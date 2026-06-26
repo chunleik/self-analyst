@@ -1,0 +1,175 @@
+package com.selfanalyst.desktop;
+
+import com.selfanalyst.agent.SelfAnalystAgent;
+import com.selfanalyst.audio.AudioWatcher;
+import com.selfanalyst.aw.store.EventStore;
+import com.selfanalyst.aw.watcher.WatcherManager;
+import com.selfanalyst.config.Config;
+import com.selfanalyst.content.ContentWatcher;
+import com.selfanalyst.desktop.controller.*;
+import com.selfanalyst.desktop.service.BehaviorAdviceService;
+import com.selfanalyst.desktop.service.SummaryService;
+import com.selfanalyst.desktop.store.TaskStore;
+import com.selfanalyst.desktop.store.UserConfigStore;
+import com.selfanalyst.memory.MemoryStore;
+import io.javalin.Javalin;
+import io.javalin.http.ContentType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.nio.file.Path;
+
+/**
+ * Desktop dashboard API server.
+ * <p>
+ * Registers {@code /desktop/*} routes on the <b>existing</b> Javalin instance
+ * shared with {@code AwServer} — no separate port is opened.
+ * <p>
+ * Typical wiring:
+ * <pre>{@code
+ *   AwServer awServer = new AwServer(dataDir, port);
+ *   Javalin app = awServer.app(); // need a getter on AwServer
+ *   SelfAnalystAgent agent = new SelfAnalystAgent(config);
+ *   DesktopServer desktop = new DesktopServer(app, config, agent,
+ *           awServer.eventStore(),
+ *           agent.memory(),
+ *           watcherManager, contentWatcher, audioWatcher);
+ *   desktop.start(); // registers routes, no listen()
+ *   awServer.start();
+ * }</pre>
+ */
+public class DesktopServer {
+
+    private static final Logger log = LoggerFactory.getLogger(DesktopServer.class);
+
+    private final Javalin app;
+    private final DesktopAgentController agentCtrl;
+    private final DesktopConfigController configCtrl;
+    private final DesktopTaskController taskCtrl;
+    private final DesktopStatusController statusCtrl;
+
+    /**
+     * Create and register all desktop API routes.
+     *
+     * @param app            existing Javalin instance (shared with AwServer)
+     * @param config         application configuration
+     * @param agent          LLM agent (nullable – chat/summary enhancement disabled when null)
+     * @param eventStore     AW event store for querying activity data
+     * @param memoryStore    optional memory store for goal context in summaries
+     * @param watcherManager optional – for collector status reporting
+     * @param contentWatcher optional – for collector status reporting
+     * @param audioWatcher   optional – for collector status reporting
+     */
+    public DesktopServer(Javalin app,
+                         Config config,
+                         SelfAnalystAgent agent,
+                         EventStore eventStore,
+                         MemoryStore memoryStore,
+                         WatcherManager watcherManager,
+                         ContentWatcher contentWatcher,
+                         AudioWatcher audioWatcher) {
+        this.app = app;
+
+        Path memoryDir = config.memoryDir();
+        TaskStore taskStore = new TaskStore(memoryDir);
+        UserConfigStore userConfigStore = new UserConfigStore(memoryDir);
+        SummaryService summaryService = new SummaryService(eventStore, memoryStore);
+        BehaviorAdviceService adviceService = new BehaviorAdviceService();
+
+        this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore, config);
+        this.configCtrl = new DesktopConfigController(config, userConfigStore);
+        this.taskCtrl = new DesktopTaskController(taskStore);
+        this.statusCtrl = new DesktopStatusController(
+                config, watcherManager, contentWatcher, audioWatcher);
+    }
+
+    /**
+     * Register all routes on the shared Javalin instance.
+     * Call this <b>before</b> {@code AwServer.start()}.
+     */
+    public void start() {
+        // ── Desktop frontend static files (from classpath) ───
+        app.get("/desktop-ui/{f}", ctx -> {
+            String file = ctx.pathParam("f");
+            String path = "/desktop-ui/" + file;
+            try (var in = getClass().getResourceAsStream(path)) {
+                if (in != null) {
+                    ctx.result(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                    ctx.header("Cache-Control", "no-cache, no-store, must-revalidate");
+                    if (file.endsWith(".css")) ctx.contentType("text/css");
+                    else if (file.endsWith(".js")) ctx.contentType("application/javascript");
+                    else if (file.endsWith(".html")) ctx.contentType("text/html");
+                } else {
+                    ctx.status(404);
+                }
+            }
+        });
+        app.get("/desktop-ui", ctx -> ctx.redirect("/desktop-ui/index.html"));
+        app.get("/desktop-ui/", ctx -> ctx.redirect("/desktop-ui/index.html"));
+
+        // ── Agent tab ────────────────────────────────────────
+        app.get("/desktop/summary", agentCtrl::getSummary);
+        app.post("/desktop/chat", agentCtrl::chat);
+        app.get("/desktop/usage", agentCtrl::getUsage);
+
+        // ── Config tab ───────────────────────────────────────
+        app.get("/desktop/config", configCtrl::getConfig);
+        app.put("/desktop/config", configCtrl::putConfig);
+        app.get("/desktop/config/raw", configCtrl::getRawConfig);
+        app.put("/desktop/config/raw", configCtrl::putRawConfig);
+        app.get("/desktop/config/history", configCtrl::getConfigHistory);
+        app.get("/desktop/config/history/{id}", configCtrl::getConfigVersion);
+        app.post("/desktop/config/test-llm", configCtrl::testLlm);
+        app.post("/desktop/config/test-embedding", configCtrl::testEmbedding);
+
+        // ── Tasks CRUD ───────────────────────────────────────
+        app.get("/desktop/tasks", taskCtrl::listTasks);
+        app.post("/desktop/tasks", taskCtrl::createTask);
+        app.put("/desktop/tasks/{id}", taskCtrl::updateTask);
+        app.post("/desktop/tasks/{id}/complete", taskCtrl::completeTask);
+        app.post("/desktop/tasks/{id}/archive", taskCtrl::archiveTask);
+        app.delete("/desktop/tasks/{id}", taskCtrl::deleteTask);
+
+        // ── Status ───────────────────────────────────────────
+        app.get("/desktop/status", statusCtrl::getStatus);
+
+        // Catch-all exception handler so no error returns an empty body
+        app.exception(Exception.class, (e, ctx) -> {
+            log.error("Unhandled exception on {} {}", ctx.method(), ctx.path(), e);
+            try {
+                String msg = e.getMessage();
+                if (msg == null) msg = e.getClass().getName();
+                ctx.status(500).result("{\"error\":\"" + escapeJson(msg) + "\"}").contentType("application/json");
+            } catch (Throwable ignored) {
+                ctx.status(500).result("{\"error\":\"Internal server error\"}").contentType("application/json");
+            }
+        });
+
+        log.info("Registered /desktop/* routes on shared Javalin instance");
+    }
+
+    private static String escapeJson(String s) {
+        if (s == null) return "null";
+        StringBuilder sb = new StringBuilder(s.length() + 20);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 0x20) { sb.append(String.format("\\u%04x", (int) c)); }
+                    else { sb.append(c); }
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Expose controllers for testing or advanced use. */
+    public DesktopAgentController agentController() { return agentCtrl; }
+    public DesktopConfigController configController() { return configCtrl; }
+    public DesktopTaskController taskController() { return taskCtrl; }
+    public DesktopStatusController statusController() { return statusCtrl; }
+}

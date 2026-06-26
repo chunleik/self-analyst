@@ -1,0 +1,28 @@
+# 默认：所有文本文件在仓库与工作区中统一使用 LF（eol=lf 覆盖本机 core.autocrlf，
+# 消除 Windows 下 "LF will be replaced by CRLF" 警告）。
+* text=auto eol=lf
+
+# Unix shell 脚本必须保持 LF，否则在 Linux/macOS 上无法执行
+*.sh   text eol=lf
+
+# Windows 批处理 / cmd 需要 CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# 二进制资源——禁止任何换行符规范化或 diff
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.eot    binary
+*.pdf    binary
+*.jar    binary
+*.exe    binary
+*.dll    binary
+*.so     binary
+*.dylib  binary
+*.db     binary

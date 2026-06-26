@@ -1,0 +1,12 @@
+# 可选的本机 cargo 配置示例。
+#
+# 通常无需此文件：在已正确安装 MSVC + Windows SDK 的环境下，
+# cargo 会自动定位 link.exe，直接 `cargo build` 即可。
+#
+# 仅当构建报错找不到链接器（link.exe）时，复制本文件为 config.toml
+# 并把下面的路径改成你本机实际的 MSVC link.exe 绝对路径。
+# 注意：MSVC 版本号（如 14.44.35207）和 VS 版本（Community/Professional）
+# 因机器而异，请勿照抄。
+#
+# [target.x86_64-pc-windows-msvc]
+# linker = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/<你的版本>/bin/Hostx64/x64/link.exe"

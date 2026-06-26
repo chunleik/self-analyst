@@ -1,0 +1,20 @@
+[package]
+name = "self-analyst-desktop"
+version = "1.0.0"
+edition = "2021"
+
+[package.metadata]
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+ureq = "3"
+open = "5"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Security", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[lib]
+name = "self_analyst_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]

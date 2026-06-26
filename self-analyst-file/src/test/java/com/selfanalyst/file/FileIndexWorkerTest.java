@@ -1,0 +1,131 @@
+package com.selfanalyst.file;
+
+import com.selfanalyst.file.extractor.FileContentExtractorFactory;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class FileIndexWorkerTest {
+
+    private FileWatchStore store;
+    private Path root;
+    private Path file;
+    private AtomicInteger llmCalls;
+    private FileSummarizer summarizer;
+    private FileContentExtractorFactory factory;
+    private PathFilter pathFilter;
+
+    @BeforeEach
+    void setUp(@TempDir Path tmp) throws Exception {
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        root = Files.createDirectories(tmp.resolve("root"));
+        file = Files.writeString(root.resolve("notes.txt"), "version one content");
+        llmCalls = new AtomicInteger();
+        Function<String, String> llm = prompt -> {
+            llmCalls.incrementAndGet();
+            return "{\"summary\":\"S\",\"mainTopics\":[\"a\",\"b\"],\"estimatedPurpose\":\"p\"}";
+        };
+        summarizer = new FileSummarizer(llm);
+        factory = new FileContentExtractorFactory();
+        pathFilter = new PathFilter(1024, List.of(), List.of(), List.of());
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (store != null) store.close();
+    }
+
+    private FileIndexWorker worker(int minReindexMinutes) {
+        return new FileIndexWorker(store, pathFilter, factory, summarizer, null,
+                List.of(root), 60, 8000, minReindexMinutes);
+    }
+
+    private void upsert() {
+        store.upsertPending(file.toAbsolutePath().toString(),
+                "notes.txt", root.toAbsolutePath().toString(), "txt");
+    }
+
+    @Test
+    void indexesPendingFile() {
+        upsert();
+        worker(0).processOneRound();
+
+        FileRecord rec = store.findByPath(file.toAbsolutePath().toString());
+        assertEquals(FileStatus.INDEXED, rec.status());
+        assertEquals("S", rec.summary());
+        assertNotNull(rec.fileHash());
+        assertEquals(1, llmCalls.get());
+    }
+
+    @Test
+    void unchangedFileNotReSummarized() {
+        upsert();
+        worker(0).processOneRound();
+        assertEquals(1, llmCalls.get());
+
+        // spurious MODIFY with no real change → cheap (size,mtime) prefilter hit
+        upsert();
+        worker(0).processOneRound();
+
+        assertEquals(1, llmCalls.get(), "unchanged content must not re-summarize");
+        assertEquals(FileStatus.INDEXED, store.findByPath(file.toAbsolutePath().toString()).status());
+    }
+
+    @Test
+    void changedContentReSummarizedWhenIntervalZero() throws Exception {
+        upsert();
+        worker(0).processOneRound();
+        assertEquals(1, llmCalls.get());
+
+        Files.writeString(file, "version two content is different");
+        Files.setLastModifiedTime(file, FileTime.from(Instant.now().plusSeconds(5)));
+        upsert();
+        worker(0).processOneRound();
+
+        assertEquals(2, llmCalls.get(), "changed content must be re-summarized");
+    }
+
+    @Test
+    void minReindexIntervalSkipsRecentlyIndexed() throws Exception {
+        upsert();
+        worker(0).processOneRound();
+        assertEquals(1, llmCalls.get());
+
+        // change content, but a large min re-index interval must defer the re-summary
+        Files.writeString(file, "version two content is different");
+        Files.setLastModifiedTime(file, FileTime.from(Instant.now().plusSeconds(5)));
+        upsert();
+        worker(60).processOneRound();
+
+        assertEquals(1, llmCalls.get(), "within min re-index interval → skip this round");
+        assertEquals(FileStatus.PENDING, store.findByPath(file.toAbsolutePath().toString()).status(),
+                "still PENDING for a later round");
+    }
+
+    @Test
+    void missingFileMarkedDeleted() throws Exception {
+        upsert();
+        Files.delete(file);
+        worker(0).processOneRound();
+        assertEquals(FileStatus.DELETED, store.findByPath(file.toAbsolutePath().toString()).status());
+        assertEquals(0, llmCalls.get());
+    }
+
+    @Test
+    void truncateByCodepointKeepsPrefix() {
+        String s = "abcdefghij";
+        assertEquals("abcde", FileIndexWorker.truncateByCodepoint(s, 5));
+        assertEquals(s, FileIndexWorker.truncateByCodepoint(s, 100));
+    }
+}

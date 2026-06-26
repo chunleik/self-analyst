@@ -1,0 +1,28 @@
+target/
+dependency-reduced-pom.xml
+*.jar
+*.class
+.self-analyst/
+.idea/
+data/
+logs/
+*.log
+tools/
+!self-analyst-app/src/main/java/com/selfanalyst/tools/
+!self-analyst-app/src/main/java/com/selfanalyst/tools/**
+dist/
+.superpowers/
+.claude/*
+# 例外：随仓库共享 SDD 命令流，其余 .claude（settings.local.json 等本地配置）仍忽略
+!.claude/commands/
+!.claude/commands/**
+
+# 本机 cargo 配置（含机器相关的 linker 路径），见同目录 .example
+self-analyst-desktop/src-tauri/.cargo/config.toml
+
+# 由 scripts/build-axsidecar.ps1 编译并暂存的边车二进制（SPEC-AXS-060），不入库
+self-analyst-content/src/main/resources/axsidecar/
+
+# ActivityWatch aw-webui（MPL-2.0）预编译产物，仅本地自测用、不随仓库分发。
+# 缺失时 WebUiHandler 优雅返回 404，CLI/桌面端/REST API 不受影响。
+self-analyst-aw/src/main/resources/webui/

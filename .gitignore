@@ -1,5 +1,7 @@
 target/
 dependency-reduced-pom.xml
+deps.txt
+.codegraph/
 *.jar
 *.class
 .self-analyst/

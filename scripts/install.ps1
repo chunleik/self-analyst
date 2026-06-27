@@ -92,7 +92,7 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host "[4/6] Building SelfAnalyst..." -ForegroundColor Yellow
 
 $jarSource = $null
-$targetJar = Join-Path $ProjectDir "target\$JarName"
+$targetJar = Join-Path $ProjectDir "self-analyst-app\target\$JarName"
 $rootJar = Join-Path $ProjectDir $JarName
 
 if (Test-Path $targetJar) {

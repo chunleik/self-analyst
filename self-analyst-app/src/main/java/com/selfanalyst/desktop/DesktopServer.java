@@ -8,7 +8,9 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.desktop.controller.*;
 import com.selfanalyst.desktop.service.BehaviorAdviceService;
+import com.selfanalyst.desktop.service.ChatSummaryService;
 import com.selfanalyst.desktop.service.SummaryService;
+import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.memory.MemoryStore;
@@ -47,6 +49,7 @@ public class DesktopServer {
     private final DesktopConfigController configCtrl;
     private final DesktopTaskController taskCtrl;
     private final DesktopStatusController statusCtrl;
+    private final DesktopChatSessionController chatSessionCtrl;
 
     /**
      * Create and register all desktop API routes.
@@ -81,6 +84,11 @@ public class DesktopServer {
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.statusCtrl = new DesktopStatusController(
                 config, watcherManager, contentWatcher, audioWatcher);
+
+        ChatSessionStore chatSessionStore = new ChatSessionStore(memoryDir);
+        ChatSummaryService chatSummaryService = new ChatSummaryService();
+        this.chatSessionCtrl = new DesktopChatSessionController(
+                chatSessionStore, chatSummaryService, agent, config);
     }
 
     /**
@@ -130,6 +138,16 @@ public class DesktopServer {
         app.post("/desktop/tasks/{id}/archive", taskCtrl::archiveTask);
         app.delete("/desktop/tasks/{id}", taskCtrl::deleteTask);
 
+        // ── Chat sessions CRUD ───────────────────────────────
+        app.get   ("/desktop/chat/sessions",                      chatSessionCtrl::listSessions);
+        app.post  ("/desktop/chat/sessions",                      chatSessionCtrl::createSession);
+        app.get   ("/desktop/chat/sessions/{id}",                 chatSessionCtrl::getSession);
+        app.put   ("/desktop/chat/sessions/{id}",                 chatSessionCtrl::updateSession);
+        app.delete("/desktop/chat/sessions/{id}",                 chatSessionCtrl::deleteSession);
+        app.post  ("/desktop/chat/sessions/{id}/messages",        chatSessionCtrl::appendMessages);
+        app.put   ("/desktop/chat/sessions/{id}/messages/{msgId}", chatSessionCtrl::updateMessage);
+        app.put   ("/desktop/chat/active-session",                chatSessionCtrl::setActiveSession);
+
         // ── Status ───────────────────────────────────────────
         app.get("/desktop/status", statusCtrl::getStatus);
 
@@ -172,4 +190,5 @@ public class DesktopServer {
     public DesktopConfigController configController() { return configCtrl; }
     public DesktopTaskController taskController() { return taskCtrl; }
     public DesktopStatusController statusController() { return statusCtrl; }
+    public DesktopChatSessionController chatSessionController() { return chatSessionCtrl; }
 }

@@ -294,10 +294,13 @@ function setupEvents() {
 
   // Chat tab - new session button
   state.dom.newChatSessionBtn.addEventListener("click", function () {
-    createChatSession({ title: "新会话" });
-    switchTab("chat");
-    renderChatTab();
-    if (state.dom.chatTabInput) state.dom.chatTabInput.focus();
+    createChatSession({ title: "新会话" }).then(function () {
+      switchTab("chat");
+      renderChatTab();
+      if (state.dom.chatTabInput) state.dom.chatTabInput.focus();
+    }).catch(function (err) {
+      alert("新建会话失败: " + (err && err.message ? err.message : err));
+    });
   });
 
   // Chat tab - session search

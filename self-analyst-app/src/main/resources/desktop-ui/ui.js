@@ -52,7 +52,9 @@ function switchTab(tab) {
   state.dom.tabChat.classList.toggle("active", tab === "chat");
 
   if (tab === "chat") {
-    ensureActiveChatSession();
+    // ensureActiveChatSession may create a session asynchronously; re-render
+    // once it resolves so a freshly created session shows up (SPEC-CSP-FE-002).
+    ensureActiveChatSession().then(renderChatTab).catch(function () {});
     renderChatTab();
     setTimeout(function () {
       if (state.dom.chatTabInput) state.dom.chatTabInput.focus();

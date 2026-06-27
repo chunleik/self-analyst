@@ -53,9 +53,13 @@ function cacheDom() {
 
 function init() {
   cacheDom();
-  loadChatSessions();
+  // Drop the legacy localStorage sessions key; the backend is now the source
+  // of truth and this key is never read again (SPEC-CSP-FE-006 / DEC-004).
+  try { localStorage.removeItem(CHAT_STORAGE_KEY); } catch (e) { /* unavailable */ }
   setupEvents();
   switchTab("agent");
+  // Render the chat list only after the backend index resolves (SPEC-CSP-FE-002).
+  loadChatSessions().then(function () { renderChatTab(); });
   loadAll();
   startAutoRefresh();
 }

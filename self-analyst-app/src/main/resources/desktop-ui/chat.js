@@ -3,43 +3,60 @@
    ============================================================ */
 "use strict";
 
-// ---- LocalStorage Persistence ----
+// ---- Backend Persistence (SPEC-CSP-FE-002..004) ----
+// The backend (`{memoryDir}/chat-sessions/`) is the source of truth; the
+// session list below is an in-memory cache that drives rendering. Index meta
+// rows carry no `messages` — bodies are lazy-loaded on activation.
 
 function loadChatSessions() {
-  try {
-    var raw = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (!raw) { state.chatSessions = []; return; }
-    var data = JSON.parse(raw);
-    if (data && data.version === 1 && Array.isArray(data.sessions)) {
-      state.chatSessions = data.sessions;
-      state.activeChatSessionId = data.activeChatSessionId || null;
-    }
-  } catch (e) { state.chatSessions = []; }
-}
-
-function saveChatSessions() {
-  try {
-    // Prune: keep top 50 sessions by updatedAt
-    var sessions = state.chatSessions.slice(0, 50);
-    sessions.forEach(function (s) {
-      s.messages = s.messages.slice(0, 200);
+  return api.listSessions().then(function (index) {
+    var rows = (index && index.sessions) || [];
+    state.chatSessions = rows.map(function (meta) {
+      meta.messages = [];
+      meta.messagesLoaded = false;
+      return meta;
     });
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify({
-      version: 1,
-      activeChatSessionId: state.activeChatSessionId,
-      sessions: sessions,
-    }));
-  } catch (e) { /* localStorage unavailable */ }
+    state.activeChatSessionId = (index && index.activeSessionId) || null;
+  }).catch(function () {
+    // Keep an empty list rather than breaking init (SPEC-CSP-FE-007).
+    state.chatSessions = [];
+    state.activeChatSessionId = null;
+  });
 }
 
-function touchSession(session) {
-  session.updatedAt = new Date().toISOString();
-  // Move to top
-  var idx = state.chatSessions.indexOf(session);
-  if (idx > 0) {
-    state.chatSessions.splice(idx, 1);
-    state.chatSessions.unshift(session);
-  }
+// Lazy-load a session's message bodies + summary (SPEC-CSP-FE-003).
+function ensureSessionMessagesLoaded(session) {
+  if (!session) return Promise.resolve(null);
+  if (session.messagesLoaded) return Promise.resolve(session);
+  return api.getSession(session.id).then(function (full) {
+    session.messages = (full && full.messages) || [];
+    session.summary = full ? full.summary : session.summary;
+    session.messagesLoaded = true;
+    return session;
+  }).catch(function () {
+    // Treat as loaded-but-empty so the thread renders instead of spinning.
+    session.messages = session.messages || [];
+    session.messagesLoaded = true;
+    return session;
+  });
+}
+
+// Re-sort the cached list by updatedAt desc (server owns ordering; this keeps
+// the local view consistent until the next listSessions()).
+function resortChatSessions() {
+  state.chatSessions.sort(function (a, b) {
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  });
+}
+
+// Replace the cached row's meta/fields from a server Session/meta response.
+function mergeSessionFields(session, fresh) {
+  if (!session || !fresh) return;
+  if (fresh.title != null) session.title = fresh.title;
+  if (fresh.updatedAt != null) session.updatedAt = fresh.updatedAt;
+  if (fresh.summary != null) session.summary = fresh.summary;
+  if (fresh.contextLabel != null) session.contextLabel = fresh.contextLabel;
+  if (fresh.contextSnapshot != null) session.contextSnapshot = fresh.contextSnapshot;
 }
 
 function getActiveChatSession() {
@@ -50,36 +67,36 @@ function getActiveChatSession() {
   return null;
 }
 
+// Returns a Promise resolving to the active session, creating one if none.
 function ensureActiveChatSession() {
   var s = getActiveChatSession();
-  if (s) return s;
+  if (s) return Promise.resolve(s);
   return createChatSession({ title: "当前会话" });
 }
 
+// Create a session via the backend; returns a Promise resolving to it.
 function createChatSession(opts) {
-  var now = new Date().toISOString();
-  var session = {
-    id: createId("chat"),
+  return api.createSession({
     title: (opts && opts.title) || "新会话",
-    createdAt: now,
-    updatedAt: now,
     source: (opts && opts.source) || "manual",
     contextLabel: opts && opts.contextLabel,
-    contextSnapshot: opts && opts.contextSnapshot || null,
-    messages: [],
-  };
-  state.chatSessions.unshift(session);
-  state.activeChatSessionId = session.id;
-  saveChatSessions();
-  return session;
+    contextSnapshot: (opts && opts.contextSnapshot) || null,
+    initialMessages: (opts && opts.initialMessages) || null,
+  }).then(function (session) {
+    session.messages = session.messages || [];
+    session.messagesLoaded = true;
+    state.chatSessions.unshift(session);
+    state.activeChatSessionId = session.id;
+    return session;
+  });
 }
 
 function deleteChatSession(id) {
-  state.chatSessions = state.chatSessions.filter(function (s) { return s.id !== id; });
-  if (state.activeChatSessionId === id) {
-    state.activeChatSessionId = state.chatSessions.length > 0 ? state.chatSessions[0].id : null;
-  }
-  saveChatSessions();
+  return api.deleteSession(id).then(function (resp) {
+    state.chatSessions = state.chatSessions.filter(function (s) { return s.id !== id; });
+    state.activeChatSessionId = (resp && resp.activeSessionId) || null;
+    return resp;
+  });
 }
 
 // ---- Message Formatting ----
@@ -178,11 +195,14 @@ function renderChatTab() {
 function renderChatSessionList() {
   var list = state.dom.chatSessionList;
   var search = state.chatSessionSearch || "";
+  // Search matches index fields only (title + preview + summary), not message
+  // bodies (SPEC-CSP-FE-005 / DEC-009).
   var filtered = state.chatSessions.filter(function (s) {
     if (!search) return true;
     var q = search.toLowerCase();
     return (s.title && s.title.toLowerCase().indexOf(q) >= 0) ||
-           (s.messages.some(function (m) { return m.content && m.content.toLowerCase().indexOf(q) >= 0; }));
+           (s.lastMessagePreview && s.lastMessagePreview.toLowerCase().indexOf(q) >= 0) ||
+           (s.summary && s.summary.toLowerCase().indexOf(q) >= 0);
   });
 
   if (filtered.length === 0) {
@@ -194,9 +214,13 @@ function renderChatSessionList() {
   for (var i = 0; i < filtered.length; i++) {
     var s = filtered[i];
     var active = s.id === state.activeChatSessionId;
-    var lastMsg = s.messages.length > 0 ? s.messages[s.messages.length - 1] : null;
-    var preview = lastMsg ? (lastMsg.content || "").substring(0, 40) : "";
-    if (lastMsg && lastMsg.content && lastMsg.content.length > 40) preview += "...";
+    // Prefer the index preview; fall back to last loaded message if present.
+    var preview = s.lastMessagePreview || "";
+    if (!preview && s.messages && s.messages.length > 0) {
+      var lastMsg = s.messages[s.messages.length - 1];
+      preview = (lastMsg.content || "").substring(0, 40);
+      if (lastMsg.content && lastMsg.content.length > 40) preview += "...";
+    }
     html += '<div class="chat-session-item' + (active ? " active" : "") + '" data-sid="' + s.id + '">' +
       '<div class="session-title">' + escHtml(s.title) + '</div>' +
       (preview ? '<div class="session-preview">' + escHtml(preview) + '</div>' : "") +
@@ -216,16 +240,19 @@ function renderChatSessionList() {
       var item = deleteBtn.closest(".chat-session-item");
       var sid = item ? item.dataset.sid : null;
       if (sid && confirm("确定删除该会话及其所有消息？")) {
-        deleteChatSession(sid);
-        renderChatTab();
+        deleteChatSession(sid).then(renderChatTab).catch(function (err) {
+          alert("删除会话失败: " + err.message);
+        });
       }
       return;
     }
     var item = e.target.closest(".chat-session-item");
     if (item) {
-      state.activeChatSessionId = item.dataset.sid;
-      saveChatSessions();
-      renderChatTab();
+      var sid = item.dataset.sid;
+      state.activeChatSessionId = sid;
+      api.setActiveSession(sid).catch(function () { /* best-effort pointer */ });
+      var selected = getActiveChatSession();
+      ensureSessionMessagesLoaded(selected).then(renderChatTab);
     }
   };
 }
@@ -241,6 +268,15 @@ function renderChatThread() {
   }
 
   state.dom.chatSessionTitle.textContent = session.title;
+
+  // Bodies are lazy-loaded; show a transient state and fetch on demand.
+  if (!session.messagesLoaded) {
+    thread.innerHTML = '<div class="chat-welcome"><p>加载中…</p></div>';
+    ensureSessionMessagesLoaded(session).then(function () {
+      if (getActiveChatSession() === session) renderChatThread();
+    });
+    return;
+  }
 
   if (session.messages.length === 0) {
     thread.innerHTML = '<div class="chat-welcome"><p>欢迎使用会话模式</p><p class="chat-welcome-hint">可以追问当前状态、记录想法、生成待办</p></div>';
@@ -355,52 +391,65 @@ function updateChatInputState() {
 
 function sendChatTabMessage() {
   if (state.chatSending) return;
-  var session = getActiveChatSession();
-  if (!session) { session = ensureActiveChatSession(); }
   var input = state.dom.chatTabInput;
   var text = input.value.trim();
   if (!text) return;
 
-  var context = buildChatContext(session);
-  var now = new Date().toISOString();
-  var userMsg = { id: createId("msg"), role: "user", content: text, createdAt: now, status: "sent", contextSnapshot: context };
-  var pendingMsg = { id: createId("msg"), role: "assistant", content: "思考中...", createdAt: now, status: "pending" };
-
-  session.messages.push(userMsg, pendingMsg);
-  updateSessionTitleFromFirstMessage(session);
-  touchSession(session);
-  input.value = "";
   state.chatSending = true;
-  saveChatSessions();
-  renderChatTab();
+  input.value = "";
 
-  api.postChat(text, context).then(function (resp) {
-    pendingMsg.status = "sent";
-    pendingMsg.content = resp.message || resp.reply || resp.content || "Agent 未返回可显示内容";
-    pendingMsg.suggestedTasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
-    touchSession(session);
-    state.chatSending = false;
-    saveChatSessions();
-    renderChatTab();
+  ensureActiveChatSession().then(function (session) {
+    var context = buildChatContext(session);
+    var userMsg = { role: "user", content: text, status: "sent", contextSnapshot: context };
+    var pendingMsg = { role: "assistant", content: "思考中...", status: "pending" };
+
+    // Persist user + pending assistant; adopt server-assigned ids into cache.
+    return api.appendMessages(session.id, { messages: [userMsg, pendingMsg] })
+      .then(function (appended) {
+        var savedUser = appended[0];
+        var savedPending = appended[1];
+        session.messages.push(savedUser, savedPending);
+        session.updatedAt = savedPending.createdAt || new Date().toISOString();
+        resortChatSessions();
+        renderChatTab();
+        backfillSessionTitle(session, text);
+
+        return api.postChat(text, context).then(function (resp) {
+          var content = resp.message || resp.reply || resp.content || "Agent 未返回可显示内容";
+          var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
+          savedPending.status = "sent";
+          savedPending.content = content;
+          savedPending.suggestedTasks = tasks;
+          renderChatTab();
+          return api.updateMessage(session.id, savedPending.id,
+            { status: "sent", content: content, suggestedTasks: tasks });
+        }).catch(function (err) {
+          // Never lose the user's input: reflect error in-memory and persist best-effort.
+          savedPending.status = "error";
+          savedPending.content = formatChatErrorMessage(err);
+          savedPending.error = err.message || String(err);
+          renderChatTab();
+          return api.updateMessage(session.id, savedPending.id,
+            { status: "error", error: savedPending.error }).catch(function () {});
+        });
+      });
   }).catch(function (err) {
-    pendingMsg.status = "error";
-    pendingMsg.content = formatChatErrorMessage(err);
-    pendingMsg.error = err.message || String(err);
+    alert("发送失败: " + (err && err.message ? err.message : err));
+  }).then(function () {
     state.chatSending = false;
-    saveChatSessions();
     renderChatTab();
   });
 }
 
-function updateSessionTitleFromFirstMessage(session) {
-  if (session.title !== "新会话") return;
-  var userMsg = null;
-  for (var i = 0; i < session.messages.length; i++) {
-    if (session.messages[i].role === "user") { userMsg = session.messages[i]; break; }
-  }
-  if (!userMsg) return;
-  var txt = (userMsg.content || "").replace(/\n/g, " ").trim();
-  session.title = txt.substring(0, 18) || "新会话";
+// Backfill a default-titled session from its first user message (SPEC-CSP-FE-004).
+function backfillSessionTitle(session, text) {
+  if (!session || session.title !== "新会话") return;
+  var txt = (text || "").replace(/\n/g, " ").trim().substring(0, 18);
+  if (!txt) return;
+  api.updateSession(session.id, { title: txt }).then(function (fresh) {
+    mergeSessionFields(session, fresh);
+    renderChatSessionList();
+  }).catch(function () { /* non-fatal */ });
 }
 
 function retryChatMessage(msgId) {
@@ -413,6 +462,7 @@ function retryChatMessage(msgId) {
     if (session.messages[i].id === msgId) { errIdx = i; break; }
   }
   if (errIdx < 0) return;
+  var pendingMsg = session.messages[errIdx];
   // Find preceding user message
   var userMsg = null;
   for (var j = errIdx - 1; j >= 0; j--) {
@@ -420,26 +470,29 @@ function retryChatMessage(msgId) {
   }
   if (!userMsg) return;
 
-  session.messages[errIdx].status = "pending";
-  session.messages[errIdx].content = "思考中...";
   state.chatSending = true;
-  saveChatSessions();
+  pendingMsg.status = "pending";
+  pendingMsg.content = "思考中...";
   renderChatTab();
 
+  api.updateMessage(session.id, pendingMsg.id, { status: "pending" }).catch(function () {});
+
   api.postChat(userMsg.content, userMsg.contextSnapshot || buildChatContext(session)).then(function (resp) {
-    session.messages[errIdx].status = "sent";
-    session.messages[errIdx].content = resp.message || resp.reply || resp.content || "Agent 未返回可显示内容";
-    session.messages[errIdx].suggestedTasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
-    touchSession(session);
-    state.chatSending = false;
-    saveChatSessions();
-    renderChatTab();
+    var content = resp.message || resp.reply || resp.content || "Agent 未返回可显示内容";
+    var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
+    pendingMsg.status = "sent";
+    pendingMsg.content = content;
+    pendingMsg.suggestedTasks = tasks;
+    return api.updateMessage(session.id, pendingMsg.id,
+      { status: "sent", content: content, suggestedTasks: tasks });
   }).catch(function (err) {
-    session.messages[errIdx].status = "error";
-    session.messages[errIdx].content = formatChatErrorMessage(err);
-    session.messages[errIdx].error = err.message || String(err);
+    pendingMsg.status = "error";
+    pendingMsg.content = formatChatErrorMessage(err);
+    pendingMsg.error = err.message || String(err);
+    return api.updateMessage(session.id, pendingMsg.id,
+      { status: "error", error: pendingMsg.error }).catch(function () {});
+  }).then(function () {
     state.chatSending = false;
-    saveChatSessions();
     renderChatTab();
   });
 }
@@ -477,19 +530,20 @@ function createSuggestedTask(title, notes, priority, btn) {
 // ---- Open Chat Tab with Context ----
 
 function openChatTabWithContext(context) {
-  var session = createChatSession({
+  createChatSession({
     title: context.title || "上下文追问",
     source: context.type === "task" ? "task_context" : "agent_context",
     contextLabel: context.label || context.title,
     contextSnapshot: context,
+    initialMessages: [{
+      role: "system",
+      content: "已带入上下文：" + (context.title || context.label || "当前条目"),
+      contextSnapshot: context,
+    }],
+  }).then(function () {
+    switchTab("chat");
+    renderChatTab();
+  }).catch(function (err) {
+    alert("创建会话失败: " + (err && err.message ? err.message : err));
   });
-  session.messages.push({
-    id: createId("msg"),
-    role: "system",
-    content: "已带入上下文：" + (context.title || context.label || "当前条目"),
-    createdAt: new Date().toISOString(),
-    contextSnapshot: context,
-  });
-  saveChatSessions();
-  switchTab("chat");
 }

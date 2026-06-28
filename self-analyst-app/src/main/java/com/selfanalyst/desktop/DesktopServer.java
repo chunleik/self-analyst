@@ -86,7 +86,7 @@ public class DesktopServer {
                 config, watcherManager, contentWatcher, audioWatcher);
 
         ChatSessionStore chatSessionStore = new ChatSessionStore(memoryDir);
-        ChatSummaryService chatSummaryService = new ChatSummaryService();
+        ChatSummaryService chatSummaryService = new ChatSummaryService(config.effectiveLanguage());
         this.chatSessionCtrl = new DesktopChatSessionController(
                 chatSessionStore, chatSummaryService, agent, config);
     }

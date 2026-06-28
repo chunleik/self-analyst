@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.service;
 
 import com.selfanalyst.desktop.store.ChatSessionStore;
+import com.selfanalyst.i18n.Lang;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,6 +27,18 @@ public class ChatSummaryService {
     /** Number of user-message snippets used by the deterministic fallback. */
     private static final int FALLBACK_SNIPPETS = 3;
 
+    /** Effective language for the summary prompt (SPEC-I18N-PROMPT-003b). */
+    private final Lang lang;
+
+    /** Defaults to {@link Lang#ZH} for backward compatibility with existing tests. */
+    public ChatSummaryService() {
+        this(Lang.ZH);
+    }
+
+    public ChatSummaryService(Lang lang) {
+        this.lang = lang != null ? lang : Lang.ZH;
+    }
+
     /**
      * Summarize a session in one line. With a null {@code client}, or on any
      * blank/failed LLM result, returns {@link #deterministicFallback}.
@@ -33,18 +46,18 @@ public class ChatSummaryService {
     public String summarize(ChatSessionStore.Session session,
                             SummaryPromptService.SummaryTextClient client) {
         if (client == null) {
-            return deterministicFallback(session);
+            return deterministicFallback(session, lang);
         }
         try {
-            String prompt = buildPrompt(session);
+            String prompt = buildPrompt(session, lang);
             String response = client.complete(prompt, Duration.ofSeconds(5));
             if (response == null || response.isBlank()) {
-                return deterministicFallback(session);
+                return deterministicFallback(session, lang);
             }
             String normalized = normalize(response);
-            return normalized.isBlank() ? deterministicFallback(session) : normalized;
+            return normalized.isBlank() ? deterministicFallback(session, lang) : normalized;
         } catch (Exception e) {
-            return deterministicFallback(session);
+            return deterministicFallback(session, lang);
         }
     }
 
@@ -55,10 +68,12 @@ public class ChatSummaryService {
      * each trimmed). No config/secret values are ever referenced
      * (SPEC-CSP-API-011d / DEC-007 / DEC-010).
      */
-    private static String buildPrompt(ChatSessionStore.Session session) {
+    static String buildPrompt(ChatSessionStore.Session session, Lang lang) {
+        boolean isEn = lang == Lang.EN;
         StringBuilder body = new StringBuilder();
         if (session.title != null && !session.title.isBlank()) {
-            body.append("会话标题：").append(session.title.strip()).append('\n');
+            body.append(isEn ? "Session title: " : "会话标题：")
+                    .append(session.title.strip()).append('\n');
         }
         List<ChatSessionStore.Message> messages =
                 session.messages != null ? session.messages : List.of();
@@ -66,8 +81,23 @@ public class ChatSummaryService {
         for (int i = from; i < messages.size(); i++) {
             ChatSessionStore.Message m = messages.get(i);
             if (m.content == null || m.content.isBlank()) continue;
-            String role = "assistant".equals(m.role) ? "助手" : "system".equals(m.role) ? "系统" : "用户";
-            body.append(role).append("：").append(trim(m.content, MSG_TRIM)).append('\n');
+            String role;
+            if (isEn) {
+                role = "assistant".equals(m.role) ? "Assistant" : "system".equals(m.role) ? "System" : "User";
+                body.append(role).append(": ").append(trim(m.content, MSG_TRIM)).append('\n');
+            } else {
+                role = "assistant".equals(m.role) ? "助手" : "system".equals(m.role) ? "系统" : "用户";
+                body.append(role).append("：").append(trim(m.content, MSG_TRIM)).append('\n');
+            }
+        }
+        if (isEn) {
+            return """
+                    You are SelfAnalyst. Summarize in one English sentence what the following conversation is about, so it can later be searched by content.
+                    Output only the summary itself — no prefix, quotes, code block, or extra explanation; no more than 40 words.
+
+                    Conversation:
+                    %s
+                    """.formatted(body.toString().strip());
         }
         return """
                 你是 SelfAnalyst，请用一句中文概括下面这段对话聊了什么，便于以后按内容检索会话。
@@ -85,7 +115,7 @@ public class ChatSummaryService {
      * messages (" / "), trimmed to ~80 chars; fall back to the title. Never
      * empty (SPEC-CSP-API-011b, TST-015).
      */
-    static String deterministicFallback(ChatSessionStore.Session s) {
+    static String deterministicFallback(ChatSessionStore.Session s, Lang lang) {
         List<String> snippets = new ArrayList<>();
         if (s != null && s.messages != null) {
             for (ChatSessionStore.Message m : s.messages) {
@@ -101,7 +131,7 @@ public class ChatSummaryService {
         if (s != null && s.title != null && !s.title.isBlank()) {
             return trim(s.title.strip(), SUMMARY_LEN);
         }
-        return "新会话";
+        return lang == Lang.EN ? "New chat" : "新会话";
     }
 
     // ── Helpers ──────────────────────────────────────────────────

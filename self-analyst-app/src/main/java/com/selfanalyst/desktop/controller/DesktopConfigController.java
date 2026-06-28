@@ -50,6 +50,7 @@ public class DesktopConfigController {
      * raw-edit template and unknown-key detection (SPEC-CFGUI-DEC-004).
      */
     private static final Map<String, String> SUPPORTED_DEFAULTS = new LinkedHashMap<>() {{
+        put("app.language", "auto");
         put("llm.api-key", ""); put("llm.base-url", "https://api.openai.com/v1");
         put("llm.model", "gpt-4o"); put("llm.temperature", "0.7");
         put("websearch.enabled", "false"); put("websearch.mcp-url", "https://search.parallel.ai/mcp");

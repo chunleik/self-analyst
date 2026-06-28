@@ -33,6 +33,7 @@ SelfAnalyst follows Specification-Driven Development. Every module and major fea
 | [docs/specs/llm-budget.md](docs/specs/llm-budget.md) | LLM token 用量限制与每日预算（max_tokens、可配 maxIters、计量 + off/warn/block 预算） | `SPEC-BUDGET-*` |
 | [docs/specs/desktop-config-editor.md](docs/specs/desktop-config-editor.md) | 桌面端「配置」改为纯文本编辑器：直接编辑 `config.properties` 原始文本（raw GET/PUT）+ 最近 10 个版本历史（自动命名、查看/切换） | `SPEC-CFGUI-*`、`SPEC-CFGUI-VER-*` |
 | [docs/specs/chat-session-store.md](docs/specs/chat-session-store.md) | 桌面端会话改为后端持久化：`{memoryDir}/chat-sessions/` 按会话分片 + 索引 + REST CRUD（取代 localStorage，不迁移旧数据，会话数不设上限，按会话摘要搜索） | `SPEC-CSP-*` |
+| [docs/specs/i18n.md](docs/specs/i18n.md) | 桌面端中/英双语国际化：后端全部 LLM 提示词 + 桌面 UI 全部界面文案按有效语言切换；`app.language=zh\|en\|auto`（默认 auto，读系统 Locale，可覆盖），并修复写死中文字面量泄漏 | `SPEC-I18N-*` |
 
 ### Archive
 

@@ -7,7 +7,11 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Properties;
+
+import com.selfanalyst.i18n.Lang;
+import com.selfanalyst.i18n.LangResolver;
 
 public record Config(
         String llmApiKey,
@@ -63,7 +67,8 @@ public record Config(
         int desktopSummaryMaxTimelineLlm,
         String budgetMode,
         long budgetDailyTokens,
-        double budgetWarnRatio) {
+        double budgetWarnRatio,
+        String appLanguage) {
 
     public static Config load() {
         Properties props = new Properties();
@@ -243,6 +248,9 @@ public record Config(
                 "https://search.parallel.ai/mcp");
         String webSearchApiKey = envOrProp(props, "websearch.api-key", "WEBSEARCH_API_KEY", "");
 
+        // ── 应用语言 (SPEC-I18N-CFG-001) ──
+        String appLanguage = envOrProp(props, "app.language", "APP_LANGUAGE", "auto");
+
         return new Config(apiKey, baseUrl, model, awUrl, awTimeout,
                 Path.of(memDir), awEmbedded, awPort, awDataDir,
                 wikiEnabled, wikiBackfillEnabled, wikiWorkerIntervalSeconds,
@@ -261,7 +269,16 @@ public record Config(
                 fileWatchExcludeDirs, fileWatchExcludeGlobs,
                 fileWatchSemanticEnabled, fileSemanticIndexDir,
                 llmMaxTokens, agentMaxIters, desktopSummaryMaxTimelineLlm,
-                budgetMode, budgetDailyTokens, budgetWarnRatio);
+                budgetMode, budgetDailyTokens, budgetWarnRatio, appLanguage);
+    }
+
+    /**
+     * 有效语言（派生，不入构造）：由启动期 {@code app.language} 与系统 Locale
+     * 唯一解析（SPEC-I18N-RES-002）。变更 {@code app.language} 需重启后端才生效
+     * （SPEC-I18N-DEC-007）。
+     */
+    public Lang effectiveLanguage() {
+        return LangResolver.resolve(appLanguage, Locale.getDefault());
     }
 
     /**
@@ -286,7 +303,7 @@ public record Config(
                 0.7, false, false, false, false,
                 false, "", 512, 8000, 60, 5, 5, 5, "", "", "", true,
                 baseDir.resolve("file-semantic-index"),
-                2048, 8, 4, "warn", 100000000L, 0.8);
+                2048, 8, 4, "warn", 100000000L, 0.8, "auto");
     }
 
     private static String envOrProp(Properties props, String propKey,

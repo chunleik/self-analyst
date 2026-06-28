@@ -56,12 +56,21 @@ function init() {
   // Drop the legacy localStorage sessions key; the backend is now the source
   // of truth and this key is never read again (SPEC-CSP-FE-006 / DEC-004).
   try { localStorage.removeItem(CHAT_STORAGE_KEY); } catch (e) { /* unavailable */ }
-  setupEvents();
-  switchTab("agent");
-  // Render the chat list only after the backend index resolves (SPEC-CSP-FE-002).
-  loadChatSessions().then(function () { renderChatTab(); });
-  loadAll();
-  startAutoRefresh();
+
+  // Resolve the effective language before the first render so static + dynamic
+  // text comes up localized (SPEC-I18N-RES-003 / UI-004). A status failure keeps
+  // the default state.lang ("zh") rather than blocking startup.
+  api.getStatus().then(function (st) {
+    if (st && st.language) { state.lang = st.language; state.status = st; }
+  }).catch(function () { /* keep default lang */ }).then(function () {
+    applyI18n(document);
+    setupEvents();
+    switchTab("agent");
+    // Render the chat list only after the backend index resolves (SPEC-CSP-FE-002).
+    loadChatSessions().then(function () { renderChatTab(); });
+    loadAll();
+    startAutoRefresh();
+  });
 }
 
 // Start when DOM is ready

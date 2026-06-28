@@ -1,6 +1,7 @@
 package com.selfanalyst.agent;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.i18n.Lang;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.memory.MemoryStore;
 import com.selfanalyst.tools.ActivityWatchTools;
@@ -28,7 +29,6 @@ import reactor.core.publisher.Mono;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -37,45 +37,6 @@ import java.util.concurrent.TimeoutException;
 public class SelfAnalystAgent {
 
     private static final Logger log = LoggerFactory.getLogger(SelfAnalystAgent.class);
-
-    private static final String BASE_SYSTEM_PROMPT = """
-            你是 SelfAnalyst，一个基于数据的自我提升伙伴。
-
-            你的使命：帮助用户持续提升自己。
-
-            三层工作模式：
-            1. 感知（Perceive）— 基于 ActivityWatch 数据呈现客观事实
-            2. 认知（Understand）— 发现模式、对比基线、识别值得关注的信号
-            3. 改进（Improve）— 给出具体、可验证的行动建议，并追踪上次建议的效果
-
-            工作流程：
-            1. 先回顾已知的用户目标、模式和最近改进记录
-            2. 判断用户本次询问涉及感知/认知/改进的哪个层次
-            3. 制定分析计划，告知用户你准备做什么
-            4. 调用 ActivityWatch 工具获取数据
-            5. 将数据转化为洞察，关联用户目标
-            6. 如有新的模式或发现，明确告知用户"建议记录以下发现"
-
-            关键原则：
-            - 不要只给数据，要给判断
-            - 建议必须具体可执行，避免"提高效率"这种废话
-            - 主动追踪上次建议的结果，形成闭环
-            - 用户设立的目标是分析的最高优先级锚点
-
-            隐私与安全：
-            - 历史摘要或屏幕内容中可能含有密码、密钥、Token 等敏感字符串
-            - 不得向用户回显、引用或分析这类内容，识别到后直接忽略
-            """;
-
-    private static final DateTimeFormatter DATE_TIME_FMT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss EEEE (z, OOOO)", java.util.Locale.CHINA);
-    private static final String PROMPT_DATE_LINE =
-            "当前本地时间：%s\n" +
-            "ActivityWatch 存储的所有时间戳均为 UTC，向用户展示时须换算为本地时间。\n\n";
-    private static final String PLAIN_COMPLETION_SYSTEM_PROMPT = """
-            你是 SelfAnalyst 的摘要改写器。
-            只根据用户提供的数据完成当前请求，不保留会话状态，不调用工具。
-            """;
 
     private final ReActAgent agent;
     private final OpenAIChatModel plainModel;
@@ -86,6 +47,7 @@ public class SelfAnalystAgent {
     private final boolean hasConfigTools;
     private final boolean hasFileTools;
     private final UsageMeter usageMeter;
+    private final Lang lang;
     private volatile boolean usageMissingLogged;
 
     public SelfAnalystAgent(Config config) throws IOException {
@@ -111,6 +73,7 @@ public class SelfAnalystAgent {
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter) throws IOException {
         this.usageMeter = usageMeter;
+        this.lang = config.effectiveLanguage();
         this.wikiStore = wikiStore;
         this.semanticEnabled = wikiTools != null && wikiTools.hasSemanticIndex();
         this.hasConfigTools = userConfigStore != null;
@@ -197,48 +160,19 @@ public class SelfAnalystAgent {
     }
 
     private String buildSystemPrompt() {
-        StringBuilder sb = new StringBuilder();
-        sb.append(BASE_SYSTEM_PROMPT)
-                .append(String.format(PROMPT_DATE_LINE, ZonedDateTime.now().format(DATE_TIME_FMT)))
-                .append("\n\n## 关于用户的长期记忆\n\n")
-                .append(memory.profile().buildContextSummary())
-                .append("\n\n## LLM Wiki 时间摘要\n\n");
-        if (wikiStore != null) {
-            sb.append("你可以使用 WikiTools 查询用户过去时间段的活动摘要。当用户询问某时间段做了什么、" +
-                    "任务分布、趋势变化、复盘对比时，优先调用 WikiTools。" +
-                    "如果 Wiki 返回 pending 或 failed 区间，须明确说明摘要仍在生成或生成失败。");
-            if (semanticEnabled) {
-                sb.append("当用户问题只有主题、现象或任务描述而没有明确时间范围时，" +
-                        "优先尝试 semanticSearchWiki 进行语义检索。");
-            }
-        } else {
-            sb.append("Wiki 当前未启用。");
-        }
-        if (hasFileTools) {
-            sb.append("\n\n## 文件索引\n\n")
-              .append("你可以使用 FileTools 检索被监控目录中文件的摘要：")
-              .append("searchFiles 按主题语义检索文件、listRecentFiles 按修改时间列出文件、")
-              .append("getFileSummary 查看单个文件摘要、fileIndexStatus 查看索引进度。")
-              .append("当用户询问某个文档/代码文件写了什么、最近改了哪些文件、")
-              .append("或按主题查找本地文件时，调用这些工具。");
-        }
-        sb.append("\n\n当用户的问题需要实时、外部的网络信息（最新资讯、技术文档、本地数据无法回答的事实）时，" +
-                "可使用联网搜索工具；涉及用户个人活动数据时，仍优先 ActivityWatch / Wiki 工具。");
-        if (hasConfigTools) {
-            sb.append("\n\n## 配置管理\n\n")
-              .append("你可以使用 getConfig 工具查看 SelfAnalyst 当前所有配置项，")
-              .append("使用 setConfigValue 工具修改单个配置项并持久化到文件。\n")
-              .append("当用户要求切换模型、更新 API Key、开关联网搜索/音频/采集等功能、")
-              .append("调整刷新频率等时，直接调用这些工具完成操作。\n")
-              .append("修改后告知用户新值已保存，并明确说明是否需要重启 SelfAnalyst 才能生效。");
-        }
-        return sb.toString();
+        return AgentPrompts.systemPrompt(lang, memory.profile().buildContextSummary(),
+                wikiStore != null, semanticEnabled, hasFileTools, hasConfigTools,
+                ZonedDateTime.now());
     }
 
     public Mono<String> chat(String userInput) {
         if (usageMeter != null && usageMeter.isBlocked()) {
-            return Mono.just("已达到今日 token 使用上限，已暂停对话以控制成本。" +
-                    "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
+            return Mono.just(lang == Lang.EN
+                    ? "The daily token budget has been reached; the conversation is paused to control cost. "
+                      + "You can adjust llm.budget.dailyTokens / llm.budget.mode in the configuration, "
+                      + "or wait for the automatic daily reset."
+                    : "已达到今日 token 使用上限，已暂停对话以控制成本。"
+                      + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
         }
         return agent.call(Msg.builder()
                         .textContent(userInput)
@@ -259,11 +193,12 @@ public class SelfAnalystAgent {
         if (usageMeter != null) {
             usageMeter.enforce(UsageMeter.Category.SUMMARY);
         }
+        String plainSystemPrompt = AgentPrompts.plainCompletionPrompt(lang);
         List<Msg> messages = List.of(
                 Msg.builder()
                         .name("system")
                         .role(MsgRole.SYSTEM)
-                        .textContent(PLAIN_COMPLETION_SYSTEM_PROMPT)
+                        .textContent(plainSystemPrompt)
                         .build(),
                 Msg.builder()
                         .name("user")
@@ -291,7 +226,7 @@ public class SelfAnalystAgent {
                             usage.getInputTokens(), usage.getOutputTokens());
                 } else {
                     // 供应商/SDK 未在流式响应中返回 usage：退回长度估算，避免预算被静默架空
-                    long inEst = estimateTokens(PLAIN_COMPLETION_SYSTEM_PROMPT) + estimateTokens(userInput);
+                    long inEst = estimateTokens(plainSystemPrompt) + estimateTokens(userInput);
                     usageMeter.record(UsageMeter.Category.SUMMARY, inEst, estimateTokens(text));
                     if (!usageMissingLogged) {
                         usageMissingLogged = true;

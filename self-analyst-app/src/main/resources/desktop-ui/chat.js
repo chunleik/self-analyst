@@ -71,13 +71,13 @@ function getActiveChatSession() {
 function ensureActiveChatSession() {
   var s = getActiveChatSession();
   if (s) return Promise.resolve(s);
-  return createChatSession({ title: "当前会话" });
+  return createChatSession({ title: t("chat.currentSession") });
 }
 
 // Create a session via the backend; returns a Promise resolving to it.
 function createChatSession(opts) {
   return api.createSession({
-    title: (opts && opts.title) || "新会话",
+    title: (opts && opts.title) || t("chat.newSessionDefault"),
     source: (opts && opts.source) || "manual",
     contextLabel: opts && opts.contextLabel,
     contextSnapshot: (opts && opts.contextSnapshot) || null,
@@ -161,26 +161,26 @@ function renderStructuredChatContent(items) {
       html += '<div class="structured-response-headline">' + escHtml(item.headline) + '</div>';
     }
     if (item.insight) {
-      html += '<div class="structured-response-row"><span>洞察</span><p>' + escHtml(item.insight) + '</p></div>';
+      html += '<div class="structured-response-row"><span>' + escHtml(t("timeline.insight")) + '</span><p>' + escHtml(item.insight) + '</p></div>';
     }
     if (item.suggestion) {
-      html += '<div class="structured-response-row"><span>建议</span><p>' + escHtml(item.suggestion) + '</p></div>';
+      html += '<div class="structured-response-row"><span>' + escHtml(t("timeline.suggestion")) + '</span><p>' + escHtml(item.suggestion) + '</p></div>';
     }
     if (item.confidence) {
-      html += '<div class="structured-response-meta">置信度: ' + escHtml(item.confidence) + '</div>';
+      html += '<div class="structured-response-meta">' + escHtml(t("chat.confidence", { v: item.confidence })) + '</div>';
     }
     html += '</div>';
   }
   if (items.length > limit) {
-    html += '<div class="structured-response-more">还有 ' + (items.length - limit) + ' 条摘要未展开</div>';
+    html += '<div class="structured-response-more">' + escHtml(t("chat.moreSummaries", { n: items.length - limit })) + '</div>';
   }
   html += '</div>';
   return html;
 }
 
 function formatChatErrorMessage(err) {
-  var reason = err && err.message ? err.message : String(err || "未知错误");
-  return "发送失败: " + reason;
+  var reason = err && err.message ? err.message : String(err || t("common.unknownError"));
+  return t("chat.sendFailed", { msg: reason });
 }
 
 // ---- Render ----
@@ -206,7 +206,7 @@ function renderChatSessionList() {
   });
 
   if (filtered.length === 0) {
-    list.innerHTML = '<div class="chat-session-empty">' + (search ? "没有匹配的会话" : '暂无会话，点击"+ 新建"开始') + '</div>';
+    list.innerHTML = '<div class="chat-session-empty">' + escHtml(search ? t("chat.noMatch") : t("chat.emptyHint")) + '</div>';
     return;
   }
 
@@ -225,7 +225,7 @@ function renderChatSessionList() {
       '<div class="session-title">' + escHtml(s.title) + '</div>' +
       (preview ? '<div class="session-preview">' + escHtml(preview) + '</div>' : "") +
       '<div class="session-time">' + formatRelativeTime(s.updatedAt) + '</div>' +
-      '<button class="session-delete-btn" data-action="delete-session" title="删除会话">' +
+      '<button class="session-delete-btn" data-action="delete-session" title="' + escHtml(t("chat.deleteSessionTitle")) + '">' +
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>' +
       '</button>' +
       '</div>';
@@ -239,9 +239,9 @@ function renderChatSessionList() {
       e.stopPropagation();
       var item = deleteBtn.closest(".chat-session-item");
       var sid = item ? item.dataset.sid : null;
-      if (sid && confirm("确定删除该会话及其所有消息？")) {
+      if (sid && confirm(t("chat.confirmDeleteSession"))) {
         deleteChatSession(sid).then(renderChatTab).catch(function (err) {
-          alert("删除会话失败: " + err.message);
+          alert(t("chat.deleteSessionFailed", { msg: err.message }));
         });
       }
       return;
@@ -262,8 +262,8 @@ function renderChatThread() {
   var session = getActiveChatSession();
 
   if (!session) {
-    thread.innerHTML = '<div class="chat-welcome"><p>选择或创建一个会话</p><p class="chat-welcome-hint">从左侧列表选择会话，或点击"+ 新建"创建新会话</p></div>';
-    state.dom.chatSessionTitle.textContent = "选择或创建会话";
+    thread.innerHTML = '<div class="chat-welcome"><p>' + escHtml(t("chat.selectOrCreateThread")) + '</p><p class="chat-welcome-hint">' + escHtml(t("chat.selectFromListHint")) + '</p></div>';
+    state.dom.chatSessionTitle.textContent = t("chat.selectOrCreate");
     return;
   }
 
@@ -271,7 +271,7 @@ function renderChatThread() {
 
   // Bodies are lazy-loaded; show a transient state and fetch on demand.
   if (!session.messagesLoaded) {
-    thread.innerHTML = '<div class="chat-welcome"><p>加载中…</p></div>';
+    thread.innerHTML = '<div class="chat-welcome"><p>' + escHtml(t("common.loadingEllipsis")) + '</p></div>';
     ensureSessionMessagesLoaded(session).then(function () {
       if (getActiveChatSession() === session) renderChatThread();
     });
@@ -279,7 +279,7 @@ function renderChatThread() {
   }
 
   if (session.messages.length === 0) {
-    thread.innerHTML = '<div class="chat-welcome"><p>欢迎使用会话模式</p><p class="chat-welcome-hint">可以追问当前状态、记录想法、生成待办</p></div>';
+    thread.innerHTML = '<div class="chat-welcome"><p>' + escHtml(t("chat.welcomeTitle")) + '</p><p class="chat-welcome-hint">' + escHtml(t("chat.welcomeHint")) + '</p></div>';
     return;
   }
 
@@ -290,7 +290,7 @@ function renderChatThread() {
     html += '<div class="' + cls + '">';
     html += '<div class="msg-content">' + formatChatMessageContent(m.content) + '</div>';
     if (m.status === "error") {
-      html += '<div class="msg-retry" data-mid="' + m.id + '">重试</div>';
+      html += '<div class="msg-retry" data-mid="' + m.id + '">' + escHtml(t("chat.retry")) + '</div>';
     }
     // Suggested tasks
     if (m.suggestedTasks && m.suggestedTasks.length > 0) {
@@ -299,7 +299,7 @@ function renderChatThread() {
         var st = m.suggestedTasks[t];
         html += '<div class="chat-suggested-task-row">' +
           '<span class="task-title">' + escHtml(st.title) + '</span>' +
-          '<button class="btn btn-sm btn-primary create-suggested-task" data-title="' + escHtml(st.title) + '" data-notes="' + escHtml(st.notes || "") + '" data-priority="' + escHtml(st.priority || "medium") + '">创建任务</button>' +
+          '<button class="btn btn-sm btn-primary create-suggested-task" data-title="' + escHtml(st.title) + '" data-notes="' + escHtml(st.notes || "") + '" data-priority="' + escHtml(st.priority || "medium") + '">' + escHtml(t("chat.createTask")) + '</button>' +
           '</div>';
       }
       html += '</div>';
@@ -336,7 +336,7 @@ function renderChatContextPanel() {
     statusDiv.innerHTML = '<div>' + escHtml(summary.current.headline) + '</div>' +
       (summary.current.evidence ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">' + escHtml(summary.current.evidence.slice(0, 2).join("; ")) + '</div>' : "");
   } else {
-    statusDiv.textContent = "暂无数据";
+    statusDiv.textContent = t("common.noData");
   }
 
   // Recent activity
@@ -350,7 +350,7 @@ function renderChatContextPanel() {
     }
     actDiv.innerHTML = actHtml;
   } else {
-    actDiv.textContent = "暂无活动摘要";
+    actDiv.textContent = t("chat.noActivitySummary");
   }
 
   // Task suggestions -- from last assistant message with suggestedTasks
@@ -370,7 +370,7 @@ function renderChatContextPanel() {
       }
       taskDiv.innerHTML = tHtml;
     } else {
-      taskDiv.textContent = "暂无建议待办";
+      taskDiv.textContent = t("chat.noSuggestedTasks");
     }
   }
 }
@@ -380,7 +380,7 @@ function updateChatInputState() {
   var session = getActiveChatSession();
   if (state.dom.chatTabInput) {
     state.dom.chatTabInput.disabled = !llmOk || !session;
-    if (!llmOk) state.dom.chatTabInput.placeholder = "LLM 未配置，请先在配置页设置 API Key";
+    if (!llmOk) state.dom.chatTabInput.placeholder = t("chat.llmNotConfiguredPlaceholder");
   }
   if (state.dom.chatTabSendBtn) {
     state.dom.chatTabSendBtn.disabled = !llmOk || !session || state.chatSending;
@@ -401,7 +401,7 @@ function sendChatTabMessage() {
   ensureActiveChatSession().then(function (session) {
     var context = buildChatContext(session);
     var userMsg = { role: "user", content: text, status: "sent", contextSnapshot: context };
-    var pendingMsg = { role: "assistant", content: "思考中...", status: "pending" };
+    var pendingMsg = { role: "assistant", content: t("chat.thinking"), status: "pending" };
 
     // Persist user + pending assistant; adopt server-assigned ids into cache.
     return api.appendMessages(session.id, { messages: [userMsg, pendingMsg] })
@@ -415,7 +415,7 @@ function sendChatTabMessage() {
         backfillSessionTitle(session, text);
 
         return api.postChat(text, context).then(function (resp) {
-          var content = resp.message || resp.reply || resp.content || "Agent 未返回可显示内容";
+          var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
           var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
           savedPending.status = "sent";
           savedPending.content = content;
@@ -434,7 +434,7 @@ function sendChatTabMessage() {
         });
       });
   }).catch(function (err) {
-    alert("发送失败: " + (err && err.message ? err.message : err));
+    alert(t("chat.sendFailed", { msg: (err && err.message ? err.message : err) }));
   }).then(function () {
     state.chatSending = false;
     renderChatTab();
@@ -443,7 +443,7 @@ function sendChatTabMessage() {
 
 // Backfill a default-titled session from its first user message (SPEC-CSP-FE-004).
 function backfillSessionTitle(session, text) {
-  if (!session || session.title !== "新会话") return;
+  if (!session || session.title !== t("chat.newSessionDefault")) return;
   var txt = (text || "").replace(/\n/g, " ").trim().substring(0, 18);
   if (!txt) return;
   api.updateSession(session.id, { title: txt }).then(function (fresh) {
@@ -472,13 +472,13 @@ function retryChatMessage(msgId) {
 
   state.chatSending = true;
   pendingMsg.status = "pending";
-  pendingMsg.content = "思考中...";
+  pendingMsg.content = t("chat.thinking");
   renderChatTab();
 
   api.updateMessage(session.id, pendingMsg.id, { status: "pending" }).catch(function () {});
 
   api.postChat(userMsg.content, userMsg.contextSnapshot || buildChatContext(session)).then(function (resp) {
-    var content = resp.message || resp.reply || resp.content || "Agent 未返回可显示内容";
+    var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
     var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
     pendingMsg.status = "sent";
     pendingMsg.content = content;
@@ -520,10 +520,10 @@ function buildChatContext(session) {
 
 function createSuggestedTask(title, notes, priority, btn) {
   api.createTask({ title: title, notes: notes, priority: priority, source: "chat" }).then(function () {
-    if (btn) { btn.textContent = "已创建"; btn.disabled = true; }
+    if (btn) { btn.textContent = t("task.created"); btn.disabled = true; }
     loadTasks();
   }).catch(function (err) {
-    alert("创建任务失败: " + err.message);
+    alert(t("task.createFailed", { msg: err.message }));
   });
 }
 
@@ -531,19 +531,19 @@ function createSuggestedTask(title, notes, priority, btn) {
 
 function openChatTabWithContext(context) {
   createChatSession({
-    title: context.title || "上下文追问",
+    title: context.title || t("chat.contextFollowup"),
     source: context.type === "task" ? "task_context" : "agent_context",
     contextLabel: context.label || context.title,
     contextSnapshot: context,
     initialMessages: [{
       role: "system",
-      content: "已带入上下文：" + (context.title || context.label || "当前条目"),
+      content: t("chat.contextBrought", { title: context.title || context.label || t("chat.currentItem") }),
       contextSnapshot: context,
     }],
   }).then(function () {
     switchTab("chat");
     renderChatTab();
   }).catch(function (err) {
-    alert("创建会话失败: " + (err && err.message ? err.message : err));
+    alert(t("chat.createSessionFailed", { msg: (err && err.message ? err.message : err) }));
   });
 }

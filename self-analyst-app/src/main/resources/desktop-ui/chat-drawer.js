@@ -13,14 +13,14 @@ function openChat(context) {
   state.dom.chatInput.value = "";
 
   if (context) {
-    state.dom.chatTitle.textContent = "讨论: " + (context.title || context.label || "条目");
+    state.dom.chatTitle.textContent = t("drawer.discussWith", { title: context.title || context.label || t("drawer.item") });
     state.dom.chatContext.innerHTML =
       '<div style="font-size:13px;color:var(--text-secondary);">' +
-      "<strong>上下文:</strong> " +
-      escHtml(context.description || context.headline || context.summary || context.title || "当前选中项") +
+      "<strong>" + escHtml(t("drawer.contextLabel")) + "</strong> " +
+      escHtml(context.description || context.headline || context.summary || context.title || t("drawer.currentSelection")) +
       "</div>";
   } else {
-    state.dom.chatTitle.textContent = "讨论";
+    state.dom.chatTitle.textContent = t("drawer.discuss");
     state.dom.chatContext.innerHTML = "";
   }
 
@@ -54,7 +54,7 @@ function sendChatMessage() {
   state.dom.chatInput.value = "";
 
   // Add loading message
-  var loadingEl = addChatMessage("agent", '<span class="spinner"></span> 思考中...');
+  var loadingEl = addChatMessage("agent", '<span class="spinner"></span> ' + escHtml(t("chat.thinking")));
 
   api
     .postChat(msg, context)
@@ -64,7 +64,7 @@ function sendChatMessage() {
         loadingEl.remove();
       }
 
-      var reply = resp.reply || resp.message || resp.text || "无回复";
+      var reply = resp.reply || resp.message || resp.text || t("chat.noReply");
       addChatMessage("agent", reply);
 
       // Show suggested tasks if any
@@ -77,7 +77,7 @@ function sendChatMessage() {
       if (loadingEl && loadingEl.parentNode) {
         loadingEl.remove();
       }
-      addChatMessage("agent", "发送失败: " + err.message);
+      addChatMessage("agent", t("chat.sendFailed", { msg: err.message }));
     });
 }
 
@@ -97,8 +97,8 @@ function renderChatSuggestions(suggested) {
     html +=
       '<button class="chat-suggested-task-card" data-suggested-task="' +
       escHtml(typeof title === "string" ? title : JSON.stringify(title)) +
-      '">+ 添加为任务: ' +
-      escHtml(typeof title === "string" ? title : JSON.stringify(title)) +
+      '">' +
+      escHtml(t("drawer.addAsTask", { title: typeof title === "string" ? title : JSON.stringify(title) })) +
       "</button>";
   });
   state.dom.chatSuggestions.innerHTML = html;

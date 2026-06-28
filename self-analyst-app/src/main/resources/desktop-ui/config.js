@@ -11,15 +11,15 @@ function renderConfigTab() {
   var readOnly = state.configLoadError ? " readonly" : "";
 
   var historyCount = (state.configHistory && state.configHistory.length) || 0;
-  var historyLabel = "历史版本" + (historyCount ? " (" + historyCount + ")" : "")
+  var historyLabel = t("config.historyVersions") + (historyCount ? " (" + historyCount + ")" : "")
     + (state.configHistoryOpen ? " ▴" : " ▾");
 
   var html = ""
     + '<div class="config-editor-toolbar">'
     +   '<button id="config-history-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(historyLabel) + '</button>'
     +   '<span class="config-toolbar-spacer"></span>'
-    +   '<button id="test-llm-btn" class="btn btn-sm btn-outline" type="button">测试 LLM 连接</button>'
-    +   '<button id="test-embedding-btn" class="btn btn-sm btn-outline" type="button">测试 Embedding 连接</button>'
+    +   '<button id="test-llm-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.testLlm")) + '</button>'
+    +   '<button id="test-embedding-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.testEmbedding")) + '</button>'
     + '</div>';
 
   if (state.configHistoryOpen) {
@@ -27,7 +27,7 @@ function renderConfigTab() {
   }
 
   if (state.configLoadError) {
-    html += '<div class="config-load-error">载入配置失败，编辑器为只读。请关闭后重试。</div>';
+    html += '<div class="config-load-error">' + escHtml(t("config.loadErrorReadonly")) + '</div>';
   }
 
   html += '<textarea id="config-raw-editor" class="config-raw-editor" spellcheck="false" wrap="off"'
@@ -48,7 +48,7 @@ function renderConfigActionBar() {
   return (
     '<div class="config-action-bar" id="config-action-bar">' +
     '<div class="config-action-meta">' +
-    '<span class="config-action-title">配置更改</span>' +
+    '<span class="config-action-title">' + escHtml(t("config.changesTitle")) + '</span>' +
     '<span class="config-action-status" id="config-action-status"></span>' +
     '<span class="config-save-result' +
     resultClass +
@@ -57,8 +57,8 @@ function renderConfigActionBar() {
     "</span>" +
     "</div>" +
     '<div class="config-action-buttons">' +
-    '<button id="discard-config-btn" class="btn btn-sm btn-outline" type="button">放弃更改</button>' +
-    '<button id="save-all-config-btn" class="btn btn-sm btn-primary" type="button">保存更改</button>' +
+    '<button id="discard-config-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.discard")) + '</button>' +
+    '<button id="save-all-config-btn" class="btn btn-sm btn-primary" type="button">' + escHtml(t("config.saveChanges")) + '</button>' +
     "</div>" +
     "</div>"
   );
@@ -69,15 +69,15 @@ function renderConfigActionBar() {
 function renderConfigHistory() {
   var list = state.configHistory || [];
   if (state.configHistoryError) {
-    return '<div class="config-history-panel"><div class="config-history-empty">历史版本载入失败</div></div>';
+    return '<div class="config-history-panel"><div class="config-history-empty">' + escHtml(t("config.historyLoadFailed")) + '</div></div>';
   }
   if (list.length === 0) {
-    return '<div class="config-history-panel"><div class="config-history-empty">暂无历史版本（保存后自动生成）</div></div>';
+    return '<div class="config-history-panel"><div class="config-history-empty">' + escHtml(t("config.historyEmpty")) + '</div></div>';
   }
 
   var rows = list.map(function (v) {
     var expanded = state.configHistoryExpandedId === v.id;
-    var summary = v.summary ? escHtml(v.summary) : "（摘要生成中…）";
+    var summary = v.summary ? escHtml(v.summary) : escHtml(t("config.summaryGenerating"));
     var preview = "";
     if (expanded && typeof v.text === "string") {
       preview = '<pre class="config-history-preview">' + escHtml(v.text) + "</pre>";
@@ -91,8 +91,8 @@ function renderConfigHistory() {
       "</div>" +
       '<div class="config-history-actions">' +
       '<button class="btn btn-sm btn-outline config-history-view" data-version-id="' + escHtml(v.id) + '" type="button">' +
-      (expanded ? "收起" : "查看") + "</button>" +
-      '<button class="btn btn-sm btn-primary config-history-switch" data-version-id="' + escHtml(v.id) + '" type="button">切换</button>' +
+      (expanded ? escHtml(t("config.collapse")) : escHtml(t("config.view"))) + "</button>" +
+      '<button class="btn btn-sm btn-primary config-history-switch" data-version-id="' + escHtml(v.id) + '" type="button">' + escHtml(t("config.switch")) + '</button>' +
       "</div>" +
       "</div>" +
       preview +
@@ -151,7 +151,7 @@ function toggleVersionPreview(id) {
     state.configHistoryExpandedId = id;
     renderConfigTab();
   }).catch(function (err) {
-    state.configSaveResult = { type: "error", msg: "载入版本失败: " + (err.message || "未知错误") };
+    state.configSaveResult = { type: "error", msg: t("config.loadVersionFailed", { msg: err.message || t("common.unknownError") }) };
     updateConfigActionBar();
   });
 }
@@ -164,11 +164,11 @@ function switchToVersion(id) {
     state.configDirty = state.configRawText !== state.configRawBaseline;
     state.configSaveResult = {
       type: "success",
-      msg: "已载入版本「" + (detail.name || "") + "」，保存后生效",
+      msg: t("config.versionLoaded", { name: detail.name || "" }),
     };
     renderConfigTab();
   }).catch(function (err) {
-    state.configSaveResult = { type: "error", msg: "切换版本失败: " + (err.message || "未知错误") };
+    state.configSaveResult = { type: "error", msg: t("config.switchVersionFailed", { msg: err.message || t("common.unknownError") }) };
     updateConfigActionBar();
   });
 }
@@ -245,11 +245,11 @@ function updateConfigActionBar() {
 
   if (status) {
     if (state.configSaving) {
-      status.textContent = "正在保存...";
+      status.textContent = t("config.saving");
     } else if (state.configDirty) {
-      status.textContent = "有未保存更改";
+      status.textContent = t("config.unsavedChanges");
     } else {
-      status.textContent = "没有未保存更改";
+      status.textContent = t("config.noUnsavedChanges");
     }
   }
 
@@ -269,7 +269,7 @@ function updateConfigActionBar() {
 
   if (saveBtn) {
     saveBtn.disabled = state.configSaving || !state.configDirty || state.configLoadError;
-    saveBtn.textContent = state.configSaving ? "保存中..." : "保存更改";
+    saveBtn.textContent = state.configSaving ? t("config.savingShort") : t("config.saveChanges");
   }
 }
 
@@ -295,12 +295,12 @@ function saveAllConfig() {
     state.configDirty = false;
     state.configSaving = false;
 
-    var msg = "保存成功";
+    var msg = t("config.saveSuccess");
     if (resp && resp.restartRequired && resp.restartRequired.length > 0) {
-      msg += "（需重启后端: " + resp.restartRequired.join(", ") + "）";
+      msg += t("config.restartSuffix", { keys: resp.restartRequired.join(", ") });
     }
     if (resp && resp.unknownKeys && resp.unknownKeys.length > 0) {
-      msg += "（未知键: " + resp.unknownKeys.join(", ") + "）";
+      msg += t("config.unknownKeysSuffix", { keys: resp.unknownKeys.join(", ") });
     }
     state.configSaveResult = { type: "success", msg: msg };
     renderConfigTab();
@@ -309,7 +309,7 @@ function saveAllConfig() {
   }).catch(function (err) {
     // Save failed: keep dirty state and baseline untouched. SPEC-CFGUI-UI-003f.
     state.configSaving = false;
-    state.configSaveResult = { type: "error", msg: "保存失败: " + (err.message || "未知错误") };
+    state.configSaveResult = { type: "error", msg: t("config.saveFailed", { msg: err.message || t("common.unknownError") }) };
     updateConfigActionBar();
   });
 }

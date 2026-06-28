@@ -238,7 +238,7 @@ public record Config(
         if (budgetWarnRatio <= 0 || budgetWarnRatio > 1) budgetWarnRatio = 0.8;
 
         boolean webSearchEnabled = Boolean.parseBoolean(
-                envOrProp(props, "websearch.enabled", "WEBSEARCH_ENABLED", "true"));
+                envOrProp(props, "websearch.enabled", "WEBSEARCH_ENABLED", "false"));
         String webSearchMcpUrl = envOrProp(props, "websearch.mcp-url", "WEBSEARCH_MCP_URL",
                 "https://search.parallel.ai/mcp");
         String webSearchApiKey = envOrProp(props, "websearch.api-key", "WEBSEARCH_API_KEY", "");

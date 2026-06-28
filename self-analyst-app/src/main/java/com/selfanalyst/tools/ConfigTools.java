@@ -63,7 +63,7 @@ public class ConfigTools {
                 {"llm.temperature", eff.getProperty("llm.temperature", "0.7"),                       null},
         });
         appendSection(sb, "联网搜索", new String[][]{
-                {"websearch.enabled", eff.getProperty("websearch.enabled", "true"),                                  null},
+                {"websearch.enabled", eff.getProperty("websearch.enabled", "false"),                                 null},
                 {"websearch.mcp-url", eff.getProperty("websearch.mcp-url", "https://search.parallel.ai/mcp"),       null},
                 {"websearch.api-key", eff.getProperty("websearch.api-key", ""),                                      "masked"},
         });

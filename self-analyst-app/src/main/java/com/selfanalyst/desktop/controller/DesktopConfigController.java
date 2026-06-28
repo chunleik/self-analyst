@@ -52,7 +52,7 @@ public class DesktopConfigController {
     private static final Map<String, String> SUPPORTED_DEFAULTS = new LinkedHashMap<>() {{
         put("llm.api-key", ""); put("llm.base-url", "https://api.openai.com/v1");
         put("llm.model", "gpt-4o"); put("llm.temperature", "0.7");
-        put("websearch.enabled", "true"); put("websearch.mcp-url", "https://search.parallel.ai/mcp");
+        put("websearch.enabled", "false"); put("websearch.mcp-url", "https://search.parallel.ai/mcp");
         put("websearch.api-key", "");
         put("agent.summaryRefreshMinutes", "5"); put("agent.allowAgentTasks", "false");
         put("agent.cacheSummaries", "true");
@@ -758,7 +758,7 @@ public class DesktopConfigController {
 
     private Map<String, Map<String, Object>> buildWebSearchSection(Properties eff) {
         var m = new LinkedHashMap<String, Map<String, Object>>();
-        m.put("webSearchEnabled", field("webSearchEnabled", eff.getProperty("websearch.enabled", "true")));
+        m.put("webSearchEnabled", field("webSearchEnabled", eff.getProperty("websearch.enabled", "false")));
         m.put("webSearchMcpUrl", field("webSearchMcpUrl", eff.getProperty("websearch.mcp-url", "https://search.parallel.ai/mcp")));
         m.put("webSearchApiKey", field("webSearchApiKey", eff.getProperty("websearch.api-key", ""), true));
         return m;

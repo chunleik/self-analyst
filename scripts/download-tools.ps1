@@ -1,5 +1,10 @@
 # Download external tools (PaddleOCR + whisper.cpp)
-param()
+# WebView2 is NOT downloaded — the app uses the system-provided (Evergreen) runtime.
+#   -SkipWhisper   Don't download whisper.cpp + the 466MB model (for the minimal,
+#                  no-audio build). PaddleOCR is always downloaded.
+param(
+    [switch]$SkipWhisper
+)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -25,17 +30,21 @@ New-Item -ItemType Directory -Force -Path tools/PaddleOCR-json | Out-Null
 & $SevenZip x $paddleZip -o"$Root\tools\PaddleOCR-json" -y | Out-Null
 Remove-Item $paddleZip
 
-Write-Host "=== Downloading whisper.cpp ===" -ForegroundColor Cyan
-$whisperUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.6/whisper-bin-x64.zip"
-$whisperZip = "$env:TEMP\whisper-bin.zip"
+if ($SkipWhisper) {
+    Write-Host "=== Skipping whisper.cpp (-SkipWhisper) ===" -ForegroundColor Yellow
+} else {
+    Write-Host "=== Downloading whisper.cpp ===" -ForegroundColor Cyan
+    $whisperUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.6/whisper-bin-x64.zip"
+    $whisperZip = "$env:TEMP\whisper-bin.zip"
 
-Invoke-WebRequest -Uri $whisperUrl -OutFile $whisperZip
-New-Item -ItemType Directory -Force -Path tools/whisper | Out-Null
-Expand-Archive -Path $whisperZip -DestinationPath tools/whisper -Force
-Remove-Item $whisperZip
+    Invoke-WebRequest -Uri $whisperUrl -OutFile $whisperZip
+    New-Item -ItemType Directory -Force -Path tools/whisper | Out-Null
+    Expand-Archive -Path $whisperZip -DestinationPath tools/whisper -Force
+    Remove-Item $whisperZip
 
-Write-Host "=== Downloading whisper model (ggml-small.bin, 466MB) ===" -ForegroundColor Cyan
-$modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
-Invoke-WebRequest -Uri $modelUrl -OutFile tools/whisper/ggml-small.bin
+    Write-Host "=== Downloading whisper model (ggml-small.bin, 466MB) ===" -ForegroundColor Cyan
+    $modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+    Invoke-WebRequest -Uri $modelUrl -OutFile tools/whisper/ggml-small.bin
+}
 
 Write-Host "Done. tools/ ready." -ForegroundColor Green

@@ -3,8 +3,9 @@
    ============================================================ */
 "use strict";
 
-// The config modal edits the user config.properties file as raw text.
-// SPEC-CFGUI-UI-001: a single monospaced textarea replaces the structured form.
+// The config modal edits the user config.toml file as raw text.
+// SPEC-CFGUI-UI-001 / SPEC-TOML-UI-001: a single monospaced textarea; the file
+// name/path shown comes from the API and reports config.toml.
 
 function renderConfigTab() {
   var grid = state.dom.configGrid;
@@ -78,6 +79,14 @@ function renderConfigHistory() {
   var rows = list.map(function (v) {
     var expanded = state.configHistoryExpandedId === v.id;
     var summary = v.summary ? escHtml(v.summary) : "（摘要生成中…）";
+    // Pre-migration snapshots (format !== "toml") are view-only. SPEC-TOML-VER-002.
+    var isLegacy = v.format && v.format !== "toml";
+    var legacyBadge = isLegacy
+      ? '<span class="config-version-legacy">旧格式（properties），仅可查看</span>'
+      : "";
+    var switchBtn = isLegacy
+      ? '<button class="btn btn-sm btn-primary config-history-switch" disabled type="button" title="旧格式配置不可切换">切换</button>'
+      : '<button class="btn btn-sm btn-primary config-history-switch" data-version-id="' + escHtml(v.id) + '" type="button">切换</button>';
     var preview = "";
     if (expanded && typeof v.text === "string") {
       preview = '<pre class="config-history-preview">' + escHtml(v.text) + "</pre>";
@@ -88,11 +97,12 @@ function renderConfigHistory() {
       '<div class="config-history-meta">' +
       '<span class="config-history-name">' + escHtml(v.name || "") + "</span>" +
       '<span class="config-history-summary">' + summary + "</span>" +
+      legacyBadge +
       "</div>" +
       '<div class="config-history-actions">' +
       '<button class="btn btn-sm btn-outline config-history-view" data-version-id="' + escHtml(v.id) + '" type="button">' +
       (expanded ? "收起" : "查看") + "</button>" +
-      '<button class="btn btn-sm btn-primary config-history-switch" data-version-id="' + escHtml(v.id) + '" type="button">切换</button>' +
+      switchBtn +
       "</div>" +
       "</div>" +
       preview +
@@ -180,29 +190,63 @@ function currentEditorText() {
   return el ? el.value : "";
 }
 
-// Lightweight .properties line parser for the test buttons. Skips blank lines
-// and `#`/`!` comments; splits on the first `=` or `:`. SPEC-CFGUI-UI-005b.
-function parseEditorProps() {
+// Lightweight TOML line parser for the test buttons. Tracks the current `[table]`
+// header, skips blank/`#` lines, splits `key = value` on the first `=`, strips
+// surrounding quotes from keys and values, and composes `table.key` dotted names.
+// Top-level dotted keys (`llm.base-url = ...`) pass through unchanged.
+// SPEC-TOML-UI-003.
+function parseEditorToml() {
   var map = {};
   var lines = currentEditorText().split(/\r?\n/);
+  var table = "";
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
-    var trimmed = line.replace(/^\s+/, "");
-    if (trimmed === "" || trimmed.charAt(0) === "#" || trimmed.charAt(0) === "!") continue;
+    var trimmed = line.replace(/^\s+/, "").replace(/\s+$/, "");
+    if (trimmed === "" || trimmed.charAt(0) === "#") continue;
+    if (trimmed.charAt(0) === "[") {
+      var close = trimmed.indexOf("]");
+      if (close > 0) table = stripTomlKey(trimmed.slice(1, close).trim());
+      continue;
+    }
     var eq = line.indexOf("=");
-    var colon = line.indexOf(":");
-    var sep = eq;
-    if (sep < 0 || (colon >= 0 && colon < sep)) sep = colon;
-    if (sep < 0) continue;
-    var key = line.slice(0, sep).trim();
-    var val = line.slice(sep + 1).trim();
-    if (key) map[key] = val;
+    if (eq < 0) continue;
+    var key = stripTomlKey(line.slice(0, eq).trim());
+    var val = stripTomlValue(line.slice(eq + 1).trim());
+    if (!key) continue;
+    map[table ? table + "." + key : key] = val;
   }
   return map;
 }
 
+function stripQuotesToken(s) {
+  if (s.length >= 2) {
+    var f = s.charAt(0), l = s.charAt(s.length - 1);
+    if ((f === '"' && l === '"') || (f === "'" && l === "'")) return s.slice(1, -1);
+  }
+  return s;
+}
+
+// Strip surrounding quotes from each dotted segment of a key.
+function stripTomlKey(k) {
+  var parts = k.split(".");
+  for (var i = 0; i < parts.length; i++) parts[i] = stripQuotesToken(parts[i].trim());
+  return parts.join(".");
+}
+
+// Strip surrounding quotes from a value; for unquoted scalars drop inline comments.
+function stripTomlValue(v) {
+  var s = v;
+  if (s.length >= 2) {
+    var f = s.charAt(0), l = s.charAt(s.length - 1);
+    if ((f === '"' && l === '"') || (f === "'" && l === "'")) return s.slice(1, -1);
+  }
+  var hash = s.indexOf("#");
+  if (hash >= 0) s = s.slice(0, hash).replace(/\s+$/, "");
+  return s;
+}
+
 function readLlmConfigFromEditor() {
-  var m = parseEditorProps();
+  var m = parseEditorToml();
   var cfg = {};
   if (m["llm.base-url"] !== undefined) cfg.baseUrl = m["llm.base-url"];
   if (m["llm.model"] !== undefined) cfg.model = m["llm.model"];
@@ -211,7 +255,7 @@ function readLlmConfigFromEditor() {
 }
 
 function readEmbeddingConfigFromEditor() {
-  var m = parseEditorProps();
+  var m = parseEditorToml();
   var cfg = {};
   if (m["embedding.base-url"] !== undefined) cfg.embeddingBaseUrl = m["embedding.base-url"];
   if (m["embedding.model"] !== undefined) cfg.embeddingModel = m["embedding.model"];

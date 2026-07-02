@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public record Config(
         String llmApiKey,
@@ -65,20 +67,16 @@ public record Config(
         long budgetDailyTokens,
         double budgetWarnRatio) {
 
+    private static final Logger log = LoggerFactory.getLogger(Config.class);
+
     public static Config load() {
-        Properties props = new Properties();
-        try (InputStream in = Config.class.getClassLoader()
-                .getResourceAsStream("application.properties")) {
-            if (in != null) {
-                props.load(new InputStreamReader(in, StandardCharsets.UTF_8));
-            }
-        } catch (IOException ignored) {}
+        Properties props = loadClasspathProps();
 
         // Compute memory.dir early — needed to find user config saved by desktop UI
-        String memDir = envOrProp(props, "memory.dir", "MEMORY_DIR",
-                System.getProperty("user.home") + "/.self-analyst");
+        String memDir = memoryDirOf(props);
 
-        // Overlay user config from ~/.self-analyst/config.properties (legacy)
+        // Overlay user config from ~/.self-analyst/config.properties (legacy, lowest
+        // user priority; properties semantics unchanged — SPEC-TOML-DEC-001).
         Path legacyConfig = Path.of(System.getProperty("user.home"), ".self-analyst", "config.properties");
         if (Files.exists(legacyConfig)) {
             Properties userProps = new Properties();
@@ -88,15 +86,9 @@ public record Config(
             } catch (IOException ignored) {}
         }
 
-        // Overlay user config from {memoryDir}/config.properties (desktop UI save target)
-        Path desktopConfig = Path.of(memDir).resolve("config.properties");
-        if (!desktopConfig.equals(legacyConfig) && Files.exists(desktopConfig)) {
-            Properties desktopProps = new Properties();
-            try (Reader r = Files.newBufferedReader(desktopConfig, StandardCharsets.UTF_8)) {
-                desktopProps.load(r);
-                props.putAll(desktopProps);
-            } catch (IOException ignored) {}
-        }
+        // Overlay user-level config from {memoryDir}: config.toml preferred, else the
+        // un-migrated config.properties (CLI-only path). SPEC-TOML-MIG-002a.
+        overlayUserConfig(props, Path.of(memDir));
 
         String apiKey = envOrProp(props, "llm.api-key", "OPENAI_API_KEY", "")
                 .replace("${OPENAI_API_KEY:CHANGE_ME}", "CHANGE_ME")
@@ -287,6 +279,58 @@ public record Config(
                 false, "", 512, 8000, 60, 5, 5, 5, "", "", "", true,
                 baseDir.resolve("file-semantic-index"),
                 2048, 8, 4, "warn", 100000000L, 0.8);
+    }
+
+    /** Load the classpath {@code application.properties} defaults (empty if absent). */
+    private static Properties loadClasspathProps() {
+        Properties props = new Properties();
+        try (InputStream in = Config.class.getClassLoader()
+                .getResourceAsStream("application.properties")) {
+            if (in != null) {
+                props.load(new InputStreamReader(in, StandardCharsets.UTF_8));
+            }
+        } catch (IOException ignored) {}
+        return props;
+    }
+
+    /** Resolve memory.dir: env {@code MEMORY_DIR} > classpath {@code memory.dir} > {@code ~/.self-analyst}. */
+    private static String memoryDirOf(Properties props) {
+        return envOrProp(props, "memory.dir", "MEMORY_DIR",
+                System.getProperty("user.home") + "/.self-analyst");
+    }
+
+    /**
+     * The effective memory directory, resolvable before {@link #load()} so callers
+     * (e.g. startup migration) can locate the user config file first.
+     * SPEC-TOML-MIG-001a.
+     */
+    public static Path resolveMemoryDir() {
+        return Path.of(memoryDirOf(loadClasspathProps()));
+    }
+
+    /**
+     * Overlay the user-level config from {@code {memoryDir}}: prefer
+     * {@code config.toml} (parsed + flattened + normalized), else fall back to the
+     * un-migrated {@code config.properties}. A TOML parse failure at runtime is
+     * logged and skipped — startup must not crash on a hand-broken file; the raw
+     * editor is the strict gate. SPEC-TOML-MIG-002a, SPEC-TOML-DEC-001. Package
+     * visibility for load-priority tests.
+     */
+    static void overlayUserConfig(Properties props, Path memoryDir) {
+        Path toml = memoryDir.resolve("config.toml");
+        Path properties = memoryDir.resolve("config.properties");
+        if (Files.exists(toml)) {
+            try {
+                props.putAll(TomlSupport.parseAndFlatten(
+                        Files.readString(toml, StandardCharsets.UTF_8)));
+            } catch (IOException | RuntimeException e) {
+                log.warn("跳过无法解析的 {}: {}", toml, e.getMessage());
+            }
+        } else if (Files.exists(properties)) {
+            try (Reader r = Files.newBufferedReader(properties, StandardCharsets.UTF_8)) {
+                props.load(r);
+            } catch (IOException ignored) {}
+        }
     }
 
     private static String envOrProp(Properties props, String propKey,

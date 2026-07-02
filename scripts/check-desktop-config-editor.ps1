@@ -41,6 +41,14 @@ Assert-Contains $configJs 'readLlmConfigFromEditor' "Missing readLlmConfigFromEd
 Assert-Contains $configJs 'readEmbeddingConfigFromEditor' "Missing readEmbeddingConfigFromEditor helper"
 Assert-NotContains $configJs 'renderCollectorFields' "Structured config residue: renderCollectorFields still present"
 
+# TOML editor (SPEC-TOML-UI-001/003): TOML parser replaces the .properties parser
+Assert-Contains $configJs 'function\s+parseEditorToml' "Missing parseEditorToml TOML parser"
+Assert-NotContains $configJs 'parseEditorProps' "Properties residue: parseEditorProps still present"
+Assert-Contains $configJs 'config\.toml' "Missing config.toml label/reference"
+
+# Version history legacy-format badge + disabled switch (SPEC-TOML-VER-002)
+Assert-Contains $configJs 'config-version-legacy' "Missing legacy-format history badge markup"
+
 # api.js: raw client methods (SPEC-CFGUI-UI-002a/003d)
 Assert-Contains $apiJs 'getRawConfig' "Missing api.getRawConfig"
 Assert-Contains $apiJs 'saveRawConfig' "Missing api.saveRawConfig"
@@ -53,8 +61,9 @@ Assert-Contains $configJs 'config-history-btn' "Missing history toggle button"
 Assert-Contains $apiJs 'getConfigHistory' "Missing api.getConfigHistory"
 Assert-Contains $apiJs '/desktop/config/history' "Missing /desktop/config/history endpoint usage"
 
-# styles.css: editor styles (SPEC-CFGUI-UI-001a, SPEC-CFGUI-VER-UI)
+# styles.css: editor styles (SPEC-CFGUI-UI-001a, SPEC-CFGUI-VER-UI, SPEC-TOML-VER-002)
 Assert-Contains $styles '\.config-raw-editor' "Missing .config-raw-editor styles"
 Assert-Contains $styles '\.config-history-panel' "Missing .config-history-panel styles"
+Assert-Contains $styles '\.config-version-legacy' "Missing .config-version-legacy badge styles"
 
 Write-Output "desktop config editor static checks passed"

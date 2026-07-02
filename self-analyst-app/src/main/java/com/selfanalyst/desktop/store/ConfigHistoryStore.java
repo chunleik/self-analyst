@@ -24,12 +24,21 @@ public class ConfigHistoryStore {
     /** Retention cap: keep the most recent N versions. */
     public static final int MAX_VERSIONS = 10;
 
+    /** Snapshot text format markers. SPEC-TOML-VER-001. */
+    public static final String FORMAT_TOML = "toml";
+    public static final String FORMAT_PROPERTIES = "properties";
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Path filePath;
 
-    /** A single saved snapshot. Newest-first ordering is preserved on disk. */
-    public record ConfigVersion(String id, String name, String summary, long savedAt, String text) {}
+    /**
+     * A single saved snapshot. Newest-first ordering is preserved on disk. The
+     * {@code format} field distinguishes pre-migration {@code "properties"}
+     * snapshots (view-only) from current {@code "toml"} ones. SPEC-TOML-VER-001.
+     */
+    public record ConfigVersion(String id, String name, String summary, long savedAt,
+                                String text, String format) {}
 
     /** Manifest wrapper for (de)serialization. */
     private record Manifest(List<ConfigVersion> versions) {}
@@ -53,13 +62,16 @@ public class ConfigHistoryStore {
 
     /**
      * Append a new snapshot (newest-first) and prune to {@link #MAX_VERSIONS}.
-     * SPEC-CFGUI-VER-API-003.
+     * {@code format} is normally {@link #FORMAT_TOML}. SPEC-CFGUI-VER-API-003,
+     * SPEC-TOML-VER-001.
      */
-    public synchronized ConfigVersion add(String name, String summary, String text) throws IOException {
+    public synchronized ConfigVersion add(String name, String summary, String text, String format)
+            throws IOException {
         List<ConfigVersion> versions = new ArrayList<>(readAll());
+        String fmt = normalizeFormat(format);
         ConfigVersion v = new ConfigVersion(
                 UUID.randomUUID().toString(), name, summary, System.currentTimeMillis(),
-                redactSensitiveValues(text));
+                redactSensitiveValues(text, fmt), fmt);
         versions.add(0, v); // newest first
         while (versions.size() > MAX_VERSIONS) {
             versions.remove(versions.size() - 1); // drop oldest
@@ -75,7 +87,8 @@ public class ConfigHistoryStore {
         for (int i = 0; i < versions.size(); i++) {
             ConfigVersion v = versions.get(i);
             if (v.id().equals(id)) {
-                versions.set(i, new ConfigVersion(v.id(), v.name(), summary, v.savedAt(), v.text()));
+                versions.set(i, new ConfigVersion(v.id(), v.name(), summary, v.savedAt(),
+                        v.text(), v.format()));
                 changed = true;
                 break;
             }
@@ -97,8 +110,10 @@ public class ConfigHistoryStore {
             if (m.versions() == null) return List.of();
             List<ConfigVersion> redacted = new ArrayList<>();
             for (ConfigVersion v : m.versions()) {
+                // Legacy manifests have no format → treat as "properties". SPEC-TOML-VER-001.
+                String fmt = normalizeFormat(v.format());
                 redacted.add(new ConfigVersion(v.id(), v.name(), v.summary(), v.savedAt(),
-                        redactSensitiveValues(v.text())));
+                        redactSensitiveValues(v.text(), fmt), fmt));
             }
             return redacted;
         } catch (IOException e) {
@@ -106,16 +121,22 @@ public class ConfigHistoryStore {
         }
     }
 
-    static String redactSensitiveValues(String text) {
+    /** Default a missing/blank format to {@code "properties"} (legacy snapshots). */
+    private static String normalizeFormat(String format) {
+        return (format == null || format.isBlank()) ? FORMAT_PROPERTIES : format;
+    }
+
+    static String redactSensitiveValues(String text, String format) {
         if (text == null || text.isEmpty()) return "";
+        boolean toml = FORMAT_TOML.equals(format);
         StringBuilder out = new StringBuilder(text.length());
         for (String line : text.split("(?<=\\n)", -1)) {
-            out.append(redactSensitiveLine(line));
+            out.append(redactSensitiveLine(line, toml));
         }
         return out.toString();
     }
 
-    private static String redactSensitiveLine(String line) {
+    private static String redactSensitiveLine(String line, boolean toml) {
         if (line == null || line.isEmpty()) return "";
         String ending = "";
         String body = line;
@@ -138,9 +159,27 @@ public class ConfigHistoryStore {
             sep = colon;
         }
         if (sep < 0) return line;
-        String key = body.substring(0, sep).trim().toLowerCase();
+        // Strip optional surrounding quotes so a quoted TOML key ("llm.api-key")
+        // matches the same suffix rule as a bare key. SPEC-TOML-VER-001.
+        String key = stripQuotes(body.substring(0, sep).trim()).toLowerCase();
         if (!isSensitiveKey(key)) return line;
+        // TOML: keep the snapshot valid TOML by emptying the value (key = "");
+        // properties: keep legacy behavior (key= with the value dropped).
+        if (toml) {
+            return body.substring(0, sep + 1) + " \"\"" + ending;
+        }
         return body.substring(0, sep + 1) + ending;
+    }
+
+    private static String stripQuotes(String key) {
+        if (key.length() >= 2) {
+            char first = key.charAt(0);
+            char last = key.charAt(key.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                return key.substring(1, key.length() - 1);
+            }
+        }
+        return key;
     }
 
     private static boolean isSensitiveKey(String key) {

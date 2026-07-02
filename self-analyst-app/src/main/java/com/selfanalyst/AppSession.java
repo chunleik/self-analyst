@@ -7,6 +7,7 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.audio.AudioWatcher;
 import com.selfanalyst.desktop.DesktopServer;
+import com.selfanalyst.desktop.store.ConfigMigration;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.usage.UsageMeter;
 import com.selfanalyst.wiki.*;
@@ -48,6 +49,10 @@ public class AppSession implements AutoCloseable {
     private FileWatcher fileWatcher;
 
     public AppSession() throws IOException {
+        // Migrate the user config to TOML before it is first read. AppSession is the
+        // single backend entry (CLI + desktop), so "首次读取之前" holds here.
+        // SPEC-TOML-MIG-001a.
+        ConfigMigration.migrateIfNeeded(Config.resolveMemoryDir());
         this.config = Config.load();
         this.usageMeter = new UsageMeter(config, config.memoryDir());
         if (config.awEmbedded()) {

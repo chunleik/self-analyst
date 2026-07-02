@@ -1,6 +1,8 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.TomlSupport;
+import com.selfanalyst.config.TomlValidationException;
 import com.selfanalyst.desktop.store.ConfigHistoryStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import org.junit.jupiter.api.Test;
@@ -28,61 +30,104 @@ class DesktopConfigControllerTest {
     }
 
     @Test
-    void buildRawResponseReturnsTemplateWhenFileMissing(@TempDir Path dir) throws Exception {
+    void buildRawResponseReturnsTomlTemplateWhenFileMissing(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-012: template has section table headers + path guidance,
+        // path points at config.toml.
         UserConfigStore store = new UserConfigStore(dir);
         var resp = controller(dir, store).buildRawResponse();
 
-        assertFalse(resp.exists()); // SPEC-CFGUI-TST-002
-        assertTrue(resp.text().contains("llm.base-url"));
-        assertTrue(resp.text().contains("embedding.model"));
-        assertTrue(resp.path().endsWith("config.properties"));
+        assertFalse(resp.exists());
+        assertTrue(resp.text().contains("[llm]"), resp.text());
+        assertTrue(resp.text().contains("[embedding]"), resp.text());
+        assertTrue(resp.text().contains("# base-url"), resp.text());
+        assertTrue(resp.text().contains("D:\\docs"), resp.text()); // path guidance comment
+        assertTrue(resp.path().endsWith("config.toml"));
+        // Template parses as valid TOML (all keys commented → empty tables).
+        assertTrue(TomlSupport.parseAndFlatten(resp.text()).isEmpty());
     }
 
     @Test
     void buildRawResponseReturnsFileTextWhenPresent(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
-        store.saveRaw("llm.model=x\n");
+        store.saveRaw("[llm]\nmodel = \"x\"\n");
         var resp = controller(dir, store).buildRawResponse();
 
-        assertTrue(resp.exists()); // SPEC-CFGUI-TST-001
-        assertEquals("llm.model=x\n", resp.text());
+        assertTrue(resp.exists());
+        assertEquals("[llm]\nmodel = \"x\"\n", resp.text());
     }
 
     @Test
-    void parseAndSaveRejectIllegalUnicodeWithoutWriting(@TempDir Path dir) throws Exception {
+    void invalidTomlSyntaxRejectedWithoutWriting(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-004: syntax error → TomlValidationException (line/col), no write.
         UserConfigStore store = new UserConfigStore(dir);
-        store.saveRaw("llm.model=keep\n");
+        store.saveRaw("[llm]\nmodel = \"keep\"\n");
         var ctrl = controller(dir, store);
 
-        String bad = "a=\\uZZZZ"; // SPEC-CFGUI-TST-004
-        assertThrows(IllegalArgumentException.class,
-                () -> DesktopConfigController.parseProperties(bad));
-        assertThrows(IllegalArgumentException.class, () -> ctrl.applyRawSave(bad));
+        TomlValidationException ex = assertThrows(TomlValidationException.class,
+                () -> ctrl.applyRawSave("model = \n")); // dangling value
+        assertTrue(ex.getMessage().contains("行"), ex.getMessage());
 
-        // File must remain untouched after a failed save.
-        assertEquals("llm.model=keep\n", store.readRaw());
+        assertEquals("[llm]\nmodel = \"keep\"\n", store.readRaw()); // untouched
+    }
+
+    @Test
+    void knownKeyTypeViolationRejectedWithoutWriting(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-005: aw.port = "abc" is not an integer → 400, no write.
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("[llm]\nmodel = \"keep\"\n");
+        var ctrl = controller(dir, store);
+
+        TomlValidationException ex = assertThrows(TomlValidationException.class,
+                () -> ctrl.applyRawSave("[aw]\nport = \"abc\"\n"));
+        assertTrue(ex.getMessage().contains("aw.port"), ex.getMessage());
+
+        assertEquals("[llm]\nmodel = \"keep\"\n", store.readRaw()); // untouched
+    }
+
+    @Test
+    void validTomlSaveIsVerbatimRoundTrip(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-006: valid text saved char-for-char.
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+        String text = "[llm]\nmodel = \"gpt-4o-mini\"\napi-key = \"sk-x\"\n";
+        ctrl.applyRawSave(text);
+        assertEquals(text, store.readRaw());
     }
 
     @Test
     void restartRequiredReflectsRestartKeyChanges(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-007: restart semantics preserved on dotted keys.
         UserConfigStore store = new UserConfigStore(dir);
         var ctrl = controller(dir, store);
 
-        var r1 = ctrl.applyRawSave("llm.model=gpt-4o-mini\n"); // SPEC-CFGUI-TST-005
+        var r1 = ctrl.applyRawSave("[llm]\nmodel = \"gpt-4o-mini\"\n");
         assertTrue(r1.restartRequired().contains("llm.model"));
 
-        var r2 = ctrl.applyRawSave("llm.model=gpt-4o-mini\nllm.api-key=sk-x\n");
+        var r2 = ctrl.applyRawSave("[llm]\nmodel = \"gpt-4o-mini\"\napi-key = \"sk-x\"\n");
         assertFalse(r2.restartRequired().contains("llm.api-key"));
     }
 
     @Test
     void unknownKeysWarnButDoNotBlockSave(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-007: unknown key warned, still saved.
         UserConfigStore store = new UserConfigStore(dir);
         var ctrl = controller(dir, store);
 
-        var r = ctrl.applyRawSave("foo.bar=1\n"); // SPEC-CFGUI-TST-006
+        var r = ctrl.applyRawSave("foo.bar = 1\n");
         assertTrue(r.unknownKeys().contains("foo.bar"));
-        assertEquals("foo.bar=1\n", store.readRaw()); // saved anyway
+        assertEquals("foo.bar = 1\n", store.readRaw()); // saved anyway
+    }
+
+    @Test
+    void savedRawTomlIsReadableByStore(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-015 spirit: a saved raw TOML re-parses consistently.
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+        ctrl.applyRawSave("[aw]\nport = 5601\ncollection.window = false\n");
+
+        Properties back = store.loadUser();
+        assertEquals("5601", back.getProperty("aw.port"));
+        assertEquals("false", back.getProperty("aw.collection.window"));
     }
 
     @Test
@@ -113,9 +158,9 @@ class DesktopConfigControllerTest {
     @SuppressWarnings("unchecked")
     void structuredConfigSectionsDoNotExposeSecretValues(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
-        store.saveRaw("llm.api-key=sk-live-secret\n"
-                + "embedding.api-key=emb-live-secret\n"
-                + "websearch.api-key=web-live-secret\n");
+        store.saveRaw("[llm]\napi-key = \"sk-live-secret\"\n"
+                + "[embedding]\napi-key = \"emb-live-secret\"\n"
+                + "[websearch]\napi-key = \"web-live-secret\"\n");
         var ctrl = controller(dir, store);
         Properties effective = store.load();
 
@@ -153,14 +198,15 @@ class DesktopConfigControllerTest {
         var ctrl = controller(dir, store);
 
         for (int i = 1; i <= 12; i++) {
-            ctrl.applyRawSave("llm.model=m" + i + "\n"); // SPEC-CFGUI-VER-TST-001/002
+            ctrl.applyRawSave("[llm]\nmodel = \"m" + i + "\"\n"); // SPEC-CFGUI-VER-TST-001/002
         }
 
         // Inspect via a fresh store pointed at the same memory dir.
         ConfigHistoryStore history = new ConfigHistoryStore(dir);
         var list = history.list();
         assertEquals(ConfigHistoryStore.MAX_VERSIONS, list.size());
-        assertEquals("llm.model=m12\n", list.get(0).text()); // newest first
+        assertEquals("[llm]\nmodel = \"m12\"\n", list.get(0).text()); // newest first
+        assertEquals(ConfigHistoryStore.FORMAT_TOML, list.get(0).format());
         assertTrue(list.get(0).name().matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"));
     }
 }

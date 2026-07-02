@@ -1,6 +1,9 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.SupportedKeys;
+import com.selfanalyst.config.TomlSupport;
+import com.selfanalyst.config.TomlValidationException;
 import com.selfanalyst.desktop.store.ConfigHistoryStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -10,7 +13,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.StringReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -44,28 +46,9 @@ public class DesktopConfigController {
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key"
     );
 
-    /**
-     * Supported config keys (dotted) → default value, mirroring the structured
-     * sections (aligns with SPEC-CFG-TOOL-002). Single source of truth for the
-     * raw-edit template and unknown-key detection (SPEC-CFGUI-DEC-004).
-     */
-    private static final Map<String, String> SUPPORTED_DEFAULTS = new LinkedHashMap<>() {{
-        put("llm.api-key", ""); put("llm.base-url", "https://api.openai.com/v1");
-        put("llm.model", "gpt-4o"); put("llm.temperature", "0.7");
-        put("websearch.enabled", "true"); put("websearch.mcp-url", "https://search.parallel.ai/mcp");
-        put("websearch.api-key", "");
-        put("agent.summaryRefreshMinutes", "5"); put("agent.allowAgentTasks", "false");
-        put("agent.cacheSummaries", "true");
-        put("desktop.hideToTray", "true"); put("desktop.autoOpenWindow", "true");
-        put("desktop.autoStartBackend", "true");
-        put("aw.mode", "embedded"); put("aw.port", "5700");
-        put("aw.collection.window", "true"); put("aw.collection.afk", "true");
-        put("aw.collection.content", "true"); put("aw.ocr.engine", "auto");
-        put("aw.audio.enabled", "false"); put("aw.audio.whisperPath", "tools/whisper");
-        put("embedding.enabled", "true"); put("embedding.base-url", "https://api.openai.com/v1");
-        put("embedding.api-key", ""); put("embedding.model", "text-embedding-3-small");
-        put("embedding.dimensions", "1536"); put("embedding.send-encoding-format", "true");
-    }};
+    // Supported config keys, defaults and declared types live in the shared
+    // com.selfanalyst.config.SupportedKeys (single source of truth for the raw-edit
+    // template, unknown-key detection, type validation, and TOML generation).
 
     /** Version-name timestamp format (local zone). SPEC-CFGUI-VER-DEC-002. */
     private static final DateTimeFormatter VERSION_NAME_FMT =
@@ -231,16 +214,16 @@ public class DesktopConfigController {
         }
     }
 
-    // ── Raw text config (SPEC-CFGUI) ─────────────────────────────
-    // The desktop "配置" modal edits the user config.properties file as plain
-    // text. Logic lives in pure/package methods so it is unit-testable without
-    // mocking Javalin Context; the endpoint methods only marshal ctx ↔ helpers.
+    // ── Raw text config (SPEC-TOML / SPEC-CFGUI) ─────────────────
+    // The desktop "配置" modal edits the user config.toml file as plain text.
+    // Logic lives in pure/package methods so it is unit-testable without mocking
+    // Javalin Context; the endpoint methods only marshal ctx ↔ helpers.
 
-    /** Parse text as a {@code .properties} document; throws on malformed input. */
-    static Properties parseProperties(String text) throws IOException {
+    /** Wrap a flattened dotted-key map as {@code Properties} for the diff helpers. */
+    private static Properties toProperties(Map<String, String> flat) {
         Properties p = new Properties();
-        p.load(new StringReader(text)); // StringReader → validation is charset-agnostic
-        return p;                       // malformed unicode escapes throw IllegalArgumentException
+        flat.forEach(p::setProperty);
+        return p;
     }
 
     /** Keys whose value was added/removed/changed and that require a restart. */
@@ -262,7 +245,7 @@ public class DesktopConfigController {
     static List<String> computeUnknownKeys(Properties newP) {
         List<String> result = new ArrayList<>();
         for (String key : newP.stringPropertyNames()) {
-            if (!SUPPORTED_DEFAULTS.containsKey(key)) {
+            if (!SupportedKeys.contains(key)) {
                 result.add(key);
             }
         }
@@ -270,24 +253,13 @@ public class DesktopConfigController {
     }
 
     /**
-     * A commented template listing supported keys and their defaults, all
-     * commented out, served when the user config file is empty/missing.
-     * SPEC-CFGUI-API-001b, SPEC-CFGUI-DEC-001.
+     * A commented TOML template with section table headers listing supported keys
+     * and their defaults, served when the user config file is empty/missing.
+     * Delegates to the shared {@link TomlSupport#buildTemplate}. SPEC-TOML-API-001a,
+     * SPEC-TOML-FMT-004.
      */
     static String buildTemplate() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("# SelfAnalyst 用户配置（config.properties）\n");
-        sb.append("# 仅填写需要覆盖的项，取消对应行注释后修改即可；未列出的项使用默认值。\n");
-        String lastPrefix = null;
-        for (var e : SUPPORTED_DEFAULTS.entrySet()) {
-            String prefix = e.getKey().substring(0, e.getKey().indexOf('.') + 1);
-            if (!prefix.equals(lastPrefix)) {
-                sb.append('\n');
-                lastPrefix = prefix;
-            }
-            sb.append("# ").append(e.getKey()).append('=').append(e.getValue()).append('\n');
-        }
-        return sb.toString();
+        return TomlSupport.buildTemplate(SupportedKeys.defaults(), SupportedKeys.types());
     }
 
     /** GET /desktop/config/raw response payload. */
@@ -309,12 +281,20 @@ public class DesktopConfigController {
     record RawSaveResult(List<String> restartRequired, List<String> unknownKeys) {}
 
     /**
-     * Validate, then atomically persist the submitted text verbatim. Parsing
-     * happens before any disk write, so invalid input never reaches the file.
-     * SPEC-CFGUI-API-002a/b/c, SPEC-CFGUI-GOAL-006.
+     * Validate as TOML v1.0 (syntax + structure + known-key types), then atomically
+     * persist the submitted text verbatim. All validation happens before any disk
+     * write, so invalid input never reaches the file. Throws
+     * {@link TomlValidationException} on any validation failure.
+     * SPEC-TOML-API-001b/c/d, SPEC-TOML-DEC-002.
      */
     RawSaveResult applyRawSave(String text) throws IOException {
-        Properties newP = parseProperties(text);   // throws → validation failure, no write
+        // Syntax + structure (throws with line/col); then lenient known-key types.
+        LinkedHashMap<String, String> flat = TomlSupport.parseAndFlatten(text);
+        List<String> typeViolations = TomlSupport.validateTypes(flat, SupportedKeys.types());
+        if (!typeViolations.isEmpty()) {
+            throw new TomlValidationException(typeViolations);
+        }
+        Properties newP = toProperties(flat);
         Properties oldP = userStore.loadUser();
         List<String> restart = computeRestartRequired(oldP, newP);
         List<String> unknown = computeUnknownKeys(newP);
@@ -368,7 +348,8 @@ public class DesktopConfigController {
         try {
             String name = formatVersionName(System.currentTimeMillis(), ZoneId.systemDefault());
             String summary = computeDiffSummary(oldP, newP);
-            ConfigHistoryStore.ConfigVersion v = historyStore.add(name, summary, newText);
+            ConfigHistoryStore.ConfigVersion v = historyStore.add(
+                    name, summary, newText, ConfigHistoryStore.FORMAT_TOML);
             // Only key NAMES (never values/raw text) are eligible for LLM refinement,
             // and only when something actually changed. SPEC-CFGUI-VER-DEC-004.
             if (!summary.startsWith(NO_CHANGE_SUMMARY)) {
@@ -456,6 +437,7 @@ public class DesktopConfigController {
             m.put("name", v.name());
             m.put("summary", v.summary());
             m.put("savedAt", v.savedAt());
+            m.put("format", v.format()); // SPEC-TOML-VER-001
             versions.add(m);
         }
         ctx.json(Map.of("versions", versions));
@@ -478,6 +460,7 @@ public class DesktopConfigController {
         m.put("name", v.name());
         m.put("summary", v.summary());
         m.put("savedAt", v.savedAt());
+        m.put("format", v.format()); // SPEC-TOML-VER-001
         m.put("text", v.text());
         ctx.json(m);
     }
@@ -517,12 +500,14 @@ public class DesktopConfigController {
             ctx.json(Map.of("saved", true,
                     "restartRequired", r.restartRequired(),
                     "unknownKeys", r.unknownKeys()));
-        } catch (IllegalArgumentException | IOException e) {
-            // .properties 解析失败 → 校验错误，不落盘
-            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
-            ctx.status(400).result("{\"error\":\"配置文本无效: " + escapeJson(msg) + "\"}")
+        } catch (TomlValidationException e) {
+            // TOML syntax/structure/type failure → 400 with line/col + violating keys,
+            // nothing written to disk. SPEC-TOML-API-001b/c, SPEC-TOML-GOAL-005.
+            String msg = "配置文本无效: " + String.join("; ", e.messages());
+            ctx.status(400).result("{\"error\":\"" + escapeJson(msg) + "\"}")
                     .contentType("application/json");
         } catch (Throwable t) {
+            // IO/other failures → 500 (disk write happens only after validation passes).
             log.error("Failed to save raw config", t);
             String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getName();
             ctx.status(500).result("{\"error\":\"Save raw config failed: " + escapeJson(msg) + "\"}")

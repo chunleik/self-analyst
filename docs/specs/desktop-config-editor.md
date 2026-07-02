@@ -155,6 +155,9 @@ Agent / 桌面 / Embedding / 联网搜索），每个分区是若干 input、tog
 ## 7. 非目标
 
 - **SPEC-CFGUI-NON-001**：不新增任何配置键，不改变 `config.properties` 的路径与 `.properties` 格式。
+  **（已废弃，2026-07-02）**「不改变 `.properties` 格式」部分被 [config-toml.md](config-toml.md)
+  （`SPEC-TOML-*`）取代：用户级配置迁移为 `{memoryDir}/config.toml`；「不新增配置键」约束仍然有效
+  （由 `SPEC-TOML-NON-002` 延续）。
 - **SPEC-CFGUI-NON-002**：不提供语法高亮、键名自动补全、行内校验提示（留待后续迭代）。
 - **SPEC-CFGUI-NON-003**：不改变 `config.properties` 的查找优先级（用户文件 > classpath 默认 > 硬编码默认）。
 - **SPEC-CFGUI-NON-004**：不在 raw 文本中对敏感值做脱敏（见 `SPEC-CFGUI-DEC-002`）。

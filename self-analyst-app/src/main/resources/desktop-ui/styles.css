@@ -1232,6 +1232,24 @@ input:checked + .toggle-switch::after {
   flex-shrink: 0;
 }
 
+/* Pre-migration (properties) snapshots: view-only badge + disabled 切换.
+   SPEC-TOML-VER-002. */
+.config-version-legacy {
+  align-self: flex-start;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.config-history-switch[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .config-history-preview {
   margin: 0;
   padding: 10px 12px;

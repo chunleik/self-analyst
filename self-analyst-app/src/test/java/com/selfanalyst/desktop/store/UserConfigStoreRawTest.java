@@ -4,10 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Verbatim raw read/write round-trip (SPEC-CFGUI-TST-003). */
+/** Verbatim raw read/write + TOML load/save round-trip (SPEC-TOML-TST-006/014/015). */
 class UserConfigStoreRawTest {
 
     @Test
@@ -17,30 +19,65 @@ class UserConfigStoreRawTest {
     }
 
     @Test
+    void filePathTargetsConfigToml(@TempDir Path dir) {
+        UserConfigStore store = new UserConfigStore(dir);
+        assertTrue(store.filePath().toString().endsWith("config.toml"), store.filePath().toString());
+    }
+
+    @Test
     void saveRawThenReadRawIsCharForCharFaithful(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-006: raw path is byte-faithful regardless of TOML content.
         UserConfigStore store = new UserConfigStore(dir);
         String text = "# 用户配置\n"
                 + "\n"
-                + "# LLM\n"
-                + "llm.model=gpt-4o\n"
-                + "llm.api-key=sk-测试密钥\n"
+                + "[llm]\n"
+                + "model = \"gpt-4o\"\n"
+                + "api-key = \"sk-测试密钥\"\n"
                 + "\n"
                 + "# 备注：保留注释、空行与键顺序\n";
 
         store.saveRaw(text);
 
-        // Round-trip must preserve comments, blank lines, ordering and中文 values.
         assertEquals(text, store.readRaw());
     }
 
     @Test
     void nonAsciiValuesDecodeViaLoadUser(@TempDir Path dir) throws Exception {
-        // saveRaw writes UTF-8; loadUser() must read UTF-8 too, so 中文 values
-        // are not mojibake at runtime (regression guard for the charset fix).
+        // saveRaw writes UTF-8; loadUser() parses TOML in UTF-8, so 中文 and
+        // backslash literal-string paths are not corrupted at runtime.
         UserConfigStore store = new UserConfigStore(dir);
-        store.saveRaw("aw.data-dir=D:/数据/中文目录\nllm.model=智谱-glm\n");
+        store.saveRaw("[aw]\ndata-dir = 'D:\\数据\\中文目录'\n[llm]\nmodel = \"智谱-glm\"\n");
 
-        assertEquals("D:/数据/中文目录", store.loadUser().getProperty("aw.data-dir"));
+        assertEquals("D:\\数据\\中文目录", store.loadUser().getProperty("aw.data-dir"));
         assertEquals("智谱-glm", store.loadUser().getProperty("llm.model"));
+    }
+
+    @Test
+    void saveRegeneratesParseableTomlReadBackEqual(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-015 store half: structured save output re-parses to the
+        // same flat map and reads back identically.
+        UserConfigStore store = new UserConfigStore(dir);
+        Properties p = new Properties();
+        p.setProperty("llm.model", "gpt-4o-mini");
+        p.setProperty("aw.port", "5601");
+        p.setProperty("aw.collection.window", "false");
+        p.setProperty("aw.data-dir", "D:\\aw\\data");
+        store.save(p);
+
+        Properties back = store.loadUser();
+        assertEquals("gpt-4o-mini", back.getProperty("llm.model"));
+        assertEquals("5601", back.getProperty("aw.port"));
+        assertEquals("false", back.getProperty("aw.collection.window"));
+        assertEquals("D:\\aw\\data", back.getProperty("aw.data-dir"));
+    }
+
+    @Test
+    void setPersistsSingleKeyIntoConfigToml(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-014 store half: set() writes the value into config.toml.
+        UserConfigStore store = new UserConfigStore(dir);
+        store.set("llm.model", "custom-model");
+
+        assertTrue(store.readRaw().contains("custom-model"), store.readRaw());
+        assertEquals("custom-model", store.loadUser().getProperty("llm.model"));
     }
 }

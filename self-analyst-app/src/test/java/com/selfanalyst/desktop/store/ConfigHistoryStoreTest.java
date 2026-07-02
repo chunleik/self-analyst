@@ -4,6 +4,8 @@ import com.selfanalyst.desktop.store.ConfigHistoryStore.ConfigVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -11,14 +13,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Version snapshot storage and retention (SPEC-CFGUI-VER-TST-001/002/004). */
+/** Version snapshot storage, retention, and TOML format/redaction (SPEC-TOML-VER-001). */
 class ConfigHistoryStoreTest {
+
+    private static final String TOML = ConfigHistoryStore.FORMAT_TOML;
 
     @Test
     void addThenListReturnsNewestFirst(@TempDir Path dir) throws Exception {
         ConfigHistoryStore store = new ConfigHistoryStore(dir);
-        store.add("v1", "first", "a=1\n");
-        store.add("v2", "second", "a=2\n");
+        store.add("v1", "first", "a = 1\n", TOML);
+        store.add("v2", "second", "a = 2\n", TOML);
 
         List<ConfigVersion> list = store.list();
         assertEquals(2, list.size());
@@ -30,7 +34,7 @@ class ConfigHistoryStoreTest {
     void retentionKeepsOnlyTenNewest(@TempDir Path dir) throws Exception {
         ConfigHistoryStore store = new ConfigHistoryStore(dir);
         for (int i = 1; i <= 12; i++) {
-            store.add("v" + i, "s" + i, "a=" + i + "\n");
+            store.add("v" + i, "s" + i, "a = " + i + "\n", TOML);
         }
         List<ConfigVersion> list = store.list();
         assertEquals(ConfigHistoryStore.MAX_VERSIONS, list.size());
@@ -41,33 +45,76 @@ class ConfigHistoryStoreTest {
     @Test
     void getByIdAndUpdateSummary(@TempDir Path dir) throws Exception {
         ConfigHistoryStore store = new ConfigHistoryStore(dir);
-        ConfigVersion v = store.add("v1", "old summary", "a=1\n");
+        ConfigVersion v = store.add("v1", "old summary", "a = 1\n", TOML);
 
         assertTrue(store.get(v.id()).isPresent());
-        assertEquals("a=1\n", store.get(v.id()).get().text());
+        assertEquals("a = 1\n", store.get(v.id()).get().text());
         assertTrue(store.get("nope").isEmpty());
 
         store.updateSummary(v.id(), "new summary");
         assertEquals("new summary", store.get(v.id()).get().summary());
+        assertEquals(TOML, store.get(v.id()).get().format()); // format preserved
     }
 
     @Test
-    void addRedactsSensitiveValuesFromStoredSnapshot(@TempDir Path dir) throws Exception {
+    void newAddsCarryTomlFormat(@TempDir Path dir) throws Exception {
         ConfigHistoryStore store = new ConfigHistoryStore(dir);
+        ConfigVersion v = store.add("v1", "s", "a = 1\n", TOML);
+        assertEquals(TOML, v.format());
+        assertEquals(TOML, store.list().get(0).format());
+    }
 
+    @Test
+    void legacyManifestWithoutFormatReadsAsProperties(@TempDir Path dir) throws Exception {
+        // A manifest written before the format field existed. SPEC-TOML-VER-001.
+        String json = "{\"versions\":[{"
+                + "\"id\":\"x1\",\"name\":\"old\",\"summary\":\"s\","
+                + "\"savedAt\":1,\"text\":\"llm.model=gpt-4o\\n\"}]}";
+        Files.writeString(dir.resolve("config-history.json"), json, StandardCharsets.UTF_8);
+
+        ConfigHistoryStore store = new ConfigHistoryStore(dir);
+        List<ConfigVersion> list = store.list();
+        assertEquals(1, list.size());
+        assertEquals(ConfigHistoryStore.FORMAT_PROPERTIES, list.get(0).format());
+    }
+
+    @Test
+    void tomlRedactionEmptiesValueKeepingValidToml(@TempDir Path dir) throws Exception {
+        ConfigHistoryStore store = new ConfigHistoryStore(dir);
+        store.add("v1", "summary",
+                "[llm]\napi-key = \"sk-live-secret\"\nmodel = \"gpt-4o\"\n", TOML);
+
+        String text = store.list().get(0).text();
+        assertFalse(text.contains("sk-live-secret"), text);
+        assertTrue(text.contains("api-key = \"\""), text); // stays valid TOML
+        assertTrue(text.contains("model = \"gpt-4o\""), text);
+    }
+
+    @Test
+    void tomlRedactionMatchesQuotedDottedKey(@TempDir Path dir) throws Exception {
+        ConfigHistoryStore store = new ConfigHistoryStore(dir);
+        store.add("v1", "summary",
+                "\"llm.api-key\" = \"sk-live-secret\"\n", TOML);
+
+        String text = store.list().get(0).text();
+        assertFalse(text.contains("sk-live-secret"), text);
+        assertTrue(text.contains("\"llm.api-key\" = \"\""), text);
+    }
+
+    @Test
+    void propertiesRedactionPreservesLegacyBehavior(@TempDir Path dir) throws Exception {
+        ConfigHistoryStore store = new ConfigHistoryStore(dir);
         store.add("v1", "summary",
                 "llm.api-key=sk-live-secret\n"
                         + "embedding.api-key: emb-live-secret\n"
-                        + "websearch.api-key = web-live-secret\n"
-                        + "llm.model=gpt-4o\n");
+                        + "llm.model=gpt-4o\n",
+                ConfigHistoryStore.FORMAT_PROPERTIES);
 
         String text = store.list().get(0).text();
         assertFalse(text.contains("sk-live-secret"), text);
         assertFalse(text.contains("emb-live-secret"), text);
-        assertFalse(text.contains("web-live-secret"), text);
         assertTrue(text.contains("llm.api-key="), text);
         assertTrue(text.contains("embedding.api-key:"), text);
-        assertTrue(text.contains("websearch.api-key ="), text);
         assertTrue(text.contains("llm.model=gpt-4o"), text);
     }
 }

@@ -32,6 +32,7 @@ SelfAnalyst follows Specification-Driven Development. Every module and major fea
 | [docs/specs/accessibility-sidecar.md](docs/specs/accessibility-sidecar.md) | UIA→常驻 Rust 边车 + OS 中性无障碍树协议（取代 PowerShell one-shot，预留 macOS） | `SPEC-AXS-*` |
 | [docs/specs/llm-budget.md](docs/specs/llm-budget.md) | LLM token 用量限制与每日预算（max_tokens、可配 maxIters、计量 + off/warn/block 预算） | `SPEC-BUDGET-*` |
 | [docs/specs/desktop-config-editor.md](docs/specs/desktop-config-editor.md) | 桌面端「配置」改为纯文本编辑器：直接编辑 `config.properties` 原始文本（raw GET/PUT）+ 最近 10 个版本历史（自动命名、查看/切换） | `SPEC-CFGUI-*`、`SPEC-CFGUI-VER-*` |
+| [docs/specs/config-toml.md](docs/specs/config-toml.md) | 用户级配置从 `.properties` 迁移到 TOML（`config.toml`）：格式/键拍平/类型校验、启动时存量自动迁移、raw 编辑器与版本历史适配 | `SPEC-TOML-*` |
 
 ### Archive
 

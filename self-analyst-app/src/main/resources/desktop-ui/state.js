@@ -23,6 +23,8 @@ var state = {
   configHistory: [],
   configHistoryOpen: false,
   configHistoryExpandedId: null,
+  configSupportedKeys: [],
+  configAllKeysOpen: false,
   configSaveResult: null,
   configSaving: false,
   configOpen: false,

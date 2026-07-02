@@ -15,13 +15,22 @@ function renderConfigTab() {
   var historyLabel = "历史版本" + (historyCount ? " (" + historyCount + ")" : "")
     + (state.configHistoryOpen ? " ▴" : " ▾");
 
+  var allKeysCount = (state.configSupportedKeys && state.configSupportedKeys.length) || 0;
+  var allKeysLabel = "全部可配置项" + (allKeysCount ? " (" + allKeysCount + ")" : "")
+    + (state.configAllKeysOpen ? " ▴" : " ▾");
+
   var html = ""
     + '<div class="config-editor-toolbar">'
+    +   '<button id="config-allkeys-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(allKeysLabel) + '</button>'
     +   '<button id="config-history-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(historyLabel) + '</button>'
     +   '<span class="config-toolbar-spacer"></span>'
     +   '<button id="test-llm-btn" class="btn btn-sm btn-outline" type="button">测试 LLM 连接</button>'
     +   '<button id="test-embedding-btn" class="btn btn-sm btn-outline" type="button">测试 Embedding 连接</button>'
     + '</div>';
+
+  if (state.configAllKeysOpen) {
+    html += renderSupportedKeysPanel();
+  }
 
   if (state.configHistoryOpen) {
     html += renderConfigHistory();
@@ -63,6 +72,90 @@ function renderConfigActionBar() {
     "</div>" +
     "</div>"
   );
+}
+
+// ---- All configurable keys reference panel (SPEC-TOML-UI-004) ----
+
+// Read-only reference of every supported key + default. The editor only shows
+// user overrides (SPEC-TOML-FMT-001b), so this panel is how a user discovers the
+// rest. "Insert" prepends the key as a top-level dotted assignment; nothing here
+// writes to disk — the default only becomes an override once the user saves.
+function renderSupportedKeysPanel() {
+  var keys = state.configSupportedKeys || [];
+  if (keys.length === 0) {
+    return '<div class="config-allkeys-panel"><div class="config-history-empty">无可配置项</div></div>';
+  }
+  // Detect already-present keys from state text (source of truth), not the DOM,
+  // since this renders before the textarea is (re)written. SPEC-TOML-UI-004d.
+  var present = parseTomlText(state.configRawText || "");
+
+  var rows = keys.map(function (k) {
+    var exists = present[k.key] !== undefined;
+    var btn = exists
+      ? '<span class="config-allkeys-present">已配置</span>'
+      : '<button class="btn btn-sm btn-outline config-allkeys-insert" data-assignment="'
+        + escHtml(k.assignment) + '" type="button">插入</button>';
+    return (
+      '<div class="config-allkeys-item">' +
+      '<div class="config-allkeys-meta">' +
+      '<code class="config-allkeys-assign">' + escHtml(k.assignment) + "</code>" +
+      '<span class="config-allkeys-type">' + escHtml(k.type || "") + "</span>" +
+      "</div>" +
+      '<div class="config-allkeys-actions">' + btn + "</div>" +
+      "</div>"
+    );
+  }).join("");
+
+  return '<div class="config-allkeys-panel">' + rows + "</div>";
+}
+
+function toggleSupportedKeys() {
+  state.configAllKeysOpen = !state.configAllKeysOpen;
+  renderConfigTab();
+}
+
+// Insert a supported key into its [section] table, mark dirty, and re-render so
+// the panel flips this row to "已配置". The key is placed as a dotted in-table key
+// under [section] (matching how the backend generator groups keys), because a
+// top-level dotted `llm.model` above an existing `[llm]` table is a TOML
+// duplicate-table error. When no [section] exists, a fresh table is appended.
+// SPEC-TOML-UI-004c.
+function insertSupportedKey(assignment) {
+  if (!assignment) return;
+  var eq = assignment.indexOf("=");
+  if (eq < 0) return;
+  var dottedKey = assignment.slice(0, eq).trim();
+  var valueText = assignment.slice(eq + 1).trim();
+  var segs = dottedKey.split(".");
+  var section = segs[0];
+  var line = segs.slice(1).join(".") + " = " + valueText; // key relative to [section]
+
+  var text = currentEditorText();
+  var lines = text.split(/\r?\n/);
+  var headerIdx = -1;
+  for (var i = 0; i < lines.length; i++) {
+    var t = lines[i].replace(/^\s+/, "").replace(/\s+$/, "");
+    if (t.charAt(0) === "[") {
+      var close = t.indexOf("]");
+      if (close > 0 && stripTomlKey(t.slice(1, close).trim()) === section) {
+        headerIdx = i;
+        break;
+      }
+    }
+  }
+  if (headerIdx >= 0) {
+    lines.splice(headerIdx + 1, 0, line);
+    text = lines.join("\n");
+  } else {
+    // No such section: append a fresh table at the end (always valid — it is the
+    // last table, so no top-level-key-after-table ordering problem).
+    var sep = text.length && text.charAt(text.length - 1) !== "\n" ? "\n" : "";
+    text = text + sep + "\n[" + section + "]\n" + line + "\n";
+  }
+  state.configRawText = text;
+  state.configDirty = state.configRawText !== state.configRawBaseline;
+  state.configSaveResult = null;
+  renderConfigTab();
 }
 
 // ---- Version history (SPEC-CFGUI-VER) ----
@@ -196,8 +289,12 @@ function currentEditorText() {
 // Top-level dotted keys (`llm.base-url = ...`) pass through unchanged.
 // SPEC-TOML-UI-003.
 function parseEditorToml() {
+  return parseTomlText(currentEditorText());
+}
+
+function parseTomlText(text) {
   var map = {};
-  var lines = currentEditorText().split(/\r?\n/);
+  var lines = (text || "").split(/\r?\n/);
   var table = "";
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];

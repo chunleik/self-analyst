@@ -49,6 +49,12 @@ Assert-Contains $configJs 'config\.toml' "Missing config.toml label/reference"
 # Version history legacy-format badge + disabled switch (SPEC-TOML-VER-002)
 Assert-Contains $configJs 'config-version-legacy' "Missing legacy-format history badge markup"
 
+# All configurable keys reference panel (SPEC-TOML-UI-004)
+Assert-Contains $configJs 'function\s+renderSupportedKeysPanel' "Missing renderSupportedKeysPanel function"
+Assert-Contains $configJs 'function\s+insertSupportedKey' "Missing insertSupportedKey function"
+Assert-Contains $configJs 'config-allkeys-btn' "Missing all-keys toggle button"
+Assert-Contains $configJs 'config-allkeys-insert' "Missing all-keys insert action"
+
 # api.js: raw client methods (SPEC-CFGUI-UI-002a/003d)
 Assert-Contains $apiJs 'getRawConfig' "Missing api.getRawConfig"
 Assert-Contains $apiJs 'saveRawConfig' "Missing api.saveRawConfig"
@@ -65,5 +71,6 @@ Assert-Contains $apiJs '/desktop/config/history' "Missing /desktop/config/histor
 Assert-Contains $styles '\.config-raw-editor' "Missing .config-raw-editor styles"
 Assert-Contains $styles '\.config-history-panel' "Missing .config-history-panel styles"
 Assert-Contains $styles '\.config-version-legacy' "Missing .config-version-legacy badge styles"
+Assert-Contains $styles '\.config-allkeys-panel' "Missing .config-allkeys-panel styles"
 
 Write-Output "desktop config editor static checks passed"

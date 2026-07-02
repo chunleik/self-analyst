@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
 import com.selfanalyst.desktop.store.ConfigHistoryStore;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.lang.reflect.Method;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -54,6 +56,26 @@ class DesktopConfigControllerTest {
 
         assertTrue(resp.exists());
         assertEquals("[llm]\nmodel = \"x\"\n", resp.text());
+    }
+
+    @Test
+    void rawResponseSupportedKeysCoverAllKeysAndAssignmentsRoundTrip(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-017 / SPEC-TOML-API-001e: supportedKeys covers every key in
+        // SupportedKeys, in order; each assignment re-parses to that key's default.
+        UserConfigStore store = new UserConfigStore(dir);
+        var resp = controller(dir, store).buildRawResponse();
+
+        List<DesktopConfigController.SupportedKeyInfo> keys = resp.supportedKeys();
+        var defaults = SupportedKeys.defaults();
+        assertEquals(defaults.size(), keys.size());
+
+        int i = 0;
+        for (var e : defaults.entrySet()) {
+            var info = keys.get(i++);
+            assertEquals(e.getKey(), info.key());              // declaration order preserved
+            var flat = TomlSupport.parseAndFlatten(info.assignment());
+            assertEquals(e.getValue(), flat.get(e.getKey()));  // assignment → default value
+        }
     }
 
     @Test

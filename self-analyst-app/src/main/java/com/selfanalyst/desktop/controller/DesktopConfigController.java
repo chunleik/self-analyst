@@ -262,19 +262,42 @@ public class DesktopConfigController {
         return TomlSupport.buildTemplate(SupportedKeys.defaults(), SupportedKeys.types());
     }
 
+    /** One supported key's reference info for the raw response. SPEC-TOML-API-001e. */
+    record SupportedKeyInfo(String key, String type, String assignment) {}
+
     /** GET /desktop/config/raw response payload. */
-    record RawConfigResponse(String text, String path, boolean exists) {}
+    record RawConfigResponse(String text, String path, boolean exists,
+                             List<SupportedKeyInfo> supportedKeys) {}
+
+    /**
+     * All supported keys as {@code (key, type, defaultAssignment)}, in
+     * {@link SupportedKeys} declaration order, for the "all configurable keys"
+     * reference panel (SPEC-TOML-UI-004 / SPEC-TOML-API-001e). {@code assignment} is
+     * the top-level dotted TOML form the panel inserts verbatim.
+     */
+    static List<SupportedKeyInfo> supportedKeyInfos() {
+        LinkedHashMap<String, TomlSupport.KeyType> types = SupportedKeys.types();
+        List<SupportedKeyInfo> list = new ArrayList<>();
+        for (var e : SupportedKeys.defaults().entrySet()) {
+            TomlSupport.KeyType t = types.get(e.getKey());
+            String typeName = (t == null ? "string" : t.name().toLowerCase());
+            list.add(new SupportedKeyInfo(e.getKey(), typeName,
+                    TomlSupport.emitAssignment(e.getKey(), e.getValue(), t)));
+        }
+        return list;
+    }
 
     /**
      * Build the raw response: actual file text (not masked, not merged), or the
-     * template when the file is empty/missing. SPEC-CFGUI-API-001a,
-     * SPEC-CFGUI-DEC-002, SPEC-CFGUI-NON-004.
+     * template when the file is empty/missing, plus the read-only supportedKeys list.
+     * SPEC-CFGUI-API-001a, SPEC-CFGUI-DEC-002, SPEC-CFGUI-NON-004, SPEC-TOML-API-001e.
      */
     RawConfigResponse buildRawResponse() throws IOException {
         String raw = userStore.readRaw();
         boolean exists = !raw.isBlank();
         String text = exists ? raw : buildTemplate();
-        return new RawConfigResponse(text, userStore.filePath().toString(), exists);
+        return new RawConfigResponse(text, userStore.filePath().toString(), exists,
+                supportedKeyInfos());
     }
 
     /** PUT /desktop/config/raw result payload. */

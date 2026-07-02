@@ -129,6 +129,7 @@ function loadConfig() {
     .then(function (resp) {
       state.configRawText = resp.text || "";
       state.configRawBaseline = resp.text || "";
+      state.configSupportedKeys = (resp && resp.supportedKeys) || [];
       state.configLoadError = false;
       state.configDirty = false;
       state.configSaveResult = null;

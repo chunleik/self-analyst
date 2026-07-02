@@ -180,6 +180,18 @@ function setupEvents() {
       return;
     }
 
+    // All configurable keys reference panel toggle. SPEC-TOML-UI-004a.
+    if (target.id === "config-allkeys-btn") {
+      toggleSupportedKeys();
+      return;
+    }
+
+    // Insert a supported key into the editor. SPEC-TOML-UI-004c.
+    if (target.classList.contains("config-allkeys-insert")) {
+      insertSupportedKey(target.dataset.assignment);
+      return;
+    }
+
     // Version history toggle
     if (target.id === "config-history-btn") {
       toggleConfigHistory();

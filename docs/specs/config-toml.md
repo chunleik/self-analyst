@@ -165,6 +165,11 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 - **SPEC-TOML-API-001d**：全部校验通过后逐字原子写入 `config.toml`（temp + rename，
   round-trip 逐字符一致），响应结构与 `restartRequired`/`unknownKeys` 语义不变
   （`SPEC-CFGUI-API-002c`，比较对象为拍平后的点分键集）。
+- **SPEC-TOML-API-001e**：`GET /desktop/config/raw` 响应在既有 `{ text, path, exists }`
+  基础上新增只读字段 `supportedKeys`：按 `SupportedKeys` 声明顺序的
+  `[{ key, type, assignment }]` 列表，`key` 为点分键、`type` 为声明类型小写、`assignment`
+  为该键默认值的顶层点分 TOML 赋值文本（引号规则与 `TomlSupport` 生成一致）。供
+  `SPEC-TOML-UI-004` 参考面板消费；不改变 `text`/`exists` 既有语义。
 
 ### SPEC-TOML-API-002：结构化端点与 ConfigTools
 
@@ -187,6 +192,28 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 - **SPEC-TOML-UI-003**：「测试 LLM 连接」「测试 Embedding 连接」按钮改为从编辑器当前
   **TOML 文本**中解析相关键（`llm.base-url`/`llm.model`/`llm.api-key` 及 `embedding.*`，
   含表内写法与顶层点分写法两种形态）；解析不出时按既有回退语义（`SPEC-CFGUI-UI-005c`）。
+
+### SPEC-TOML-UI-004：全部可配置项参考面板（补偿 `SPEC-CFGUI-DEC-001` 可发现性）
+
+> 动机：编辑器只显示用户覆盖项（`SPEC-TOML-FMT-001b`/`SPEC-CFGUI-DEC-001`），文件非空时
+> 用户看不到"还有哪些键可配、默认值是多少"。本面板为**只读参考**，与会落盘的编辑文本物理隔离，
+> 不改变整文件覆盖保存语义（`SPEC-CFGUI-DEC-003`），因此默认值不会被固化成覆盖。
+
+- **SPEC-TOML-UI-004a**：配置模态工具区提供「全部可配置项」入口（可折叠面板，与
+  `SPEC-CFGUI-VER-UI-001` 历史面板同构）；无论文件是否为空、是否已有覆盖项均可展开。
+- **SPEC-TOML-UI-004b**：面板按 `SupportedKeys` 声明顺序列出**全部受支持键**，每项显示
+  点分键名、声明类型与默认值（以 `key = default` 的 TOML 赋值文本呈现，引号/字面量规则
+  与 `TomlSupport` 生成一致）。数据源为 `GET /desktop/config/raw` 响应新增的
+  `supportedKeys` 字段（`SPEC-TOML-API-001e`），不额外发请求。
+- **SPEC-TOML-UI-004c**：每项提供「插入」动作，把该键以**顶层点分赋值**形式
+  （`llm.model = "gpt-4o"`）插入编辑器**文本开头**（首个 `[table]` 之前，保证 TOML 归属
+  无歧义），并进入脏态，由用户改值后走既有保存流程。插入采用默认值而非注释形式——用户显式
+  点击即表示要覆盖该项，得到的是可编辑的真实覆盖项。
+- **SPEC-TOML-UI-004d**：当某键已存在于编辑器当前文本（按 `SPEC-TOML-UI-003` 的轻量解析
+  判定，含表内与顶层两种写法）时，其「插入」动作禁用并标注「已配置」，避免产生重复键导致保存
+  400（TOML 重复键即解析错误，`SPEC-TOML-FMT-002b`）。
+- **SPEC-TOML-UI-004e**：面板为纯参考，**不**触发任何写盘、不影响历史版本、不改变
+  `SupportedKeys` 键集（`SPEC-TOML-NON-002`）。
 
 ---
 
@@ -236,6 +263,8 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 | SPEC-TOML-TST-014 | `ConfigTools.setConfigValue` 写入后读回 | 值落入 `config.toml`，白名单/重启提示行为不变 |
 | SPEC-TOML-TST-015 | 结构化 `PUT /desktop/config` 保存 | 重新生成的 `config.toml` 可被 raw 端点与 `Config.load()` 一致解析 |
 | SPEC-TOML-TST-016 | 编辑器内测试 LLM 连接，键写在 `[llm]` 表内（手动/UI） | 正确解析出 base-url/model/api-key 并发起测试 |
+| SPEC-TOML-TST-017 | `GET .../raw` 响应含 `supportedKeys`，逐项 `assignment` 可被 `parseAndFlatten` 还原为对应默认值 | `supportedKeys` 覆盖全部受支持键，顺序与 `SupportedKeys` 一致 |
+| SPEC-TOML-TST-018 | 参考面板「插入」某键 / 已存在键（手动/UI） | 未存在键插入为顶层点分赋值并置脏；已存在键的插入禁用、标注「已配置」 |
 
 ---
 
@@ -249,8 +278,10 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 | SPEC-TOML-MIG-001 | `desktop/store/ConfigMigration.java`、`AppSession.java`（时机）、`desktop/store/ConfigHistoryStore.java`（迁移快照） | 单元测试 `ConfigMigrationTest` |
 | SPEC-TOML-MIG-002 | `config/Config.java#overlayUserConfig`、`desktop/store/UserConfigStore.java#loadUser` | 单元测试 `ConfigTest`、`UserConfigStoreRawTest` |
 | SPEC-TOML-API-001 | `desktop/controller/DesktopConfigController.java`、`config/TomlSupport.java`、`desktop/store/UserConfigStore.java` | 单元测试 `DesktopConfigControllerTest` |
+| SPEC-TOML-API-001e | `desktop/controller/DesktopConfigController.java#supportedKeyInfos`、`config/TomlSupport.java#emitAssignment` | 单元测试 `DesktopConfigControllerTest` |
 | SPEC-TOML-API-002 | `desktop/controller/DesktopConfigController.java`、`desktop/store/UserConfigStore.java`、`ConfigTools`（`agent/tools`） | 单元测试 `DesktopConfigControllerTest` + 集成 `AppVerification`（config round trip） |
 | SPEC-TOML-UI-001..003 | `desktop-ui/config.js`（`parseEditorToml`、标签、旧格式徽标）、`api.js`、`styles.css` | 静态检查 `check-desktop-config-editor.ps1` + 手动/验收测试 |
+| SPEC-TOML-UI-004 | `desktop-ui/config.js`（`renderSupportedKeysPanel`、`insertSupportedKey`、`toggleSupportedKeys`）、`events.js`、`state.js`、`ui.js`、`styles.css` | 手动/验收测试 + 代码审查 |
 | SPEC-TOML-VER-001..003 | `desktop/store/ConfigHistoryStore.java`（`format` 字段/脱敏）、`desktop/controller/DesktopConfigController.java`、`desktop-ui/config.js` | 单元测试 `ConfigHistoryStoreTest` + 手动/验收测试 |
 | SPEC-TOML-NON-001..005 | 全特性（`SupportedKeys` 键集不变、`Config.java` 保留 classpath/legacy properties、结构化写入丢注释、无回滚工具） | 代码审查 |
 | SPEC-TOML-TST-001..016 | 测试用例 | 单元测试 `TomlSupportTest`/`ConfigTest`/`UserConfigStoreRawTest`/`ConfigMigrationTest`/`DesktopConfigControllerTest`/`ConfigHistoryStoreTest` + 手动/验收测试 |

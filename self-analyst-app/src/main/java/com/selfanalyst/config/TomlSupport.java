@@ -280,6 +280,18 @@ public final class TomlSupport {
         return new Partition(sections, topLevel);
     }
 
+    /**
+     * Emit a top-level dotted assignment line ({@code llm.model = "gpt-4o"}) for the
+     * reference panel's one-click insert (SPEC-TOML-UI-004c) and the raw response's
+     * {@code supportedKeys} (SPEC-TOML-API-001e). Reuses the same key/value emission
+     * as {@link #generateToml}, so quoting (literal Windows paths, typed scalars) is
+     * identical. Top-level dotted form is unambiguous regardless of any table headers
+     * below it, which is why callers prepend it before the first {@code [table]}.
+     */
+    public static String emitAssignment(String dottedKey, String value, KeyType type) {
+        return emitKey(dottedKey) + " = " + emitValue(value, type);
+    }
+
     private static String emitKey(String dotted) {
         String[] segments = dotted.split("\\.");
         StringBuilder sb = new StringBuilder();

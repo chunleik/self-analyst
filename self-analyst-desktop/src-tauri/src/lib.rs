@@ -79,6 +79,14 @@ fn show_message(title: &str, message: &str) {
 }
 
 fn find_java() -> Option<std::path::PathBuf> {
+    // Portable build: prefer the JRE bundled next to the exe (dist/runtime/bin/java.exe).
+    // This makes the app fully offline — no system Java required.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundled = dir.join("runtime").join("bin").join("java.exe");
+            if bundled.exists() { return Some(bundled); }
+        }
+    }
     // Check JAVA_HOME
     for env_key in &["JAVA_HOME", "JDK_HOME"] {
         if let Ok(home) = std::env::var(env_key) {
@@ -160,6 +168,9 @@ fn start_java(app: AppHandle, port: u16) {
 
     let child = Command::new(java)
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        // Run with CWD = exe dir so the backend resolves its relative paths
+        // (tools/PaddleOCR-json, tools/whisper, ./data, ./config) next to the exe.
+        .current_dir(&exe_dir)
         .env("AW_PORT", port.to_string())
         .arg("-jar")
         .arg(jar.to_string_lossy().to_string())
@@ -257,6 +268,9 @@ pub fn run() {
         Some(guard) => guard,
         None => return,
     };
+
+    // Portable build relies on the system-provided (Evergreen) WebView2 runtime
+    // — it is intentionally NOT bundled.
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())

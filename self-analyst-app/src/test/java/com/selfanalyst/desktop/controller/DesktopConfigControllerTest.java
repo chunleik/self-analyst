@@ -79,6 +79,47 @@ class DesktopConfigControllerTest {
     }
 
     @Test
+    void supportedKeysIncludeRuntimeConfigKeysAndPrivacyDefaults() throws Exception {
+        var defaults = SupportedKeys.defaults();
+
+        assertEquals("false", defaults.get("wiki.enabled"));
+        assertEquals("false", defaults.get("embedding.enabled"));
+        assertEquals("false", defaults.get("websearch.enabled"));
+        assertTrue(defaults.containsKey("memory.dir"));
+        assertTrue(defaults.containsKey("aw.base-url"));
+        assertTrue(defaults.containsKey("wiki.prompt.maxContentChars"));
+        assertTrue(defaults.containsKey("file.watch.paths"));
+        assertTrue(defaults.containsKey("llm.budget.dailyTokens"));
+        assertTrue(defaults.containsKey("desktop.summary.maxTimelineLlm"));
+    }
+
+    @Test
+    void runtimeConfigKeysAreNotReportedUnknown(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+
+        String text = ""
+                + "memory.dir = 'D:\\data\\memory'\n"
+                + "[aw]\n"
+                + "base-url = \"http://localhost:5700/api/0\"\n"
+                + "timeout = 15000\n"
+                + "[wiki]\n"
+                + "enabled = false\n"
+                + "prompt.maxContentChars = 12000\n"
+                + "[file.watch]\n"
+                + "paths = 'D:\\docs'\n"
+                + "maxContentChars = 8000\n"
+                + "[llm.budget]\n"
+                + "dailyTokens = 100000000\n"
+                + "[desktop.summary]\n"
+                + "maxTimelineLlm = 4\n";
+
+        var result = ctrl.applyRawSave(text);
+
+        assertTrue(result.unknownKeys().isEmpty(), result.unknownKeys().toString());
+    }
+
+    @Test
     void invalidTomlSyntaxRejectedWithoutWriting(@TempDir Path dir) throws Exception {
         // SPEC-TOML-TST-004: syntax error → TomlValidationException (line/col), no write.
         UserConfigStore store = new UserConfigStore(dir);

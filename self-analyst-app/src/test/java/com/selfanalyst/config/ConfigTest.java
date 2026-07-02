@@ -10,8 +10,22 @@ import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class ConfigTest {
+
+    @Test
+    void classpathDefaultsKeepNetworkFeaturesOptIn() throws Exception {
+        Properties props = new Properties();
+        try (var in = Config.class.getClassLoader().getResourceAsStream("application.properties")) {
+            assertNotNull(in, "application.properties must be available on the test classpath");
+            props.load(new java.io.InputStreamReader(in, StandardCharsets.UTF_8));
+        }
+
+        assertEquals("false", props.getProperty("wiki.enabled"));
+        assertEquals("false", props.getProperty("embedding.enabled"));
+        assertEquals("false", props.getProperty("websearch.enabled"));
+    }
 
     @Test
     void exposesAudioEnabledAsConfigValue(@TempDir Path dir) throws Exception {

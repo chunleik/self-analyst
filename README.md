@@ -39,12 +39,15 @@ powershell -File scripts/download-tools.ps1
 # 构建完整 dist/
 powershell -File scripts/build-dist.ps1
 
-# 启动（CLI 模式）
+# 启动后台服务（在 http://localhost:5700 提供 REST API 与桌面页）
 java -jar dist/self-analyst-app.jar
 
 # 或桌面模式（双击）
 .\dist\SelfAnalyst.exe
 ```
+
+> `java -jar` 只启动后台服务，本身不提供命令行交互；启动后请用桌面端
+> 或浏览器访问 `http://localhost:5700/desktop-ui/` 与 Agent 对话。
 
 桌面模式会启动同目录下的 `self-analyst-app.jar`，并在窗口中加载轻量桌面页
 `http://localhost:5700/desktop-ui/`。右键托盘图标可使用：
@@ -66,12 +69,12 @@ java -jar dist/self-analyst-app.jar
 桌面端为 Windows 单实例运行；重复双击 `SelfAnalyst.exe` 时会提示
 `SelfAnalyst 已在运行`，不会再创建额外托盘图标或后端进程。
 
-启动后直接输入问题即可：
+在桌面页 / Web 桌面的对话框里直接输入问题即可：
 
 ```
-> 我今天的时间都花在哪里了？
-> 帮我对比一下本周和上周的专注时间
-> 我想把社交媒体的时间减少到每天 30 分钟以内
+我今天的时间都花在哪里了？
+帮我对比一下本周和上周的专注时间
+我想把社交媒体的时间减少到每天 30 分钟以内
 ```
 
 ## 配置
@@ -85,8 +88,8 @@ java -jar dist/self-analyst-app.jar
 | `llm.model` | `LLM_MODEL` | `gpt-4o` | 模型名称 |
 | `aw.mode` | `AW_MODE` | `embedded` | AW 模式：`embedded` 或 `external` |
 | `aw.port` | `AW_PORT` | `5700` | AW 服务端口 |
-| `aw.data-dir` | `AW_DATA_DIR` | `~/.self-analyst/aw-data` | 活动数据存储目录 |
-| `memory.dir` | `MEMORY_DIR` | `~/.self-analyst` | 目标/模式/记忆存储目录 |
+| `aw.data-dir` | `AW_DATA_DIR` | `./data/aw-data` | 活动数据存储目录（相对启动目录；可改为 `${user.home}/.self-analyst/aw-data`） |
+| `memory.dir` | `MEMORY_DIR` | `./data/memory` | 目标/模式/记忆存储目录（相对启动目录；可改为 `${user.home}/.self-analyst`） |
 | `aw.ocr.engine` | `AW_OCR_ENGINE` | `auto` | OCR 引擎：`auto`、`paddle`、`tesseract` |
 | `aw.audio.enabled` | `AW_AUDIO_ENABLED` | `false` | 音频采集（需麦克风） |
 | `file.watch.enabled` | `FILE_WATCH_ENABLED` | `false` | 目录文件监控 + LLM 摘要（内容会发送给 LLM，注意隐私） |
@@ -122,32 +125,9 @@ aw.ocr.engine=auto     # auto = PaddleOCR 优先，不可用时回退 Tesseract
 PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
 后会下载到 `tools/PaddleOCR-json/`（详见「快速开始」）。
 
-## CLI 命令
-
-```
-self-analyst chat "消息"     发送消息给 Agent
-self-analyst goals            查看活跃目标
-self-analyst add-goal \       添加新目标
-  -d "减少社交媒体" \
-  -m "浏览器-社交类时长" \
-  -b 45 -t 15
-self-analyst memory           查看所有记忆
-self-analyst help             帮助信息
-```
-
-无参数启动进入交互式 REPL：
-
-```
-> /help       查看命令
-> /goals      查看目标
-> /memory     查看记忆
-> /addgoal    交互式添加目标
-> /exit       保存记忆并退出
-```
-
 ## Memory 系统
 
-长期记忆持久化在 `~/.self-analyst/memory.json`：
+长期记忆持久化在 `memory.dir`（默认 `./data/memory`）：
 
 - **Goal（目标）**：描述、衡量指标、基线值、目标值、设置日期
 - **KnownPattern（已知模式）**：发现的行为模式 + 置信度评分
@@ -207,13 +187,15 @@ self-analyst/
 │   │   └── src/lib.rs           单实例 + 窗口 + 托盘 + Java 子进程管理
 │   └── package.json
 │
-└── self-analyst-app/            (App 模块 — CLI 应用)
+└── self-analyst-app/            (App 模块 — 主程序 / 后台服务)
     ├── src/main/java/.../
-    │   ├── App.java             picocli 入口
-    │   ├── cli/                 命令路由 + REPL + 会话管理
+    │   ├── App.java             程序入口（启动 AppSession 后台服务）
+    │   ├── AppSession.java      组装并启动各模块 + HTTP 服务
     │   ├── config/Config.java   配置加载
     │   ├── agent/               ReActAgent + PlanHook
-    │   ├── tools/ActivityWatchTools.java  AW API 工具集
+    │   ├── desktop/             桌面 REST API + 桌面 UI 前端
+    │   ├── tools/               Agent 工具集（AW / 文件 / 搜索等）
+    │   ├── usage/               LLM token 计量与预算
     │   └── memory/              成长档案: Goal + Pattern + Log
     └── target/self-analyst-app-1.0.0.jar   (fat jar)
 ```

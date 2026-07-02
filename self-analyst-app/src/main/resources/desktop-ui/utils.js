@@ -13,11 +13,15 @@ function escHtml(str) {
   return d.innerHTML;
 }
 
+function uiLocale() {
+  return (typeof state !== "undefined" && state && state.lang === "en") ? "en-US" : "zh-CN";
+}
+
 function formatDate(d) {
   if (!d) return "";
   var date = new Date(d);
   if (isNaN(date.getTime())) return String(d);
-  return date.toLocaleDateString("zh-CN", {
+  return date.toLocaleDateString(uiLocale(), {
     month: "short",
     day: "numeric",
     weekday: "short",
@@ -28,12 +32,12 @@ function formatDateTime(d) {
   if (!d) return "";
   var date = new Date(d);
   if (isNaN(date.getTime())) return String(d);
-  return date.toLocaleString("zh-CN");
+  return date.toLocaleString(uiLocale());
 }
 
 function priorityLabel(p) {
-  var map = { high: "高", medium: "中", low: "低" };
-  return map[p] || p || "中";
+  var map = { high: t("priority.high"), medium: t("priority.medium"), low: t("priority.low") };
+  return map[p] || p || t("priority.medium");
 }
 
 function priorityBadge(p) {
@@ -44,7 +48,7 @@ function priorityBadge(p) {
 function statusBadge(s) {
   var cls = "status-" + (s === "running" || s === "online" ? "running" : s === "degraded" ? "degraded" : "error");
   var label =
-    s === "running" || s === "online" ? "运行中" : s === "degraded" ? "降级" : "已禁用";
+    s === "running" || s === "online" ? t("status.running") : s === "degraded" ? t("status.degraded") : t("status.disabled");
   return '<span class="tag tag-' + cls + '">' + escHtml(label) + "</span>";
 }
 
@@ -57,10 +61,10 @@ function formatRelativeTime(iso) {
   try {
     var diff = Date.now() - new Date(iso).getTime();
     var min = Math.floor(diff / 60000);
-    if (min < 1) return "刚刚";
-    if (min < 60) return min + "分钟前";
+    if (min < 1) return t("time.justNow");
+    if (min < 60) return t("time.minutesAgo", { n: min });
     var hrs = Math.floor(min / 60);
-    if (hrs < 24) return hrs + "小时前";
-    return Math.floor(hrs / 24) + "天前";
+    if (hrs < 24) return t("time.hoursAgo", { n: hrs });
+    return t("time.daysAgo", { n: Math.floor(hrs / 24) });
   } catch (e) { return ""; }
 }

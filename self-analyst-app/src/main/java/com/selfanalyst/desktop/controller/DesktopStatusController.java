@@ -68,6 +68,8 @@ public class DesktopStatusController {
     public void getStatus(Context ctx) {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("backend", "running");
+        // Effective language for the desktop UI to pick its message column (SPEC-I18N-RES-003)
+        status.put("language", config.effectiveLanguage().code());
 
         // AW section
         Map<String, Object> aw = new LinkedHashMap<>();

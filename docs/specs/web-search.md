@@ -64,7 +64,7 @@ agentscope 1.0.12 已传递引入官方 MCP Java SDK（`io.modelcontextprotocol.
 
 | 属性键 | 环境变量 | 默认值 | 含义 |
 |--------|----------|--------|------|
-| `websearch.enabled` | `WEBSEARCH_ENABLED` | `true` | 是否启用联网搜索 |
+| `websearch.enabled` | `WEBSEARCH_ENABLED` | `false` | 是否启用联网搜索（隐私默认关闭，按需开启） |
 | `websearch.mcp-url` | `WEBSEARCH_MCP_URL` | `https://search.parallel.ai/mcp` | MCP server 端点 |
 | `websearch.api-key` | `WEBSEARCH_API_KEY` | （空） | 可选 Bearer token，留空则匿名 |
 

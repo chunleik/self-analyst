@@ -98,8 +98,8 @@ echo -e "${YELLOW}[4/6] Building SelfAnalyst...${NC}"
 
 # Check if jar already exists in target/
 JAR_SOURCE=""
-if [ -f "${PROJECT_DIR}/target/${JAR_NAME}" ]; then
-    JAR_SOURCE="${PROJECT_DIR}/target/${JAR_NAME}"
+if [ -f "${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}" ]; then
+    JAR_SOURCE="${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}"
     echo "  Using existing build."
 elif [ -f "${PROJECT_DIR}/${JAR_NAME}" ]; then
     JAR_SOURCE="${PROJECT_DIR}/${JAR_NAME}"
@@ -108,7 +108,7 @@ elif command -v mvn &>/dev/null; then
     echo "  Running: mvn package -DskipTests -q"
     cd "${PROJECT_DIR}"
     if mvn package -DskipTests -q 2>&1; then
-        JAR_SOURCE="${PROJECT_DIR}/target/${JAR_NAME}"
+        JAR_SOURCE="${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}"
         echo -e "${GREEN}  Build successful.${NC}"
     else
         echo -e "${RED}ERROR: Maven build failed.${NC}"
@@ -118,7 +118,7 @@ elif command -v mvnw &>/dev/null; then
     echo "  Running: ./mvnw package -DskipTests -q"
     cd "${PROJECT_DIR}"
     if ./mvnw package -DskipTests -q 2>&1; then
-        JAR_SOURCE="${PROJECT_DIR}/target/${JAR_NAME}"
+        JAR_SOURCE="${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}"
         echo -e "${GREEN}  Build successful.${NC}"
     else
         echo -e "${RED}ERROR: Maven wrapper build failed.${NC}"

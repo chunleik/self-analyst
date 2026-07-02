@@ -7,9 +7,13 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.selfanalyst.i18n.Lang;
+import com.selfanalyst.i18n.LangResolver;
 
 public record Config(
         String llmApiKey,
@@ -65,7 +69,8 @@ public record Config(
         int desktopSummaryMaxTimelineLlm,
         String budgetMode,
         long budgetDailyTokens,
-        double budgetWarnRatio) {
+        double budgetWarnRatio,
+        String appLanguage) {
 
     private static final Logger log = LoggerFactory.getLogger(Config.class);
 
@@ -114,9 +119,9 @@ public record Config(
                 memDir + "/aw-data"));
 
         boolean wikiEnabled = Boolean.parseBoolean(
-                envOrProp(props, "wiki.enabled", "WIKI_ENABLED", "true"));
+                envOrProp(props, "wiki.enabled", "WIKI_ENABLED", "false"));
         boolean wikiBackfillEnabled = Boolean.parseBoolean(
-                envOrProp(props, "wiki.backfill.enabled", "WIKI_BACKFILL_ENABLED", "true"));
+                envOrProp(props, "wiki.backfill.enabled", "WIKI_BACKFILL_ENABLED", "false"));
         int wikiWorkerIntervalSeconds = Integer.parseInt(
                 envOrProp(props, "wiki.worker.intervalSeconds", "WIKI_WORKER_INTERVAL_SECONDS", "60"));
         int wikiPromptMaxContentChars = Integer.parseInt(
@@ -138,7 +143,7 @@ public record Config(
         }
 
         boolean embeddingEnabled = Boolean.parseBoolean(
-                envOrProp(props, "embedding.enabled", "EMBEDDING_ENABLED", "true"));
+                envOrProp(props, "embedding.enabled", "EMBEDDING_ENABLED", "false"));
         String embeddingBaseUrl = envOrProp(props, "embedding.base-url", "EMBEDDING_BASE_URL",
                 "https://api.openai.com/v1");
         String embeddingApiKey = envOrProp(props, "embedding.api-key", "EMBEDDING_API_KEY",
@@ -230,10 +235,13 @@ public record Config(
         if (budgetWarnRatio <= 0 || budgetWarnRatio > 1) budgetWarnRatio = 0.8;
 
         boolean webSearchEnabled = Boolean.parseBoolean(
-                envOrProp(props, "websearch.enabled", "WEBSEARCH_ENABLED", "true"));
+                envOrProp(props, "websearch.enabled", "WEBSEARCH_ENABLED", "false"));
         String webSearchMcpUrl = envOrProp(props, "websearch.mcp-url", "WEBSEARCH_MCP_URL",
                 "https://search.parallel.ai/mcp");
         String webSearchApiKey = envOrProp(props, "websearch.api-key", "WEBSEARCH_API_KEY", "");
+
+        // ── 应用语言 (SPEC-I18N-CFG-001) ──
+        String appLanguage = envOrProp(props, "app.language", "APP_LANGUAGE", "auto");
 
         return new Config(apiKey, baseUrl, model, awUrl, awTimeout,
                 Path.of(memDir), awEmbedded, awPort, awDataDir,
@@ -253,7 +261,16 @@ public record Config(
                 fileWatchExcludeDirs, fileWatchExcludeGlobs,
                 fileWatchSemanticEnabled, fileSemanticIndexDir,
                 llmMaxTokens, agentMaxIters, desktopSummaryMaxTimelineLlm,
-                budgetMode, budgetDailyTokens, budgetWarnRatio);
+                budgetMode, budgetDailyTokens, budgetWarnRatio, appLanguage);
+    }
+
+    /**
+     * 有效语言（派生，不入构造）：由启动期 {@code app.language} 与系统 Locale
+     * 唯一解析（SPEC-I18N-RES-002）。变更 {@code app.language} 需重启后端才生效
+     * （SPEC-I18N-DEC-007）。
+     */
+    public Lang effectiveLanguage() {
+        return LangResolver.resolve(appLanguage, Locale.getDefault());
     }
 
     /**
@@ -278,7 +295,7 @@ public record Config(
                 0.7, false, false, false, false,
                 false, "", 512, 8000, 60, 5, 5, 5, "", "", "", true,
                 baseDir.resolve("file-semantic-index"),
-                2048, 8, 4, "warn", 100000000L, 0.8);
+                2048, 8, 4, "warn", 100000000L, 0.8, "auto");
     }
 
     /** Load the classpath {@code application.properties} defaults (empty if absent). */

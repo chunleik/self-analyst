@@ -93,6 +93,23 @@ class ConfigMigrationTest {
     }
 
     @Test
+    void backupRenameFailureLeavesNoTomlHalfMigration(@TempDir Path dir) throws Exception {
+        // If archiving config.properties fails after TOML has been generated, startup
+        // must not leave config.toml behind, because a later run would treat migration
+        // as complete and ignore the still-present properties file.
+        writeProps(dir, "llm.model=gpt-4o\n");
+        Path blockedBackup = dir.resolve("config.properties.bak");
+        Files.createDirectory(blockedBackup);
+        Files.writeString(blockedBackup.resolve("locked.txt"), "occupied", StandardCharsets.UTF_8);
+
+        ConfigMigration.migrateIfNeeded(dir);
+
+        assertFalse(Files.exists(dir.resolve("config.toml")));
+        assertTrue(Files.exists(dir.resolve("config.properties")));
+        assertTrue(Files.isDirectory(dir.resolve("config.properties.bak")));
+    }
+
+    @Test
     void secondInvocationIsNoOp(@TempDir Path dir) throws Exception {
         writeProps(dir, "llm.model=gpt-4o\n");
         ConfigMigration.migrateIfNeeded(dir);

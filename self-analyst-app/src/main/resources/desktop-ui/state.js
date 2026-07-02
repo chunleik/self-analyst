@@ -5,6 +5,7 @@
 
 var state = {
   tab: "agent",
+  lang: "zh",  // effective language; overwritten from /desktop/status in init() (SPEC-I18N-UI-004)
   status: null,
   summary: null,
   tasks: [],
@@ -35,4 +36,7 @@ var state = {
   chatContextToggles: { currentStatus: true, futureTasks: true, history: false },
 };
 
+// Legacy localStorage key. No longer a data source (sessions live in the
+// backend, SPEC-CSP-DEC-002/-004); retained only for the one-time deletion in
+// init() so upgraded clients drop stale local data (SPEC-CSP-FE-006).
 var CHAT_STORAGE_KEY = "selfAnalyst.chatSessions.v1";

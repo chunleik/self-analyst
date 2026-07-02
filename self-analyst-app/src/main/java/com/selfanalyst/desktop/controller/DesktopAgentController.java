@@ -69,8 +69,10 @@ public class DesktopAgentController {
                     && !agent.isBudgetBlocked();
             SummaryPromptService.SummaryTextClient summaryClient =
                     llmAvailable ? agent::completePlain : null;
+            com.selfanalyst.i18n.Lang lang = config != null
+                    ? config.effectiveLanguage() : com.selfanalyst.i18n.Lang.ZH;
             if (llmAvailable) {
-                enhanced = promptService.enhance(current, summaryClient);
+                enhanced = promptService.enhance(current, summaryClient, lang);
             } else {
                 enhanced = promptService.localOnly(current);
             }
@@ -88,7 +90,8 @@ public class DesktopAgentController {
             currentMap.put("goalContext", enhanced.goalContext());
 
             // If LLM enhancement failed for current status, skip it for timeline entries
-            boolean llmFailed = enhanced.insight() != null && enhanced.insight().contains("LLM 未配置");
+            boolean llmFailed = enhanced.insight() != null
+                    && enhanced.insight().equals(SummaryPromptService.noInsightText(lang));
             // Cap how many timeline entries get LLM enhancement to bound per-page token cost
             // (the rest fall back to local-only). Beyond cap → no LLM call.
             int llmCap = config != null ? config.desktopSummaryMaxTimelineLlm() : 0;
@@ -98,7 +101,7 @@ public class DesktopAgentController {
                 final SummaryService.TimelineEntry te = timeline.get(i);
                 final boolean useLlm = !llmFailed && llmAvailable && i < llmCap;
                 timelineFutures.add(CompletableFuture.supplyAsync(() -> {
-                    var e = useLlm ? promptService.enhance(te.facts(), summaryClient)
+                    var e = useLlm ? promptService.enhance(te.facts(), summaryClient, lang)
                                    : promptService.localOnly(te.facts());
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("key", te.key());
@@ -126,7 +129,7 @@ public class DesktopAgentController {
 
                 BehaviorAdviceService.BehaviorAdvice finalAdvice;
                 if (!"empty".equals(rawAdvice.type()) && llmAvailable && !llmFailed) {
-                    finalAdvice = promptService.enhanceAdvice(rawAdvice, summaryClient);
+                    finalAdvice = promptService.enhanceAdvice(rawAdvice, summaryClient, lang);
                 } else {
                     finalAdvice = rawAdvice;
                 }

@@ -29,7 +29,7 @@ function renderBehaviorAdvice() {
     card.classList.add("type-empty");
     body.innerHTML =
       '<div class="behavior-advice-empty">' +
-      escHtml((advice && advice.title) || "还没有足够行为数据生成建议。继续使用一段时间后，这里会出现基于过往行为的提醒或鼓励。") +
+      escHtml((advice && advice.title) || t("advice.empty")) +
       "</div>";
     return;
   }
@@ -37,8 +37,12 @@ function renderBehaviorAdvice() {
   // SPEC-ADV-UI-003: Full card content
   card.classList.add("type-" + (advice.type || "suggestion"));
 
-  var typeLabels = { encouragement: "鼓励", suggestion: "建议", reminder: "提醒" };
-  var typeLabel = typeLabels[advice.type] || "建议";
+  var typeLabels = {
+    encouragement: t("advice.type.encouragement"),
+    suggestion: t("advice.type.suggestion"),
+    reminder: t("advice.type.reminder"),
+  };
+  var typeLabel = typeLabels[advice.type] || t("advice.type.suggestion");
 
   var updatedText = advice.generatedAt
     ? formatRelativeTime(advice.generatedAt)
@@ -56,15 +60,15 @@ function renderBehaviorAdvice() {
     "</span>";
   if (advice.scopeLabel) {
     html +=
-      '<span class="behavior-advice-scope">基于' +
-      escHtml(advice.scopeLabel) +
+      '<span class="behavior-advice-scope">' +
+      escHtml(t("advice.basedOn", { scope: advice.scopeLabel })) +
       "</span>";
   }
   if (updatedText) {
     html +=
       '<span class="behavior-advice-updated">' +
-      escHtml(updatedText) +
-      "更新</span>";
+      escHtml(t("advice.updated", { time: updatedText })) +
+      "</span>";
   }
   html += "</div>";
 
@@ -95,25 +99,25 @@ function renderBehaviorAdvice() {
     html += '<div class="behavior-advice-basis">';
     if (advice.basis.observationRange) {
       html +=
-        '<span class="behavior-advice-basis-item"><strong>观察范围</strong> ' +
+        '<span class="behavior-advice-basis-item"><strong>' + escHtml(t("advice.basis.observationRange")) + '</strong> ' +
         escHtml(advice.basis.observationRange) +
         "</span>";
     }
     if (advice.basis.trend) {
       html +=
-        '<span class="behavior-advice-basis-item"><strong>趋势</strong> ' +
+        '<span class="behavior-advice-basis-item"><strong>' + escHtml(t("advice.basis.trend")) + '</strong> ' +
         escHtml(advice.basis.trend) +
         "</span>";
     }
     if (advice.basis.adviceKind) {
       html +=
-        '<span class="behavior-advice-basis-item"><strong>建议类型</strong> ' +
+        '<span class="behavior-advice-basis-item"><strong>' + escHtml(t("advice.basis.adviceKind")) + '</strong> ' +
         escHtml(advice.basis.adviceKind) +
         "</span>";
     }
     if (advice.basis.dataCompleteness) {
       html +=
-        '<span class="behavior-advice-basis-item"><strong>数据完整度</strong> ' +
+        '<span class="behavior-advice-basis-item"><strong>' + escHtml(t("advice.basis.dataCompleteness")) + '</strong> ' +
         escHtml(advice.basis.dataCompleteness) +
         "</span>";
     }
@@ -130,20 +134,20 @@ function renderTimeline() {
   var body = state.dom.timelineBody;
 
   if (!sm) {
-    body.innerHTML = '<div class="timeline-empty">数据不足</div>';
+    body.innerHTML = '<div class="timeline-empty">' + escHtml(t("timeline.insufficient")) + '</div>';
     return;
   }
 
   var entries = sm.entries || sm.timeline || [];
   if (!entries.length) {
-    body.innerHTML = '<div class="timeline-empty">数据不足</div>';
+    body.innerHTML = '<div class="timeline-empty">' + escHtml(t("timeline.insufficient")) + '</div>';
     return;
   }
 
   var html = '<div class="timeline-list">';
   entries.forEach(function (entry, idx) {
-    var label = entry.label || entry.period || "时间段";
-    var headline = entry.headline || "暂无总结";
+    var label = entry.label || entry.period || t("timeline.period");
+    var headline = entry.headline || t("timeline.noSummary");
     var summary = entry.summary || "";
     var tags = entry.tags || [];
     var evidence = entry.evidence;
@@ -151,7 +155,7 @@ function renderTimeline() {
     var suggestion = entry.suggestion;
     var localFacts = entry.local_facts;
 
-    var isLlmAvailable = !!(headline && headline !== "暂无总结");
+    var isLlmAvailable = !!(headline && headline !== t("timeline.noSummary"));
 
     html +=
       '<div class="timeline-entry" data-entry-idx="' +
@@ -182,7 +186,7 @@ function renderTimeline() {
     if (!isLlmAvailable && localFacts) {
       html += '<div class="timeline-local-facts">';
       if (localFacts.top_apps && localFacts.top_apps.length) {
-        html += "<strong>常用应用:</strong> ";
+        html += "<strong>" + escHtml(t("timeline.topApps")) + "</strong> ";
         html += localFacts.top_apps
           .map(function (a) { return "<span>" + escHtml(a) + "</span>"; })
           .join(" ");
@@ -190,25 +194,25 @@ function renderTimeline() {
       }
       if (localFacts.active_time) {
         html +=
-          "<strong>活跃时长:</strong> " +
+          "<strong>" + escHtml(t("timeline.activeTime")) + "</strong> " +
           escHtml(localFacts.active_time) +
           "<br>";
       }
       if (localFacts.afk_time) {
         html +=
-          "<strong>离开时长:</strong> " +
+          "<strong>" + escHtml(t("timeline.afkTime")) + "</strong> " +
           escHtml(localFacts.afk_time) +
           "<br>";
       }
       html += "</div>";
       html +=
-        '<div class="llm-not-configured">配置 LLM 后可生成建议</div>';
+        '<div class="llm-not-configured">' + escHtml(t("timeline.llmNotConfigured")) + '</div>';
     }
 
     if (evidence) {
       html +=
         '<div class="timeline-detail-section">' +
-        '<div class="timeline-detail-label">证据</div>' +
+        '<div class="timeline-detail-label">' + escHtml(t("timeline.evidence")) + '</div>' +
         '<div class="timeline-detail-text">' +
         escHtml(typeof evidence === "string" ? evidence : JSON.stringify(evidence)) +
         "</div></div>";
@@ -217,7 +221,7 @@ function renderTimeline() {
     if (insight) {
       html +=
         '<div class="timeline-detail-section">' +
-        '<div class="timeline-detail-label">洞察</div>' +
+        '<div class="timeline-detail-label">' + escHtml(t("timeline.insight")) + '</div>' +
         '<div class="timeline-detail-text">' +
         escHtml(typeof insight === "string" ? insight : JSON.stringify(insight)) +
         "</div></div>";
@@ -226,7 +230,7 @@ function renderTimeline() {
     if (suggestion) {
       html +=
         '<div class="timeline-detail-section">' +
-        '<div class="timeline-detail-label">建议</div>' +
+        '<div class="timeline-detail-label">' + escHtml(t("timeline.suggestion")) + '</div>' +
         '<div class="timeline-detail-text">' +
         escHtml(typeof suggestion === "string" ? suggestion : JSON.stringify(suggestion)) +
         "</div></div>";
@@ -235,7 +239,7 @@ function renderTimeline() {
     html +=
       '<button class="btn btn-sm btn-outline timeline-entry-discuss-btn" data-entry-idx="' +
       idx +
-      '">追问</button>';
+      '">' + escHtml(t("timeline.discuss")) + '</button>';
 
     html += "</div></div>";
   });
@@ -254,7 +258,7 @@ function renderTasks() {
 
   // Task list
   if (!tasks.length) {
-    html += '<div class="tasks-empty">暂无待办事项</div>';
+    html += '<div class="tasks-empty">' + escHtml(t("tasks.empty")) + '</div>';
     body.innerHTML = html;
     return;
   }
@@ -294,7 +298,7 @@ function renderTaskItem(task) {
     '">' +
     '<div class="task-item-header">' +
     '<div class="task-item-title">' +
-    escHtml(task.title || "未命名任务") +
+    escHtml(task.title || t("task.untitled")) +
     "</div>" +
     '<div class="task-item-meta">' +
     (task.dueAt
@@ -318,25 +322,25 @@ function renderTaskEditForm(task) {
   var html = '<div class="task-item-detail">';
   html += '<div class="task-item-edit-form">';
   html +=
-    "<label>标题</label>" +
+    "<label>" + escHtml(t("task.label.title")) + "</label>" +
     '<input type="text" class="edit-task-title" value="' +
     escHtml(task.title || "") +
     '">';
   html +=
-    "<label>优先级</label>" +
+    "<label>" + escHtml(t("task.label.priority")) + "</label>" +
     '<select class="edit-task-priority">' +
     '<option value="high"' +
     (task.priority === "high" ? " selected" : "") +
-    ">高</option>" +
+    ">" + escHtml(t("priority.high")) + "</option>" +
     '<option value="medium"' +
     (task.priority === "medium" || !task.priority ? " selected" : "") +
-    ">中</option>" +
+    ">" + escHtml(t("priority.medium")) + "</option>" +
     '<option value="low"' +
     (task.priority === "low" ? " selected" : "") +
-    ">低</option>" +
+    ">" + escHtml(t("priority.low")) + "</option>" +
     "</select>";
   html +=
-    "<label>截止日期</label>" +
+    "<label>" + escHtml(t("task.label.due")) + "</label>" +
     '<input type="text" class="edit-task-due" placeholder="YYYY-MM-DD" value="' +
     escHtml(task.dueAt || "") +
     '">';
@@ -346,26 +350,26 @@ function renderTaskEditForm(task) {
     html +=
       '<button class="btn btn-sm btn-success complete-task-btn" data-task-id="' +
       escHtml(String(task.id)) +
-      '">完成</button>';
+      '">' + escHtml(t("task.complete")) + '</button>';
   }
   html +=
     '<button class="btn btn-sm btn-outline discuss-task-btn" data-task-id="' +
     escHtml(String(task.id)) +
     '" data-task-title="' +
     escHtml(task.title || "") +
-    '">讨论</button>';
+    '">' + escHtml(t("task.discuss")) + '</button>';
   html +=
     '<button class="btn btn-sm btn-outline archive-task-btn" data-task-id="' +
     escHtml(String(task.id)) +
-    '">归档</button>';
+    '">' + escHtml(t("task.archive")) + '</button>';
   html +=
     '<button class="btn btn-sm btn-danger delete-task-btn" data-task-id="' +
     escHtml(String(task.id)) +
-    '">删除</button>';
+    '">' + escHtml(t("task.delete")) + '</button>';
   html +=
     '<button class="btn btn-sm btn-primary save-task-btn" data-task-id="' +
     escHtml(String(task.id)) +
-    '">保存</button>';
+    '">' + escHtml(t("task.save")) + '</button>';
   html += "</div>";
   html += "</div></div>";
   return html;

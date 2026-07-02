@@ -7,7 +7,7 @@
 
 function showError(msg) {
   state.error = msg;
-  state.dom.errorMessage.textContent = msg || "本地服务未就绪，正在重试...";
+  state.dom.errorMessage.textContent = msg || t("error.notReady");
   state.dom.errorOverlay.classList.remove("hidden");
 }
 
@@ -22,23 +22,23 @@ function updateStatusBar() {
   var st = state.status || {};
   var cfg = state.config || {};
 
-  setStatusDot(state.dom.backendDot, true, "服务");
-  state.dom.backendText.textContent = "服务";
+  setStatusDot(state.dom.backendDot, true, t("status.service"));
+  state.dom.backendText.textContent = t("status.service");
 
   // Collectors
   var collectorsOk = st.collectors === "running" || st.collectors_status === "running";
-  setStatusDot(state.dom.collectorsDot, collectorsOk, "采集");
-  state.dom.collectorsText.textContent = "采集";
+  setStatusDot(state.dom.collectorsDot, collectorsOk, t("status.capture"));
+  state.dom.collectorsText.textContent = t("status.capture");
 
   // LLM
   var llmOk = st.llm && st.llm.configured;
-  setStatusDot(state.dom.llmDot, llmOk, "LLM");
-  state.dom.llmText.textContent = "LLM";
+  setStatusDot(state.dom.llmDot, llmOk, t("status.llm"));
+  state.dom.llmText.textContent = t("status.llm");
 }
 
 function setStatusDot(el, ok, label) {
   el.className = "status-dot " + (ok ? "green" : "orange");
-  el.title = label + (ok ? " 正常" : " 未就绪");
+  el.title = label + " " + (ok ? t("status.ok") : t("status.notReady"));
 }
 
 // ---- Tab Switching ----
@@ -52,7 +52,9 @@ function switchTab(tab) {
   state.dom.tabChat.classList.toggle("active", tab === "chat");
 
   if (tab === "chat") {
-    ensureActiveChatSession();
+    // ensureActiveChatSession may create a session asynchronously; re-render
+    // once it resolves so a freshly created session shows up (SPEC-CSP-FE-002).
+    ensureActiveChatSession().then(renderChatTab).catch(function () {});
     renderChatTab();
     setTimeout(function () {
       if (state.dom.chatTabInput) state.dom.chatTabInput.focus();
@@ -72,7 +74,7 @@ function openConfigModal() {
 
 function closeConfigModal() {
   // Guard against losing unsaved edits. SPEC-CFGUI-UI-004a.
-  if (state.configDirty && !window.confirm("有未保存的更改，确定丢弃并关闭？")) {
+  if (state.configDirty && !window.confirm(t("config.confirmDiscardClose"))) {
     return;
   }
   state.configOpen = false;
@@ -103,7 +105,7 @@ function loadAll() {
     state.tasks = results[1] || [];
 
     if (!state.status) {
-      showError("本地服务未就绪，正在重试...");
+      showError(t("error.notReady"));
     } else {
       hideError();
     }
@@ -145,7 +147,7 @@ function loadConfig() {
       state.configRawBaseline = "";
       state.configLoadError = true;
       state.configDirty = false;
-      state.configSaveResult = { type: "error", msg: "载入配置失败: " + (err.message || "未知错误") };
+      state.configSaveResult = { type: "error", msg: t("config.loadConfigFailed", { msg: err.message || t("common.unknownError") }) };
       state.configSaving = false;
       renderConfigTab();
     });

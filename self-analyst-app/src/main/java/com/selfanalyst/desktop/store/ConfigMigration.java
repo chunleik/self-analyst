@@ -64,11 +64,22 @@ public final class ConfigMigration {
             }
             String tomlText = TomlSupport.generateToml(flat, SupportedKeys.types());
 
-            // Atomic write of config.toml, then archive the old file as .bak.
+            // Write TOML to a temp file first, archive the old file, then publish
+            // config.toml. Publishing last avoids a half-migrated state where TOML
+            // exists but the old properties file could not be archived.
             Files.writeString(tmp, tomlText, StandardCharsets.UTF_8);
-            Files.move(tmp, toml, StandardCopyOption.REPLACE_EXISTING);
-            Files.move(properties, memoryDir.resolve("config.properties.bak"),
-                    StandardCopyOption.REPLACE_EXISTING);
+            Path backup = memoryDir.resolve("config.properties.bak");
+            Files.move(properties, backup, StandardCopyOption.REPLACE_EXISTING);
+            try {
+                Files.move(tmp, toml, StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception e) {
+                try {
+                    Files.move(backup, properties, StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException restore) {
+                    log.error("config.properties 迁移失败后恢复备份也失败: {}", restore.getMessage());
+                }
+                throw e;
+            }
             log.info("已将 config.properties 迁移为 config.toml（原文件备份为 config.properties.bak）");
 
             recordSnapshot(memoryDir, tomlText);

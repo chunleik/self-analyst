@@ -38,7 +38,7 @@ function setupEvents() {
           loadTasks();
         })
         .catch(function (err) {
-          alert("完成任务失败: " + err.message);
+          alert(t("task.completeFailed", { msg: err.message }));
         });
       return;
     }
@@ -52,7 +52,7 @@ function setupEvents() {
       for (var ti = 0; ti < state.tasks.length; ti++) {
         if (String(state.tasks[ti].id) === String(dId)) { fullTask = state.tasks[ti]; break; }
       }
-      var taskCtx = { type: "task", id: fullTask ? fullTask.id : dId, title: "任务讨论：" + dTitle, label: dTitle };
+      var taskCtx = { type: "task", id: fullTask ? fullTask.id : dId, title: t("task.discussPrefix", { title: dTitle }), label: dTitle };
       if (fullTask) {
         taskCtx.priority = fullTask.priority;
         taskCtx.status = fullTask.status;
@@ -74,7 +74,7 @@ function setupEvents() {
           loadTasks();
         })
         .catch(function (err) {
-          alert("归档任务失败: " + err.message);
+          alert(t("task.archiveFailed", { msg: err.message }));
         });
       return;
     }
@@ -82,7 +82,7 @@ function setupEvents() {
     // Delete
     if (target.classList.contains("delete-task-btn")) {
       var delId = target.dataset.taskId;
-      if (!confirm("确认删除此任务？")) return;
+      if (!confirm(t("task.confirmDelete"))) return;
       api
         .deleteTask(delId)
         .then(function () {
@@ -90,7 +90,7 @@ function setupEvents() {
           loadTasks();
         })
         .catch(function (err) {
-          alert("删除任务失败: " + err.message);
+          alert(t("task.deleteFailed", { msg: err.message }));
         });
       return;
     }
@@ -121,7 +121,7 @@ function setupEvents() {
           loadTasks();
         })
         .catch(function (err) {
-          alert("保存任务失败: " + err.message);
+          alert(t("task.saveFailed", { msg: err.message }));
         });
       return;
     }
@@ -145,7 +145,7 @@ function setupEvents() {
       var entries = sm ? sm.entries || sm.timeline || [] : [];
       var entryData = entries[idx];
       if (entryData) {
-        var entryCtx = { type: "timeline_entry", id: entryData.key || idx, title: (entryData.label || entryData.period) + "追问", label: entryData.label || entryData.period };
+        var entryCtx = { type: "timeline_entry", id: entryData.key || idx, title: t("timeline.discussSuffix", { label: entryData.label || entryData.period }), label: entryData.label || entryData.period };
         if (entryData.headline) entryCtx.headline = entryData.headline;
         if (entryData.summary) entryCtx.summary = entryData.summary;
         if (entryData.period) entryCtx.period = entryData.period;
@@ -214,25 +214,25 @@ function setupEvents() {
     if (target.id === "test-llm-btn") {
       var llmConfig = readLlmConfigFromEditor();
       target.disabled = true;
-      target.textContent = "测试中...";
+      target.textContent = t("config.testing");
       api
         .testLlm(llmConfig)
         .then(function (resp) {
           state.configSaveResult = {
             type: "success",
-            msg: resp.ok || resp.success ? "连接成功" : "连接失败: " + (resp.error || "未知错误"),
+            msg: resp.ok || resp.success ? t("config.connectOk") : t("config.connectFailed", { msg: resp.error || t("common.unknownError") }),
           };
           target.disabled = false;
-          target.textContent = "测试 LLM 连接";
+          target.textContent = t("config.testLlm");
           updateConfigActionBar();
         })
         .catch(function (err) {
           state.configSaveResult = {
             type: "error",
-            msg: "测试失败: " + err.message,
+            msg: t("config.testFailed", { msg: err.message }),
           };
           target.disabled = false;
-          target.textContent = "测试 LLM 连接";
+          target.textContent = t("config.testLlm");
           updateConfigActionBar();
         });
       return;
@@ -242,25 +242,25 @@ function setupEvents() {
     if (target.id === "test-embedding-btn") {
       var embeddingConfig = readEmbeddingConfigFromEditor();
       target.disabled = true;
-      target.textContent = "测试中...";
+      target.textContent = t("config.testing");
       api
         .testEmbedding(embeddingConfig)
         .then(function (resp) {
           state.configSaveResult = {
             type: "success",
-            msg: resp.ok || resp.success ? "连接成功" : "连接失败: " + (resp.error || "未知错误"),
+            msg: resp.ok || resp.success ? t("config.connectOk") : t("config.connectFailed", { msg: resp.error || t("common.unknownError") }),
           };
           target.disabled = false;
-          target.textContent = "测试 Embedding 连接";
+          target.textContent = t("config.testEmbedding");
           updateConfigActionBar();
         })
         .catch(function (err) {
           state.configSaveResult = {
             type: "error",
-            msg: "测试失败: " + err.message,
+            msg: t("config.testFailed", { msg: err.message }),
           };
           target.disabled = false;
-          target.textContent = "测试 Embedding 连接";
+          target.textContent = t("config.testEmbedding");
           updateConfigActionBar();
         });
       return;
@@ -294,22 +294,25 @@ function setupEvents() {
     api
       .createTask({ title: taskTitle, priority: "medium", source: "chat" })
       .then(function () {
-        card.textContent = "已添加";
+        card.textContent = t("task.added");
         card.disabled = true;
         card.style.opacity = "0.6";
         loadTasks();
       })
       .catch(function (err) {
-        alert("添加任务失败: " + err.message);
+        alert(t("task.addFailed", { msg: err.message }));
       });
   });
 
   // Chat tab - new session button
   state.dom.newChatSessionBtn.addEventListener("click", function () {
-    createChatSession({ title: "新会话" });
-    switchTab("chat");
-    renderChatTab();
-    if (state.dom.chatTabInput) state.dom.chatTabInput.focus();
+    createChatSession({ title: t("chat.newSessionDefault") }).then(function () {
+      switchTab("chat");
+      renderChatTab();
+      if (state.dom.chatTabInput) state.dom.chatTabInput.focus();
+    }).catch(function (err) {
+      alert(t("chat.newSessionFailed", { msg: (err && err.message ? err.message : err) }));
+    });
   });
 
   // Chat tab - session search

@@ -1,5 +1,7 @@
 package com.selfanalyst.desktop.service;
 
+import com.selfanalyst.i18n.Lang;
+
 import java.time.Duration;
 import java.util.*;
 
@@ -25,20 +27,25 @@ public class SummaryPromptService {
      * @return enriched summary
      */
     public EnhancedSummary enhance(SummaryService.LocalFacts facts, SummaryTextClient client) {
+        return enhance(facts, client, Lang.ZH);
+    }
+
+    /** Language-aware overload (SPEC-I18N-PROMPT-001): prompt + fallback follow {@code lang}. */
+    public EnhancedSummary enhance(SummaryService.LocalFacts facts, SummaryTextClient client, Lang lang) {
         if (client == null) {
-            return fromLocalOnly(facts);
+            return fromLocalOnly(facts, lang);
         }
 
         try {
-            String prompt = buildPrompt(facts);
+            String prompt = buildPrompt(facts, lang);
             String response = client.complete(prompt, Duration.ofSeconds(5));
             if (response == null || response.isBlank()) {
-                return fromLocalOnly(facts);
+                return fromLocalOnly(facts, lang);
             }
-            return parseEnhanced(facts, response);
+            return parseEnhanced(facts, response, lang);
         } catch (Exception e) {
             // LLM unavailable – fallback to local-only
-            return fromLocalOnly(facts);
+            return fromLocalOnly(facts, lang);
         }
     }
 
@@ -62,12 +69,19 @@ public class SummaryPromptService {
     public BehaviorAdviceService.BehaviorAdvice enhanceAdvice(
             BehaviorAdviceService.BehaviorAdvice advice,
             SummaryTextClient client) {
+        return enhanceAdvice(advice, client, Lang.ZH);
+    }
+
+    /** Language-aware overload (SPEC-I18N-PROMPT-001): advice prompt follows {@code lang}. */
+    public BehaviorAdviceService.BehaviorAdvice enhanceAdvice(
+            BehaviorAdviceService.BehaviorAdvice advice,
+            SummaryTextClient client, Lang lang) {
         if (client == null || advice == null || "empty".equals(advice.type())) {
             return advice;
         }
 
         try {
-            String prompt = buildAdvicePrompt(advice);
+            String prompt = buildAdvicePrompt(advice, lang);
             String response = client.complete(prompt, Duration.ofSeconds(5));
             if (response == null || response.isBlank()) {
                 return advice;
@@ -80,10 +94,19 @@ public class SummaryPromptService {
 
     // ── Internal ─────────────────────────────────────────────────
 
-    private static EnhancedSummary fromLocalOnly(SummaryService.LocalFacts facts) {
+    /** Fallback insight shown when LLM is unavailable, localized (SPEC-I18N-PROMPT-005). */
+    static final String NO_INSIGHT_ZH = "暂无 AI 洞察（LLM 未配置）";
+    static final String NO_INSIGHT_EN = "No AI insight (LLM not configured)";
+
+    /** Localized "no insight" fallback text; the controller uses this to detect LLM failure. */
+    public static String noInsightText(Lang lang) {
+        return lang == Lang.EN ? NO_INSIGHT_EN : NO_INSIGHT_ZH;
+    }
+
+    private static EnhancedSummary fromLocalOnly(SummaryService.LocalFacts facts, Lang lang) {
         return new EnhancedSummary(
                 facts.headline(),
-                "暂无 AI 洞察（LLM 未配置）",
+                noInsightText(lang),
                 null,
                 "low",
                 facts.evidence(),
@@ -95,7 +118,33 @@ public class SummaryPromptService {
         );
     }
 
-    private static String buildPrompt(SummaryService.LocalFacts facts) {
+    static String buildPrompt(SummaryService.LocalFacts facts, Lang lang) {
+        String topApps = facts.topApps() != null ? String.join(", ", facts.topApps()) : null;
+        if (lang == Lang.EN) {
+            return """
+                    You are SelfAnalyst. Based on the following activity data, generate a short summary (1-2 sentences).
+                    Output JSON only, nothing else:
+                    {
+                      "headline": "summarize the current activity in one English sentence",
+                      "insight": "one-sentence insight or pattern finding",
+                      "suggestion": "a specific actionable suggestion (optional, null if none)",
+                      "confidence": "high or medium or low"
+                    }
+
+                    Activity data:
+                    - Top apps: %s
+                    - Active time: %s
+                    - Idle time: %s
+                    - Window switches: %d
+                    - User goal: %s
+                    """.formatted(
+                    topApps != null ? topApps : "none",
+                    facts.activeTime(),
+                    facts.afkTime(),
+                    facts.switchCount(),
+                    facts.goalContext() != null ? facts.goalContext() : "none"
+            );
+        }
         return """
                 你是 SelfAnalyst，请基于以下活动数据生成一条简短摘要（1-2 句）。
                 输出格式为 JSON，不要输出其他内容：
@@ -113,7 +162,7 @@ public class SummaryPromptService {
                 - 窗口切换: %d 次
                 - 用户目标: %s
                 """.formatted(
-                facts.topApps() != null ? String.join(", ", facts.topApps()) : "无",
+                topApps != null ? topApps : "无",
                 facts.activeTime(),
                 facts.afkTime(),
                 facts.switchCount(),
@@ -121,7 +170,7 @@ public class SummaryPromptService {
         );
     }
 
-    private static EnhancedSummary parseEnhanced(SummaryService.LocalFacts facts, String response) {
+    private static EnhancedSummary parseEnhanced(SummaryService.LocalFacts facts, String response, Lang lang) {
         try {
             // Best-effort JSON extraction from LLM output
             String json = response;
@@ -144,7 +193,7 @@ public class SummaryPromptService {
                     facts.activeTime(), facts.afkTime(),
                     facts.switchCount(), facts.goalContext());
         } catch (Exception e) {
-            return fromLocalOnly(facts);
+            return fromLocalOnly(facts, lang);
         }
     }
 
@@ -152,7 +201,31 @@ public class SummaryPromptService {
         return val != null ? val.toString() : fallback;
     }
 
-    private static String buildAdvicePrompt(BehaviorAdviceService.BehaviorAdvice advice) {
+    static String buildAdvicePrompt(BehaviorAdviceService.BehaviorAdvice advice, Lang lang) {
+        if (lang == Lang.EN) {
+            return """
+                    You are SelfAnalyst. Based on the following behavior analysis, refine the advice wording to be more natural and empathetic.
+                    Output JSON only, nothing else:
+                    {
+                      "title": "refined main conclusion (one sentence, no more than 80 characters)",
+                      "body": "refined explanation (no more than 240 characters)",
+                      "confidence": "high or medium or low"
+                    }
+
+                    Current advice:
+                    - Type: %s
+                    - Main conclusion: %s
+                    - Explanation: %s
+                    - Evidence: %s
+                    - Trend: %s
+                    """.formatted(
+                    advice.type(),
+                    advice.title(),
+                    advice.body(),
+                    advice.evidenceTags() != null ? String.join(", ", advice.evidenceTags()) : "none",
+                    advice.basis() != null ? advice.basis().trend() : "unknown"
+            );
+        }
         return """
                 你是 SelfAnalyst，请基于以下行为分析结果优化建议措辞，使其更自然、共情。
                 输出格式为 JSON，不要输出其他内容：

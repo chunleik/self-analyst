@@ -766,7 +766,7 @@ public class DesktopConfigController {
 
     private Map<String, Map<String, Object>> buildWebSearchSection(Properties eff) {
         var m = new LinkedHashMap<String, Map<String, Object>>();
-        m.put("webSearchEnabled", field("webSearchEnabled", eff.getProperty("websearch.enabled", "true")));
+        m.put("webSearchEnabled", field("webSearchEnabled", eff.getProperty("websearch.enabled", "false")));
         m.put("webSearchMcpUrl", field("webSearchMcpUrl", eff.getProperty("websearch.mcp-url", "https://search.parallel.ai/mcp")));
         m.put("webSearchApiKey", field("webSearchApiKey", eff.getProperty("websearch.api-key", ""), true));
         return m;

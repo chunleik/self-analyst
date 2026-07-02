@@ -43,7 +43,7 @@ SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集�
 | Wiki 摘要 | 时段内的活动标题 / OCR 文本片段 | `llm.base-url` | **开启**（`wiki.enabled=true`）|
 | 语义索引 Embedding | 待索引文本 | `embedding.base-url` | **开启**（`embedding.enabled=true`）|
 | 文件监控摘要 | **被监控目录的文件内容** | `llm.base-url` | **关闭**（`file.watch.enabled=false`）|
-| 联网搜索 | 你的搜索查询 | `websearch.mcp-url`（默认 `search.parallel.ai`）| `websearch.enabled=true`，需配 key |
+| 联网搜索 | 你的搜索查询 | `websearch.mcp-url`（默认 `search.parallel.ai`）| **关闭**（`websearch.enabled=false`），按需开启并配 key |
 
 > ⚠️ **文件监控**是隐私敞口最大的功能：开启后，被监控目录里的文件正文会被发给 LLM
 > 生成摘要。请只监控你确实希望被分析的目录。默认关闭。

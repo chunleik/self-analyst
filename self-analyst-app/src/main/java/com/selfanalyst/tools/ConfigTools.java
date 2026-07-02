@@ -14,6 +14,7 @@ import java.util.Set;
 public class ConfigTools {
 
     private static final Set<String> ALLOWED_KEYS = Set.of(
+            "app.language",
             "llm.api-key", "llm.base-url", "llm.model", "llm.temperature",
             "aw.mode", "aw.port",
             "aw.collection.window", "aw.collection.afk", "aw.collection.content",
@@ -29,6 +30,7 @@ public class ConfigTools {
     );
 
     private static final Set<String> RESTART_REQUIRED = Set.of(
+            "app.language",
             "llm.model", "llm.temperature", "aw.mode", "aw.port",
             "aw.collection.window", "aw.collection.afk", "aw.collection.content",
             "agent.summaryRefreshMinutes", "desktop.autoStartBackend",
@@ -44,7 +46,8 @@ public class ConfigTools {
     }
 
     @Tool(description = "获取 SelfAnalyst 当前所有配置项的有效值（含默认值）。" +
-            "可修改的配置键包括：llm.api-key、llm.base-url、llm.model、llm.temperature；" +
+            "可修改的配置键包括：app.language（zh/en/auto，需重启后端生效）；" +
+            "llm.api-key、llm.base-url、llm.model、llm.temperature；" +
             "websearch.enabled、websearch.mcp-url、websearch.api-key；" +
             "agent.summaryRefreshMinutes、agent.allowAgentTasks、agent.cacheSummaries；" +
             "desktop.hideToTray、desktop.autoOpenWindow、desktop.autoStartBackend；" +
@@ -56,6 +59,9 @@ public class ConfigTools {
         Properties eff = userStore.load();
         StringBuilder sb = new StringBuilder("当前 SelfAnalyst 配置：\n\n");
 
+        appendSection(sb, "应用", new String[][]{
+                {"app.language", eff.getProperty("app.language", "auto"), null},
+        });
         appendSection(sb, "LLM", new String[][]{
                 {"llm.api-key",     eff.getProperty("llm.api-key",     ""),                          "masked"},
                 {"llm.base-url",    eff.getProperty("llm.base-url",    "https://api.openai.com/v1"), null},
@@ -63,7 +69,7 @@ public class ConfigTools {
                 {"llm.temperature", eff.getProperty("llm.temperature", "0.7"),                       null},
         });
         appendSection(sb, "联网搜索", new String[][]{
-                {"websearch.enabled", eff.getProperty("websearch.enabled", "true"),                                  null},
+                {"websearch.enabled", eff.getProperty("websearch.enabled", "false"),                                 null},
                 {"websearch.mcp-url", eff.getProperty("websearch.mcp-url", "https://search.parallel.ai/mcp"),       null},
                 {"websearch.api-key", eff.getProperty("websearch.api-key", ""),                                      "masked"},
         });

@@ -337,6 +337,7 @@ a:hover {
 /* ----- Cards ----- */
 .card {
   background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
@@ -667,7 +668,8 @@ a:hover {
   margin-bottom: 12px;
   background: var(--bg-card);
   border-radius: var(--radius-md);
-  border: 1px solid var(--accent);
+  border: 1px solid rgba(91, 141, 239, 0.42);
+  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.06);
 }
 
 .task-new-form input,
@@ -712,11 +714,16 @@ a:hover {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 .task-item:hover {
   background: var(--bg-card-hover);
   border-color: var(--border-light);
+}
+.task-item.expanded {
+  border-color: rgba(91, 141, 239, 0.62);
+  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.08);
 }
 
 .task-item-header {
@@ -748,10 +755,6 @@ a:hover {
 .task-item-due {
   font-size: 11px;
   color: var(--text-muted);
-}
-
-.task-item.expanded {
-  border-color: var(--accent);
 }
 
 .task-item-detail {
@@ -872,6 +875,7 @@ a:hover {
 
 .config-section {
   background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
@@ -940,11 +944,9 @@ a:hover {
   cursor: pointer;
 }
 
-/* Dark theme number input spinners */
 .config-field input[type="number"]::-webkit-inner-spin-button,
 .config-field input[type="number"]::-webkit-outer-spin-button {
-  filter: invert(0.7);
-  opacity: 0.8;
+  opacity: 0.75;
 }
 
 .config-toggle {
@@ -1015,7 +1017,7 @@ input:checked + .toggle-switch::after {
   justify-content: space-between;
   gap: 16px;
   padding: 12px 14px;
-  background: var(--bg-secondary);
+  background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
@@ -1168,7 +1170,7 @@ input:checked + .toggle-switch::after {
   tab-size: 4;
   resize: vertical;
   color: var(--text-primary);
-  background: var(--bg-input);
+  background: #fbfdff;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   outline: none;
@@ -1193,13 +1195,35 @@ input:checked + .toggle-switch::after {
   flex: 1;
 }
 
-.config-history-panel {
+.config-history-panel,
+.config-allkeys-panel {
   margin-bottom: 10px;
-  max-height: 260px;
   overflow-y: auto;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--bg-surface, var(--bg-input));
+  background: var(--bg-surface);
+}
+
+.config-history-panel {
+  max-height: 260px;
+}
+
+.config-allkeys-panel {
+  max-height: 300px;
+}
+
+.config-history-preview {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 200px;
+  overflow: auto;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  background: #fbfdff;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-primary);
 }
 
 .config-history-empty {
@@ -1269,30 +1293,7 @@ input:checked + .toggle-switch::after {
   cursor: not-allowed;
 }
 
-.config-history-preview {
-  margin: 0;
-  padding: 10px 12px;
-  max-height: 200px;
-  overflow: auto;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: pre;
-  background: var(--bg-input);
-  border-top: 1px solid var(--border-color);
-  color: var(--text-primary);
-}
-
 /* All configurable keys reference panel (SPEC-TOML-UI-004) */
-.config-allkeys-panel {
-  margin-bottom: 10px;
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-surface, var(--bg-input));
-}
-
 .config-allkeys-item {
   display: flex;
   align-items: center;

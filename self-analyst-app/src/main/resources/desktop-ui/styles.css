@@ -649,6 +649,7 @@ a:hover {
   max-height: none;
   flex: 1;
   margin: 12px;
+  border: none;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -668,8 +669,8 @@ a:hover {
   margin-bottom: 12px;
   background: var(--bg-card);
   border-radius: var(--radius-md);
-  border: 1px solid rgba(91, 141, 239, 0.42);
-  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.06);
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .task-new-form input,
@@ -722,8 +723,8 @@ a:hover {
   border-color: var(--border-light);
 }
 .task-item.expanded {
-  border-color: rgba(91, 141, 239, 0.62);
-  box-shadow: 0 0 0 3px rgba(91, 141, 239, 0.08);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
 .task-item-header {
@@ -1017,7 +1018,7 @@ input:checked + .toggle-switch::after {
   justify-content: space-between;
   gap: 16px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
@@ -1170,7 +1171,7 @@ input:checked + .toggle-switch::after {
   tab-size: 4;
   resize: vertical;
   color: var(--text-primary);
-  background: #fbfdff;
+  background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   outline: none;
@@ -1221,7 +1222,7 @@ input:checked + .toggle-switch::after {
   font-size: 12px;
   line-height: 1.45;
   white-space: pre;
-  background: #fbfdff;
+  background: var(--bg-input);
   border-top: 1px solid var(--border-color);
   color: var(--text-primary);
 }

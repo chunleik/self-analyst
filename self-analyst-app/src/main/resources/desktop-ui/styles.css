@@ -1593,8 +1593,8 @@ input:checked + .toggle-switch::after {
   line-height: 1;
 }
 .chat-session-item .session-delete-btn:hover {
-  color: var(--color-danger, #e74c3c);
-  background: var(--bg-hover);
+  color: var(--red);
+  background: var(--red-dim);
 }
 .chat-session-item:hover .session-delete-btn {
   display: block;
@@ -1700,7 +1700,7 @@ input:checked + .toggle-switch::after {
 }
 .structured-response-item {
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
 }
@@ -1785,6 +1785,7 @@ input:checked + .toggle-switch::after {
 }
 .chat-context-section {
   background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   padding: 10px;
 }
@@ -1848,6 +1849,10 @@ input:checked + .toggle-switch::after {
   text-align: center;
   max-width: 400px;
   padding: 32px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
 }
 
 .overlay-icon {

@@ -26,21 +26,21 @@
   --text-muted: #7b8798;
   --text-inverse: #ffffff;
 
-  --accent: #376dcc;
-  --accent-hover: #2f62bd;
+  --accent: #2f62bd;
+  --accent-hover: #2857ad;
   --accent-soft: #f2f7ff;
-  --accent-dim: rgba(55, 109, 204, 0.14);
-  --accent-strong: #376dcc;
-  --accent-strong-hover: #2f62bd;
+  --accent-dim: rgba(47, 98, 189, 0.14);
+  --accent-strong: #2f62bd;
+  --accent-strong-hover: #2857ad;
 
-  --green: #168a5b;
-  --green-dim: rgba(22, 138, 91, 0.12);
-  --orange: #c97914;
-  --orange-dim: rgba(201, 121, 20, 0.13);
-  --red: #d14343;
-  --red-dim: rgba(209, 67, 67, 0.12);
-  --gray: #6f7a89;
-  --gray-dim: rgba(111, 122, 137, 0.13);
+  --green: #0f6f4a;
+  --green-dim: rgba(15, 111, 74, 0.12);
+  --orange: #9a5a00;
+  --orange-dim: rgba(154, 90, 0, 0.13);
+  --red: #b42318;
+  --red-dim: rgba(180, 35, 24, 0.12);
+  --gray: #4b5563;
+  --gray-dim: rgba(75, 85, 99, 0.13);
 
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -401,7 +401,7 @@ a:hover {
 }
 
 .behavior-advice-card.type-encouragement {
-  border-left-color: #26a69a;
+  border-left-color: var(--green);
 }
 .behavior-advice-card.type-suggestion {
   border-left-color: var(--accent);
@@ -430,8 +430,8 @@ a:hover {
   line-height: 1.5;
 }
 .behavior-advice-type-tag.tag-encouragement {
-  background: rgba(38, 166, 154, 0.15);
-  color: #26a69a;
+  background: var(--green-dim);
+  color: var(--green);
 }
 .behavior-advice-type-tag.tag-suggestion {
   background: var(--accent-dim);
@@ -1185,9 +1185,9 @@ input:checked + .toggle-switch::after {
   margin-bottom: 10px;
   padding: 8px 12px;
   border-radius: 6px;
-  color: #c0392b;
-  background: rgba(192, 57, 43, 0.08);
-  border: 1px solid rgba(192, 57, 43, 0.3);
+  color: var(--red);
+  background: var(--red-dim);
+  border: 1px solid var(--red);
   font-size: 13px;
 }
 

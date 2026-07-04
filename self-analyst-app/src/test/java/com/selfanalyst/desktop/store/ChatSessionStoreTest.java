@@ -226,6 +226,7 @@ class ChatSessionStoreTest {
         assertNull(store.updateMessage("nope", "m", "c", null, null, null));
         assertNull(store.delete("nope"));
         assertNull(store.appendMessages("nope", List.of(msg("user", "x"))));
+        assertNull(store.updateMemoryPolicy("nope", "off"));
     }
 
     @Test
@@ -261,15 +262,71 @@ class ChatSessionStoreTest {
     }
 
     @Test
-    void updateMemoryPolicyPersistsToShardAndIndex(@TempDir Path memoryDir) {
+    void sessionHonorsProvidedAndBlankMemoryPolicies(@TempDir Path memoryDir) {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        CreateRequest off = req("off");
+        off.memoryPolicy = "off";
+        CreateRequest blank = req("blank");
+        blank.memoryPolicy = " ";
+
+        Session offSession = store.create(off);
+        Session blankSession = store.create(blank);
+
+        assertEquals("off", offSession.memoryPolicy);
+        assertEquals("off", store.getSession(offSession.id).memoryPolicy);
+        assertEquals("smart", blankSession.memoryPolicy);
+    }
+
+    @Test
+    void updateMemoryPolicyPersistsToShardAndIndex(@TempDir Path memoryDir) throws Exception {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("memory"));
+        var before = s.updatedAt;
+        Thread.sleep(5);
 
         Session updated = store.updateMemoryPolicy(s.id, "confirm_all");
 
         assertEquals("confirm_all", updated.memoryPolicy);
         assertEquals("confirm_all", store.getSession(s.id).memoryPolicy);
         assertEquals("confirm_all", store.listIndex().sessions.get(0).memoryPolicy);
+        assertTrue(updated.updatedAt.isAfter(before));
         assertThrows(IllegalArgumentException.class, () -> store.updateMemoryPolicy(s.id, "always"));
+    }
+
+    @Test
+    void legacyShardAndIndexDefaultMemoryPolicyOnRead(@TempDir Path memoryDir) throws Exception {
+        Path chatDir = memoryDir.resolve("chat-sessions");
+        Files.createDirectories(chatDir);
+        String id = "legacy-session";
+        Files.writeString(chatDir.resolve(id + ".json"), """
+                {
+                  "id": "legacy-session",
+                  "title": "Legacy",
+                  "createdAt": "2026-01-01T00:00:00Z",
+                  "updatedAt": "2026-01-01T00:00:00Z",
+                  "source": "manual",
+                  "messages": []
+                }
+                """);
+        Files.writeString(chatDir.resolve("index.json"), """
+                {
+                  "activeSessionId": "legacy-session",
+                  "sessions": [
+                    {
+                      "id": "legacy-session",
+                      "title": "Legacy",
+                      "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "source": "manual",
+                      "messageCount": 0
+                    }
+                  ]
+                }
+                """);
+
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+
+        assertEquals("smart", store.getSession(id).memoryPolicy);
+        assertEquals("smart", store.listIndex().sessions.get(0).memoryPolicy);
     }
 }

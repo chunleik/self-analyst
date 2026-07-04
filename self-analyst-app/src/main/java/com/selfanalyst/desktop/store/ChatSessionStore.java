@@ -93,6 +93,7 @@ public class ChatSessionStore {
             Index idx = MAPPER.readValue(indexFile.toFile(), Index.class);
             if (idx == null) idx = new Index();
             if (idx.sessions == null) idx.sessions = new ArrayList<>();
+            normalizeIndexMemoryPolicy(idx);
             return idx;
         } catch (IOException e) {
             log.warn("chat-sessions index.json unreadable ({}), rebuilding from shards", e.getMessage());
@@ -189,7 +190,9 @@ public class ChatSessionStore {
         Path shard = shardFile(id);
         if (id == null || !Files.exists(shard)) return null;
         try {
-            return MAPPER.readValue(shard.toFile(), Session.class);
+            Session s = MAPPER.readValue(shard.toFile(), Session.class);
+            normalizeSessionMemoryPolicy(s);
+            return s;
         } catch (IOException e) {
             log.warn("Failed to read chat shard {}: {}", id, e.getMessage());
             return null;
@@ -403,6 +406,20 @@ public class ChatSessionStore {
             case "smart", "confirm_all", "off" -> value;
             default -> throw new IllegalArgumentException("Invalid memoryPolicy: " + value);
         };
+    }
+
+    private static void normalizeSessionMemoryPolicy(Session s) {
+        if (s != null) {
+            s.memoryPolicy = normalizeMemoryPolicy(s.memoryPolicy);
+        }
+    }
+
+    private static void normalizeIndexMemoryPolicy(Index idx) {
+        for (SessionMeta m : idx.sessions) {
+            if (m != null) {
+                m.memoryPolicy = normalizeMemoryPolicy(m.memoryPolicy);
+            }
+        }
     }
 
     /** Keep only the newest {@link #MAX_MESSAGES} messages (SPEC-CSP-API-009b). */

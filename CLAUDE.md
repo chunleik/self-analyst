@@ -35,6 +35,7 @@ SelfAnalyst follows Specification-Driven Development. Every module and major fea
 | [docs/specs/config-toml.md](docs/specs/config-toml.md) | 用户级配置从 `.properties` 迁移到 TOML（`config.toml`）：格式/键拍平/类型校验、启动时存量自动迁移、raw 编辑器与版本历史适配 | `SPEC-TOML-*` |
 | [docs/specs/chat-session-store.md](docs/specs/chat-session-store.md) | 桌面端会话改为后端持久化：`{memoryDir}/chat-sessions/` 按会话分片 + 索引 + REST CRUD（取代 localStorage，不迁移旧数据，会话数不设上限，按会话摘要搜索） | `SPEC-CSP-*` |
 | [docs/specs/i18n.md](docs/specs/i18n.md) | 桌面端中/英双语国际化：后端全部 LLM 提示词 + 桌面 UI 全部界面文案按有效语言切换；`app.language=zh\|en\|auto`（默认 auto，读系统 Locale，可覆盖），并修复写死中文字面量泄漏 | `SPEC-I18N-*` |
+| [docs/specs/long-term-memory.md](docs/specs/long-term-memory.md) | 长期记忆：从会话自动提炼可长期复用的信息，按风险分级自动保存或待用户确认，并提供会话级记忆策略与记忆管理入口 | `SPEC-LTM-*` |
 
 ### Archive
 

@@ -5,9 +5,18 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public class LongTermMemoryService {
+
+    private static final Pattern CREDENTIAL_LIKE_PATTERN = Pattern.compile(
+            "(?is).*(\\b[a-z0-9_-]*api[_-]?key\\b\\s*[:=]\\s*\\S+"
+                    + "|\\b[a-z0-9_-]*token\\b\\s*[:=]\\s*\\S+"
+                    + "|\\bpassword\\b\\s*[:=]\\s*\\S+"
+                    + "|\\bauthorization\\b\\s*:\\s*bearer\\s+\\S+"
+                    + "|\\bsk-[a-z0-9_-]{8,}\\b).*");
 
     private final MemoryStore store;
 
@@ -40,10 +49,11 @@ public class LongTermMemoryService {
         GrowthProfile.MemoryItem existing = findDuplicate(clean);
         if (existing != null) return existing;
         Instant now = Instant.now();
+        String cleanStatus = normalizeStatus(requestedStatus);
         GrowthProfile.MemoryItem item = new GrowthProfile.MemoryItem(
                 newId(), normalizeType(type), clean, cleanEvidence, 10,
-                normalizeStatus(requestedStatus), false, "confirm".equals(requestedStatus) ? "confirm" : "auto",
-                source != null ? source : "ui_manual", sourceSessionId, List.of(), now, now);
+                cleanStatus, false, "confirm".equals(canonical(requestedStatus)) ? "confirm" : "auto",
+                normalizeSource(source), sourceSessionId, List.of(), now, now);
         List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
         List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
         items.add(item);
@@ -57,11 +67,15 @@ public class LongTermMemoryService {
         List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
         for (int i = 0; i < items.size(); i++) {
             GrowthProfile.MemoryItem old = items.get(i);
-            if (old.id().equals(id)) {
+            if (Objects.equals(old.id(), id)) {
                 String nextContent = content != null ? normalizeContent(content) : old.content();
                 String nextEvidence = evidence != null ? blankToNull(evidence) : old.evidence();
                 rejectForbidden(nextContent);
                 rejectForbidden(nextEvidence);
+                GrowthProfile.MemoryItem duplicate = findDuplicate(nextContent, old);
+                if (duplicate != null) {
+                    throw new IllegalArgumentException("Duplicate memory content is already stored");
+                }
                 GrowthProfile.MemoryItem updated = new GrowthProfile.MemoryItem(
                         old.id(),
                         type != null ? normalizeType(type) : old.type(),
@@ -88,7 +102,7 @@ public class LongTermMemoryService {
     public synchronized boolean delete(String id) throws IOException {
         List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
         List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
-        boolean removed = items.removeIf(m -> m.id().equals(id));
+        boolean removed = items.removeIf(m -> Objects.equals(m.id(), id));
         if (removed) saveOrRestore(items, snapshot);
         return removed;
     }
@@ -105,21 +119,30 @@ public class LongTermMemoryService {
     }
 
     private GrowthProfile.MemoryItem findDuplicate(String content) {
+        return findDuplicate(content, null);
+    }
+
+    private GrowthProfile.MemoryItem findDuplicate(String content, GrowthProfile.MemoryItem excluded) {
         String normalized = fingerprint(content);
         return store.profile().getMemories().stream()
                 .filter(m -> !"rejected".equals(m.status()))
+                .filter(m -> !isSameMemory(m, excluded))
                 .filter(m -> normalized.equals(fingerprint(m.content())))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static boolean isSameMemory(GrowthProfile.MemoryItem item, GrowthProfile.MemoryItem other) {
+        if (other == null) return false;
+        if (item.id() != null || other.id() != null) return Objects.equals(item.id(), other.id());
+        return item == other;
     }
 
     private static void rejectForbidden(String content) {
         if (content == null) {
             return;
         }
-        String lower = content.toLowerCase(Locale.ROOT);
-        if (lower.contains("api_key") || lower.contains("token=") || lower.contains("password=")
-                || lower.matches(".*sk-[a-z0-9_-]{8,}.*")) {
+        if (CREDENTIAL_LIKE_PATTERN.matcher(content).matches()) {
             throw new IllegalArgumentException("Sensitive credential-like content cannot be stored as memory");
         }
     }
@@ -136,7 +159,8 @@ public class LongTermMemoryService {
     }
 
     private static String normalizeType(String type) {
-        String normalized = type == null ? "note" : type;
+        String normalized = canonical(type);
+        if (normalized.isEmpty()) return "note";
         return switch (normalized) {
             case "goal", "preference", "project", "pattern", "fact", "note" -> normalized;
             default -> "note";
@@ -144,11 +168,20 @@ public class LongTermMemoryService {
     }
 
     private static String normalizeStatus(String status) {
-        String normalized = status == null ? "active" : status;
+        String normalized = canonical(status);
+        if (normalized.isEmpty()) return "active";
         return switch (normalized) {
             case "active", "pending", "disabled", "rejected" -> normalized;
             default -> "active";
         };
+    }
+
+    private static String normalizeSource(String source) {
+        return source == null || source.isBlank() ? "ui_manual" : source.trim();
+    }
+
+    private static String canonical(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private static String fingerprint(String content) {

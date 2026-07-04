@@ -37,11 +37,61 @@ class LongTermMemoryServiceTest {
     }
 
     @Test
+    void updateRejectsDuplicateContentAndLeavesItemsUnchanged() throws Exception {
+        LongTermMemoryService svc = service();
+        GrowthProfile.MemoryItem first = svc.createManual("preference", "用户偏好中文。", "one", null, "ui_manual", "active");
+        GrowthProfile.MemoryItem second = svc.createManual("preference", "用户偏好英文。", "two", null, "ui_manual", "active");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () ->
+                svc.update(second.id(), null, " 用户偏好中文。 ", null, null, null, null));
+
+        assertTrue(error.getMessage().contains("Duplicate memory content"));
+        assertEquals(2, svc.list(null, null, null, null).size());
+        assertEquals("用户偏好中文。", memoryById(svc, first.id()).content());
+        assertEquals("用户偏好英文。", memoryById(svc, second.id()).content());
+    }
+
+    @Test
+    void createManualNormalizesTypeStatusAndBlankSource() throws Exception {
+        LongTermMemoryService svc = service();
+
+        GrowthProfile.MemoryItem item = svc.createManual(
+                " Goal ", "每天深度工作三小时。", "manual", null, "   ", "Pending ");
+
+        assertEquals("goal", item.type());
+        assertEquals("pending", item.status());
+        assertEquals("ui_manual", item.source());
+    }
+
+    @Test
     void secretLikeContentIsRejected() throws Exception {
         LongTermMemoryService svc = service();
         assertThrows(IllegalArgumentException.class, () ->
                 svc.createManual("fact", "OPENAI_API_KEY=sk-test-secret", "bad", null, "ui_manual", "active"));
         assertTrue(svc.list(null, null, null, null).isEmpty());
+    }
+
+    @Test
+    void credentialLikePatternsAreRejectedInContentAndEvidence() throws Exception {
+        List<String> secrets = List.of(
+                "password: swordfish",
+                "api-key=abc123456",
+                "access_token: abcdefgh",
+                "Authorization: Bearer abcdefgh");
+
+        for (int i = 0; i < secrets.size(); i++) {
+            String secret = secrets.get(i);
+            String index = Integer.toString(i);
+            LongTermMemoryService contentSvc = new LongTermMemoryService(MemoryStore.load(tempDir.resolve("content-" + index)));
+            assertThrows(IllegalArgumentException.class, () ->
+                    contentSvc.createManual("fact", secret, "safe", null, "ui_manual", "active"));
+            assertTrue(contentSvc.list(null, null, null, null).isEmpty());
+
+            LongTermMemoryService evidenceSvc = new LongTermMemoryService(MemoryStore.load(tempDir.resolve("evidence-" + index)));
+            assertThrows(IllegalArgumentException.class, () ->
+                    evidenceSvc.createManual("fact", "safe content " + index, secret, null, "ui_manual", "active"));
+            assertTrue(evidenceSvc.list(null, null, null, null).isEmpty());
+        }
     }
 
     @Test
@@ -136,6 +186,25 @@ class LongTermMemoryServiceTest {
         assertEquals(List.of(original), profile.getMemories());
     }
 
+    @Test
+    void missingUpdateAndDeleteTolerateNullIds() throws Exception {
+        MemoryStore store = MemoryStore.load(tempDir);
+        store.profile().getMemories().add(item(null, Instant.parse("2026-07-04T01:00:00Z")));
+        LongTermMemoryService svc = new LongTermMemoryService(store);
+
+        assertNull(svc.update("missing", null, "changed", null, null, null, null));
+        assertFalse(svc.delete("missing"));
+    }
+
+    @Test
+    void updateClampsConfidenceToRange() throws Exception {
+        LongTermMemoryService svc = service();
+        GrowthProfile.MemoryItem item = svc.createManual("note", "confidence bounds", "manual", null, "ui_manual", "active");
+
+        assertEquals(10, svc.update(item.id(), null, null, null, 99, null, null).confidence());
+        assertEquals(1, svc.update(item.id(), null, null, null, -5, null, null).confidence());
+    }
+
     private LongTermMemoryService service() throws Exception {
         return new LongTermMemoryService(MemoryStore.load(tempDir));
     }
@@ -150,5 +219,12 @@ class LongTermMemoryServiceTest {
         return new GrowthProfile.MemoryItem(
                 id, "note", "content " + id, "evidence " + id, 5, "active", false,
                 "auto", "test", "session-1", List.of(), Instant.parse("2026-07-04T00:00:00Z"), updatedAt);
+    }
+
+    private static GrowthProfile.MemoryItem memoryById(LongTermMemoryService svc, String id) {
+        return svc.list(null, null, null, null).stream()
+                .filter(m -> id.equals(m.id()))
+                .findFirst()
+                .orElseThrow();
     }
 }

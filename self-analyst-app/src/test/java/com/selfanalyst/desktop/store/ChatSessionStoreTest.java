@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Sharded persistence, CRUD, invariants, isolation, index rebuild (SPEC-CSP-TST-001..014). */
@@ -248,5 +249,27 @@ class ChatSessionStoreTest {
                 new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
                 .readValue(shard.toFile(), Session.class);
         assertEquals(s.id, reloaded.id);
+    }
+
+    @Test
+    void sessionDefaultsMemoryPolicyToSmart(@TempDir Path memoryDir) {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        Session s = store.create(req("memory"));
+
+        assertEquals("smart", s.memoryPolicy);
+        assertEquals("smart", store.listIndex().sessions.get(0).memoryPolicy);
+    }
+
+    @Test
+    void updateMemoryPolicyPersistsToShardAndIndex(@TempDir Path memoryDir) {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        Session s = store.create(req("memory"));
+
+        Session updated = store.updateMemoryPolicy(s.id, "confirm_all");
+
+        assertEquals("confirm_all", updated.memoryPolicy);
+        assertEquals("confirm_all", store.getSession(s.id).memoryPolicy);
+        assertEquals("confirm_all", store.listIndex().sessions.get(0).memoryPolicy);
+        assertThrows(IllegalArgumentException.class, () -> store.updateMemoryPolicy(s.id, "always"));
     }
 }

@@ -159,6 +159,7 @@ public class ChatSessionStore {
         m.updatedAt = s.updatedAt;
         m.source = s.source;
         m.contextLabel = s.contextLabel;
+        m.memoryPolicy = normalizeMemoryPolicy(s.memoryPolicy);
         m.summary = s.summary;
         m.messageCount = s.messages != null ? s.messages.size() : 0;
         m.lastMessagePreview = lastPreview(s);
@@ -211,6 +212,7 @@ public class ChatSessionStore {
         s.updatedAt = now;
         s.title = (req != null && req.title != null && !req.title.isBlank()) ? req.title : "新会话";
         s.source = (req != null && req.source != null && !req.source.isBlank()) ? req.source : "manual";
+        s.memoryPolicy = normalizeMemoryPolicy(req != null ? req.memoryPolicy : null);
         if (req != null) {
             s.contextLabel = req.contextLabel;
             s.contextSnapshot = req.contextSnapshot;
@@ -242,6 +244,18 @@ public class ChatSessionStore {
         if (title != null) s.title = title;
         if (contextLabel != null) s.contextLabel = contextLabel;
         if (contextSnapshot != null) s.contextSnapshot = contextSnapshot;
+        s.updatedAt = Instant.now();
+        writeJson(shardFile(id), s);
+        Index idx = loadIndex();
+        upsertMeta(idx, s);
+        writeJson(indexFile, idx);
+        return s;
+    }
+
+    public synchronized Session updateMemoryPolicy(String id, String memoryPolicy) {
+        Session s = getSession(id);
+        if (s == null) return null;
+        s.memoryPolicy = normalizeMemoryPolicy(memoryPolicy);
         s.updatedAt = Instant.now();
         writeJson(shardFile(id), s);
         Index idx = loadIndex();
@@ -383,6 +397,14 @@ public class ChatSessionStore {
         return content;
     }
 
+    private static String normalizeMemoryPolicy(String value) {
+        if (value == null || value.isBlank()) return "smart";
+        return switch (value) {
+            case "smart", "confirm_all", "off" -> value;
+            default -> throw new IllegalArgumentException("Invalid memoryPolicy: " + value);
+        };
+    }
+
     /** Keep only the newest {@link #MAX_MESSAGES} messages (SPEC-CSP-API-009b). */
     private static void truncateMessages(Session s) {
         if (s.messages != null && s.messages.size() > MAX_MESSAGES) {
@@ -419,6 +441,7 @@ public class ChatSessionStore {
         public String source;          // manual | agent_context | task_context
         public String contextLabel;
         public Object contextSnapshot; // opaque, round-tripped (SPEC-CSP-MODEL-003)
+        public String memoryPolicy; // smart | confirm_all | off
         public String summary;
         public List<Message> messages = new ArrayList<>();
     }
@@ -452,6 +475,7 @@ public class ChatSessionStore {
 
         public String source;
         public String contextLabel;
+        public String memoryPolicy; // smart | confirm_all | off
         public String summary;
         public String lastMessagePreview;
         public int messageCount;
@@ -471,6 +495,7 @@ public class ChatSessionStore {
         public String source;
         public String contextLabel;
         public Object contextSnapshot;
+        public String memoryPolicy; // smart | confirm_all | off
         public List<Message> initialMessages;
     }
 

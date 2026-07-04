@@ -44,9 +44,34 @@ class GrowthProfileMemoryItemTest {
         assertTrue(summary.contains("上午专注度高"));
     }
 
+    @Test
+    void contextSummarySortsActiveMemoriesByConfidenceAndLimitsToThirty() {
+        GrowthProfile profile = new GrowthProfile();
+        profile.getMemories().add(item("lower-included", "pattern", "较低置信但应保留的长期记忆", "active", 8));
+        profile.getMemories().add(item("highest", "preference", "高置信长期记忆", "active", 10));
+        for (int i = 1; i <= 28; i++) {
+            profile.getMemories().add(item("filler-" + i, "fact", "填充长期记忆 " + i, "active", 7));
+        }
+        profile.getMemories().add(item("excluded-31", "fact", "第 31 条应被排除的长期记忆", "active", 1));
+
+        String summary = profile.buildContextSummary();
+
+        assertTrue(summary.contains("## 长期记忆"));
+        int highestIndex = summary.indexOf("高置信长期记忆");
+        int lowerIndex = summary.indexOf("较低置信但应保留的长期记忆");
+        assertTrue(highestIndex >= 0);
+        assertTrue(lowerIndex >= 0);
+        assertTrue(highestIndex < lowerIndex);
+        assertFalse(summary.contains("第 31 条应被排除的长期记忆"));
+    }
+
     private static GrowthProfile.MemoryItem item(String id, String type, String content, String status) {
+        return item(id, type, content, status, 9);
+    }
+
+    private static GrowthProfile.MemoryItem item(String id, String type, String content, String status, int confidence) {
         return new GrowthProfile.MemoryItem(
-                id, type, content, "test evidence", 9, status, false, "auto",
+                id, type, content, "test evidence", confidence, status, false, "auto",
                 "chat_auto", "session-1", List.of("msg-1"), Instant.parse("2026-07-04T00:00:00Z"),
                 Instant.parse("2026-07-04T00:00:00Z"));
     }

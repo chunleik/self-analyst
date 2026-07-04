@@ -53,4 +53,19 @@ class MemoryStoreTest {
         assertEquals(1, loaded.profile().getLogs().size());
         assertEquals("试行集中会议", loaded.profile().getLogs().getFirst().action());
     }
+
+    @Test
+    void shouldRoundTripMemoryItems() throws Exception {
+        MemoryStore store = MemoryStore.load(tempDir);
+        store.profile().getMemories().add(new GrowthProfile.MemoryItem(
+                "mem-1", "preference", "用户偏好使用中文交流。", "用户明确说明",
+                9, "active", false, "auto", "chat_auto", "session-1",
+                List.of("msg-1"), java.time.Instant.parse("2026-07-04T00:00:00Z"),
+                java.time.Instant.parse("2026-07-04T00:00:00Z")));
+        store.save();
+
+        MemoryStore loaded = MemoryStore.load(tempDir);
+        assertEquals(1, loaded.profile().getMemories().size());
+        assertEquals("用户偏好使用中文交流。", loaded.profile().getMemories().getFirst().content());
+    }
 }

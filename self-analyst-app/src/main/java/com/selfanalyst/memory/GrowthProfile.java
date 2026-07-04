@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateDeserializer;
 import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateSerializer;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -50,9 +51,26 @@ public class GrowthProfile {
             LocalDate observedAt) {
     }
 
+    public record MemoryItem(
+            String id,
+            String type,
+            String content,
+            String evidence,
+            int confidence,
+            String status,
+            boolean sensitive,
+            String approvalPolicy,
+            String source,
+            String sourceSessionId,
+            List<String> sourceMessageIds,
+            Instant createdAt,
+            Instant updatedAt) {
+    }
+
     private List<Goal> goals = new ArrayList<>();
     private List<KnownPattern> patterns = new ArrayList<>();
     private List<ImprovementLog> logs = new ArrayList<>();
+    private List<MemoryItem> memories = new ArrayList<>();
 
     public GrowthProfile() {}
 
@@ -62,6 +80,13 @@ public class GrowthProfile {
     public void setPatterns(List<KnownPattern> patterns) { this.patterns = patterns; }
     public List<ImprovementLog> getLogs() { return logs; }
     public void setLogs(List<ImprovementLog> logs) { this.logs = logs; }
+    public List<MemoryItem> getMemories() {
+        if (memories == null) memories = new ArrayList<>();
+        return memories;
+    }
+    public void setMemories(List<MemoryItem> memories) {
+        this.memories = memories != null ? memories : new ArrayList<>();
+    }
 
     public String buildContextSummary() {
         StringBuilder sb = new StringBuilder();
@@ -97,6 +122,24 @@ public class GrowthProfile {
                 sb.append("- ").append(log.observedAt()).append(": ")
                   .append(log.action()).append(" → ").append(log.outcome()).append("\n");
             }
+            sb.append("\n");
+        }
+
+        List<MemoryItem> activeMemories = getMemories().stream()
+                .filter(m -> "active".equals(m.status()))
+                .toList();
+        if (!activeMemories.isEmpty()) {
+            sb.append("## 长期记忆\n");
+            activeMemories.stream()
+                    .sorted((a, b) -> Integer.compare(b.confidence(), a.confidence()))
+                    .limit(30)
+                    .forEach(m -> sb.append("- [")
+                            .append(m.type())
+                            .append("] ")
+                            .append(m.content())
+                            .append("（置信度: ")
+                            .append(m.confidence())
+                            .append("/10）\n"));
             sb.append("\n");
         }
 

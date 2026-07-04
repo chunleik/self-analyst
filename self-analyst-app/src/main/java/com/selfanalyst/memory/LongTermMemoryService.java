@@ -2,7 +2,7 @@ package com.selfanalyst.memory;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -26,9 +26,7 @@ public class LongTermMemoryService {
                 .filter(m -> query.isEmpty()
                         || lower(m.content()).contains(query)
                         || lower(m.evidence()).contains(query))
-                .sorted(Comparator.comparing(
-                        GrowthProfile.MemoryItem::updatedAt,
-                        Comparator.nullsLast(Comparator.naturalOrder())).reversed())
+                .sorted(LongTermMemoryService::compareUpdatedAtDescendingNullsLast)
                 .toList();
     }
 
@@ -36,16 +34,20 @@ public class LongTermMemoryService {
                                                               String sourceSessionId, String source,
                                                               String requestedStatus) throws IOException {
         String clean = normalizeContent(content);
+        String cleanEvidence = blankToNull(evidence);
         rejectForbidden(clean);
+        rejectForbidden(cleanEvidence);
         GrowthProfile.MemoryItem existing = findDuplicate(clean);
         if (existing != null) return existing;
         Instant now = Instant.now();
         GrowthProfile.MemoryItem item = new GrowthProfile.MemoryItem(
-                newId(), normalizeType(type), clean, blankToNull(evidence), 10,
+                newId(), normalizeType(type), clean, cleanEvidence, 10,
                 normalizeStatus(requestedStatus), false, "confirm".equals(requestedStatus) ? "confirm" : "auto",
                 source != null ? source : "ui_manual", sourceSessionId, List.of(), now, now);
-        store.profile().getMemories().add(item);
-        store.save();
+        List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
+        List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
+        items.add(item);
+        saveOrRestore(items, snapshot);
         return item;
     }
 
@@ -57,12 +59,14 @@ public class LongTermMemoryService {
             GrowthProfile.MemoryItem old = items.get(i);
             if (old.id().equals(id)) {
                 String nextContent = content != null ? normalizeContent(content) : old.content();
+                String nextEvidence = evidence != null ? blankToNull(evidence) : old.evidence();
                 rejectForbidden(nextContent);
+                rejectForbidden(nextEvidence);
                 GrowthProfile.MemoryItem updated = new GrowthProfile.MemoryItem(
                         old.id(),
                         type != null ? normalizeType(type) : old.type(),
                         nextContent,
-                        evidence != null ? blankToNull(evidence) : old.evidence(),
+                        nextEvidence,
                         confidence != null ? clampConfidence(confidence) : old.confidence(),
                         status != null ? normalizeStatus(status) : old.status(),
                         sensitive != null ? sensitive : old.sensitive(),
@@ -72,8 +76,9 @@ public class LongTermMemoryService {
                         old.sourceMessageIds(),
                         old.createdAt(),
                         Instant.now());
+                List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
                 items.set(i, updated);
-                store.save();
+                saveOrRestore(items, snapshot);
                 return updated;
             }
         }
@@ -81,9 +86,22 @@ public class LongTermMemoryService {
     }
 
     public synchronized boolean delete(String id) throws IOException {
-        boolean removed = store.profile().getMemories().removeIf(m -> m.id().equals(id));
-        if (removed) store.save();
+        List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
+        List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
+        boolean removed = items.removeIf(m -> m.id().equals(id));
+        if (removed) saveOrRestore(items, snapshot);
         return removed;
+    }
+
+    private void saveOrRestore(List<GrowthProfile.MemoryItem> items, List<GrowthProfile.MemoryItem> snapshot)
+            throws IOException {
+        try {
+            store.save();
+        } catch (IOException | RuntimeException e) {
+            items.clear();
+            items.addAll(snapshot);
+            throw e;
+        }
     }
 
     private GrowthProfile.MemoryItem findDuplicate(String content) {
@@ -96,6 +114,9 @@ public class LongTermMemoryService {
     }
 
     private static void rejectForbidden(String content) {
+        if (content == null) {
+            return;
+        }
         String lower = content.toLowerCase(Locale.ROOT);
         if (lower.contains("api_key") || lower.contains("token=") || lower.contains("password=")
                 || lower.matches(".*sk-[a-z0-9_-]{8,}.*")) {
@@ -144,5 +165,15 @@ public class LongTermMemoryService {
 
     private static int clampConfidence(int value) {
         return Math.max(1, Math.min(10, value));
+    }
+
+    private static int compareUpdatedAtDescendingNullsLast(GrowthProfile.MemoryItem left,
+                                                           GrowthProfile.MemoryItem right) {
+        Instant leftUpdatedAt = left.updatedAt();
+        Instant rightUpdatedAt = right.updatedAt();
+        if (leftUpdatedAt == null && rightUpdatedAt == null) return 0;
+        if (leftUpdatedAt == null) return 1;
+        if (rightUpdatedAt == null) return -1;
+        return rightUpdatedAt.compareTo(leftUpdatedAt);
     }
 }

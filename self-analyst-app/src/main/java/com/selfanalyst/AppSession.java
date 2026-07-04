@@ -227,6 +227,7 @@ public class AppSession implements AutoCloseable {
                     awServer.eventStore(), memoryStore, watcherManager, contentWatcher, audioWatcher);
             desktopServer.start();
             awServer.registerWebUi();
+            log.info(desktopUiStartupLogMessage(config.awPort()));
         }
     }
 
@@ -276,6 +277,10 @@ public class AppSession implements AutoCloseable {
         } catch (Exception e) {
             log.warn("嵌入式 AW 启动失败: {}", e.getMessage());
         }
+    }
+
+    static String desktopUiStartupLogMessage(int port) {
+        return "Desktop UI 已就绪: http://localhost:" + port + "/desktop-ui/";
     }
 
     public Config config() { return config; }

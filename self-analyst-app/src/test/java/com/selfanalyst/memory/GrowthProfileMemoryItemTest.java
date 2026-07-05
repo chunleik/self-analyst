@@ -3,7 +3,10 @@ package com.selfanalyst.memory;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.AbstractList;
+import java.util.ConcurrentModificationException;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -77,6 +80,17 @@ class GrowthProfileMemoryItemTest {
         assertFalse(summary.contains("第 31 条应被排除的长期记忆"));
     }
 
+    @Test
+    void contextSummaryCopiesMemoryListBeforeStreaming() {
+        GrowthProfile profile = new GrowthProfile();
+        profile.setMemories(new StreamHostileMemoryList(List.of(
+                item("active-1", "preference", "用户偏好使用中文交流。", "active"))));
+
+        String summary = profile.buildContextSummary();
+
+        assertTrue(summary.contains("用户偏好使用中文交流。"));
+    }
+
     private static GrowthProfile.MemoryItem item(String id, String type, String content, String status) {
         return item(id, type, content, status, 9);
     }
@@ -86,5 +100,28 @@ class GrowthProfileMemoryItemTest {
                 id, type, content, "test evidence", confidence, status, false, "auto",
                 "chat_auto", "session-1", List.of("msg-1"), Instant.parse("2026-07-04T00:00:00Z"),
                 Instant.parse("2026-07-04T00:00:00Z"));
+    }
+
+    private static final class StreamHostileMemoryList extends AbstractList<GrowthProfile.MemoryItem> {
+        private final List<GrowthProfile.MemoryItem> delegate;
+
+        private StreamHostileMemoryList(List<GrowthProfile.MemoryItem> delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public GrowthProfile.MemoryItem get(int index) {
+            return delegate.get(index);
+        }
+
+        @Override
+        public int size() {
+            return delegate.size();
+        }
+
+        @Override
+        public Stream<GrowthProfile.MemoryItem> stream() {
+            throw new ConcurrentModificationException("live memory stream was used");
+        }
     }
 }

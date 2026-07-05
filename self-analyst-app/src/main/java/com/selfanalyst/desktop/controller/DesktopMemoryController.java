@@ -46,9 +46,9 @@ public class DesktopMemoryController {
             JsonNode body = MAPPER.readTree(ctx.body());
             var updated = memoryService.update(ctx.pathParam("id"), text(body, "type"),
                     text(body, "content"), text(body, "evidence"),
-                    body.has("confidence") ? body.get("confidence").asInt() : null,
+                    body.hasNonNull("confidence") ? body.get("confidence").asInt() : null,
                     text(body, "status"),
-                    body.has("sensitive") ? body.get("sensitive").asBoolean() : null);
+                    body.hasNonNull("sensitive") ? body.get("sensitive").asBoolean() : null);
             if (updated == null) {
                 ctx.status(404).json(Map.of("error", "Memory not found: " + ctx.pathParam("id")));
                 return;

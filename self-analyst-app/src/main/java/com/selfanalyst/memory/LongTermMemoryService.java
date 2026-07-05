@@ -63,7 +63,7 @@ public class LongTermMemoryService {
         String cleanStatus = normalizeStatus(requestedStatus);
         GrowthProfile.MemoryItem item = new GrowthProfile.MemoryItem(
                 newId(), normalizeType(type), clean, cleanEvidence, 10,
-                cleanStatus, false, "confirm".equals(canonical(requestedStatus)) ? "confirm" : "auto",
+                cleanStatus, false, "pending".equals(cleanStatus) ? "confirm" : "auto",
                 normalizeSource(source), sourceSessionId, List.of(), now, now);
         List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
         List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
@@ -296,7 +296,7 @@ public class LongTermMemoryService {
     private static boolean matchesForgetTarget(GrowthProfile.MemoryItem item, String target) {
         String content = fingerprint(item.content());
         String evidence = fingerprint(item.evidence());
-        return content.contains(target) || target.contains(content)
+        return content.contains(target)
                 || evidence.contains(target);
     }
 

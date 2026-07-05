@@ -112,6 +112,24 @@ class MemoryExtractionServiceTest {
     }
 
     @Test
+    void invalidCandidateDoesNotDropLaterValidCandidate() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+
+        svc.extractAfterAssistantSent(session("smart"), user("我偏好中文回答。"), assistant("收到。"),
+                (prompt, timeout) -> """
+                        [
+                          {"type":"fact","content":"api-key=sk-test-secret123","evidence":"bad","confidence":10,"sensitive":true,"approvalPolicy":"confirm"},
+                          {"type":"preference","content":"用户偏好中文回答。","evidence":"用户明确说明。","confidence":9,"sensitive":false,"approvalPolicy":"auto"}
+                        ]
+                        """);
+
+        List<GrowthProfile.MemoryItem> active = memory.list("active", null, null, null);
+        assertEquals(1, active.size());
+        assertEquals("用户偏好中文回答。", active.getFirst().content());
+    }
+
+    @Test
     void credentialLikeChatTextDoesNotReachExtractionClient() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
@@ -196,20 +214,56 @@ class MemoryExtractionServiceTest {
     }
 
     @Test
-    void forgetInstructionDisablesMatchingMemoryWithoutCallingLlm() throws Exception {
+    void offPolicyDoesNotDisableMemoryFromForgetText() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         GrowthProfile.MemoryItem item = memory.createManual(
                 "preference", "用户偏好中文交流。", "manual", "session-1", "chat_manual", "active");
         MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
         AtomicBoolean called = new AtomicBoolean(false);
 
-        svc.extractAfterAssistantSent(session("off"), user("不要记住 用户偏好中文交流。"), assistant("已处理。"),
+        svc.extractAfterAssistantSent(session("off"), user("忘记 用户偏好中文交流。"), assistant("已处理。"),
                 (prompt, timeout) -> {
                     called.set(true);
                     return "[]";
                 });
 
         assertFalse(called.get());
+        assertEquals("active", memory.list(null, null, null, null).stream()
+                .filter(m -> item.id().equals(m.id()))
+                .findFirst()
+                .orElseThrow()
+                .status());
+    }
+
+    @Test
+    void reminderTextWithForgetSubstringDoesNotDisableMemory() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        GrowthProfile.MemoryItem item = memory.createManual(
+                "note", "喝水", "manual", "session-1", "chat_manual", "active");
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+
+        svc.extractAfterAssistantSent(session("smart"), user("别忘记提醒我喝水。"), assistant("好的。"),
+                (prompt, timeout) -> "[]");
+
+        assertEquals("active", memory.list(null, null, null, null).stream()
+                .filter(m -> item.id().equals(m.id()))
+                .findFirst()
+                .orElseThrow()
+                .status());
+    }
+
+    @Test
+    void disableActionFromExtractionDisablesMemoryById() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        GrowthProfile.MemoryItem item = memory.createManual(
+                "preference", "用户偏好中文交流。", "manual", "session-1", "chat_manual", "active");
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+
+        svc.extractAfterAssistantSent(session("smart"), user("请忘记这条中文偏好。"), assistant("已处理。"),
+                (prompt, timeout) -> """
+                        [{"action":"disable","id":"%s"}]
+                        """.formatted(item.id()));
+
         assertEquals("disabled", memory.list(null, null, null, null).stream()
                 .filter(m -> item.id().equals(m.id()))
                 .findFirst()

@@ -24,6 +24,16 @@ const sandbox = {
       "chat.moreSummaries": `还有 ${params?.n ?? 0} 条摘要未展开`,
       "chat.sendFailed": `发送失败: ${params?.msg ?? ""}`,
       "common.unknownError": "未知错误",
+      "memory.loading": "加载中",
+      "memory.loadFailed": `加载失败: ${params?.msg ?? ""}`,
+      "memory.noSession": "无会话",
+      "memory.policy.smart": "智能",
+      "memory.policy.confirmAll": "全部确认",
+      "memory.policy.off": "关闭",
+      "memory.pendingCount": `待确认 ${params?.n ?? 0}`,
+      "memory.addPlaceholder": "添加记忆",
+      "memory.add": "添加",
+      "memory.empty": "暂无记忆",
     };
     return messages[key] || key;
   },
@@ -61,3 +71,36 @@ assert.equal(
   sandbox.formatChatErrorMessage(new Error("timeout")),
   "发送失败: timeout",
 );
+
+const root = { innerHTML: "", textContent: "" };
+const draft = { value: "", oninput: null };
+const elements = {
+  "chat-memory-content": root,
+  "session-memory-policy": {},
+  "memory-draft-input": draft,
+  "memory-add-btn": {},
+};
+sandbox.document = {
+  getElementById(id) {
+    return elements[id] || null;
+  },
+  querySelectorAll() {
+    return [];
+  },
+};
+sandbox.state = {
+  activeChatSessionId: "session-1",
+  chatSessions: [{ id: "session-1", memoryPolicy: "smart" }],
+  memoryLoading: false,
+  memoryLoadError: null,
+  memoryItems: [],
+  pendingMemoryCount: 0,
+  memoryDraft: "未提交草稿",
+};
+
+sandbox.renderChatMemoryPanel();
+assert.equal(draft.value, "未提交草稿");
+assert.equal(typeof draft.oninput, "function");
+draft.value = "新的草稿";
+draft.oninput();
+assert.equal(sandbox.state.memoryDraft, "新的草稿");

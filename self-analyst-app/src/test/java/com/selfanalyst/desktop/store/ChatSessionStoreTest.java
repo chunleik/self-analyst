@@ -294,6 +294,16 @@ class ChatSessionStoreTest {
     }
 
     @Test
+    void createRejectsInvalidMemoryPolicy(@TempDir Path memoryDir) {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        CreateRequest bad = req("bad policy");
+        bad.memoryPolicy = "always";
+
+        assertThrows(IllegalArgumentException.class, () -> store.create(bad));
+        assertTrue(store.listIndex().sessions.isEmpty());
+    }
+
+    @Test
     void legacyShardAndIndexDefaultMemoryPolicyOnRead(@TempDir Path memoryDir) throws Exception {
         Path chatDir = memoryDir.resolve("chat-sessions");
         Files.createDirectories(chatDir);
@@ -327,6 +337,54 @@ class ChatSessionStoreTest {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
 
         assertEquals("smart", store.getSession(id).memoryPolicy);
+        assertEquals("smart", store.listIndex().sessions.get(0).memoryPolicy);
+    }
+
+    @Test
+    void invalidMemoryPolicyInShardDefaultsToSmartOnRead(@TempDir Path memoryDir) throws Exception {
+        Path chatDir = memoryDir.resolve("chat-sessions");
+        Files.createDirectories(chatDir);
+        String id = "future-session";
+        Files.writeString(chatDir.resolve(id + ".json"), """
+                {
+                  "id": "future-session",
+                  "title": "Future",
+                  "createdAt": "2026-01-01T00:00:00Z",
+                  "updatedAt": "2026-01-01T00:00:00Z",
+                  "source": "manual",
+                  "memoryPolicy": "future_policy",
+                  "messages": []
+                }
+                """);
+
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+
+        assertEquals("smart", store.getSession(id).memoryPolicy);
+    }
+
+    @Test
+    void invalidMemoryPolicyInIndexDefaultsToSmartOnRead(@TempDir Path memoryDir) throws Exception {
+        Path chatDir = memoryDir.resolve("chat-sessions");
+        Files.createDirectories(chatDir);
+        Files.writeString(chatDir.resolve("index.json"), """
+                {
+                  "activeSessionId": "future-session",
+                  "sessions": [
+                    {
+                      "id": "future-session",
+                      "title": "Future",
+                      "createdAt": "2026-01-01T00:00:00Z",
+                      "updatedAt": "2026-01-01T00:00:00Z",
+                      "source": "manual",
+                      "memoryPolicy": "future_policy",
+                      "messageCount": 0
+                    }
+                  ]
+                }
+                """);
+
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+
         assertEquals("smart", store.listIndex().sessions.get(0).memoryPolicy);
     }
 }

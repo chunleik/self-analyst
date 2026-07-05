@@ -64,6 +64,17 @@ class LongTermMemoryServiceTest {
     }
 
     @Test
+    void pendingManualMemoryUsesConfirmApprovalPolicy() throws Exception {
+        LongTermMemoryService svc = service();
+
+        GrowthProfile.MemoryItem item = svc.createManual(
+                "note", "需要用户确认的手动记忆。", "manual", null, "ui_manual", "pending");
+
+        assertEquals("pending", item.status());
+        assertEquals("confirm", item.approvalPolicy());
+    }
+
+    @Test
     void secretLikeContentIsRejected() throws Exception {
         LongTermMemoryService svc = service();
         assertThrows(IllegalArgumentException.class, () ->

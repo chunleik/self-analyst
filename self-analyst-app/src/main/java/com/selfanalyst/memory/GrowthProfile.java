@@ -90,8 +90,12 @@ public class GrowthProfile {
 
     public String buildContextSummary() {
         StringBuilder sb = new StringBuilder();
+        List<Goal> goalSnapshot = snapshot(goals);
+        List<KnownPattern> patternSnapshot = snapshot(patterns);
+        List<ImprovementLog> logSnapshot = snapshot(logs);
+        List<MemoryItem> memorySnapshot = snapshot(getMemories());
 
-        List<Goal> active = goals.stream().filter(Goal::active).toList();
+        List<Goal> active = goalSnapshot.stream().filter(Goal::active).toList();
         if (!active.isEmpty()) {
             sb.append("## 活跃目标\n");
             for (Goal g : active) {
@@ -103,18 +107,18 @@ public class GrowthProfile {
             sb.append("\n");
         }
 
-        if (!patterns.isEmpty()) {
+        if (!patternSnapshot.isEmpty()) {
             sb.append("## 已确认的行为模式\n");
-            for (KnownPattern p : patterns) {
+            for (KnownPattern p : patternSnapshot) {
                 sb.append("- ").append(p.description())
                   .append("（置信度: ").append(p.confidence()).append("/10）\n");
             }
             sb.append("\n");
         }
 
-        if (!logs.isEmpty()) {
+        if (!logSnapshot.isEmpty()) {
             sb.append("## 最近的改进记录\n");
-            var recent = logs.stream()
+            var recent = logSnapshot.stream()
                     .sorted((a, b) -> b.observedAt().compareTo(a.observedAt()))
                     .limit(5)
                     .toList();
@@ -125,7 +129,7 @@ public class GrowthProfile {
             sb.append("\n");
         }
 
-        List<MemoryItem> activeMemories = getMemories().stream()
+        List<MemoryItem> activeMemories = memorySnapshot.stream()
                 .filter(m -> "active".equals(m.status()))
                 .filter(m -> !LongTermMemoryService.containsForbiddenContent(m.content()))
                 .filter(m -> !LongTermMemoryService.containsForbiddenContent(m.evidence()))
@@ -150,5 +154,9 @@ public class GrowthProfile {
         }
 
         return sb.toString();
+    }
+
+    private static <T> List<T> snapshot(List<T> items) {
+        return items == null ? List.of() : new ArrayList<>(items);
     }
 }

@@ -69,6 +69,36 @@ class DesktopMemoryControllerTest {
     }
 
     @Test
+    void chatControllerCreateSessionMapsInvalidMemoryPolicyTo400() {
+        ChatSessionStore store = new ChatSessionStore(tempDir);
+        DesktopChatSessionController controller = new DesktopChatSessionController(
+                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), null);
+        FakeContext ctx = FakeContext.withBody("{\"title\":\"bad\",\"memoryPolicy\":\"always\"}");
+
+        controller.createSession(ctx.ctx());
+
+        assertEquals(400, ctx.status);
+    }
+
+    @Test
+    void memoryUpdateTreatsExplicitJsonNullAsUnspecified() throws Exception {
+        LongTermMemoryService service = new LongTermMemoryService(MemoryStore.load(tempDir));
+        GrowthProfile.MemoryItem item = service.createExtracted(
+                "pattern", "用户晚上容易分心。", "inferred", 9,
+                true, "confirm", "pending", "session-1", List.of("msg-1"));
+        DesktopMemoryController controller = new DesktopMemoryController(service);
+        FakeContext ctx = FakeContext.withBody("{\"confidence\":null,\"sensitive\":null}");
+        ctx.pathParams.put("id", item.id());
+
+        controller.update(ctx.ctx());
+
+        assertEquals(200, ctx.status);
+        GrowthProfile.MemoryItem updated = (GrowthProfile.MemoryItem) ctx.json;
+        assertEquals(9, updated.confidence());
+        assertTrue(updated.sensitive());
+    }
+
+    @Test
     void assistantSentUpdateSchedulesMemoryExtraction() throws Exception {
         ChatSessionStore store = new ChatSessionStore(tempDir);
         ChatSessionStore.Session session = store.create(req("memory"));

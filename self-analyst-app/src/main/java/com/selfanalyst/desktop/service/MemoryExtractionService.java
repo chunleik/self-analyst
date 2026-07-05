@@ -33,17 +33,16 @@ public class MemoryExtractionService {
                                           SummaryPromptService.SummaryTextClient client) {
         if (session == null) return;
         try {
-            String forgetTarget = forgetTarget(user != null ? user.content : null);
-            if (forgetTarget != null) {
-                memoryService.disableMatching(forgetTarget);
-                return;
-            }
             if ("off".equals(session.memoryPolicy) || client == null) return;
             if (memoryService.hasSourceMessageId(assistant != null ? assistant.id : null)) return;
             if (containsForbiddenChatText(user, assistant)) return;
             String raw = client.complete(buildPrompt(session, user, assistant), EXTRACTION_TIMEOUT);
             for (Candidate candidate : parseCandidates(raw)) {
-                saveCandidate(session, user, assistant, candidate);
+                try {
+                    saveCandidate(session, user, assistant, candidate);
+                } catch (Exception ignored) {
+                    // Skip one malformed/sensitive candidate without dropping later valid ones.
+                }
             }
         } catch (Exception ignored) {
             // Extraction is best-effort and must never affect the chat response path.
@@ -66,7 +65,7 @@ public class MemoryExtractionService {
                 现有 active/pending 记忆摘要: %s
                 用户消息: %s
                 助手回复: %s
-                字段: type, content, evidence, confidence(1-10), sensitive, approvalPolicy(auto|confirm)
+                字段: action(add|disable), id(仅 disable 时填现有记忆 id), type, content, evidence, confidence(1-10), sensitive, approvalPolicy(auto|confirm)
                 """.formatted(language, safe(session.id), safe(session.title), safe(session.memoryPolicy),
                 safe(user != null ? user.id : null), safe(assistant != null ? assistant.id : null),
                 safe(memorySnapshot()), safe(user != null ? user.content : null),
@@ -99,7 +98,17 @@ public class MemoryExtractionService {
     private void saveCandidate(ChatSessionStore.Session session, ChatSessionStore.Message user,
                                ChatSessionStore.Message assistant, Candidate candidate)
             throws Exception {
-        if (candidate == null || candidate.content() == null || candidate.content().isBlank()) return;
+        if (candidate == null) return;
+        String action = canonical(candidate.action());
+        if ("disable".equals(action) || "delete".equals(action) || "forget".equals(action)) {
+            String id = firstNonBlank(candidate.id(), candidate.targetId());
+            if (id != null) {
+                memoryService.update(id, null, null, null, null, "disabled", null);
+            }
+            return;
+        }
+        if (!action.isEmpty() && !"add".equals(action)) return;
+        if (candidate.content() == null || candidate.content().isBlank()) return;
         String status = shouldAutoActivate(session, candidate) ? "active" : "pending";
         memoryService.createExtracted(
                 candidate.type(), candidate.content(), candidate.evidence(), clamp(candidate.confidence()),
@@ -137,27 +146,9 @@ public class MemoryExtractionService {
     }
 
     private static String formatMemory(GrowthProfile.MemoryItem item) {
-        return "- [%s/%s] %s%s".formatted(
-                safe(item.status()), safe(item.type()), safe(item.content()),
+        return "- [id=%s %s/%s] %s%s".formatted(
+                safe(item.id()), safe(item.status()), safe(item.type()), safe(item.content()),
                 item.evidence() == null || item.evidence().isBlank() ? "" : " (" + safe(item.evidence()) + ")");
-    }
-
-    private static String forgetTarget(String content) {
-        if (content == null || content.isBlank()) return null;
-        String lower = content.toLowerCase(Locale.ROOT);
-        String[] markers = {
-                "不要记住", "别记住", "不用记住", "不要保存", "忘记",
-                "do not remember", "don't remember", "forget"
-        };
-        for (String marker : markers) {
-            int index = lower.indexOf(marker);
-            if (index < 0) continue;
-            String target = content.substring(index + marker.length())
-                    .replaceFirst("^[\\s:：,，。.!！?？]+", "")
-                    .trim();
-            return target.isBlank() ? content.trim() : target;
-        }
-        return null;
     }
 
     private static String safe(String value) {
@@ -169,8 +160,22 @@ public class MemoryExtractionService {
         return value.length() > maxLength ? value.substring(0, maxLength) : value;
     }
 
+    private static String canonical(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record Candidate(String type, String content, String evidence, int confidence,
+    record Candidate(String action, String id, String targetId,
+                     String type, String content, String evidence, int confidence,
                      boolean sensitive, String approvalPolicy) {
     }
 }

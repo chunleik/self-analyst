@@ -112,6 +112,8 @@ public class DesktopChatSessionController {
                 scheduleSummary(created.id);
             }
             ctx.status(201).json(created);
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to create session: " + e.getMessage()));
         }

@@ -160,7 +160,7 @@ public class ChatSessionStore {
         m.updatedAt = s.updatedAt;
         m.source = s.source;
         m.contextLabel = s.contextLabel;
-        m.memoryPolicy = normalizeMemoryPolicy(s.memoryPolicy);
+        m.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
         m.summary = s.summary;
         m.messageCount = s.messages != null ? s.messages.size() : 0;
         m.lastMessagePreview = lastPreview(s);
@@ -401,23 +401,32 @@ public class ChatSessionStore {
     }
 
     private static String normalizeMemoryPolicy(String value) {
-        if (value == null || value.isBlank()) return "smart";
-        return switch (value) {
-            case "smart", "confirm_all", "off" -> value;
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isBlank()) return "smart";
+        return switch (normalized) {
+            case "smart", "confirm_all", "off" -> normalized;
             default -> throw new IllegalArgumentException("Invalid memoryPolicy: " + value);
         };
     }
 
+    private static String coerceMemoryPolicy(String value) {
+        try {
+            return normalizeMemoryPolicy(value);
+        } catch (IllegalArgumentException ignored) {
+            return "smart";
+        }
+    }
+
     private static void normalizeSessionMemoryPolicy(Session s) {
         if (s != null) {
-            s.memoryPolicy = normalizeMemoryPolicy(s.memoryPolicy);
+            s.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
         }
     }
 
     private static void normalizeIndexMemoryPolicy(Index idx) {
         for (SessionMeta m : idx.sessions) {
             if (m != null) {
-                m.memoryPolicy = normalizeMemoryPolicy(m.memoryPolicy);
+                m.memoryPolicy = coerceMemoryPolicy(m.memoryPolicy);
             }
         }
     }

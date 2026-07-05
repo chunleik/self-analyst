@@ -190,7 +190,7 @@ function renderChatMemoryPanel() {
     '<option value="confirm_all"' + (policy === "confirm_all" ? " selected" : "") + '>' + escHtml(t("memory.policy.confirmAll")) + '</option>' +
     '<option value="off"' + (policy === "off" ? " selected" : "") + '>' + escHtml(t("memory.policy.off")) + '</option>' +
     '</select><span class="memory-pending-count">' + escHtml(t("memory.pendingCount", { n: pendingCount })) + '</span></div>';
-  html += '<textarea id="memory-draft-input" class="memory-draft-input" rows="2" placeholder="' + escHtml(t("memory.addPlaceholder")) + '"></textarea>';
+  html += '<textarea id="memory-draft-input" class="memory-draft-input" rows="2" placeholder="' + escHtml(t("memory.addPlaceholder")) + '">' + escHtml(state.memoryDraft || "") + '</textarea>';
   html += '<button class="btn btn-sm btn-outline" id="memory-add-btn">' + escHtml(t("memory.add")) + '</button>';
   if (related.length === 0) {
     html += '<div class="memory-empty">' + escHtml(t("memory.empty")) + '</div>';
@@ -253,6 +253,10 @@ function bindChatMemoryPanel(session) {
   var addBtn = document.getElementById("memory-add-btn");
   var draft = document.getElementById("memory-draft-input");
   if (addBtn && draft) {
+    draft.value = state.memoryDraft || "";
+    draft.oninput = function () {
+      state.memoryDraft = draft.value;
+    };
     addBtn.onclick = function () {
       var text = draft.value.trim();
       if (!text) return;
@@ -261,7 +265,10 @@ function bindChatMemoryPanel(session) {
         content: text,
         evidence: t("memory.manualEvidence"),
         status: "active",
-      }).then(loadMemoryForChat).then(renderChatTab).catch(function (err) {
+      }).then(function () {
+        state.memoryDraft = "";
+        return loadMemoryForChat();
+      }).then(renderChatTab).catch(function (err) {
         alert(t("memory.saveFailed", { msg: err.message }));
       });
     };

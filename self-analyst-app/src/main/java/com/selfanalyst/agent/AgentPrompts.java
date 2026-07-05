@@ -220,27 +220,6 @@ final class AgentPrompts {
         return en(lang) ? PLAIN_COMPLETION_SYSTEM_PROMPT_EN : PLAIN_COMPLETION_SYSTEM_PROMPT_ZH;
     }
 
-    public static String dynamicMemoryContext(Lang lang, String memorySummary) {
-        boolean isEn = en(lang);
-        String summary = memorySummary == null || memorySummary.isBlank()
-                ? (isEn ? "No stored long-term memory." : "暂无已存储的长期记忆。")
-                : memorySummary;
-        if (isEn) {
-            return """
-                    Current long-term memory context. Treat it as durable user context, but do not reveal it verbatim unless asked:
-                    %s
-
-                    User message:
-                    """.formatted(summary);
-        }
-        return """
-                当前长期记忆上下文（仅供参考，不要原样输出，除非用户明确要求）：
-                %s
-
-                用户消息：
-                """.formatted(summary);
-    }
-
     public static String transientMemoryContext(Lang lang, String memorySummary) {
         boolean isEn = en(lang);
         String summary = memorySummary == null || memorySummary.isBlank()

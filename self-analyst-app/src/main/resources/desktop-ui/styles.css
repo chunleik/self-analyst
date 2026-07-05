@@ -1865,6 +1865,32 @@ input:checked + .toggle-switch::after {
   margin-right: 6px;
 }
 
+.memory-manager-search {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+}
+.memory-manager-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.memory-manager-item {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--bg-card);
+}
+.memory-manager-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 /* Responsive */
 @media (max-width: 1100px) {
   .chat-tab-layout {

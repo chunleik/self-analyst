@@ -46,8 +46,16 @@ function renderConfigTab() {
     + '</textarea>'
     + renderConfigActionBar();
 
+  html += '<section class="config-section memory-manager-section">' +
+    '<div class="config-section-header"><div class="config-section-title">' + escHtml(t("memory.managerTitle")) + '</div></div>' +
+    '<div class="config-section-body">' +
+    '<input id="memory-manager-search" class="memory-manager-search" type="text" placeholder="' + escHtml(t("memory.searchPlaceholder")) + '">' +
+    '<div id="memory-manager-list" class="memory-manager-list"></div>' +
+    '</div></section>';
+
   grid.innerHTML = html;
   updateConfigActionBar();
+  renderMemoryManager();
 }
 
 function renderConfigActionBar() {
@@ -454,5 +462,66 @@ function saveAllConfig() {
     state.configSaving = false;
     state.configSaveResult = { type: "error", msg: t("config.saveFailed", { msg: err.message || t("common.unknownError") }) };
     updateConfigActionBar();
+  });
+}
+
+function renderMemoryManager() {
+  var list = document.getElementById("memory-manager-list");
+  if (!list) return;
+  var search = document.getElementById("memory-manager-search");
+  var q = search ? search.value : "";
+  var lower = q.toLowerCase();
+  var items = state.memoryItems.filter(function (m) {
+    return !lower || (m.content || "").toLowerCase().indexOf(lower) >= 0 ||
+      (m.evidence || "").toLowerCase().indexOf(lower) >= 0;
+  });
+  if (items.length === 0) {
+    list.innerHTML = '<div class="memory-empty">' + escHtml(t("memory.empty")) + '</div>';
+    bindMemoryManager();
+    return;
+  }
+  var html = "";
+  items.forEach(function (m) {
+    var statusKey = "memory.status." + (m.status || "disabled");
+    html += '<div class="memory-manager-item" data-mid="' + escHtml(m.id || "") + '">' +
+      '<div class="memory-content">' + escHtml(m.content || "") + '</div>' +
+      '<div class="memory-evidence">' + escHtml(t(statusKey)) + ' · ' + escHtml(m.evidence || "") + '</div>' +
+      '<div class="memory-manager-actions">' +
+      (m.status === "active" ? '<button class="btn btn-sm btn-outline memory-disable">' + escHtml(t("memory.disable")) + '</button>' :
+        '<button class="btn btn-sm btn-outline memory-enable">' + escHtml(t("memory.enable")) + '</button>') +
+      '<button class="btn btn-sm btn-outline memory-delete">' + escHtml(t("memory.delete")) + '</button>' +
+      '</div></div>';
+  });
+  list.innerHTML = html;
+  bindMemoryManager();
+}
+
+function bindMemoryManager() {
+  var search = document.getElementById("memory-manager-search");
+  if (search) search.oninput = renderMemoryManager;
+  Array.prototype.forEach.call(document.querySelectorAll(".memory-disable"), function (btn) {
+    btn.onclick = function () {
+      api.updateMemory(this.closest(".memory-manager-item").dataset.mid, { status: "disabled" })
+        .then(loadMemoryForChat)
+        .then(renderConfigTab)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".memory-enable"), function (btn) {
+    btn.onclick = function () {
+      api.updateMemory(this.closest(".memory-manager-item").dataset.mid, { status: "active" })
+        .then(loadMemoryForChat)
+        .then(renderConfigTab)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".memory-delete"), function (btn) {
+    btn.onclick = function () {
+      if (!confirm(t("memory.confirmDelete"))) return;
+      api.deleteMemory(this.closest(".memory-manager-item").dataset.mid)
+        .then(loadMemoryForChat)
+        .then(renderConfigTab)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
   });
 }

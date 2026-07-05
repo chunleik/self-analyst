@@ -163,6 +163,16 @@ var MESSAGES = {
   "memory.reject": { zh: "拒绝", en: "Reject" },
   "memory.manualEvidence": { zh: "用户从会话手动添加", en: "Manually added from chat" },
   "memory.saveFailed": { zh: "保存记忆失败: {msg}", en: "Failed to save memory: {msg}" },
+  "memory.managerTitle": { zh: "记忆管理", en: "Memory management" },
+  "memory.searchPlaceholder": { zh: "搜索记忆...", en: "Search memories..." },
+  "memory.status.active": { zh: "已启用", en: "Active" },
+  "memory.status.pending": { zh: "待确认", en: "Pending" },
+  "memory.status.disabled": { zh: "已停用", en: "Disabled" },
+  "memory.status.rejected": { zh: "已拒绝", en: "Rejected" },
+  "memory.disable": { zh: "停用", en: "Disable" },
+  "memory.enable": { zh: "启用", en: "Enable" },
+  "memory.delete": { zh: "删除", en: "Delete" },
+  "memory.confirmDelete": { zh: "确定删除这条记忆？", en: "Delete this memory?" },
 
   // ── Chat drawer (legacy) ──
   "drawer.discuss": { zh: "讨论", en: "Discuss" },

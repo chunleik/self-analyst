@@ -135,6 +135,33 @@ public class LongTermMemoryService {
         return removed;
     }
 
+    public synchronized int disableMatching(String query) throws IOException {
+        String target = fingerprint(query);
+        if (target.isEmpty()) {
+            return 0;
+        }
+        List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
+        List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
+        Instant now = Instant.now();
+        int changed = 0;
+        for (int i = 0; i < items.size(); i++) {
+            GrowthProfile.MemoryItem old = items.get(i);
+            if (!"active".equals(old.status()) && !"pending".equals(old.status())) {
+                continue;
+            }
+            if (!matchesForgetTarget(old, target)) {
+                continue;
+            }
+            items.set(i, new GrowthProfile.MemoryItem(
+                    old.id(), old.type(), old.content(), old.evidence(), old.confidence(),
+                    "disabled", old.sensitive(), old.approvalPolicy(), old.source(),
+                    old.sourceSessionId(), old.sourceMessageIds(), old.createdAt(), now));
+            changed++;
+        }
+        if (changed > 0) saveOrRestore(items, snapshot);
+        return changed;
+    }
+
     private void saveOrRestore(List<GrowthProfile.MemoryItem> items, List<GrowthProfile.MemoryItem> snapshot)
             throws IOException {
         try {
@@ -232,6 +259,13 @@ public class LongTermMemoryService {
 
     private static String fingerprint(String content) {
         return content == null ? "" : content.trim().replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean matchesForgetTarget(GrowthProfile.MemoryItem item, String target) {
+        String content = fingerprint(item.content());
+        String evidence = fingerprint(item.evidence());
+        return content.contains(target) || target.contains(content)
+                || evidence.contains(target);
     }
 
     private static String blankToNull(String value) {

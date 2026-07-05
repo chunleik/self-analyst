@@ -114,13 +114,14 @@ class MemoryExtractionServiceTest {
     @Test
     void fencedJsonResponseIsParsedAndPromptIsBounded() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        memory.createManual("note", "m".repeat(5000), "existing memory", null, "ui_manual", "active");
         MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.EN);
         String longMessage = "x".repeat(5000);
 
         svc.extractAfterAssistantSent(session("smart"), user(longMessage), assistant(longMessage),
                 (prompt, timeout) -> {
                     assertTrue(prompt.contains("English"));
-                    assertTrue(prompt.length() < 9000, "prompt should bound copied chat text");
+                    assertTrue(prompt.length() < 11000, "prompt should bound copied chat text and memory snapshot");
                     return """
                             ```json
                             [{"type":"goal","content":"User wants concise answers.","evidence":"User said so.","confidence":10,"sensitive":false,"approvalPolicy":"auto"}]
@@ -129,6 +130,48 @@ class MemoryExtractionServiceTest {
                 });
 
         assertEquals(1, memory.list("active", "goal", null, null).size());
+    }
+
+    @Test
+    void promptIncludesBoundedMemorySnapshotPolicyAndSourceIds() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        memory.createManual("preference", "用户偏好中文交流。", "existing active", "session-1", "chat_manual", "active");
+        memory.createManual("goal", "用户想每天深度工作三小时。", "existing pending", "session-1", "chat_manual", "pending");
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+
+        svc.extractAfterAssistantSent(session("smart"), user("我偏好简洁回答。"), assistant("收到。"),
+                (prompt, timeout) -> {
+                    assertTrue(prompt.contains("当前会话ID: session-1"));
+                    assertTrue(prompt.contains("记忆策略: smart"));
+                    assertTrue(prompt.contains("user=user-1, assistant=assistant-1"));
+                    assertTrue(prompt.contains("用户偏好中文交流。"));
+                    assertTrue(prompt.contains("用户想每天深度工作三小时。"));
+                    return "[]";
+                });
+
+        assertEquals(2, memory.list(null, null, null, null).size());
+    }
+
+    @Test
+    void forgetInstructionDisablesMatchingMemoryWithoutCallingLlm() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        GrowthProfile.MemoryItem item = memory.createManual(
+                "preference", "用户偏好中文交流。", "manual", "session-1", "chat_manual", "active");
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        AtomicBoolean called = new AtomicBoolean(false);
+
+        svc.extractAfterAssistantSent(session("off"), user("不要记住 用户偏好中文交流。"), assistant("已处理。"),
+                (prompt, timeout) -> {
+                    called.set(true);
+                    return "[]";
+                });
+
+        assertFalse(called.get());
+        assertEquals("disabled", memory.list(null, null, null, null).stream()
+                .filter(m -> item.id().equals(m.id()))
+                .findFirst()
+                .orElseThrow()
+                .status());
     }
 
     private static ChatSessionStore.Session session(String policy) {

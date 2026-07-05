@@ -177,12 +177,13 @@ function renderChatMemoryPanel() {
   var related = state.memoryItems.filter(function (m) {
     return m.sourceSessionId === session.id || m.status === "pending";
   }).slice(0, 6);
+  var pendingCount = state.pendingMemoryCount || 0;
   var html = '<div class="memory-policy-row">' +
     '<select id="session-memory-policy">' +
     '<option value="smart"' + (policy === "smart" ? " selected" : "") + '>' + escHtml(t("memory.policy.smart")) + '</option>' +
     '<option value="confirm_all"' + (policy === "confirm_all" ? " selected" : "") + '>' + escHtml(t("memory.policy.confirmAll")) + '</option>' +
     '<option value="off"' + (policy === "off" ? " selected" : "") + '>' + escHtml(t("memory.policy.off")) + '</option>' +
-    '</select></div>';
+    '</select><span class="memory-pending-count">' + escHtml(t("memory.pendingCount", { n: pendingCount })) + '</span></div>';
   html += '<textarea id="memory-draft-input" class="memory-draft-input" rows="2" placeholder="' + escHtml(t("memory.addPlaceholder")) + '"></textarea>';
   html += '<button class="btn btn-sm btn-outline" id="memory-add-btn">' + escHtml(t("memory.add")) + '</button>';
   if (related.length === 0) {
@@ -190,17 +191,44 @@ function renderChatMemoryPanel() {
   } else {
     html += '<div class="memory-list">';
     related.forEach(function (m) {
+      var actions = "";
+      if (m.status === "pending") {
+        actions = '<button class="btn btn-sm btn-primary memory-edit-approve">' + escHtml(t("memory.editApprove")) + '</button>' +
+          '<button class="btn btn-sm btn-outline memory-approve">' + escHtml(t("memory.approve")) + '</button>' +
+          '<button class="btn btn-sm btn-outline memory-reject">' + escHtml(t("memory.reject")) + '</button>';
+      } else if (m.status === "active") {
+        actions = '<button class="btn btn-sm btn-outline memory-panel-edit">' + escHtml(t("memory.edit")) + '</button>' +
+          '<button class="btn btn-sm btn-outline memory-panel-disable">' + escHtml(t("memory.disable")) + '</button>';
+      }
       html += '<div class="memory-item status-' + escHtml(m.status || "") + '" data-mid="' + escHtml(m.id || "") + '">' +
         '<div class="memory-content">' + escHtml(m.content || "") + '</div>' +
         '<div class="memory-evidence">' + escHtml(m.evidence || "") + '</div>' +
-        (m.status === "pending" ? '<button class="btn btn-sm btn-primary memory-approve">' + escHtml(t("memory.approve")) + '</button>' +
-          '<button class="btn btn-sm btn-outline memory-reject">' + escHtml(t("memory.reject")) + '</button>' : "") +
+        actions +
         '</div>';
     });
     html += '</div>';
   }
   root.innerHTML = html;
   bindChatMemoryPanel(session);
+}
+
+function memoryById(id) {
+  return state.memoryItems.find(function (m) { return m.id === id; });
+}
+
+function promptMemoryPatch(item) {
+  if (!item) return null;
+  var content = prompt(t("memory.editContent"), item.content || "");
+  if (content == null) return null;
+  content = content.trim();
+  if (!content) return null;
+  var evidence = prompt(t("memory.editEvidence"), item.evidence || "");
+  if (evidence == null) return null;
+  return { content: content, evidence: evidence.trim() };
+}
+
+function refreshChatMemoryAfterUpdate() {
+  return loadMemoryForChat().then(renderChatTab);
 }
 
 function bindChatMemoryPanel(session) {
@@ -237,8 +265,39 @@ function bindChatMemoryPanel(session) {
     approve[i].onclick = function () {
       var id = this.closest(".memory-item").dataset.mid;
       api.updateMemory(id, { status: "active" })
-        .then(loadMemoryForChat)
-        .then(renderChatTab)
+        .then(refreshChatMemoryAfterUpdate)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
+  }
+  var editApprove = document.querySelectorAll(".memory-edit-approve");
+  for (var k = 0; k < editApprove.length; k++) {
+    editApprove[k].onclick = function () {
+      var id = this.closest(".memory-item").dataset.mid;
+      var patch = promptMemoryPatch(memoryById(id));
+      if (!patch) return;
+      patch.status = "active";
+      api.updateMemory(id, patch)
+        .then(refreshChatMemoryAfterUpdate)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
+  }
+  var edit = document.querySelectorAll(".memory-panel-edit");
+  for (var e = 0; e < edit.length; e++) {
+    edit[e].onclick = function () {
+      var id = this.closest(".memory-item").dataset.mid;
+      var patch = promptMemoryPatch(memoryById(id));
+      if (!patch) return;
+      api.updateMemory(id, patch)
+        .then(refreshChatMemoryAfterUpdate)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
+  }
+  var disable = document.querySelectorAll(".memory-panel-disable");
+  for (var d = 0; d < disable.length; d++) {
+    disable[d].onclick = function () {
+      var id = this.closest(".memory-item").dataset.mid;
+      api.updateMemory(id, { status: "disabled" })
+        .then(refreshChatMemoryAfterUpdate)
         .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
     };
   }
@@ -247,8 +306,7 @@ function bindChatMemoryPanel(session) {
     reject[j].onclick = function () {
       var id = this.closest(".memory-item").dataset.mid;
       api.updateMemory(id, { status: "rejected" })
-        .then(loadMemoryForChat)
-        .then(renderChatTab)
+        .then(refreshChatMemoryAfterUpdate)
         .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
     };
   }

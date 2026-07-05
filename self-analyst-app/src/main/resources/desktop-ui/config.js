@@ -50,6 +50,10 @@ function renderConfigTab() {
     '<div class="config-section-header"><div class="config-section-title">' + escHtml(t("memory.managerTitle")) + '</div></div>' +
     '<div class="config-section-body">' +
     '<input id="memory-manager-search" class="memory-manager-search" type="text" placeholder="' + escHtml(t("memory.searchPlaceholder")) + '">' +
+    '<div class="memory-manager-add-row">' +
+    '<textarea id="memory-manager-new-content" class="memory-draft-input" rows="2" placeholder="' + escHtml(t("memory.addPlaceholder")) + '"></textarea>' +
+    '<button id="memory-manager-add" class="btn btn-sm btn-outline" type="button">' + escHtml(t("memory.add")) + '</button>' +
+    '</div>' +
     '<div id="memory-manager-list" class="memory-manager-list"></div>' +
     '</div></section>';
 
@@ -487,6 +491,7 @@ function renderMemoryManager() {
       '<div class="memory-content">' + escHtml(m.content || "") + '</div>' +
       '<div class="memory-evidence">' + escHtml(t(statusKey)) + ' · ' + escHtml(m.evidence || "") + '</div>' +
       '<div class="memory-manager-actions">' +
+      '<button class="btn btn-sm btn-outline memory-manager-edit">' + escHtml(t("memory.edit")) + '</button>' +
       (m.status === "active" ? '<button class="btn btn-sm btn-outline memory-disable">' + escHtml(t("memory.disable")) + '</button>' :
         '<button class="btn btn-sm btn-outline memory-enable">' + escHtml(t("memory.enable")) + '</button>') +
       '<button class="btn btn-sm btn-outline memory-delete">' + escHtml(t("memory.delete")) + '</button>' +
@@ -499,6 +504,33 @@ function renderMemoryManager() {
 function bindMemoryManager() {
   var search = document.getElementById("memory-manager-search");
   if (search) search.oninput = renderMemoryManager;
+  var addBtn = document.getElementById("memory-manager-add");
+  var newContent = document.getElementById("memory-manager-new-content");
+  if (addBtn && newContent) {
+    addBtn.onclick = function () {
+      var text = newContent.value.trim();
+      if (!text) return;
+      api.createMemory({
+        type: "note",
+        content: text,
+        evidence: t("memory.manualEvidence"),
+        status: "active",
+      }).then(loadMemoryForChat)
+        .then(renderConfigTab)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".memory-manager-edit"), function (btn) {
+    btn.onclick = function () {
+      var id = this.closest(".memory-manager-item").dataset.mid;
+      var patch = promptMemoryPatch(memoryById(id));
+      if (!patch) return;
+      api.updateMemory(id, patch)
+        .then(loadMemoryForChat)
+        .then(renderConfigTab)
+        .catch(function (err) { alert(t("memory.saveFailed", { msg: err.message })); });
+    };
+  });
   Array.prototype.forEach.call(document.querySelectorAll(".memory-disable"), function (btn) {
     btn.onclick = function () {
       api.updateMemory(this.closest(".memory-manager-item").dataset.mid, { status: "disabled" })

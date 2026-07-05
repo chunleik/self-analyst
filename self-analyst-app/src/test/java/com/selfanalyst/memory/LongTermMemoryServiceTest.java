@@ -205,6 +205,19 @@ class LongTermMemoryServiceTest {
         assertEquals(1, svc.update(item.id(), null, null, null, -5, null, null).confidence());
     }
 
+    @Test
+    void disableMatchingTurnsActiveOrPendingMemoriesOff() throws Exception {
+        LongTermMemoryService svc = service();
+        GrowthProfile.MemoryItem active = svc.createManual(
+                "preference", "用户偏好中文交流。", "manual", "session-1", "chat_manual", "active");
+        GrowthProfile.MemoryItem pending = svc.createManual(
+                "goal", "用户想每天深度工作三小时。", "manual", "session-1", "chat_manual", "pending");
+
+        assertEquals(1, svc.disableMatching("用户偏好中文交流。"));
+        assertEquals("disabled", memoryById(svc, active.id()).status());
+        assertEquals("pending", memoryById(svc, pending.id()).status());
+    }
+
     private LongTermMemoryService service() throws Exception {
         return new LongTermMemoryService(MemoryStore.load(tempDir));
     }

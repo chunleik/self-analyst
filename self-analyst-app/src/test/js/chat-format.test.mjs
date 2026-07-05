@@ -16,6 +16,17 @@ const sandbox = {
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
   },
+  t(key, params) {
+    const messages = {
+      "timeline.insight": "洞察",
+      "timeline.suggestion": "建议",
+      "chat.confidence": `置信度: ${params?.v ?? ""}`,
+      "chat.moreSummaries": `还有 ${params?.n ?? 0} 条摘要未展开`,
+      "chat.sendFailed": `发送失败: ${params?.msg ?? ""}`,
+      "common.unknownError": "未知错误",
+    };
+    return messages[key] || key;
+  },
 };
 vm.createContext(sandbox);
 vm.runInContext(chatJs, sandbox);

@@ -1825,6 +1825,11 @@ input:checked + .toggle-switch::after {
 .memory-item {
   margin-bottom: 8px;
 }
+.memory-policy-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .memory-policy-row select,
 .memory-draft-input {
   width: 100%;
@@ -1834,6 +1839,15 @@ input:checked + .toggle-switch::after {
   border-radius: 6px;
   padding: 6px 8px;
   font-size: 12px;
+}
+.memory-policy-row select {
+  flex: 1;
+  width: auto;
+}
+.memory-pending-count {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 .memory-draft-input {
   resize: vertical;
@@ -1873,6 +1887,16 @@ input:checked + .toggle-switch::after {
   border-radius: 6px;
   background: var(--bg-input);
   color: var(--text-primary);
+}
+.memory-manager-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+.memory-manager-add-row .memory-draft-input {
+  flex: 1;
+  margin-bottom: 0;
 }
 .memory-manager-list {
   display: flex;

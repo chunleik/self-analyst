@@ -284,7 +284,7 @@ public class DesktopChatSessionController {
         memoryPool.submit(() -> {
             try {
                 ChatSessionStore.Session session = store.getSession(sessionId);
-                if (session == null || "off".equals(session.memoryPolicy) || session.messages == null) return;
+                if (session == null || session.messages == null) return;
                 ChatSessionStore.Message assistant = null;
                 ChatSessionStore.Message user = null;
                 for (int i = 0; i < session.messages.size(); i++) {

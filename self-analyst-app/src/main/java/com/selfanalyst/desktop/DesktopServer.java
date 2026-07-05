@@ -119,6 +119,7 @@ public class DesktopServer {
                     if (file.endsWith(".css")) ctx.contentType("text/css");
                     else if (file.endsWith(".js")) ctx.contentType("application/javascript");
                     else if (file.endsWith(".html")) ctx.contentType("text/html");
+                    else if (file.endsWith(".svg")) ctx.contentType("image/svg+xml");
                 } else {
                     ctx.status(404);
                 }

@@ -6,8 +6,13 @@ const chatJs = fs.readFileSync(
   new URL("../../main/resources/desktop-ui/chat.js", import.meta.url),
   "utf8",
 );
+const i18nJs = fs.readFileSync(
+  new URL("../../main/resources/desktop-ui/i18n.js", import.meta.url),
+  "utf8",
+);
 
 const sandbox = {
+  state: { lang: "zh" },
   escHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -39,6 +44,7 @@ const sandbox = {
   },
 };
 vm.createContext(sandbox);
+vm.runInContext(i18nJs, sandbox);
 vm.runInContext(chatJs, sandbox);
 
 const jsonReply = "```json\n" + JSON.stringify([

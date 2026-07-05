@@ -476,8 +476,8 @@ function renderChatThread() {
     // Suggested tasks
     if (m.suggestedTasks && m.suggestedTasks.length > 0) {
       html += '<div class="chat-suggested-tasks">';
-      for (var t = 0; t < m.suggestedTasks.length; t++) {
-        var st = m.suggestedTasks[t];
+      for (var taskIndex = 0; taskIndex < m.suggestedTasks.length; taskIndex++) {
+        var st = m.suggestedTasks[taskIndex];
         html += '<div class="chat-suggested-task-row">' +
           '<span class="task-title">' + escHtml(st.title) + '</span>' +
           '<button class="btn btn-sm btn-primary create-suggested-task" data-title="' + escHtml(st.title) + '" data-notes="' + escHtml(st.notes || "") + '" data-priority="' + escHtml(st.priority || "medium") + '">' + escHtml(t("chat.createTask")) + '</button>' +
@@ -526,8 +526,8 @@ function renderChatContextPanel() {
   if (timeline && timeline.length > 0) {
     var actHtml = "";
     for (var i = 0; i < Math.min(4, timeline.length); i++) {
-      var t = timeline[i];
-      actHtml += '<div class="activity-item"><strong>' + escHtml(t.label) + '</strong> ' + escHtml((t.headline || "").substring(0, 30)) + '</div>';
+      var timelineEntry = timeline[i];
+      actHtml += '<div class="activity-item"><strong>' + escHtml(timelineEntry.label) + '</strong> ' + escHtml((timelineEntry.headline || "").substring(0, 30)) + '</div>';
     }
     actDiv.innerHTML = actHtml;
   } else {
@@ -546,8 +546,8 @@ function renderChatContextPanel() {
     }
     if (lastAssistantTasks && lastAssistantTasks.length > 0) {
       var tHtml = "";
-      for (var t = 0; t < lastAssistantTasks.length; t++) {
-        tHtml += '<div class="chat-suggested-task-row"><span class="task-title">' + escHtml(lastAssistantTasks[t].title) + '</span></div>';
+      for (var taskIdx = 0; taskIdx < lastAssistantTasks.length; taskIdx++) {
+        tHtml += '<div class="chat-suggested-task-row"><span class="task-title">' + escHtml(lastAssistantTasks[taskIdx].title) + '</span></div>';
       }
       taskDiv.innerHTML = tHtml;
     } else {

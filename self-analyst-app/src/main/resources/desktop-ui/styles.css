@@ -1768,8 +1768,8 @@ input:checked + .toggle-switch::after {
   color: var(--text-primary);
   resize: none;
   outline: none;
-  min-height: 36px;
-  max-height: 120px;
+  min-height: 72px;
+  max-height: 180px;
 }
 .chat-composer textarea:focus { border-color: var(--accent); }
 

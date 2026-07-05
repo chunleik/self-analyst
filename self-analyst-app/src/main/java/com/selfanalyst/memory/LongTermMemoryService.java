@@ -61,6 +61,30 @@ public class LongTermMemoryService {
         return item;
     }
 
+    public synchronized GrowthProfile.MemoryItem createExtracted(String type, String content, String evidence,
+                                                                 int confidence, boolean sensitive,
+                                                                 String approvalPolicy, String status,
+                                                                 String sourceSessionId,
+                                                                 List<String> sourceMessageIds)
+            throws IOException {
+        String clean = normalizeContent(content);
+        String cleanEvidence = blankToNull(evidence);
+        rejectForbidden(clean);
+        rejectForbidden(cleanEvidence);
+        GrowthProfile.MemoryItem existing = findDuplicate(clean);
+        if (existing != null) return existing;
+        Instant now = Instant.now();
+        GrowthProfile.MemoryItem item = new GrowthProfile.MemoryItem(
+                newId(), normalizeType(type), clean, cleanEvidence, clampConfidence(confidence),
+                normalizeStatus(status), sensitive, normalizeApprovalPolicy(approvalPolicy),
+                "chat_auto", sourceSessionId, normalizeMessageIds(sourceMessageIds), now, now);
+        List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
+        List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
+        items.add(item);
+        saveOrRestore(items, snapshot);
+        return item;
+    }
+
     public synchronized GrowthProfile.MemoryItem update(String id, String type, String content, String evidence,
                                                         Integer confidence, String status, Boolean sensitive)
             throws IOException {
@@ -178,6 +202,24 @@ public class LongTermMemoryService {
 
     private static String normalizeSource(String source) {
         return source == null || source.isBlank() ? "ui_manual" : source.trim();
+    }
+
+    private static String normalizeApprovalPolicy(String approvalPolicy) {
+        String normalized = canonical(approvalPolicy);
+        return switch (normalized) {
+            case "auto", "confirm" -> normalized;
+            default -> "confirm";
+        };
+    }
+
+    private static List<String> normalizeMessageIds(List<String> sourceMessageIds) {
+        if (sourceMessageIds == null) {
+            return List.of();
+        }
+        return sourceMessageIds.stream()
+                .filter(Objects::nonNull)
+                .filter(id -> !id.isBlank())
+                .toList();
     }
 
     private static String canonical(String value) {

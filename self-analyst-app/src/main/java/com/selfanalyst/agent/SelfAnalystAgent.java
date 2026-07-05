@@ -174,8 +174,10 @@ public class SelfAnalystAgent {
                     : "已达到今日 token 使用上限，已暂停对话以控制成本。"
                       + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
         }
+        String inputWithFreshMemory = AgentPrompts.dynamicMemoryContext(
+                lang, memory.profile().buildContextSummary()) + userInput;
         return agent.call(Msg.builder()
-                        .textContent(userInput)
+                        .textContent(inputWithFreshMemory)
                 .build())
                 .map(Msg::getTextContent);
     }

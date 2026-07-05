@@ -49,4 +49,11 @@ class AgentPromptsTest {
         assertTrue(AgentPrompts.plainCompletionPrompt(Lang.EN).contains("summary rewriter"));
         assertTrue(AgentPrompts.plainCompletionPrompt(Lang.ZH).contains("摘要改写器"));
     }
+
+    @Test
+    void dynamicMemoryContextUsesCurrentSummary() {
+        String block = AgentPrompts.dynamicMemoryContext(Lang.ZH, "## 长期记忆\n- 用户偏好中文。");
+        assertTrue(block.contains("当前长期记忆"));
+        assertTrue(block.contains("用户偏好中文"));
+    }
 }

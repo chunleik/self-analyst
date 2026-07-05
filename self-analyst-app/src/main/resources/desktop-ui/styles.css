@@ -1821,6 +1821,50 @@ input:checked + .toggle-switch::after {
 }
 .chat-context-toggle input { accent-color: var(--accent); }
 
+.memory-policy-row,
+.memory-item {
+  margin-bottom: 8px;
+}
+.memory-policy-row select,
+.memory-draft-input {
+  width: 100%;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.memory-draft-input {
+  resize: vertical;
+  margin-bottom: 6px;
+}
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.memory-item {
+  border-top: 1px solid var(--border-color);
+  padding-top: 8px;
+}
+.memory-content {
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.memory-evidence,
+.memory-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.memory-item .btn {
+  margin-top: 6px;
+  margin-right: 6px;
+}
+
 /* Responsive */
 @media (max-width: 1100px) {
   .chat-tab-layout {

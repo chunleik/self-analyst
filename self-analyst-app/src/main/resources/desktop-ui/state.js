@@ -34,6 +34,11 @@ var state = {
   chatSessionSearch: "",
   chatSending: false,
   chatContextToggles: { currentStatus: true, futureTasks: true, history: false },
+  memoryItems: [],
+  memoryFilter: "",
+  memoryLoading: false,
+  pendingMemoryCount: 0,
+  memoryDraft: "",
 };
 
 // Legacy localStorage key. No longer a data source (sessions live in the

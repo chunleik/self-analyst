@@ -149,6 +149,21 @@ var MESSAGES = {
   "chat.contextBrought": { zh: "已带入上下文：{title}", en: "Context added: {title}" },
   "chat.currentItem": { zh: "当前条目", en: "current item" },
 
+  // ── Long-term memory ──
+  "memory.chatTitle": { zh: "长期记忆", en: "Long-term memory" },
+  "memory.loading": { zh: "加载中...", en: "Loading..." },
+  "memory.noSession": { zh: "选择会话后显示记忆设置", en: "Select a chat to show memory settings" },
+  "memory.policy.smart": { zh: "智能", en: "Smart" },
+  "memory.policy.confirmAll": { zh: "每次确认", en: "Confirm all" },
+  "memory.policy.off": { zh: "关闭", en: "Off" },
+  "memory.addPlaceholder": { zh: "手动添加一条记忆...", en: "Add a memory..." },
+  "memory.add": { zh: "添加记忆", en: "Add memory" },
+  "memory.empty": { zh: "暂无相关记忆", en: "No related memories" },
+  "memory.approve": { zh: "批准", en: "Approve" },
+  "memory.reject": { zh: "拒绝", en: "Reject" },
+  "memory.manualEvidence": { zh: "用户从会话手动添加", en: "Manually added from chat" },
+  "memory.saveFailed": { zh: "保存记忆失败: {msg}", en: "Failed to save memory: {msg}" },
+
   // ── Chat drawer (legacy) ──
   "drawer.discuss": { zh: "讨论", en: "Discuss" },
   "drawer.discussWith": { zh: "讨论: {title}", en: "Discuss: {title}" },

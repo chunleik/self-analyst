@@ -153,6 +153,62 @@ var api = {
       return r.json();
     });
   },
+  listMemory: function (params) {
+    var query = params ? new URLSearchParams(params).toString() : "";
+    var qs = query ? "?" + query : "";
+    return fetch(API_BASE + "/desktop/memory" + qs).then(function (r) {
+      if (!r.ok) throw new Error("List memory failed: " + r.status);
+      return r.json();
+    });
+  },
+  createMemory: function (payload) {
+    return fetch(API_BASE + "/desktop/memory", {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+      headers: { "Content-Type": "application/json" },
+    }).then(function (r) {
+      if (!r.ok) throw new Error("Create memory failed: " + r.status);
+      return r.json();
+    });
+  },
+  updateMemory: function (id, patch) {
+    return fetch(API_BASE + "/desktop/memory/" + encodeURIComponent(id), {
+      method: "PUT",
+      body: JSON.stringify(patch || {}),
+      headers: { "Content-Type": "application/json" },
+    }).then(function (r) {
+      if (!r.ok) throw new Error("Update memory failed: " + r.status);
+      return r.json();
+    });
+  },
+  deleteMemory: function (id) {
+    return fetch(API_BASE + "/desktop/memory/" + encodeURIComponent(id), {
+      method: "DELETE",
+    }).then(function (r) {
+      if (!r.ok) throw new Error("Delete memory failed: " + r.status);
+      return r.json();
+    });
+  },
+  setSessionMemoryPolicy: function (id, policy) {
+    return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(id) + "/memory-policy", {
+      method: "PUT",
+      body: JSON.stringify({ memoryPolicy: policy }),
+      headers: { "Content-Type": "application/json" },
+    }).then(function (r) {
+      if (!r.ok) throw new Error("Set memory policy failed: " + r.status);
+      return r.json();
+    });
+  },
+  createSessionMemory: function (id, payload) {
+    return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(id) + "/memory", {
+      method: "POST",
+      body: JSON.stringify(payload || {}),
+      headers: { "Content-Type": "application/json" },
+    }).then(function (r) {
+      if (!r.ok) throw new Error("Create session memory failed: " + r.status);
+      return r.json();
+    });
+  },
   getConfig: function () {
     return fetch(API_BASE + "/desktop/config").then(function (r) {
       if (!r.ok) throw new Error("Config fetch failed: " + r.status);

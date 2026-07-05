@@ -3,6 +3,7 @@ package com.selfanalyst.desktop.controller;
 import com.selfanalyst.agent.SelfAnalystAgent;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.desktop.service.ChatSummaryService;
+import com.selfanalyst.desktop.service.MemoryExtractionService;
 import com.selfanalyst.desktop.service.SummaryPromptService;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -54,19 +55,24 @@ public class DesktopChatSessionController {
     private final ChatSummaryService summaryService;
     private final SelfAnalystAgent agent;
     private final Config config;
+    private final MemoryExtractionService memoryExtractionService;
 
     private final ScheduledExecutorService summaryPool = Executors.newScheduledThreadPool(
             1, r -> { Thread t = new Thread(r, "chat-summary"); t.setDaemon(true); return t; });
+    private final ScheduledExecutorService memoryPool = Executors.newScheduledThreadPool(
+            1, r -> { Thread t = new Thread(r, "memory-extraction"); t.setDaemon(true); return t; });
     private final ConcurrentHashMap<String, ScheduledFuture<?>> pending = new ConcurrentHashMap<>();
 
     public DesktopChatSessionController(ChatSessionStore store,
                                         ChatSummaryService summaryService,
                                         SelfAnalystAgent agent,
-                                        Config config) {
+                                        Config config,
+                                        MemoryExtractionService memoryExtractionService) {
         this.store = store;
         this.summaryService = summaryService;
         this.agent = agent;
         this.config = config;
+        this.memoryExtractionService = memoryExtractionService;
     }
 
     // ── Handlers ─────────────────────────────────────────────────
@@ -186,9 +192,31 @@ public class DesktopChatSessionController {
                 return;
             }
             scheduleSummary(id);
+            if ("assistant".equals(updated.role) && "sent".equals(updated.status)) {
+                scheduleMemoryExtraction(id, updated.id);
+            }
             ctx.json(updated);
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to update message: " + e.getMessage()));
+        }
+    }
+
+    /** PUT /desktop/chat/sessions/{id}/memory-policy */
+    public void setMemoryPolicy(Context ctx) {
+        try {
+            String id = ctx.pathParam("id");
+            JsonNode body = MAPPER.readTree(ctx.body());
+            String policy = textOrNull(body, "memoryPolicy");
+            ChatSessionStore.Session updated = store.updateMemoryPolicy(id, policy);
+            if (updated == null) {
+                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                return;
+            }
+            ctx.json(updated);
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            ctx.status(500).json(Map.of("error", "Failed to set memory policy: " + e.getMessage()));
         }
     }
 
@@ -249,6 +277,44 @@ public class DesktopChatSessionController {
             // best-effort: failures must never propagate (SPEC-CSP-API-011c)
             log.warn("Summary regeneration failed for {}: {}", id, e.getMessage());
         }
+    }
+
+    private void scheduleMemoryExtraction(String sessionId, String assistantMessageId) {
+        if (memoryExtractionService == null) return;
+        memoryPool.submit(() -> {
+            try {
+                ChatSessionStore.Session session = store.getSession(sessionId);
+                if (session == null || "off".equals(session.memoryPolicy) || session.messages == null) return;
+                ChatSessionStore.Message assistant = null;
+                ChatSessionStore.Message user = null;
+                for (int i = 0; i < session.messages.size(); i++) {
+                    ChatSessionStore.Message message = session.messages.get(i);
+                    if (assistantMessageId.equals(message.id)) {
+                        assistant = message;
+                        for (int j = i - 1; j >= 0; j--) {
+                            ChatSessionStore.Message previous = session.messages.get(j);
+                            if ("user".equals(previous.role)) {
+                                user = previous;
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+                if (assistant == null || user == null) return;
+                SummaryPromptService.SummaryTextClient client = llmAvailable() ? agent::completePlain : null;
+                memoryExtractionService.extractAfterAssistantSent(session, user, assistant, client);
+            } catch (Exception e) {
+                log.warn("Memory extraction failed for session {}: {}", sessionId, e.getMessage());
+            }
+        });
+    }
+
+    private boolean llmAvailable() {
+        return agent != null && config != null
+                && config.llmApiKey() != null && !config.llmApiKey().isBlank()
+                && !config.llmApiKey().contains("CHANGE_ME")
+                && !agent.isBudgetBlocked();
     }
 
     // ── Parsing helpers ──────────────────────────────────────────

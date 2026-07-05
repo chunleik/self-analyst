@@ -9,10 +9,12 @@ import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.desktop.controller.*;
 import com.selfanalyst.desktop.service.BehaviorAdviceService;
 import com.selfanalyst.desktop.service.ChatSummaryService;
+import com.selfanalyst.desktop.service.MemoryExtractionService;
 import com.selfanalyst.desktop.service.SummaryService;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
+import com.selfanalyst.memory.LongTermMemoryService;
 import com.selfanalyst.memory.MemoryStore;
 import io.javalin.Javalin;
 import io.javalin.http.ContentType;
@@ -50,6 +52,7 @@ public class DesktopServer {
     private final DesktopTaskController taskCtrl;
     private final DesktopStatusController statusCtrl;
     private final DesktopChatSessionController chatSessionCtrl;
+    private final DesktopMemoryController memoryCtrl;
 
     /**
      * Create and register all desktop API routes.
@@ -78,17 +81,26 @@ public class DesktopServer {
         UserConfigStore userConfigStore = new UserConfigStore(memoryDir);
         SummaryService summaryService = new SummaryService(eventStore, memoryStore);
         BehaviorAdviceService adviceService = new BehaviorAdviceService();
+        LongTermMemoryService longTermMemoryService = memoryStore != null
+                ? new LongTermMemoryService(memoryStore)
+                : null;
+        MemoryExtractionService memoryExtractionService = longTermMemoryService != null
+                ? new MemoryExtractionService(longTermMemoryService, config.effectiveLanguage())
+                : null;
 
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore, config);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.statusCtrl = new DesktopStatusController(
                 config, watcherManager, contentWatcher, audioWatcher);
+        this.memoryCtrl = longTermMemoryService != null
+                ? new DesktopMemoryController(longTermMemoryService)
+                : null;
 
         ChatSessionStore chatSessionStore = new ChatSessionStore(memoryDir);
         ChatSummaryService chatSummaryService = new ChatSummaryService(config.effectiveLanguage());
         this.chatSessionCtrl = new DesktopChatSessionController(
-                chatSessionStore, chatSummaryService, agent, config);
+                chatSessionStore, chatSummaryService, agent, config, memoryExtractionService);
     }
 
     /**
@@ -147,6 +159,16 @@ public class DesktopServer {
         app.post  ("/desktop/chat/sessions/{id}/messages",        chatSessionCtrl::appendMessages);
         app.put   ("/desktop/chat/sessions/{id}/messages/{msgId}", chatSessionCtrl::updateMessage);
         app.put   ("/desktop/chat/active-session",                chatSessionCtrl::setActiveSession);
+        app.put   ("/desktop/chat/sessions/{id}/memory-policy",   chatSessionCtrl::setMemoryPolicy);
+
+        // ── Long-term memory ────────────────────────────────────
+        if (memoryCtrl != null) {
+            app.get   ("/desktop/memory",                     memoryCtrl::list);
+            app.post  ("/desktop/memory",                     memoryCtrl::create);
+            app.put   ("/desktop/memory/{id}",                memoryCtrl::update);
+            app.delete("/desktop/memory/{id}",                memoryCtrl::delete);
+            app.post  ("/desktop/chat/sessions/{id}/memory", memoryCtrl::createFromSession);
+        }
 
         // ── Status ───────────────────────────────────────────
         app.get("/desktop/status", statusCtrl::getStatus);
@@ -191,4 +213,5 @@ public class DesktopServer {
     public DesktopTaskController taskController() { return taskCtrl; }
     public DesktopStatusController statusController() { return statusCtrl; }
     public DesktopChatSessionController chatSessionController() { return chatSessionCtrl; }
+    public DesktopMemoryController memoryController() { return memoryCtrl; }
 }

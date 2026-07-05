@@ -24,6 +24,10 @@ public class LongTermMemoryService {
         this.store = store;
     }
 
+    public synchronized GrowthProfile profile() {
+        return store.profile();
+    }
+
     public synchronized List<GrowthProfile.MemoryItem> list(String status, String type,
                                                             String sourceSessionId, String q) {
         String query = q != null ? q.trim().toLowerCase(Locale.ROOT) : "";

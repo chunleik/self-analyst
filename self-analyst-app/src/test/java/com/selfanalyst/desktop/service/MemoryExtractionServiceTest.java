@@ -99,6 +99,19 @@ class MemoryExtractionServiceTest {
     }
 
     @Test
+    void credentialLikeCandidateIsNotStored() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+
+        svc.extractAfterAssistantSent(session("smart"), user("我的 api key 是 sk-test-secret123"), assistant("我不会保存。"),
+                (prompt, timeout) -> """
+                        [{"type":"fact","content":"用户的 api-key=sk-test-secret123","evidence":"聊天中出现凭据。","confidence":10,"sensitive":true,"approvalPolicy":"confirm"}]
+                        """);
+
+        assertTrue(memory.list(null, null, null, null).isEmpty());
+    }
+
+    @Test
     void fencedJsonResponseIsParsedAndPromptIsBounded() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.EN);

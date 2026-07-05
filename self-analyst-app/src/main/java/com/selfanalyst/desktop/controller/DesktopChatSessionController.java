@@ -183,6 +183,7 @@ public class DesktopChatSessionController {
             String content = textOrNull(body, "content");
             String status = textOrNull(body, "status");
             String error = textOrNull(body, "error");
+            String previousStatus = messageStatus(id, msgId);
             List<Object> suggestedTasks = body.has("suggestedTasks") && body.get("suggestedTasks").isArray()
                     ? MAPPER.convertValue(body.get("suggestedTasks"), new TypeReference<List<Object>>() {}) : null;
             ChatSessionStore.Message updated =
@@ -192,7 +193,8 @@ public class DesktopChatSessionController {
                 return;
             }
             scheduleSummary(id);
-            if ("assistant".equals(updated.role) && "sent".equals(updated.status)) {
+            if ("assistant".equals(updated.role) && "sent".equals(updated.status)
+                    && !"sent".equals(previousStatus)) {
                 scheduleMemoryExtraction(id, updated.id);
             }
             ctx.json(updated);
@@ -315,6 +317,16 @@ public class DesktopChatSessionController {
                 && config.llmApiKey() != null && !config.llmApiKey().isBlank()
                 && !config.llmApiKey().contains("CHANGE_ME")
                 && !agent.isBudgetBlocked();
+    }
+
+    private String messageStatus(String sessionId, String messageId) {
+        ChatSessionStore.Session session = store.getSession(sessionId);
+        if (session == null || session.messages == null || messageId == null) return null;
+        return session.messages.stream()
+                .filter(message -> messageId.equals(message.id))
+                .map(message -> message.status)
+                .findFirst()
+                .orElse(null);
     }
 
     // ── Parsing helpers ──────────────────────────────────────────

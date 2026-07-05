@@ -123,6 +123,7 @@ public class SelfAnalystAgent {
                 .sysPrompt(buildSystemPrompt())
                 .model(chatModel)
                 .toolkit(toolkit)
+                .hook(new DynamicMemoryContextHook(lang, () -> memory.profile().buildContextSummary()))
                 .hook(new PlanHook(usageMeter))
                 .maxIters(config.agentMaxIters())
                 .modelExecutionConfig(ExecutionConfig.builder()
@@ -160,7 +161,7 @@ public class SelfAnalystAgent {
     }
 
     private String buildSystemPrompt() {
-        return AgentPrompts.systemPrompt(lang, memory.profile().buildContextSummary(),
+        return AgentPrompts.systemPrompt(lang, "",
                 wikiStore != null, semanticEnabled, hasFileTools, hasConfigTools,
                 ZonedDateTime.now());
     }
@@ -174,10 +175,10 @@ public class SelfAnalystAgent {
                     : "已达到今日 token 使用上限，已暂停对话以控制成本。"
                       + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
         }
-        String inputWithFreshMemory = AgentPrompts.dynamicMemoryContext(
-                lang, memory.profile().buildContextSummary()) + userInput;
         return agent.call(Msg.builder()
-                        .textContent(inputWithFreshMemory)
+                        .name("user")
+                        .role(MsgRole.USER)
+                        .textContent(userInput)
                 .build())
                 .map(Msg::getTextContent);
     }

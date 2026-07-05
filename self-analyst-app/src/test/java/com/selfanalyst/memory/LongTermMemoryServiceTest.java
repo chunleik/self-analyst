@@ -77,7 +77,16 @@ class LongTermMemoryServiceTest {
                 "password: swordfish",
                 "api-key=abc123456",
                 "access_token: abcdefgh",
-                "Authorization: Bearer abcdefgh");
+                "client_secret=abcdefgh",
+                "AWS_SECRET_ACCESS_KEY=abcdefgh",
+                "access_key=abcdefgh",
+                "secret=abcdefgh",
+                "Authorization: Bearer abcdefgh",
+                "-----BEGIN PRIVATE KEY----- abcdefgh -----END PRIVATE KEY-----",
+                "验证码: 123456",
+                "银行卡号 6222020202020202020",
+                "身份证号 11010519491231002X",
+                "私钥: abcdefgh");
 
         for (int i = 0; i < secrets.size(); i++) {
             String secret = secrets.get(i);
@@ -104,6 +113,20 @@ class LongTermMemoryServiceTest {
 
         assertTrue(svc.delete(item.id()));
         assertTrue(svc.list(null, null, null, null).isEmpty());
+    }
+
+    @Test
+    void invalidTypeStatusAndApprovalPolicyAreRejected() throws Exception {
+        LongTermMemoryService svc = service();
+        GrowthProfile.MemoryItem item = svc.createManual("note", "用户偏好中文。", "manual", null, "ui_manual", "active");
+
+        assertThrows(IllegalArgumentException.class, () ->
+                svc.createManual("mood", "用户偏好简洁。", "manual", null, "ui_manual", "active"));
+        assertThrows(IllegalArgumentException.class, () ->
+                svc.update(item.id(), null, null, null, null, "activ", null));
+        assertThrows(IllegalArgumentException.class, () ->
+                svc.createExtracted("preference", "用户偏好英文。", "manual", 8,
+                        false, "maybe", "active", "session-1", List.of("m1")));
     }
 
     @Test
@@ -216,6 +239,22 @@ class LongTermMemoryServiceTest {
         assertEquals(1, svc.disableMatching("用户偏好中文交流。"));
         assertEquals("disabled", memoryById(svc, active.id()).status());
         assertEquals("pending", memoryById(svc, pending.id()).status());
+    }
+
+    @Test
+    void rejectedMemoryBlocksEquivalentAutomaticExtraction() throws Exception {
+        LongTermMemoryService svc = service();
+        GrowthProfile.MemoryItem item = svc.createManual(
+                "preference", "用户偏好中文交流。", "manual", "session-1", "chat_manual", "pending");
+        svc.update(item.id(), null, null, null, null, "rejected", null);
+
+        GrowthProfile.MemoryItem duplicate = svc.createExtracted(
+                "preference", " 用户偏好中文交流。 ", "new extraction", 9,
+                false, "auto", "active", "session-1", List.of("assistant-2"));
+
+        assertEquals(item.id(), duplicate.id());
+        assertEquals("rejected", duplicate.status());
+        assertEquals(1, svc.list(null, null, null, null).size());
     }
 
     private LongTermMemoryService service() throws Exception {

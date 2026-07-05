@@ -11,12 +11,19 @@ import java.util.regex.Pattern;
 
 public class LongTermMemoryService {
 
-    private static final Pattern CREDENTIAL_LIKE_PATTERN = Pattern.compile(
-            "(?is).*(\\b[a-z0-9_-]*api[_-]?key\\b\\s*[:=]\\s*\\S+"
-                    + "|\\b[a-z0-9_-]*token\\b\\s*[:=]\\s*\\S+"
-                    + "|\\bpassword\\b\\s*[:=]\\s*\\S+"
-                    + "|\\bauthorization\\b\\s*:\\s*bearer\\s+\\S+"
-                    + "|\\bsk-[a-z0-9_-]{8,}\\b).*");
+    private static final List<Pattern> FORBIDDEN_CONTENT_PATTERNS = List.of(
+            Pattern.compile("(?is).*-----BEGIN [A-Z ]*PRIVATE KEY-----.*"),
+            Pattern.compile("(?is).*\\b[a-z0-9_-]*api[_-]?key\\b\\s*[:=]\\s*\\S+.*"),
+            Pattern.compile("(?is).*\\b[a-z0-9_-]*(secret|client[_-]?secret|access[_-]?key|secret[_-]?access[_-]?key|private[_-]?key)\\b\\s*[:=]\\s*\\S+.*"),
+            Pattern.compile("(?is).*\\b[a-z0-9_-]*token\\b\\s*[:=]\\s*\\S+.*"),
+            Pattern.compile("(?is).*\\bpassword\\b\\s*[:=]\\s*\\S+.*"),
+            Pattern.compile("(?is).*\\bauthorization\\b\\s*:\\s*bearer\\s+\\S+.*"),
+            Pattern.compile("(?is).*\\bsk-[a-z0-9_-]{8,}\\b.*"),
+            Pattern.compile("(?is).*(密码|口令|密钥|私钥|令牌)\\s*[:：=]\\s*\\S+.*"),
+            Pattern.compile("(?is).*(验证码|verification\\s*code|otp)\\s*[:：=]?\\s*\\d{4,8}.*"),
+            Pattern.compile("(?is).*(银行卡号|bank\\s*card)\\s*[:：= ]*\\d(?:[ -]?\\d){12,18}.*"),
+            Pattern.compile("(?is).*(身份证号|identity\\s*number|id\\s*number)\\s*[:：= ]*\\d{17}[0-9xX].*")
+    );
 
     private final MemoryStore store;
 
@@ -75,7 +82,7 @@ public class LongTermMemoryService {
         String cleanEvidence = blankToNull(evidence);
         rejectForbidden(clean);
         rejectForbidden(cleanEvidence);
-        GrowthProfile.MemoryItem existing = findDuplicate(clean);
+        GrowthProfile.MemoryItem existing = findDuplicateForExtraction(clean);
         if (existing != null) return existing;
         Instant now = Instant.now();
         GrowthProfile.MemoryItem item = new GrowthProfile.MemoryItem(
@@ -174,13 +181,22 @@ public class LongTermMemoryService {
     }
 
     private GrowthProfile.MemoryItem findDuplicate(String content) {
-        return findDuplicate(content, null);
+        return findDuplicate(content, null, false);
     }
 
     private GrowthProfile.MemoryItem findDuplicate(String content, GrowthProfile.MemoryItem excluded) {
+        return findDuplicate(content, excluded, false);
+    }
+
+    private GrowthProfile.MemoryItem findDuplicateForExtraction(String content) {
+        return findDuplicate(content, null, true);
+    }
+
+    private GrowthProfile.MemoryItem findDuplicate(String content, GrowthProfile.MemoryItem excluded,
+                                                   boolean includeRejected) {
         String normalized = fingerprint(content);
         return store.profile().getMemories().stream()
-                .filter(m -> !"rejected".equals(m.status()))
+                .filter(m -> includeRejected || !"rejected".equals(m.status()))
                 .filter(m -> !isSameMemory(m, excluded))
                 .filter(m -> normalized.equals(fingerprint(m.content())))
                 .findFirst()
@@ -197,9 +213,16 @@ public class LongTermMemoryService {
         if (content == null) {
             return;
         }
-        if (CREDENTIAL_LIKE_PATTERN.matcher(content).matches()) {
+        if (containsForbiddenContent(content)) {
             throw new IllegalArgumentException("Sensitive credential-like content cannot be stored as memory");
         }
+    }
+
+    public static boolean containsForbiddenContent(String content) {
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        return FORBIDDEN_CONTENT_PATTERNS.stream().anyMatch(pattern -> pattern.matcher(content).matches());
     }
 
     private static String lower(String value) {
@@ -218,7 +241,7 @@ public class LongTermMemoryService {
         if (normalized.isEmpty()) return "note";
         return switch (normalized) {
             case "goal", "preference", "project", "pattern", "fact", "note" -> normalized;
-            default -> "note";
+            default -> throw new IllegalArgumentException("Invalid memory type: " + type);
         };
     }
 
@@ -227,7 +250,7 @@ public class LongTermMemoryService {
         if (normalized.isEmpty()) return "active";
         return switch (normalized) {
             case "active", "pending", "disabled", "rejected" -> normalized;
-            default -> "active";
+            default -> throw new IllegalArgumentException("Invalid memory status: " + status);
         };
     }
 
@@ -239,8 +262,17 @@ public class LongTermMemoryService {
         String normalized = canonical(approvalPolicy);
         return switch (normalized) {
             case "auto", "confirm" -> normalized;
-            default -> "confirm";
+            case "" -> "confirm";
+            default -> throw new IllegalArgumentException("Invalid memory approvalPolicy: " + approvalPolicy);
         };
+    }
+
+    public synchronized boolean hasSourceMessageId(String messageId) {
+        if (messageId == null || messageId.isBlank()) {
+            return false;
+        }
+        return store.profile().getMemories().stream()
+                .anyMatch(m -> m.sourceMessageIds() != null && m.sourceMessageIds().contains(messageId));
     }
 
     private static List<String> normalizeMessageIds(List<String> sourceMessageIds) {

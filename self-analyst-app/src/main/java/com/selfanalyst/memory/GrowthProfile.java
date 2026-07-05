@@ -127,6 +127,8 @@ public class GrowthProfile {
 
         List<MemoryItem> activeMemories = getMemories().stream()
                 .filter(m -> "active".equals(m.status()))
+                .filter(m -> !LongTermMemoryService.containsForbiddenContent(m.content()))
+                .filter(m -> !LongTermMemoryService.containsForbiddenContent(m.evidence()))
                 .toList();
         if (!activeMemories.isEmpty()) {
             sb.append("## 长期记忆\n");

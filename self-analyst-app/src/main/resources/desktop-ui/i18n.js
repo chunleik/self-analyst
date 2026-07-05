@@ -152,6 +152,7 @@ var MESSAGES = {
   // ── Long-term memory ──
   "memory.chatTitle": { zh: "长期记忆", en: "Long-term memory" },
   "memory.loading": { zh: "加载中...", en: "Loading..." },
+  "memory.loadFailed": { zh: "记忆加载失败: {msg}", en: "Failed to load memory: {msg}" },
   "memory.noSession": { zh: "选择会话后显示记忆设置", en: "Select a chat to show memory settings" },
   "memory.policy.smart": { zh: "智能", en: "Smart" },
   "memory.policy.confirmAll": { zh: "每次确认", en: "Confirm all" },

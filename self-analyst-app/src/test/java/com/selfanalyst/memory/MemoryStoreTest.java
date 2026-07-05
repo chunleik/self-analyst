@@ -1,7 +1,9 @@
 package com.selfanalyst.memory;
 
+import com.fasterxml.jackson.databind.JsonMappingException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.List;
@@ -67,5 +69,26 @@ class MemoryStoreTest {
         MemoryStore loaded = MemoryStore.load(tempDir);
         assertEquals(1, loaded.profile().getMemories().size());
         assertEquals("用户偏好使用中文交流。", loaded.profile().getMemories().getFirst().content());
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void failedSaveKeepsExistingMemoryFileReadable() throws Exception {
+        MemoryStore store = MemoryStore.load(tempDir);
+        store.profile().getGoals().add(
+                GrowthProfile.Goal.create("减少社交媒体", "浏览器-社交", 45, 15));
+        store.save();
+        Path file = tempDir.resolve("memory.json");
+        String original = Files.readString(file);
+
+        ((List) store.profile().getGoals()).add(new Object() {
+            public Object getSelf() {
+                return this;
+            }
+        });
+
+        assertThrows(JsonMappingException.class, store::save);
+        assertEquals(original, Files.readString(file));
+        assertEquals(1, MemoryStore.load(tempDir).profile().getGoals().size());
     }
 }

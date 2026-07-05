@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -91,6 +92,14 @@ class DesktopMemoryControllerTest {
         assertEquals(session.id, extraction.session.id);
         assertEquals("user", extraction.user.role);
         assertEquals(assistantId, extraction.assistant.id);
+
+        FakeContext second = FakeContext.withBody("{\"content\":\"好的，补充一句。\",\"status\":\"sent\"}");
+        second.pathParams.put("id", session.id);
+        second.pathParams.put("msgId", assistantId);
+        controller.updateMessage(second.ctx());
+        Thread.sleep(200);
+
+        assertEquals(1, extraction.count(), "sent->sent updates must not schedule duplicate extraction");
     }
 
     private static ChatSessionStore.CreateRequest req(String title) {
@@ -109,6 +118,7 @@ class DesktopMemoryControllerTest {
 
     private static final class CapturingExtractionService extends MemoryExtractionService {
         private final CountDownLatch latch = new CountDownLatch(1);
+        private final AtomicInteger count = new AtomicInteger();
         ChatSessionStore.Session session;
         ChatSessionStore.Message user;
         ChatSessionStore.Message assistant;
@@ -122,6 +132,7 @@ class DesktopMemoryControllerTest {
                                               ChatSessionStore.Message user,
                                               ChatSessionStore.Message assistant,
                                               SummaryPromptService.SummaryTextClient client) {
+            count.incrementAndGet();
             this.session = session;
             this.user = user;
             this.assistant = assistant;
@@ -130,6 +141,10 @@ class DesktopMemoryControllerTest {
 
         boolean await() throws InterruptedException {
             return latch.await(2, TimeUnit.SECONDS);
+        }
+
+        int count() {
+            return count.get();
         }
     }
 

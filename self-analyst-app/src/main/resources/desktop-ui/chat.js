@@ -31,9 +31,11 @@ function loadMemoryForChat() {
   return api.listMemory({}).then(function (resp) {
     state.memoryItems = (resp && resp.memories) || [];
     state.pendingMemoryCount = state.memoryItems.filter(function (m) { return m.status === "pending"; }).length;
-  }).catch(function () {
+    state.memoryLoadError = null;
+  }).catch(function (err) {
     state.memoryItems = [];
     state.pendingMemoryCount = 0;
+    state.memoryLoadError = err && err.message ? err.message : t("common.unknownError");
   }).then(function () {
     state.memoryLoading = false;
   });
@@ -167,6 +169,10 @@ function renderChatMemoryPanel() {
   if (!root) return;
   if (state.memoryLoading) {
     root.textContent = t("memory.loading");
+    return;
+  }
+  if (state.memoryLoadError) {
+    root.textContent = t("memory.loadFailed", { msg: state.memoryLoadError });
     return;
   }
   if (!session) {

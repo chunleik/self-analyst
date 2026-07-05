@@ -39,6 +39,8 @@ public class MemoryExtractionService {
                 return;
             }
             if ("off".equals(session.memoryPolicy) || client == null) return;
+            if (memoryService.hasSourceMessageId(assistant != null ? assistant.id : null)) return;
+            if (containsForbiddenChatText(user, assistant)) return;
             String raw = client.complete(buildPrompt(session, user, assistant), EXTRACTION_TIMEOUT);
             for (Candidate candidate : parseCandidates(raw)) {
                 saveCandidate(session, user, assistant, candidate);
@@ -74,6 +76,8 @@ public class MemoryExtractionService {
     private String memorySnapshot() {
         String snapshot = memoryService.list(null, null, null, null).stream()
                 .filter(m -> "active".equals(m.status()) || "pending".equals(m.status()))
+                .filter(m -> !LongTermMemoryService.containsForbiddenContent(m.content()))
+                .filter(m -> !LongTermMemoryService.containsForbiddenContent(m.evidence()))
                 .limit(12)
                 .map(MemoryExtractionService::formatMemory)
                 .reduce((left, right) -> left + "\n" + right)
@@ -120,6 +124,12 @@ public class MemoryExtractionService {
             return List.of(userId);
         }
         return List.of(userId, assistantId);
+    }
+
+    private static boolean containsForbiddenChatText(ChatSessionStore.Message user,
+                                                     ChatSessionStore.Message assistant) {
+        return LongTermMemoryService.containsForbiddenContent(user != null ? user.content : null)
+                || LongTermMemoryService.containsForbiddenContent(assistant != null ? assistant.content : null);
     }
 
     private static int clamp(int value) {

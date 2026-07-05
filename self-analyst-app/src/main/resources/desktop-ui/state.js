@@ -37,6 +37,7 @@ var state = {
   memoryItems: [],
   memoryFilter: "",
   memoryLoading: false,
+  memoryLoadError: null,
   pendingMemoryCount: 0,
   memoryDraft: "",
 };

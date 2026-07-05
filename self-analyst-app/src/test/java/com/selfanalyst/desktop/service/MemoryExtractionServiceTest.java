@@ -112,6 +112,43 @@ class MemoryExtractionServiceTest {
     }
 
     @Test
+    void credentialLikeChatTextDoesNotReachExtractionClient() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        AtomicBoolean called = new AtomicBoolean(false);
+
+        svc.extractAfterAssistantSent(session("smart"),
+                user("client_secret=abcdefgh123456，请不要泄露。"), assistant("我不会保存。"),
+                (prompt, timeout) -> {
+                    called.set(true);
+                    return "[]";
+                });
+
+        assertFalse(called.get(), "credential-like chat text must not be sent to extraction LLM");
+        assertTrue(memory.list(null, null, null, null).isEmpty());
+    }
+
+    @Test
+    void alreadyExtractedAssistantMessageDoesNotCallClientAgain() throws Exception {
+        LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        memory.createExtracted("preference", "用户偏好中文交流。", "existing", 9,
+                false, "auto", "active", "session-1", List.of("user-1", "assistant-1"));
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        AtomicBoolean called = new AtomicBoolean(false);
+
+        svc.extractAfterAssistantSent(session("smart"), user("我偏好中文。"), assistant("好的。"),
+                (prompt, timeout) -> {
+                    called.set(true);
+                    return """
+                            [{"type":"preference","content":"用户倾向中文回答。","evidence":"same source","confidence":9,"sensitive":false,"approvalPolicy":"auto"}]
+                            """;
+                });
+
+        assertFalse(called.get(), "processed source message ids should be idempotent");
+        assertEquals(1, memory.list(null, null, null, null).size());
+    }
+
+    @Test
     void fencedJsonResponseIsParsedAndPromptIsBounded() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         memory.createManual("note", "m".repeat(5000), "existing memory", null, "ui_manual", "active");
@@ -137,6 +174,11 @@ class MemoryExtractionServiceTest {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         memory.createManual("preference", "用户偏好中文交流。", "existing active", "session-1", "chat_manual", "active");
         memory.createManual("goal", "用户想每天深度工作三小时。", "existing pending", "session-1", "chat_manual", "pending");
+        memory.profile().getMemories().add(new GrowthProfile.MemoryItem(
+                "legacy-secret", "fact", "client_secret=legacysecret", "legacy evidence",
+                9, "active", false, "auto", "legacy", "session-1", List.of(),
+                java.time.Instant.parse("2026-07-04T00:00:00Z"),
+                java.time.Instant.parse("2026-07-04T00:00:00Z")));
         MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
 
         svc.extractAfterAssistantSent(session("smart"), user("我偏好简洁回答。"), assistant("收到。"),
@@ -146,10 +188,11 @@ class MemoryExtractionServiceTest {
                     assertTrue(prompt.contains("user=user-1, assistant=assistant-1"));
                     assertTrue(prompt.contains("用户偏好中文交流。"));
                     assertTrue(prompt.contains("用户想每天深度工作三小时。"));
+                    assertFalse(prompt.contains("legacysecret"));
                     return "[]";
                 });
 
-        assertEquals(2, memory.list(null, null, null, null).size());
+        assertEquals(3, memory.list(null, null, null, null).size());
     }
 
     @Test

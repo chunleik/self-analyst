@@ -31,6 +31,18 @@ class GrowthProfileMemoryItemTest {
     }
 
     @Test
+    void contextSummaryExcludesLegacySensitiveActiveMemories() {
+        GrowthProfile profile = new GrowthProfile();
+        profile.getMemories().add(item("safe", "preference", "用户偏好使用中文交流。", "active"));
+        profile.getMemories().add(item("secret", "fact", "client_secret=legacysecret", "active"));
+
+        String summary = profile.buildContextSummary();
+
+        assertTrue(summary.contains("用户偏好使用中文交流。"));
+        assertFalse(summary.contains("legacysecret"));
+    }
+
+    @Test
     void contextSummaryKeepsLegacyGoalsAndPatterns() {
         GrowthProfile profile = new GrowthProfile();
         profile.getGoals().add(GrowthProfile.Goal.create("每天深度工作 3 小时", "deep_work_minutes", 60, 180));

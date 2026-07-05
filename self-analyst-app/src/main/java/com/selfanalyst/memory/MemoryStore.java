@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public class MemoryStore {
 
@@ -37,7 +39,22 @@ public class MemoryStore {
     }
 
     public void save() throws IOException {
-        MAPPER.writeValue(filePath.toFile(), profile);
+        Files.createDirectories(filePath.getParent());
+        Path temp = Files.createTempFile(filePath.getParent(), filePath.getFileName().toString(), ".tmp");
+        boolean moved = false;
+        try {
+            MAPPER.writeValue(temp.toFile(), profile);
+            try {
+                Files.move(temp, filePath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, filePath, StandardCopyOption.REPLACE_EXISTING);
+            }
+            moved = true;
+        } finally {
+            if (!moved) {
+                Files.deleteIfExists(temp);
+            }
+        }
     }
 
     public GrowthProfile profile() {

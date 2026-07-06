@@ -118,7 +118,7 @@ public class DesktopStatusController implements AutoCloseable {
 
     Map<String, Object> buildHeadroomStatus() {
         return headroomService != null
-                ? headroomService.snapshot().toMap()
+                ? headroomService.snapshotWithFreshStats().toMap()
                 : Map.of("status", "disabled", "enabled", false);
     }
 

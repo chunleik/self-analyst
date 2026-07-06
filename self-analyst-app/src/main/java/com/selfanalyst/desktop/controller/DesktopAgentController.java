@@ -205,7 +205,7 @@ public class DesktopAgentController {
             payload.putAll(agent.usageSnapshot());
         }
         if (headroomService != null) {
-            payload.put("headroom", headroomService.snapshot().toMap());
+            payload.put("headroom", headroomService.snapshotWithFreshStats().toMap());
         }
         return payload;
     }

@@ -17,13 +17,15 @@ class DesktopStatusControllerHeadroomTest {
     @Test
     void llmStatusUsesEffectiveHeadroomBaseUrl(@TempDir Path dir) {
         Config config = Config.testDefaults(dir);
+        AtomicInteger statsCalls = new AtomicInteger();
         HeadroomService service = new HeadroomService(
                 true,
                 "http://127.0.0.1:8787/v1",
                 config.llmBaseUrl(),
                 true,
                 false,
-                (uri, timeout) -> HeadroomService.ProbeResult.ok("reachable"));
+                (uri, timeout) -> HeadroomService.ProbeResult.ok("reachable"),
+                (uri, timeout) -> HeadroomService.StatsResult.ok(Map.of("requestCount", statsCalls.incrementAndGet())));
         DesktopStatusController ctrl = new DesktopStatusController(config, null, null, null, service);
 
         try {
@@ -33,6 +35,7 @@ class DesktopStatusControllerHeadroomTest {
             assertEquals("http://127.0.0.1:8787/v1", llm.get("baseUrl"));
             assertEquals("available", headroom.get("status"));
             assertEquals(true, headroom.get("enabled"));
+            assertEquals(2L, headroom.get("requestCount"));
         } finally {
             ctrl.close();
         }
@@ -42,6 +45,7 @@ class DesktopStatusControllerHeadroomTest {
     void availabilityCheckUsesStartupHeadroomSnapshotWithoutRefreshing(@TempDir Path dir) {
         Config config = Config.testDefaults(dir);
         AtomicInteger probes = new AtomicInteger();
+        AtomicInteger statsCalls = new AtomicInteger();
         HeadroomService service = new HeadroomService(
                 true,
                 "http://127.0.0.1:8787/v1",
@@ -50,7 +54,8 @@ class DesktopStatusControllerHeadroomTest {
                 false,
                 (uri, timeout) -> probes.incrementAndGet() == 1
                         ? HeadroomService.ProbeResult.fail("connection refused")
-                        : HeadroomService.ProbeResult.ok("reachable"));
+                        : HeadroomService.ProbeResult.ok("reachable"),
+                (uri, timeout) -> HeadroomService.StatsResult.ok(Map.of("requestCount", statsCalls.incrementAndGet())));
         DesktopStatusController ctrl = new DesktopStatusController(config, null, null, null, service);
 
         try {
@@ -59,9 +64,14 @@ class DesktopStatusControllerHeadroomTest {
             assertEquals(config.llmBaseUrl(), ctrl.effectiveBaseUrlForAvailabilityCheck());
             assertEquals("fallback", ctrl.buildHeadroomStatus().get("status"));
             assertEquals(1, probes.get());
+            assertEquals(0, statsCalls.get());
 
             service.refresh();
-            assertEquals("available", ctrl.buildHeadroomStatus().get("status"));
+            Map<String, Object> headroom = ctrl.buildHeadroomStatus();
+            assertEquals("available", headroom.get("status"));
+            assertEquals(2, probes.get());
+            assertEquals(2, statsCalls.get());
+            assertEquals(2L, headroom.get("requestCount"));
         } finally {
             ctrl.close();
         }

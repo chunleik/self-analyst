@@ -178,7 +178,7 @@ public final class HeadroomService {
         this.snapshot = resolve();
     }
 
-    public Snapshot refresh() {
+    public synchronized Snapshot refresh() {
         Snapshot fresh = resolve();
         this.snapshot = fresh;
         return fresh;
@@ -186,6 +186,13 @@ public final class HeadroomService {
 
     public Snapshot snapshot() {
         return snapshot;
+    }
+
+    public synchronized Snapshot snapshotWithFreshStats() {
+        Snapshot current = snapshot;
+        Snapshot fresh = copyWithStats(current, readStatsForCurrentRoute(current));
+        this.snapshot = fresh;
+        return fresh;
     }
 
     public String effectiveLlmBaseUrl() {
@@ -247,6 +254,35 @@ public final class HeadroomService {
                 lastError, statsEnabled, outputShaper, stats.status(),
                 stats.savingsPercent(), stats.originalInputTokens(), stats.compressedInputTokens(),
                 stats.requestCount(), stats.updatedAt());
+    }
+
+    private Snapshot copyWithStats(Snapshot current, StatsSnapshot stats) {
+        return new Snapshot(current.status(), current.enabled(), current.proxyUrl(), current.originalBaseUrl(),
+                current.effectiveBaseUrl(), current.lastError(), current.statsEnabled(), current.outputShaper(),
+                stats.status(), stats.savingsPercent(), stats.originalInputTokens(), stats.compressedInputTokens(),
+                stats.requestCount(), stats.updatedAt());
+    }
+
+    private StatsSnapshot readStatsForCurrentRoute(Snapshot current) {
+        if (!statsEnabled) {
+            return StatsSnapshot.disabled();
+        }
+        if (!current.enabled()) {
+            return StatsSnapshot.disabled();
+        }
+        if (!"available".equals(current.status())) {
+            return StatsSnapshot.unavailable();
+        }
+        try {
+            URI uri = URI.create(proxyUrl);
+            if (uri.getScheme() == null || uri.getHost() == null) {
+                return StatsSnapshot.unavailable();
+            }
+            return readStats(uri);
+        } catch (RuntimeException e) {
+            log.debug("Headroom stats unavailable: {}", e.getMessage());
+            return StatsSnapshot.unavailable();
+        }
     }
 
     private StatsSnapshot readStats(URI uri) {

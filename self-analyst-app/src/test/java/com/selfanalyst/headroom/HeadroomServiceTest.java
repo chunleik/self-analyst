@@ -84,6 +84,68 @@ class HeadroomServiceTest {
     }
 
     @Test
+    void snapshotWithFreshStatsUpdatesCountersWithoutReprobingOrChangingRoute() {
+        AtomicInteger probes = new AtomicInteger();
+        AtomicInteger statsCalls = new AtomicInteger();
+        HeadroomService service = new HeadroomService(
+                true,
+                "http://127.0.0.1:8787/v1",
+                "https://api.openai.com/v1",
+                true,
+                true,
+                (uri, timeout) -> {
+                    probes.incrementAndGet();
+                    return HeadroomService.ProbeResult.ok("reachable");
+                },
+                (uri, timeout) -> {
+                    int call = statsCalls.incrementAndGet();
+                    return HeadroomService.StatsResult.ok(Map.of(
+                            "savingsPercent", call * 10.0,
+                            "requestCount", call));
+                });
+
+        assertEquals(1, probes.get());
+        assertEquals(1L, service.snapshot().requestCount());
+
+        HeadroomService.Snapshot fresh = service.snapshotWithFreshStats();
+
+        assertEquals("available", fresh.status());
+        assertEquals("http://127.0.0.1:8787/v1", fresh.effectiveBaseUrl());
+        assertEquals(1, probes.get());
+        assertEquals(2, statsCalls.get());
+        assertEquals(20.0, fresh.savingsPercent());
+        assertEquals(2L, fresh.requestCount());
+    }
+
+    @Test
+    void snapshotWithFreshStatsDoesNotReadStatsWhenRouteIsFallback() {
+        AtomicInteger probes = new AtomicInteger();
+        AtomicInteger statsCalls = new AtomicInteger();
+        HeadroomService service = new HeadroomService(
+                true,
+                "http://127.0.0.1:8787/v1",
+                "https://api.openai.com/v1",
+                true,
+                false,
+                (uri, timeout) -> {
+                    probes.incrementAndGet();
+                    return HeadroomService.ProbeResult.fail("connection refused");
+                },
+                (uri, timeout) -> {
+                    statsCalls.incrementAndGet();
+                    return HeadroomService.StatsResult.ok(Map.of("requestCount", 1));
+                });
+
+        HeadroomService.Snapshot fresh = service.snapshotWithFreshStats();
+
+        assertEquals("fallback", fresh.status());
+        assertEquals("https://api.openai.com/v1", fresh.effectiveBaseUrl());
+        assertEquals("unavailable", fresh.statsStatus());
+        assertEquals(1, probes.get());
+        assertEquals(0, statsCalls.get());
+    }
+
+    @Test
     void unavailableStatsKeepAvailableRoute() {
         HeadroomService service = new HeadroomService(
                 true,

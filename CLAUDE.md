@@ -29,6 +29,7 @@ SelfAnalyst follows Specification-Driven Development. Every module and major fea
 | [docs/specs/llm-wiki.md](docs/specs/llm-wiki.md) | LLM Wiki multi-level summaries and semantic index | `SPEC-WIKI-*`, `SPEC-WIKI-SEM-*`, `SPEC-WIKI-EMB-*` |
 | [docs/specs/behavior-advice.md](docs/specs/behavior-advice.md) | Behavior-based advice/encouragement display card | `SPEC-ADV-*` |
 | [docs/specs/web-search.md](docs/specs/web-search.md) | Agent web search via MCP (Parallel Search) | `SPEC-WS-*` |
+| [docs/specs/headroom.md](docs/specs/headroom.md) | Headroom 集成：本地 proxy 降低 LLM token 成本 + 开发期跨 agent memory / failure learning | `SPEC-HR-*` |
 | [docs/specs/accessibility-sidecar.md](docs/specs/accessibility-sidecar.md) | UIA→常驻 Rust 边车 + OS 中性无障碍树协议（取代 PowerShell one-shot，预留 macOS） | `SPEC-AXS-*` |
 | [docs/specs/llm-budget.md](docs/specs/llm-budget.md) | LLM token 用量限制与每日预算（max_tokens、可配 maxIters、计量 + off/warn/block 预算） | `SPEC-BUDGET-*` |
 | [docs/specs/desktop-config-editor.md](docs/specs/desktop-config-editor.md) | 桌面端「配置」改为纯文本编辑器：直接编辑 `config.properties` 原始文本（raw GET/PUT）+ 最近 10 个版本历史（自动命名、查看/切换） | `SPEC-CFGUI-*`、`SPEC-CFGUI-VER-*` |

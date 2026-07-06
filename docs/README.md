@@ -23,6 +23,7 @@
 - [specs/llm-wiki.md](specs/llm-wiki.md) — LLM Wiki: multi-level task summaries and local semantic index
 - [specs/behavior-advice.md](specs/behavior-advice.md) — Behavior-based advice/encouragement display card on the desktop Agent tab
 - [specs/web-search.md](specs/web-search.md) — Agent web search via MCP (Parallel Search)
+- [specs/headroom.md](specs/headroom.md) — Headroom integration: runtime LLM token reduction via local proxy plus development agent memory/failure learning
 - [specs/accessibility-sidecar.md](specs/accessibility-sidecar.md) — Accessibility sidecar: replace one-shot PowerShell UIA with a long-lived Rust sidecar over an OS-neutral protocol (macOS-ready)
 - [specs/long-term-memory.md](specs/long-term-memory.md) — Long-term memory: extract durable memories from chat, confirm sensitive/inferred items, and manage memory from sessions
 

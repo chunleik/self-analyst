@@ -39,7 +39,7 @@ class DesktopStatusControllerHeadroomTest {
     }
 
     @Test
-    void availabilityCheckRefreshesHeadroomSnapshot(@TempDir Path dir) {
+    void availabilityCheckUsesStartupHeadroomSnapshotWithoutRefreshing(@TempDir Path dir) {
         Config config = Config.testDefaults(dir);
         AtomicInteger probes = new AtomicInteger();
         HeadroomService service = new HeadroomService(
@@ -56,7 +56,11 @@ class DesktopStatusControllerHeadroomTest {
         try {
             assertEquals("fallback", service.snapshot().status());
 
-            assertEquals("http://127.0.0.1:8787/v1", ctrl.effectiveBaseUrlForAvailabilityCheck());
+            assertEquals(config.llmBaseUrl(), ctrl.effectiveBaseUrlForAvailabilityCheck());
+            assertEquals("fallback", ctrl.buildHeadroomStatus().get("status"));
+            assertEquals(1, probes.get());
+
+            service.refresh();
             assertEquals("available", ctrl.buildHeadroomStatus().get("status"));
         } finally {
             ctrl.close();

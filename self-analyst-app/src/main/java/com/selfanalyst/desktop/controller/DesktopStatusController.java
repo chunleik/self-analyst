@@ -123,7 +123,7 @@ public class DesktopStatusController implements AutoCloseable {
     }
 
     String effectiveBaseUrlForAvailabilityCheck() {
-        return headroomService != null ? headroomService.refresh().effectiveBaseUrl() : config.llmBaseUrl();
+        return headroomService != null ? headroomService.effectiveLlmBaseUrl() : config.llmBaseUrl();
     }
 
     private String watcherStatus(String type) {

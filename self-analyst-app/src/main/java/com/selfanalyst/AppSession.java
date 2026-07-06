@@ -348,6 +348,9 @@ public class AppSession implements AutoCloseable {
         if (wikiStore != null) {
             wikiStore.close();
         }
+        if (desktopServer != null) {
+            desktopServer.shutdown();
+        }
         shutdownEmbeddedAW();
     }
 

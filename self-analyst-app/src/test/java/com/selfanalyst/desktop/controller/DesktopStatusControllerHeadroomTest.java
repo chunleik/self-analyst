@@ -7,8 +7,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DesktopStatusControllerHeadroomTest {
 
@@ -24,11 +26,51 @@ class DesktopStatusControllerHeadroomTest {
                 (uri, timeout) -> HeadroomService.ProbeResult.ok("reachable"));
         DesktopStatusController ctrl = new DesktopStatusController(config, null, null, null, service);
 
-        Map<String, Object> llm = ctrl.buildLlmStatus(false);
-        Map<String, Object> headroom = ctrl.buildHeadroomStatus();
+        try {
+            Map<String, Object> llm = ctrl.buildLlmStatus(false);
+            Map<String, Object> headroom = ctrl.buildHeadroomStatus();
 
-        assertEquals("http://127.0.0.1:8787/v1", llm.get("baseUrl"));
-        assertEquals("available", headroom.get("status"));
-        assertEquals(true, headroom.get("enabled"));
+            assertEquals("http://127.0.0.1:8787/v1", llm.get("baseUrl"));
+            assertEquals("available", headroom.get("status"));
+            assertEquals(true, headroom.get("enabled"));
+        } finally {
+            ctrl.close();
+        }
+    }
+
+    @Test
+    void availabilityCheckRefreshesHeadroomSnapshot(@TempDir Path dir) {
+        Config config = Config.testDefaults(dir);
+        AtomicInteger probes = new AtomicInteger();
+        HeadroomService service = new HeadroomService(
+                true,
+                "http://127.0.0.1:8787/v1",
+                config.llmBaseUrl(),
+                true,
+                false,
+                (uri, timeout) -> probes.incrementAndGet() == 1
+                        ? HeadroomService.ProbeResult.fail("connection refused")
+                        : HeadroomService.ProbeResult.ok("reachable"));
+        DesktopStatusController ctrl = new DesktopStatusController(config, null, null, null, service);
+
+        try {
+            assertEquals("fallback", service.snapshot().status());
+
+            assertEquals("http://127.0.0.1:8787/v1", ctrl.effectiveBaseUrlForAvailabilityCheck());
+            assertEquals("available", ctrl.buildHeadroomStatus().get("status"));
+        } finally {
+            ctrl.close();
+        }
+    }
+
+    @Test
+    void closeShutsDownLlmCheckerAndIsIdempotent(@TempDir Path dir) {
+        Config config = Config.testDefaults(dir);
+        DesktopStatusController ctrl = new DesktopStatusController(config, null, null, null);
+
+        ctrl.close();
+        ctrl.close();
+
+        assertTrue(ctrl.isLlmCheckerShutdownForTest());
     }
 }

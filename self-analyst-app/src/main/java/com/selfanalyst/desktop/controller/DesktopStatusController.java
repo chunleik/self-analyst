@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   GET /desktop/status → { backend, aw, collectors, llm }
  * </pre>
  */
-public class DesktopStatusController {
+public class DesktopStatusController implements AutoCloseable {
 
     private final Config config;
     private final WatcherManager watcherManager;
@@ -122,6 +122,10 @@ public class DesktopStatusController {
                 : Map.of("status", "disabled", "enabled", false);
     }
 
+    String effectiveBaseUrlForAvailabilityCheck() {
+        return headroomService != null ? headroomService.refresh().effectiveBaseUrl() : config.llmBaseUrl();
+    }
+
     private String watcherStatus(String type) {
         if (watcherManager == null) return "disabled";
         for (Watcher w : watcherManager.getWatchers()) {
@@ -144,7 +148,7 @@ public class DesktopStatusController {
 
     private boolean doCheckLlmAvailability() {
         try {
-            String baseUrl = headroomService != null ? headroomService.effectiveLlmBaseUrl() : config.llmBaseUrl();
+            String baseUrl = effectiveBaseUrlForAvailabilityCheck();
             String url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
@@ -160,5 +164,14 @@ public class DesktopStatusController {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    @Override
+    public void close() {
+        llmChecker.shutdownNow();
+    }
+
+    boolean isLlmCheckerShutdownForTest() {
+        return llmChecker.isShutdown();
     }
 }

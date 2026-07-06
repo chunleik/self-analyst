@@ -226,6 +226,12 @@ public class DesktopServer {
         log.info("Registered /desktop/* routes on shared Javalin instance");
     }
 
+    public void shutdown() {
+        if (statusCtrl != null) {
+            statusCtrl.close();
+        }
+    }
+
     private static String escapeJson(String s) {
         if (s == null) return "null";
         StringBuilder sb = new StringBuilder(s.length() + 20);

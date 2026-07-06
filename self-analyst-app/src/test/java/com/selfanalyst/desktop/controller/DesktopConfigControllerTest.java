@@ -123,7 +123,12 @@ class DesktopConfigControllerTest {
                 + "[llm.budget]\n"
                 + "dailyTokens = 100000000\n"
                 + "[desktop.summary]\n"
-                + "maxTimelineLlm = 4\n";
+                + "maxTimelineLlm = 4\n"
+                + "[headroom]\n"
+                + "enabled = false\n"
+                + "proxy-url = \"http://127.0.0.1:8787/v1\"\n"
+                + "stats.enabled = true\n"
+                + "output-shaper = false\n";
 
         var result = ctrl.applyRawSave(text);
 
@@ -226,6 +231,22 @@ class DesktopConfigControllerTest {
         assertTrue(summary.contains("修改"), summary);
         assertTrue(summary.contains("删除"), summary);
         assertTrue(summary.contains("llm.api-key"), summary);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void structuredConfigIncludesHeadroomSection(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("[headroom]\nenabled = true\nproxy-url = \"http://127.0.0.1:8787/v1\"\n");
+        var ctrl = controller(dir, store);
+        Properties effective = store.load();
+
+        Map<String, Map<String, Object>> headroom = invokeSection(ctrl, "buildHeadroomSection", effective);
+
+        assertEquals("true", headroom.get("headroomEnabled").get("effectiveValue"));
+        assertEquals("http://127.0.0.1:8787/v1", headroom.get("headroomProxyUrl").get("effectiveValue"));
+        assertEquals("true", headroom.get("headroomStatsEnabled").get("effectiveValue"));
+        assertEquals("false", headroom.get("headroomOutputShaper").get("effectiveValue"));
     }
 
     @Test

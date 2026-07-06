@@ -35,6 +35,12 @@ var api = {
       return r.json();
     });
   },
+  getUsage: function () {
+    return fetch(API_BASE + "/desktop/usage").then(function (r) {
+      if (!r.ok) throw new Error("Usage fetch failed: " + r.status);
+      return r.json();
+    });
+  },
   getTasks: function () {
     return fetch(API_BASE + "/desktop/tasks").then(function (r) {
       if (!r.ok) throw new Error("Tasks fetch failed: " + r.status);

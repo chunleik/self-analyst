@@ -110,7 +110,8 @@ public class SelfAnalystAgent {
             toolkit.registerTool(fileTools);
         }
         if (userConfigStore != null) {
-            toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier));
+            toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier,
+                    headroomService != null ? headroomService::runtimeStatusLine : null));
         }
         registerWebSearchMcp(toolkit, config);
 

@@ -121,7 +121,7 @@ public class DesktopServer {
 
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
                 config, headroomService);
-        this.configCtrl = new DesktopConfigController(config, userConfigStore);
+        this.configCtrl = new DesktopConfigController(config, userConfigStore, headroomService);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.statusCtrl = new DesktopStatusController(
                 config, watcherManager, contentWatcher, audioCaptureManager, headroomService);

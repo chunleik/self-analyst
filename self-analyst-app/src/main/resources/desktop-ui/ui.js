@@ -34,8 +34,15 @@ function updateStatusBar() {
 
   // LLM
   var llmOk = st.llm && st.llm.configured;
+  var headroom = (state.usage && state.usage.headroom) || st.headroom || {};
+  var headroomStatus = headroom.status || "unknown";
+  var headroomLabel = t("headroom.status." + headroomStatus);
+  var llmTitle = t("status.llm") + " " + (llmOk ? t("status.ok") : t("status.notReady")) +
+    " · Headroom " + headroomLabel;
   setStatusDot(state.dom.llmDot, llmOk, t("status.llm"));
-  state.dom.llmText.textContent = t("status.llm");
+  state.dom.llmDot.title = llmTitle;
+  state.dom.llmText.textContent = t("status.llm") + " · Headroom " + headroomLabel;
+  state.dom.llmText.title = llmTitle;
 
   updateAudioToggle();
 }
@@ -248,10 +255,12 @@ function loadAll() {
   // Phase 1: status + tasks are fast — render immediately
   Promise.all([
     withTimeout(api.getStatus(), 5000).catch(function () { return null; }),
-    withTimeout(api.getTasks(), 5000).catch(function () { return []; })
+    withTimeout(api.getTasks(), 5000).catch(function () { return []; }),
+    withTimeout(api.getUsage(), 5000).catch(function () { return null; })
   ]).then(function (results) {
     state.status = results[0];
     state.tasks = results[1] || [];
+    state.usage = results[2];
 
     if (!state.status) {
       showError(t("error.notReady"));
@@ -326,9 +335,11 @@ function startAutoRefresh() {
     Promise.all([
       api.getStatus().catch(function () { return state.status; }),
       api.getTasks().catch(function () { return state.tasks; }),
+      api.getUsage().catch(function () { return state.usage; }),
     ]).then(function (results) {
       state.status = results[0];
       state.tasks = results[1] || state.tasks;
+      state.usage = results[2] || state.usage;
       updateStatusBar();
       renderTasks();
     });

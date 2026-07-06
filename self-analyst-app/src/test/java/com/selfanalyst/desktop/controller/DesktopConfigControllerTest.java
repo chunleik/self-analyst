@@ -18,6 +18,7 @@ import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -231,6 +232,50 @@ class DesktopConfigControllerTest {
         assertTrue(summary.contains("修改"), summary);
         assertTrue(summary.contains("删除"), summary);
         assertTrue(summary.contains("llm.api-key"), summary);
+    }
+
+    @Test
+    void structuredPutMapsHeadroomLocalKeysWithoutTouchingAudio(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+
+        ctrl.applyStructuredSave(Map.of(
+                "headroom", Map.of(
+                        "enabled", true,
+                        "proxy-url", "http://127.0.0.1:8788/v1",
+                        "stats", Map.of("enabled", false),
+                        "output-shaper", true
+                )
+        ));
+
+        Properties user = store.loadUser();
+        assertEquals("true", user.getProperty("headroom.enabled"));
+        assertEquals("http://127.0.0.1:8788/v1", user.getProperty("headroom.proxy-url"));
+        assertEquals("false", user.getProperty("headroom.stats.enabled"));
+        assertEquals("true", user.getProperty("headroom.output-shaper"));
+        assertNull(user.getProperty("aw.audio.enabled"));
+    }
+
+    @Test
+    void structuredPutDoesNotOverrideUnchangedHeadroomDefaults(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+
+        var result = ctrl.applyStructuredSave(Map.of(
+                "headroom", Map.of(
+                        "enabled", false,
+                        "proxy-url", "http://127.0.0.1:8787/v1",
+                        "stats", Map.of("enabled", true),
+                        "output-shaper", false
+                )
+        ));
+
+        assertTrue(result.restartRequired().isEmpty(), result.restartRequired().toString());
+        Properties user = store.loadUser();
+        assertNull(user.getProperty("headroom.enabled"));
+        assertNull(user.getProperty("headroom.proxy-url"));
+        assertNull(user.getProperty("headroom.stats.enabled"));
+        assertNull(user.getProperty("headroom.output-shaper"));
     }
 
     @Test

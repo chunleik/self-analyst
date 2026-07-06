@@ -108,117 +108,8 @@ public class DesktopConfigController {
     public void putConfig(Context ctx) {
         try {
             Map<String, Object> body = MAPPER.readValue(ctx.body(), Map.class);
-            Properties user = userStore.loadUser();
-            List<String> restartKeys = new ArrayList<>();
-
-            // Map frontend camelCase keys to actual config property keys
-            Map<String, String> keyMapping = new LinkedHashMap<>();
-            keyMapping.put("apiKey", "llm.api-key");
-            keyMapping.put("baseUrl", "llm.base-url");
-            keyMapping.put("model", "llm.model");
-            keyMapping.put("temperature", "llm.temperature");
-            keyMapping.put("mode", "aw.mode");
-            keyMapping.put("port", "aw.port");
-            keyMapping.put("dataDir", "aw.data-dir");
-            keyMapping.put("window", "aw.collection.window");
-            keyMapping.put("afk", "aw.collection.afk");
-            keyMapping.put("content", "aw.collection.content");
-            keyMapping.put("ocrEngine", "aw.ocr.engine");
-            keyMapping.put("enabled", "aw.audio.enabled");
-            keyMapping.put("whisperPath", "aw.audio.whisperPath");
-            keyMapping.put("whisper_path", "aw.audio.whisperPath");
-            keyMapping.put("vadThreshold", "aw.audio.vadThreshold");
-            keyMapping.put("vad_threshold", "aw.audio.vadThreshold");
-            keyMapping.put("source", "aw.audio.source");
-            keyMapping.put("engine", "aw.audio.engine");
-            keyMapping.put("model", "aw.audio.model");
-            keyMapping.put("chunkSeconds", "aw.audio.chunkSeconds");
-            keyMapping.put("chunk_seconds", "aw.audio.chunkSeconds");
-            keyMapping.put("summaryRefreshMinutes", "agent.summaryRefreshMinutes");
-            keyMapping.put("refresh_interval", "agent.summaryRefreshMinutes");
-            keyMapping.put("allowAgentTasks", "agent.allowAgentTasks");
-            keyMapping.put("allow_agent_tasks", "agent.allowAgentTasks");
-            keyMapping.put("cacheSummaries", "agent.cacheSummaries");
-            keyMapping.put("cache", "agent.cacheSummaries");
-            keyMapping.put("hideToTray", "desktop.hideToTray");
-            keyMapping.put("hide_to_tray", "desktop.hideToTray");
-            keyMapping.put("autoOpenWindow", "desktop.autoOpenWindow");
-            keyMapping.put("auto_open", "desktop.autoOpenWindow");
-            keyMapping.put("autoStartBackend", "desktop.autoStartBackend");
-            keyMapping.put("auto_start", "desktop.autoStartBackend");
-            keyMapping.put("embeddingEnabled", "embedding.enabled");
-            keyMapping.put("embeddingBaseUrl", "embedding.base-url");
-            keyMapping.put("embeddingBase_url", "embedding.base-url");
-            keyMapping.put("embeddingApiKey", "embedding.api-key");
-            keyMapping.put("embeddingApi_key", "embedding.api-key");
-            keyMapping.put("embeddingModel", "embedding.model");
-            keyMapping.put("embeddingDimensions", "embedding.dimensions");
-            keyMapping.put("embeddingSendEncodingFormat", "embedding.send-encoding-format");
-            keyMapping.put("webSearchEnabled", "websearch.enabled");
-            keyMapping.put("webSearchMcpUrl", "websearch.mcp-url");
-            keyMapping.put("webSearchApiKey", "websearch.api-key");
-            keyMapping.put("headroomEnabled", "headroom.enabled");
-            keyMapping.put("headroomProxyUrl", "headroom.proxy-url");
-            keyMapping.put("headroomStatsEnabled", "headroom.stats.enabled");
-            keyMapping.put("headroomOutputShaper", "headroom.output-shaper");
-
-            // Flatten sections into dotted keys
-            Map<String, String> sectionToPrefix = new LinkedHashMap<>();
-            sectionToPrefix.put("llm", "llm.");
-            sectionToPrefix.put("aw", "aw.");
-            sectionToPrefix.put("collection", "aw.collection.");
-            sectionToPrefix.put("audio", "aw.audio.");
-            sectionToPrefix.put("agent", "agent.");
-            sectionToPrefix.put("desktop", "desktop.");
-            sectionToPrefix.put("embedding", "embedding.");
-            sectionToPrefix.put("websearch", "websearch.");
-            sectionToPrefix.put("headroom", "headroom.");
-
-            for (var entry : sectionToPrefix.entrySet()) {
-                String section = entry.getKey();
-                String prefix = entry.getValue();
-                Object sectionData = body.get(section);
-                if (sectionData instanceof Map<?, ?> sectionMap) {
-                    for (var kv : ((Map<String, Object>) sectionMap).entrySet()) {
-                        String rawKey = kv.getKey();
-                        String mappedKey = keyMapping.getOrDefault(rawKey, prefix + rawKey);
-                        String value = kv.getValue() != null ? kv.getValue().toString() : "";
-                        String old = user.getProperty(mappedKey, "");
-                        if (!value.equals(old)) {
-                            if (RESTART_REQUIRED.contains(mappedKey)) {
-                                restartKeys.add(mappedKey);
-                            }
-                        }
-                        if (value.isBlank()) {
-                            user.remove(mappedKey);
-                        } else {
-                            user.setProperty(mappedKey, value);
-                        }
-                    }
-                }
-            }
-
-            // Resolve full restart-required set
-            Set<String> fullRestart = new HashSet<>();
-            for (String k : restartKeys) {
-                fullRestart.add(k);
-            }
-            // Also check RESTART_REQUIRED directly
-            for (var entry : sectionToPrefix.entrySet()) {
-                String section = entry.getKey();
-                Object sectionData = body.get(section);
-                if (sectionData instanceof Map<?, ?> sectionMap) {
-                    for (var kv : ((Map<String, Object>) sectionMap).entrySet()) {
-                        String key = section + "." + kv.getKey();
-                        if (RESTART_REQUIRED.contains(key)) {
-                            fullRestart.add(key);
-                        }
-                    }
-                }
-            }
-
-            userStore.save(user);
-            ctx.json(Map.of("saved", true, "restartRequired", new ArrayList<>(fullRestart)));
+            StructuredSaveResult result = applyStructuredSave(body);
+            ctx.json(Map.of("saved", true, "restartRequired", result.restartRequired()));
         } catch (Throwable t) {
             log.error("Failed to save config", t);
             try {
@@ -232,6 +123,174 @@ public class DesktopConfigController {
                 } catch (Throwable ignored) {}
             }
         }
+    }
+
+    record StructuredSaveResult(List<String> restartRequired) {}
+
+    @SuppressWarnings("unchecked")
+    StructuredSaveResult applyStructuredSave(Map<String, Object> body) throws IOException {
+        Properties user = userStore.loadUser();
+        Properties effective = userStore.load();
+        Set<String> restartKeys = new LinkedHashSet<>();
+
+        for (var entry : sectionToPrefix().entrySet()) {
+            String section = entry.getKey();
+            String prefix = entry.getValue();
+            Object sectionData = body.get(section);
+            if (!(sectionData instanceof Map<?, ?> sectionMap)) {
+                continue;
+            }
+
+            Map<String, Object> flat = new LinkedHashMap<>();
+            flattenStructuredSection("", (Map<String, Object>) sectionMap, flat);
+            for (var kv : flat.entrySet()) {
+                String mappedKey = mapStructuredKey(section, kv.getKey(), prefix);
+                String value = kv.getValue() != null ? kv.getValue().toString() : "";
+                String oldEffective = effective.getProperty(mappedKey, "");
+                boolean hasUserOverride = user.containsKey(mappedKey);
+
+                if (value.isBlank()) {
+                    if (hasUserOverride && effectiveWouldChangeAfterRemoval(mappedKey, oldEffective)) {
+                        addRestartIfNeeded(restartKeys, mappedKey);
+                    }
+                    user.remove(mappedKey);
+                } else {
+                    if (!Objects.equals(value, oldEffective)) {
+                        addRestartIfNeeded(restartKeys, mappedKey);
+                    }
+                    if (hasUserOverride || !Objects.equals(value, oldEffective)) {
+                        user.setProperty(mappedKey, value);
+                    }
+                }
+            }
+        }
+
+        userStore.save(user);
+        return new StructuredSaveResult(new ArrayList<>(restartKeys));
+    }
+
+    private static Map<String, String> sectionToPrefix() {
+        Map<String, String> sectionToPrefix = new LinkedHashMap<>();
+        sectionToPrefix.put("llm", "llm.");
+        sectionToPrefix.put("aw", "aw.");
+        sectionToPrefix.put("collection", "aw.collection.");
+        sectionToPrefix.put("audio", "aw.audio.");
+        sectionToPrefix.put("agent", "agent.");
+        sectionToPrefix.put("desktop", "desktop.");
+        sectionToPrefix.put("embedding", "embedding.");
+        sectionToPrefix.put("websearch", "websearch.");
+        sectionToPrefix.put("headroom", "headroom.");
+        return sectionToPrefix;
+    }
+
+    private static void flattenStructuredSection(String prefix, Map<String, Object> input, Map<String, Object> output) {
+        for (var entry : input.entrySet()) {
+            String key = prefix.isBlank() ? entry.getKey() : prefix + "." + entry.getKey();
+            Object value = entry.getValue();
+            if (value instanceof Map<?, ?> nested) {
+                Map<String, Object> child = new LinkedHashMap<>();
+                for (var nestedEntry : nested.entrySet()) {
+                    child.put(String.valueOf(nestedEntry.getKey()), nestedEntry.getValue());
+                }
+                flattenStructuredSection(key, child, output);
+            } else {
+                output.put(key, value);
+            }
+        }
+    }
+
+    private static String mapStructuredKey(String section, String rawKey, String prefix) {
+        if (rawKey.startsWith(prefix)) {
+            return rawKey;
+        }
+        return switch (section) {
+            case "llm" -> mapKey(rawKey, prefix,
+                    "apiKey", "api-key",
+                    "baseUrl", "base-url",
+                    "model", "model",
+                    "temperature", "temperature");
+            case "aw" -> mapKey(rawKey, prefix,
+                    "mode", "mode",
+                    "port", "port",
+                    "dataDir", "data-dir");
+            case "collection" -> "ocrEngine".equals(rawKey)
+                    ? "aw.ocr.engine"
+                    : mapKey(rawKey, prefix,
+                            "window", "window",
+                            "afk", "afk",
+                            "content", "content");
+            case "audio" -> mapKey(rawKey, prefix,
+                    "enabled", "enabled",
+                    "whisperPath", "whisperPath",
+                    "whisper_path", "whisperPath",
+                    "vadThreshold", "vadThreshold",
+                    "vad_threshold", "vadThreshold",
+                    "source", "source",
+                    "engine", "engine",
+                    "model", "model",
+                    "chunkSeconds", "chunkSeconds",
+                    "chunk_seconds", "chunkSeconds");
+            case "agent" -> mapKey(rawKey, prefix,
+                    "summaryRefreshMinutes", "summaryRefreshMinutes",
+                    "refresh_interval", "summaryRefreshMinutes",
+                    "allowAgentTasks", "allowAgentTasks",
+                    "allow_agent_tasks", "allowAgentTasks",
+                    "cacheSummaries", "cacheSummaries",
+                    "cache", "cacheSummaries");
+            case "desktop" -> mapKey(rawKey, prefix,
+                    "hideToTray", "hideToTray",
+                    "hide_to_tray", "hideToTray",
+                    "autoOpenWindow", "autoOpenWindow",
+                    "auto_open", "autoOpenWindow",
+                    "autoStartBackend", "autoStartBackend",
+                    "auto_start", "autoStartBackend");
+            case "embedding" -> mapKey(rawKey, prefix,
+                    "embeddingEnabled", "enabled",
+                    "embeddingBaseUrl", "base-url",
+                    "embeddingBase_url", "base-url",
+                    "embeddingApiKey", "api-key",
+                    "embeddingApi_key", "api-key",
+                    "embeddingModel", "model",
+                    "embeddingDimensions", "dimensions",
+                    "embeddingSendEncodingFormat", "send-encoding-format");
+            case "websearch" -> mapKey(rawKey, prefix,
+                    "webSearchEnabled", "enabled",
+                    "webSearchMcpUrl", "mcp-url",
+                    "webSearchApiKey", "api-key");
+            case "headroom" -> mapKey(rawKey, prefix,
+                    "headroomEnabled", "enabled",
+                    "enabled", "enabled",
+                    "headroomProxyUrl", "proxy-url",
+                    "proxyUrl", "proxy-url",
+                    "proxy-url", "proxy-url",
+                    "headroomStatsEnabled", "stats.enabled",
+                    "statsEnabled", "stats.enabled",
+                    "stats.enabled", "stats.enabled",
+                    "headroomOutputShaper", "output-shaper",
+                    "outputShaper", "output-shaper",
+                    "output-shaper", "output-shaper");
+            default -> prefix + rawKey;
+        };
+    }
+
+    private static String mapKey(String rawKey, String prefix, String... aliases) {
+        for (int i = 0; i + 1 < aliases.length; i += 2) {
+            if (aliases[i].equals(rawKey)) {
+                return prefix + aliases[i + 1];
+            }
+        }
+        return prefix + rawKey;
+    }
+
+    private static void addRestartIfNeeded(Set<String> restartKeys, String mappedKey) {
+        if (RESTART_REQUIRED.contains(mappedKey)) {
+            restartKeys.add(mappedKey);
+        }
+    }
+
+    private static boolean effectiveWouldChangeAfterRemoval(String mappedKey, String oldEffective) {
+        String defaultValue = SupportedKeys.defaults().getOrDefault(mappedKey, "");
+        return !Objects.equals(defaultValue, oldEffective);
     }
 
     // ── Raw text config (SPEC-TOML / SPEC-CFGUI) ─────────────────

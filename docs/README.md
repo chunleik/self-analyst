@@ -3,6 +3,7 @@
 ## Architecture
 
 - [architecture.md](architecture.md) — System architecture, module boundaries, config overview, data flow
+- [headroom.md](headroom.md) - Runtime Headroom proxy setup plus development memory/failure-learning safety guide
 
 ## Specifications (SDD)
 

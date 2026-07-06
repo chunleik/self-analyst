@@ -305,7 +305,7 @@ Agent 通过 `ConfigTools.getConfig()` 查询配置时，必须看到 Headroom �
 | SPEC-HR-CFG-* | `Config`, `application.properties`, `ConfigTools` | 单元测试 |
 | SPEC-HR-ROUTE-* | `HeadroomService`, `SelfAnalystAgent` | 单元测试 |
 | SPEC-HR-STATS-* | `HeadroomService`, `/desktop/usage` 或配置/状态 API | 单元测试 + Controller 测试 |
-| SPEC-HR-DEV-* | `AGENTS.md`, `CLAUDE.md`, docs | 文档审查 |
+| SPEC-HR-DEV-* | `docs/headroom.md`, `AGENTS.md`, `CLAUDE.md`, docs | 文档审查 |
 | SPEC-HR-UI-* | `DesktopConfigController`, `desktop-ui/config.js`, `ConfigTools` | Controller 测试 + 静态检查 |
 | SPEC-HR-ERR-* | `HeadroomService`, app startup path, logs | 单元测试 + 隐私检查 |
 | SPEC-HR-TST-* | 测试文件 | `mvn test` |

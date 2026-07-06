@@ -1,9 +1,11 @@
 package com.selfanalyst.desktop.controller;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,5 +32,23 @@ class DesktopAgentControllerTest {
 
         assertTrue(DesktopAgentController.hasAgentStillRunning(wrapped));
         assertFalse(DesktopAgentController.hasAgentStillRunning(new RuntimeException("other")));
+    }
+
+    @Test
+    void usageSnapshotIncludesHeadroomWhenAgentMissing(@TempDir java.nio.file.Path dir) {
+        var config = com.selfanalyst.config.Config.testDefaults(dir);
+        var headroom = new com.selfanalyst.headroom.HeadroomService(
+                true,
+                "http://127.0.0.1:8787/v1",
+                config.llmBaseUrl(),
+                true,
+                false,
+                (uri, timeout) -> com.selfanalyst.headroom.HeadroomService.ProbeResult.ok("reachable"));
+        var ctrl = new DesktopAgentController(null, null, null, null, config, headroom);
+
+        var usage = ctrl.usagePayload();
+
+        assertEquals("off", usage.get("mode"));
+        assertTrue(usage.containsKey("headroom"));
     }
 }

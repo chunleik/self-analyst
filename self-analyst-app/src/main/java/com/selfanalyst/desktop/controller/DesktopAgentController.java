@@ -6,6 +6,7 @@ import com.selfanalyst.desktop.service.BehaviorAdviceService;
 import com.selfanalyst.desktop.service.SummaryPromptService;
 import com.selfanalyst.desktop.service.SummaryService;
 import com.selfanalyst.desktop.store.TaskStore;
+import com.selfanalyst.headroom.HeadroomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
@@ -38,18 +39,29 @@ public class DesktopAgentController {
     private final SelfAnalystAgent agent;
     private final TaskStore taskStore;
     private final Config config;
+    private final HeadroomService headroomService;
 
     public DesktopAgentController(SummaryService summaryService,
                                   BehaviorAdviceService adviceService,
                                   SelfAnalystAgent agent,
                                   TaskStore taskStore,
                                   Config config) {
+        this(summaryService, adviceService, agent, taskStore, config, null);
+    }
+
+    public DesktopAgentController(SummaryService summaryService,
+                                  BehaviorAdviceService adviceService,
+                                  SelfAnalystAgent agent,
+                                  TaskStore taskStore,
+                                  Config config,
+                                  HeadroomService headroomService) {
         this.summaryService = summaryService;
         this.adviceService = adviceService;
         this.promptService = new SummaryPromptService();
         this.agent = agent;
         this.taskStore = taskStore;
         this.config = config;
+        this.headroomService = headroomService;
     }
 
     /**
@@ -181,11 +193,21 @@ public class DesktopAgentController {
      * Returns today's LLM token usage and budget status.
      */
     public void getUsage(Context ctx) {
+        ctx.json(usagePayload());
+    }
+
+    Map<String, Object> usagePayload() {
+        Map<String, Object> payload = new LinkedHashMap<>();
         if (agent == null) {
-            ctx.json(Map.of("mode", "off", "status", "ok"));
-            return;
+            payload.put("mode", "off");
+            payload.put("status", "ok");
+        } else {
+            payload.putAll(agent.usageSnapshot());
         }
-        ctx.json(agent.usageSnapshot());
+        if (headroomService != null) {
+            payload.put("headroom", headroomService.snapshot().toMap());
+        }
+        return payload;
     }
 
     /**

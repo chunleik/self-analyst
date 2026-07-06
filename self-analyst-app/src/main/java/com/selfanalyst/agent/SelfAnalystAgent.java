@@ -1,6 +1,7 @@
 package com.selfanalyst.agent;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.headroom.HeadroomService;
 import com.selfanalyst.i18n.Lang;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.memory.MemoryStore;
@@ -48,6 +49,7 @@ public class SelfAnalystAgent {
     private final boolean hasConfigTools;
     private final boolean hasFileTools;
     private final UsageMeter usageMeter;
+    private final HeadroomService headroomService;
     private final Lang lang;
     private volatile boolean usageMissingLogged;
 
@@ -80,7 +82,17 @@ public class SelfAnalystAgent {
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter,
                              Supplier<String> audioRuntimeStatusSupplier) throws IOException {
+        this(config, wikiStore, wikiTools, userConfigStore, fileTools, usageMeter,
+                audioRuntimeStatusSupplier, null);
+    }
+
+    public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
+                             UserConfigStore userConfigStore, FileTools fileTools,
+                             UsageMeter usageMeter,
+                             Supplier<String> audioRuntimeStatusSupplier,
+                             HeadroomService headroomService) throws IOException {
         this.usageMeter = usageMeter;
+        this.headroomService = headroomService;
         this.lang = config.effectiveLanguage();
         this.wikiStore = wikiStore;
         this.semanticEnabled = wikiTools != null && wikiTools.hasSemanticIndex();
@@ -103,6 +115,7 @@ public class SelfAnalystAgent {
         registerWebSearchMcp(toolkit, config);
 
         Integer maxTokens = config.llmMaxTokens() > 0 ? config.llmMaxTokens() : null;
+        String llmBaseUrl = effectiveLlmBaseUrl(config, headroomService);
 
         GenerateOptions.Builder chatOpts = GenerateOptions.builder()
                 .temperature(config.llmTemperature());
@@ -110,7 +123,7 @@ public class SelfAnalystAgent {
         OpenAIChatModel chatModel = OpenAIChatModel.builder()
                 .apiKey(config.llmApiKey())
                 .modelName(config.llmModel())
-                .baseUrl(config.llmBaseUrl())
+                .baseUrl(llmBaseUrl)
                 .generateOptions(chatOpts.build())
                 .build();
 
@@ -121,7 +134,7 @@ public class SelfAnalystAgent {
         this.plainModel = OpenAIChatModel.builder()
                 .apiKey(config.llmApiKey())
                 .modelName(config.llmModel())
-                .baseUrl(config.llmBaseUrl())
+                .baseUrl(llmBaseUrl)
                 .stream(false)
                 .generateOptions(plainOpts.build())
                 .build();
@@ -139,6 +152,10 @@ public class SelfAnalystAgent {
                         .maxAttempts(1)
                         .build())
                 .build();
+    }
+
+    static String effectiveLlmBaseUrl(Config config, HeadroomService headroomService) {
+        return headroomService != null ? headroomService.effectiveLlmBaseUrl() : config.llmBaseUrl();
     }
 
     /**

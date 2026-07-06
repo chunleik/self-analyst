@@ -14,30 +14,17 @@ public class Database implements AutoCloseable {
     private static final String SAFE_BUCKET_ID = "[A-Za-z0-9._-]+";
 
     private final Path dataDir;
+    private final Path dbPath;
     private final ConcurrentHashMap<String, Connection> bucketConns = new ConcurrentHashMap<>();
     private final Connection metaConn;
 
     public Database(Path dataDir) {
         this.dataDir = dataDir;
+        this.dbPath = dataDir.resolve("aw.db");
         try {
             Files.createDirectories(dataDir);
             Class.forName("org.sqlite.JDBC");
-            metaConn = openConnection(dataDir.resolve("buckets.db"));
-            try (Statement stmt = metaConn.createStatement()) {
-                stmt.execute("PRAGMA journal_mode=WAL");
-                stmt.execute("PRAGMA foreign_keys=ON");
-                stmt.execute("""
-                    CREATE TABLE IF NOT EXISTS buckets (
-                        id TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        type TEXT NOT NULL,
-                        client TEXT NOT NULL,
-                        hostname TEXT NOT NULL,
-                        created TEXT NOT NULL,
-                        last_updated TEXT NOT NULL
-                    )
-                    """);
-            }
+            metaConn = openConnection(dbPath);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize database at " + dataDir, e);
         }
@@ -47,14 +34,28 @@ public class Database implements AutoCloseable {
         Connection c = DriverManager.getConnection("jdbc:sqlite:" + dbPath.toAbsolutePath());
         try (Statement stmt = c.createStatement()) {
             stmt.execute("PRAGMA journal_mode=WAL");
+            stmt.execute("PRAGMA foreign_keys=ON");
+            stmt.execute("PRAGMA busy_timeout=5000");
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS buckets (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    hostname TEXT NOT NULL,
+                    created TEXT NOT NULL,
+                    last_updated TEXT NOT NULL
+                )
+                """);
             stmt.execute("CREATE TABLE IF NOT EXISTS events (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "bucket_id TEXT NOT NULL," +
                     "timestamp TEXT NOT NULL," +
                     "duration REAL NOT NULL DEFAULT 0," +
                     "datastr TEXT NOT NULL DEFAULT '{}'" +
                     ")");
-            stmt.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp " +
-                    "ON events(timestamp)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_events_bucket_timestamp " +
+                    "ON events(bucket_id, timestamp)");
         }
         return c;
     }
@@ -71,15 +72,10 @@ public class Database implements AutoCloseable {
         validateBucketId(bucketId);
         return bucketConns.computeIfAbsent(bucketId, id -> {
             try {
-                Path root = dataDir.toAbsolutePath().normalize();
-                Path dbFile = root.resolve(id + ".db").normalize();
-                if (!dbFile.startsWith(root)) {
-                    throw new IllegalArgumentException("Invalid bucket id: " + id);
-                }
-                boolean existed = Files.exists(dbFile);
-                Connection c = openConnection(dbFile);
+                boolean existed = Files.exists(dbPath);
+                Connection c = openConnection(dbPath);
                 if (!existed) {
-                    log.info("Created {}", dbFile.getFileName());
+                    log.info("Created {}", dbPath.getFileName());
                 }
                 return c;
             } catch (Exception e) {

@@ -22,18 +22,20 @@ public class EventStore {
 
     public Event insertEvent(String bucketId, Event event) {
         String sql = """
-            INSERT INTO events (timestamp, duration, datastr)
-            VALUES (?, ?, ?)
+            INSERT INTO events (bucket_id, timestamp, duration, datastr)
+            VALUES (?, ?, ?, ?)
             """;
         try (PreparedStatement ps = db.bucketConnection(bucketId)
                 .prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            ps.setString(1, event.timestamp().toString());
-            ps.setDouble(2, event.duration());
-            ps.setString(3, MAPPER.writeValueAsString(event.data()));
+            ps.setString(1, bucketId);
+            ps.setString(2, event.timestamp().toString());
+            ps.setDouble(3, event.duration());
+            ps.setString(4, MAPPER.writeValueAsString(event.data()));
             ps.executeUpdate();
-            ResultSet keys = ps.getGeneratedKeys();
-            long id = keys.next() ? keys.getLong(1) : -1;
-            return new Event(id, event.timestamp(), event.duration(), event.data());
+            try (ResultSet keys = ps.getGeneratedKeys()) {
+                long id = keys.next() ? keys.getLong(1) : -1;
+                return new Event(id, event.timestamp(), event.duration(), event.data());
+            }
         } catch (Exception e) {
             throw new RuntimeException("Failed to insert event", e);
         }
@@ -68,11 +70,13 @@ public class EventStore {
     }
 
     private Event findLastEvent(String bucketId) {
-        String sql = "SELECT * FROM events ORDER BY timestamp DESC LIMIT 1";
+        String sql = "SELECT * FROM events WHERE bucket_id = ? ORDER BY timestamp DESC LIMIT 1";
         try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
-                return mapEvent(rs);
+            ps.setString(1, bucketId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return mapEvent(rs);
+                }
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to find last event", e);
@@ -81,10 +85,11 @@ public class EventStore {
     }
 
     private void updateDuration(String bucketId, long eventId, double newDuration) {
-        String sql = "UPDATE events SET duration = ? WHERE id = ?";
+        String sql = "UPDATE events SET duration = ? WHERE bucket_id = ? AND id = ?";
         try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
             ps.setDouble(1, newDuration);
-            ps.setLong(2, eventId);
+            ps.setString(2, bucketId);
+            ps.setLong(3, eventId);
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to update event duration", e);
@@ -97,8 +102,9 @@ public class EventStore {
 
     public List<Event> queryEvents(String bucketId, int limit, String startTime, String endTime) {
         List<Event> result = new ArrayList<>();
-        StringBuilder sql = new StringBuilder("SELECT * FROM events WHERE 1=1");
+        StringBuilder sql = new StringBuilder("SELECT * FROM events WHERE bucket_id = ?");
         List<Object> paramList = new ArrayList<>();
+        paramList.add(bucketId);
 
         if (startTime != null && !startTime.isBlank()) {
             sql.append(" AND timestamp >= ?");
@@ -118,9 +124,10 @@ public class EventStore {
                 if (p instanceof Integer n) ps.setInt(i + 1, n);
                 else ps.setString(i + 1, (String) p);
             }
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                result.add(mapEvent(rs));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(mapEvent(rs));
+                }
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to query events", e);
@@ -130,11 +137,13 @@ public class EventStore {
 
     public List<Event> queryAllEvents(String bucketId) {
         List<Event> result = new ArrayList<>();
-        String sql = "SELECT * FROM events ORDER BY timestamp ASC";
-        try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                result.add(mapEvent(rs));
+        String sql = "SELECT * FROM events WHERE bucket_id = ? ORDER BY timestamp ASC";
+        try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
+            ps.setString(1, bucketId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(mapEvent(rs));
+                }
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to query all events", e);
@@ -143,18 +152,21 @@ public class EventStore {
     }
 
     public int countByBucket(String bucketId) {
-        String sql = "SELECT COUNT(*) FROM events";
-        try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql);
-             ResultSet rs = ps.executeQuery()) {
-            return rs.next() ? rs.getInt(1) : 0;
+        String sql = "SELECT COUNT(*) FROM events WHERE bucket_id = ?";
+        try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
+            ps.setString(1, bucketId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
         } catch (SQLException e) {
             return 0;
         }
     }
 
     public int deleteByBucket(String bucketId) {
-        String sql = "DELETE FROM events";
+        String sql = "DELETE FROM events WHERE bucket_id = ?";
         try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
+            ps.setString(1, bucketId);
             return ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to delete events for bucket: " + bucketId, e);
@@ -163,21 +175,11 @@ public class EventStore {
 
     public List<Event> getAllEvents() {
         List<Event> result = new ArrayList<>();
-        // Scan all .db files in the data directory (each is a bucket)
-        try {
-            var files = java.nio.file.Files.list(db.dataDir())
-                    .filter(f -> f.getFileName().toString().endsWith(".db")
-                            && !f.getFileName().toString().equals("buckets.db"))
-                    .toList();
-            for (var file : files) {
-                String sql = "SELECT * FROM events ORDER BY timestamp ASC";
-                try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + file.toAbsolutePath());
-                     Statement stmt = c.createStatement();
-                     ResultSet rs = stmt.executeQuery(sql)) {
-                    while (rs.next()) {
-                        result.add(mapEvent(rs));
-                    }
-                }
+        String sql = "SELECT * FROM events ORDER BY timestamp ASC";
+        try (Statement stmt = db.metaConnection().createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                result.add(mapEvent(rs));
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to get all events", e);

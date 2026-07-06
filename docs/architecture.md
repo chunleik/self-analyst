@@ -156,7 +156,7 @@ Windows 上桌面端使用命名 mutex 保证单实例运行；重复启动只�
 |------|------|
 | LLM Agent | AgentScope Java + Project Reactor |
 | HTTP 服务器 | Javalin (Jetty) |
-| 数据存储 | SQLite (每 bucket 一个 .db) |
+| 数据存储 | SQLite (AW 使用 aw.db 单库) |
 | 窗口追踪 | JNA → user32.dll |
 | 内容识别 | UIAutomation (PowerShell) + PaddleOCR-json + Tess4J |
 | 音频转录 | Java Sound API + whisper.cpp |

@@ -146,7 +146,7 @@ self-analyst/
 │   └── src/main/java/.../aw/
 │       ├── AwServer.java        Javalin HTTP 服务器
 │       ├── controller/          14 个 REST 端点
-│       ├── store/               SQLite 存储层 (每 bucket 一个 .db)
+│       ├── store/               SQLite 存储层 (aw.db 单库)
 │       ├── query/               AQL 查询引擎 (20 个转换函数)
 │       ├── watcher/platform/    窗口/AFK 数据采集器 (JNA 原生)
 │       ├── export/              数据导入导出

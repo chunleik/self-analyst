@@ -14,7 +14,7 @@ SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集�
 
 | 数据 | 位置 | 说明 |
 |------|------|------|
-| 活动记录（窗口标题 / AFK 空闲） | `~/.self-analyst/aw-data/*.db` | 每个 bucket 一个 SQLite 文件 |
+| 活动记录（窗口标题 / AFK 空闲） | `~/.self-analyst/aw-data/aw.db` | AW bucket 和事件存于同一个 SQLite 文件 |
 | OCR / 屏幕内容文本 | 同上（aw-data） | 见下文 OCR 范围限制 |
 | 音频转写文本 | 同上（aw-data） | 仅在开启音频时产生 |
 | 成长记忆（目标 / 模式 / 改进记录） | `~/.self-analyst/memory/` | |

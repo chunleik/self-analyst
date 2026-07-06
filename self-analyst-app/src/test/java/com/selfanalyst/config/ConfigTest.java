@@ -10,7 +10,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigTest {
 
@@ -25,6 +27,49 @@ class ConfigTest {
         assertEquals("false", props.getProperty("wiki.enabled"));
         assertEquals("false", props.getProperty("embedding.enabled"));
         assertEquals("false", props.getProperty("websearch.enabled"));
+    }
+
+    @Test
+    void defaultsKeepHeadroomDisabledAndPointAtLocalProxy() throws Exception {
+        Path dir = Files.createTempDirectory("config-headroom-defaults");
+        withMemoryDir(dir, () -> {
+            Config c = Config.load();
+            assertFalse(c.headroomEnabled());
+            assertEquals("http://127.0.0.1:8787/v1", c.headroomProxyUrl());
+            assertTrue(c.headroomStatsEnabled());
+            assertFalse(c.headroomOutputShaper());
+        });
+    }
+
+    @Test
+    void testDefaultsIncludeHeadroomDefaults() throws Exception {
+        Path dir = Files.createTempDirectory("config-headroom-test-defaults");
+        Config c = Config.testDefaults(dir);
+        assertFalse(c.headroomEnabled());
+        assertEquals("http://127.0.0.1:8787/v1", c.headroomProxyUrl());
+        assertTrue(c.headroomStatsEnabled());
+        assertFalse(c.headroomOutputShaper());
+    }
+
+    @Test
+    void loadReadsHeadroomOverridesFromIsolatedMemoryDir() throws Exception {
+        Path dir = Files.createTempDirectory("config-headroom-overrides");
+        Files.writeString(dir.resolve("config.toml"), """
+                [headroom]
+                enabled = true
+                proxy-url = "http://127.0.0.1:9999/v1"
+                output-shaper = true
+                [headroom.stats]
+                enabled = false
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> {
+            Config c = Config.load();
+            assertTrue(c.headroomEnabled());
+            assertEquals("http://127.0.0.1:9999/v1", c.headroomProxyUrl());
+            assertFalse(c.headroomStatsEnabled());
+            assertTrue(c.headroomOutputShaper());
+        });
     }
 
     @Test
@@ -121,5 +166,25 @@ class ConfigTest {
         Config.overlayUserConfig(props, dir); // must not throw
 
         assertEquals("default", props.getProperty("llm.model"));
+    }
+
+    private static void withMemoryDir(Path dir, ThrowingRunnable action) throws Exception {
+        Files.createDirectories(dir);
+        String previous = System.getProperty("memory.dir");
+        System.setProperty("memory.dir", dir.toString());
+        try {
+            action.run();
+        } finally {
+            if (previous == null) {
+                System.clearProperty("memory.dir");
+            } else {
+                System.setProperty("memory.dir", previous);
+            }
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 }

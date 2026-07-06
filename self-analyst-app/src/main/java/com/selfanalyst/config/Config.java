@@ -76,6 +76,10 @@ public record Config(
         String budgetMode,
         long budgetDailyTokens,
         double budgetWarnRatio,
+        boolean headroomEnabled,
+        String headroomProxyUrl,
+        boolean headroomStatsEnabled,
+        boolean headroomOutputShaper,
         String appLanguage) {
 
     private static final Logger log = LoggerFactory.getLogger(Config.class);
@@ -259,6 +263,15 @@ public record Config(
                 envOrProp(props, "llm.budget.warnRatio", "LLM_BUDGET_WARN_RATIO", "0.8"), 0.8);
         if (budgetWarnRatio <= 0 || budgetWarnRatio > 1) budgetWarnRatio = 0.8;
 
+        boolean headroomEnabled = Boolean.parseBoolean(
+                envOrProp(props, "headroom.enabled", "HEADROOM_ENABLED", "false"));
+        String headroomProxyUrl = envOrProp(props, "headroom.proxy-url", "HEADROOM_PROXY_URL",
+                "http://127.0.0.1:8787/v1");
+        boolean headroomStatsEnabled = Boolean.parseBoolean(
+                envOrProp(props, "headroom.stats.enabled", "HEADROOM_STATS_ENABLED", "true"));
+        boolean headroomOutputShaper = Boolean.parseBoolean(
+                envOrProp(props, "headroom.output-shaper", "HEADROOM_OUTPUT_SHAPER", "false"));
+
         boolean webSearchEnabled = Boolean.parseBoolean(
                 envOrProp(props, "websearch.enabled", "WEBSEARCH_ENABLED", "false"));
         String webSearchMcpUrl = envOrProp(props, "websearch.mcp-url", "WEBSEARCH_MCP_URL",
@@ -288,7 +301,9 @@ public record Config(
                 fileWatchExcludeDirs, fileWatchExcludeGlobs,
                 fileWatchSemanticEnabled, fileSemanticIndexDir,
                 llmMaxTokens, agentMaxIters, desktopSummaryMaxTimelineLlm,
-                budgetMode, budgetDailyTokens, budgetWarnRatio, appLanguage);
+                budgetMode, budgetDailyTokens, budgetWarnRatio,
+                headroomEnabled, headroomProxyUrl, headroomStatsEnabled, headroomOutputShaper,
+                appLanguage);
     }
 
     /**
@@ -324,7 +339,9 @@ public record Config(
                 "mic", "auto", "gpt-4o-transcribe", 10,
                 false, "", 512, 8000, 60, 5, 5, 5, "", "", "", true,
                 baseDir.resolve("file-semantic-index"),
-                2048, 8, 4, "warn", 100000000L, 0.8, "auto");
+                2048, 8, 4, "warn", 100000000L, 0.8,
+                false, "http://127.0.0.1:8787/v1", true, false,
+                "auto");
     }
 
     /** Load the classpath {@code application.properties} defaults (empty if absent). */
@@ -339,8 +356,12 @@ public record Config(
         return props;
     }
 
-    /** Resolve memory.dir: env {@code MEMORY_DIR} > classpath {@code memory.dir} > {@code ~/.self-analyst}. */
+    /** Resolve memory.dir: system property > env {@code MEMORY_DIR} > classpath {@code memory.dir} > {@code ~/.self-analyst}. */
     private static String memoryDirOf(Properties props) {
+        String systemProp = System.getProperty("memory.dir");
+        if (systemProp != null && !systemProp.isBlank()) {
+            return systemProp;
+        }
         return envOrProp(props, "memory.dir", "MEMORY_DIR",
                 System.getProperty("user.home") + "/.self-analyst");
     }

@@ -94,6 +94,17 @@ class DesktopConfigControllerTest {
     }
 
     @Test
+    void supportedKeysIncludeHeadroomDefaults() {
+        var keys = DesktopConfigController.supportedKeyInfos().stream()
+                .collect(java.util.stream.Collectors.toMap(k -> k.key(), k -> k.assignment()));
+
+        assertEquals("headroom.enabled = false", keys.get("headroom.enabled"));
+        assertEquals("headroom.proxy-url = \"http://127.0.0.1:8787/v1\"", keys.get("headroom.proxy-url"));
+        assertEquals("headroom.stats.enabled = true", keys.get("headroom.stats.enabled"));
+        assertEquals("headroom.output-shaper = false", keys.get("headroom.output-shaper"));
+    }
+
+    @Test
     void runtimeConfigKeysAreNotReportedUnknown(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         var ctrl = controller(dir, store);

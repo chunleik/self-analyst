@@ -42,6 +42,11 @@ public final class SupportedKeys {
         put("llm.budget.dailyTokens", "100000000", KeyType.INTEGER);
         put("llm.budget.warnRatio", "0.8", KeyType.FLOAT);
 
+        put("headroom.enabled", "false", KeyType.BOOLEAN);
+        put("headroom.proxy-url", "http://127.0.0.1:8787/v1", KeyType.STRING);
+        put("headroom.stats.enabled", "true", KeyType.BOOLEAN);
+        put("headroom.output-shaper", "false", KeyType.BOOLEAN);
+
         put("agent.summaryRefreshMinutes", "5", KeyType.INTEGER);
         put("agent.allowAgentTasks", "false", KeyType.BOOLEAN);
         put("agent.cacheSummaries", "true", KeyType.BOOLEAN);

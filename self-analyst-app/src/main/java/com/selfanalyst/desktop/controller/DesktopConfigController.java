@@ -118,6 +118,13 @@ public class DesktopConfigController {
             keyMapping.put("enabled", "aw.audio.enabled");
             keyMapping.put("whisperPath", "aw.audio.whisperPath");
             keyMapping.put("whisper_path", "aw.audio.whisperPath");
+            keyMapping.put("vadThreshold", "aw.audio.vadThreshold");
+            keyMapping.put("vad_threshold", "aw.audio.vadThreshold");
+            keyMapping.put("source", "aw.audio.source");
+            keyMapping.put("engine", "aw.audio.engine");
+            keyMapping.put("model", "aw.audio.model");
+            keyMapping.put("chunkSeconds", "aw.audio.chunkSeconds");
+            keyMapping.put("chunk_seconds", "aw.audio.chunkSeconds");
             keyMapping.put("summaryRefreshMinutes", "agent.summaryRefreshMinutes");
             keyMapping.put("refresh_interval", "agent.summaryRefreshMinutes");
             keyMapping.put("allowAgentTasks", "agent.allowAgentTasks");
@@ -734,6 +741,11 @@ public class DesktopConfigController {
         var m = new LinkedHashMap<String, Map<String, Object>>();
         m.put("enabled", field("enabled", eff.getProperty("aw.audio.enabled", "false")));
         m.put("whisperPath", field("whisperPath", eff.getProperty("aw.audio.whisperPath", "tools/whisper")));
+        m.put("vadThreshold", field("vadThreshold", eff.getProperty("aw.audio.vadThreshold", "0.0001")));
+        m.put("source", field("source", eff.getProperty("aw.audio.source", "mic")));
+        m.put("engine", field("engine", eff.getProperty("aw.audio.engine", "auto")));
+        m.put("model", field("model", eff.getProperty("aw.audio.model", "gpt-4o-transcribe")));
+        m.put("chunkSeconds", field("chunkSeconds", eff.getProperty("aw.audio.chunkSeconds", "10")));
         return m;
     }
 

@@ -12,6 +12,23 @@ var api = {
       return r.json();
     });
   },
+  setAudioCapture: function (enabled) {
+    return fetch(API_BASE + "/desktop/audio", {
+      method: "POST",
+      body: JSON.stringify({ enabled: enabled }),
+      headers: { "Content-Type": "application/json" },
+    }).then(function (r) {
+      if (!r.ok) throw new Error("Audio capture toggle failed: " + r.status);
+      return r.json();
+    });
+  },
+  getAudioEvents: function (limit) {
+    var n = limit || 50;
+    return fetch(API_BASE + "/desktop/audio/events?limit=" + encodeURIComponent(n)).then(function (r) {
+      if (!r.ok) throw new Error("Audio events fetch failed: " + r.status);
+      return r.json();
+    });
+  },
   getSummary: function () {
     return fetch(API_BASE + "/desktop/summary").then(function (r) {
       if (!r.ok) throw new Error("Summary fetch failed: " + r.status);

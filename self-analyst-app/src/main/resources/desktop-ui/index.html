@@ -16,9 +16,14 @@
     <nav class="tabs">
       <button class="tab active" data-tab="agent" data-i18n="tab.agent">Agent</button>
       <button class="tab" data-tab="chat" data-i18n="tab.chat">会话</button>
+      <button class="tab" data-tab="audio" data-i18n="tab.audio">录音</button>
     </nav>
   </div>
   <div class="nav-right status-bar" id="status-bar">
+    <button id="audio-toggle-btn" class="btn btn-icon audio-toggle-btn" title="开始录音" aria-label="开始录音" data-i18n-title="audio.start">
+      <svg class="audio-icon audio-icon-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+      <svg class="audio-icon audio-icon-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" x2="22" y1="2" y2="22"/><path d="M9 9v3a3 3 0 0 0 5.1 2.1"/><path d="M15 9.34V5a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2"/><path d="M19 10v2a7 7 0 0 1-.11 1.23"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+    </button>
     <span class="status-dot" id="backend-dot"></span>
     <span id="backend-text" data-i18n="status.service">服务</span>
     <span class="status-dot" id="collectors-dot"></span>
@@ -130,6 +135,24 @@
           <label class="chat-context-toggle"><input type="checkbox" data-toggle="history"> <span data-i18n="chat.ctxHistory">历史消息</span></label>
         </div>
       </aside>
+    </div>
+  </section>
+
+  <!-- ===== AUDIO TAB ===== -->
+  <section id="tab-audio" class="tab-content">
+    <div class="audio-tab-layout">
+      <div class="audio-panel">
+        <div class="audio-panel-header">
+          <div>
+            <h2 class="card-title" data-i18n="audio.title">录音文本</h2>
+            <p id="audio-tab-subtitle" class="audio-subtitle" data-i18n="audio.subtitle">实时显示最近转写内容</p>
+          </div>
+          <div id="audio-tab-status" class="audio-status-pill"></div>
+        </div>
+        <div id="audio-transcript-list" class="audio-transcript-list">
+          <div class="loading-placeholder" data-i18n="common.loading">加载中...</div>
+        </div>
+      </div>
     </div>
   </section>
 

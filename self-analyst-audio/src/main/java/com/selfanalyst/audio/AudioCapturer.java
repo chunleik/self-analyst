@@ -1,114 +1,97 @@
 package com.selfanalyst.audio;
 
-import javax.sound.sampled.*;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
 /**
- * Captures microphone audio using Java Sound API.
- * Records chunks of N seconds, with Voice Activity Detection (VAD).
+ * Captures microphone or system-loopback audio in 16 kHz mono WAV chunks.
  */
 public class AudioCapturer {
+    private final AudioInput input;
 
-    private final AudioFormat format;
-    private final int chunkSeconds;
-    private final TargetDataLine line;
-    private final float vadThreshold; // RMS threshold for voice detection
+    public record CaptureResult(
+            byte[] wavData,
+            boolean voiceDetected,
+            float rms,
+            String source,
+            String deviceName) {}
 
     public AudioCapturer(int chunkSeconds, float vadThreshold) {
-        this.chunkSeconds = chunkSeconds;
-        this.vadThreshold = vadThreshold;
-        this.format = new AudioFormat(16000, 16, 1, true, false);
-
-        TargetDataLine l;
-        try {
-            DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
-            l = (TargetDataLine) AudioSystem.getLine(info);
-            l.open(format);
-            l.start();
-        } catch (Exception e) {
-            l = null;
-        }
-        this.line = l;
+        this(chunkSeconds, vadThreshold, "mic");
     }
 
-    public boolean isAvailable() { return line != null && line.isOpen(); }
+    public AudioCapturer(int chunkSeconds, float vadThreshold, String source) {
+        this.input = openInput(source, chunkSeconds, vadThreshold, defaultProviders(source));
+    }
+
+    public boolean isAvailable() {
+        return input.isAvailable();
+    }
+
+    public String source() {
+        return input.source();
+    }
+
+    public String deviceName() {
+        return input.deviceName();
+    }
 
     /** Record one chunk. Returns WAV bytes, or null if no voice detected. */
     public byte[] capture() {
-        if (!isAvailable()) return null;
-        try {
-            int bufferSize = (int) format.getFrameSize() * (int) format.getFrameRate() * chunkSeconds;
-            byte[] buffer = new byte[bufferSize];
-            int total = 0;
-            while (total < bufferSize) {
-                int n = line.read(buffer, total, bufferSize - total);
-                if (n <= 0) break;
-                total += n;
+        CaptureResult result = captureResult();
+        if (result == null) return null;
+        return result.voiceDetected() ? result.wavData() : null;
+    }
+
+    /** Record one chunk with diagnostics for UI/status reporting. */
+    public CaptureResult captureResult() {
+        return input.captureResult();
+    }
+
+    public static List<String> availableInputDevices() {
+        List<String> devices = new ArrayList<>();
+        devices.addAll(WasapiLoopbackAudioInput.availableInputDevices());
+        devices.addAll(JavaSoundAudioInput.availableInputDevices());
+        return devices;
+    }
+
+    static boolean systemMixerLooksLikeLoopback(String name, String description) {
+        return JavaSoundAudioInput.systemMixerLooksLikeLoopback(name, description);
+    }
+
+    static AudioInput openInput(String source, int chunkSeconds, float vadThreshold,
+                                List<AudioInputProvider> providers) {
+        String normalized = normalizeSource(source);
+        for (AudioInputProvider provider : providers) {
+            AudioInput input = provider.open(chunkSeconds, vadThreshold, normalized);
+            if (input != null && input.isAvailable()) {
+                return input;
             }
-            // Trim to actual bytes
-            byte[] data = new byte[total];
-            System.arraycopy(buffer, 0, data, 0, total);
-
-            // VAD: skip silent chunks
-            if (rms(data) < vadThreshold) return null;
-
-            return toWav(data);
-        } catch (Exception e) {
-            return null;
+            if (input != null) {
+                input.close();
+            }
         }
+        return AudioInput.unavailable(normalized);
     }
 
-    /** Compute RMS (root mean square) of audio samples for VAD. */
-    private static float rms(byte[] data) {
-        long sum = 0;
-        for (int i = 0; i < data.length - 1; i += 2) {
-            int sample = (data[i + 1] << 8) | (data[i] & 0xFF);
-            sum += (long) sample * sample;
+    private static List<AudioInputProvider> defaultProviders(String source) {
+        String normalized = normalizeSource(source);
+        if ("system".equals(normalized)) {
+            return List.of(
+                    WasapiLoopbackAudioInput::open,
+                    JavaSoundAudioInput::open);
         }
-        double rms = Math.sqrt((double) sum / (data.length / 2));
-        return (float) (rms / 32768.0);
+        return List.of(JavaSoundAudioInput::open);
     }
 
-    /** Wrap raw PCM 16kHz 16bit mono into a minimal WAV container. */
-    private static byte[] toWav(byte[] pcm) {
-        int dataLen = pcm.length;
-        int totalLen = 44 + dataLen;
-        ByteArrayOutputStream out = new ByteArrayOutputStream(totalLen);
-        try {
-            // RIFF header
-            out.write("RIFF".getBytes());
-            out.write(intToBytes(totalLen - 8));
-            out.write("WAVE".getBytes());
-            // fmt chunk
-            out.write("fmt ".getBytes());
-            out.write(intToBytes(16));    // chunk size
-            out.write(shortToBytes((short) 1));  // PCM
-            out.write(shortToBytes((short) 1));  // mono
-            out.write(intToBytes(16000));        // sample rate
-            out.write(intToBytes(32000));        // byte rate
-            out.write(shortToBytes((short) 2));  // block align
-            out.write(shortToBytes((short) 16)); // bits per sample
-            // data chunk
-            out.write("data".getBytes());
-            out.write(intToBytes(dataLen));
-            out.write(pcm);
-        } catch (IOException ignored) {}
-        return out.toByteArray();
-    }
-
-    private static byte[] intToBytes(int v) {
-        return new byte[]{(byte) v, (byte) (v >> 8), (byte) (v >> 16), (byte) (v >> 24)};
-    }
-
-    private static byte[] shortToBytes(short v) {
-        return new byte[]{(byte) v, (byte) (v >> 8)};
+    private static String normalizeSource(String source) {
+        if (source == null) return "mic";
+        String s = source.trim().toLowerCase(Locale.ROOT);
+        return "system".equals(s) ? "system" : "mic";
     }
 
     public void close() {
-        if (line != null) {
-            line.stop();
-            line.close();
-        }
+        input.close();
     }
 }

@@ -63,6 +63,11 @@ public final class SupportedKeys {
         put("aw.ocr.engine", "auto", KeyType.STRING);
         put("aw.audio.enabled", "false", KeyType.BOOLEAN);
         put("aw.audio.whisperPath", "tools/whisper", KeyType.STRING);
+        put("aw.audio.vadThreshold", "0.0001", KeyType.FLOAT);
+        put("aw.audio.source", "mic", KeyType.STRING);
+        put("aw.audio.engine", "auto", KeyType.STRING);
+        put("aw.audio.model", "gpt-4o-transcribe", KeyType.STRING);
+        put("aw.audio.chunkSeconds", "10", KeyType.INTEGER);
         put("ocr.sample.dir", "./data/aw-data/ocr-samples", KeyType.STRING);
         put("ocr.excluded.apps", "", KeyType.STRING);
         put("ocr.title-strip-height", "80", KeyType.INTEGER);

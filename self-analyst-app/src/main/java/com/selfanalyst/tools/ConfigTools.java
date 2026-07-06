@@ -6,6 +6,7 @@ import io.agentscope.core.tool.ToolParam;
 
 import java.util.Properties;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Agent tools for reading and writing SelfAnalyst user configuration.
@@ -19,7 +20,8 @@ public class ConfigTools {
             "aw.mode", "aw.port",
             "aw.collection.window", "aw.collection.afk", "aw.collection.content",
             "aw.ocr.engine",
-            "aw.audio.enabled", "aw.audio.whisperPath",
+            "aw.audio.enabled", "aw.audio.whisperPath", "aw.audio.vadThreshold",
+            "aw.audio.source", "aw.audio.engine", "aw.audio.model", "aw.audio.chunkSeconds",
             "agent.summaryRefreshMinutes", "agent.allowAgentTasks", "agent.cacheSummaries",
             "desktop.hideToTray", "desktop.autoOpenWindow", "desktop.autoStartBackend",
             "embedding.enabled", "embedding.base-url", "embedding.api-key",
@@ -33,6 +35,7 @@ public class ConfigTools {
             "app.language",
             "llm.model", "llm.temperature", "aw.mode", "aw.port",
             "aw.collection.window", "aw.collection.afk", "aw.collection.content",
+            "aw.audio.source", "aw.audio.engine", "aw.audio.model", "aw.audio.chunkSeconds",
             "agent.summaryRefreshMinutes", "desktop.autoStartBackend",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
             "llm.max-tokens", "llm.agent.maxIters", "desktop.summary.maxTimelineLlm",
@@ -40,9 +43,15 @@ public class ConfigTools {
     );
 
     private final UserConfigStore userStore;
+    private final Supplier<String> audioRuntimeStatusSupplier;
 
     public ConfigTools(UserConfigStore userStore) {
+        this(userStore, null);
+    }
+
+    public ConfigTools(UserConfigStore userStore, Supplier<String> audioRuntimeStatusSupplier) {
         this.userStore = userStore;
+        this.audioRuntimeStatusSupplier = audioRuntimeStatusSupplier;
     }
 
     @Tool(description = "获取 SelfAnalyst 当前所有配置项的有效值（含默认值）。" +
@@ -51,10 +60,13 @@ public class ConfigTools {
             "websearch.enabled、websearch.mcp-url、websearch.api-key；" +
             "agent.summaryRefreshMinutes、agent.allowAgentTasks、agent.cacheSummaries；" +
             "desktop.hideToTray、desktop.autoOpenWindow、desktop.autoStartBackend；" +
-            "aw.collection.window、aw.collection.afk、aw.collection.content、aw.audio.enabled；" +
+            "aw.collection.window、aw.collection.afk、aw.collection.content、aw.audio.enabled、aw.audio.whisperPath、" +
+            "aw.audio.source、aw.audio.engine、aw.audio.model、aw.audio.chunkSeconds；" +
             "embedding.enabled、embedding.model、embedding.base-url、embedding.api-key；" +
             "token 用量限制 llm.max-tokens、llm.agent.maxIters、desktop.summary.maxTimelineLlm、" +
-            "llm.budget.mode（off/warn/block）、llm.budget.dailyTokens、llm.budget.warnRatio。")
+            "llm.budget.mode（off/warn/block）、llm.budget.dailyTokens、llm.budget.warnRatio。" +
+            "输出中的 [运行时状态] aw.audio.runtimeStatus 表示顶部录音按钮控制的实时状态；" +
+            "回答当前是否正在录音/当前声音时优先参考该运行时状态，而不是只看 aw.audio.enabled。")
     public String getConfig() {
         Properties eff = userStore.load();
         StringBuilder sb = new StringBuilder("当前 SelfAnalyst 配置：\n\n");
@@ -88,7 +100,19 @@ public class ConfigTools {
                 {"aw.collection.afk",     eff.getProperty("aw.collection.afk",     "true"),  null},
                 {"aw.collection.content", eff.getProperty("aw.collection.content", "true"),  null},
                 {"aw.audio.enabled",      eff.getProperty("aw.audio.enabled",      "false"), null},
+                {"aw.audio.whisperPath",  eff.getProperty("aw.audio.whisperPath",  "tools/whisper"), null},
+                {"aw.audio.vadThreshold", eff.getProperty("aw.audio.vadThreshold", "0.0001"), null},
+                {"aw.audio.source",       eff.getProperty("aw.audio.source",       "mic"), null},
+                {"aw.audio.engine",       eff.getProperty("aw.audio.engine",       "auto"), null},
+                {"aw.audio.model",        eff.getProperty("aw.audio.model",        "gpt-4o-transcribe"), null},
+                {"aw.audio.chunkSeconds", eff.getProperty("aw.audio.chunkSeconds", "10"), null},
         });
+        String audioRuntimeStatus = audioRuntimeStatus();
+        if (audioRuntimeStatus != null) {
+            appendSection(sb, "运行时状态", new String[][]{
+                    {"aw.audio.runtimeStatus", audioRuntimeStatus, null},
+            });
+        }
         appendSection(sb, "Embedding", new String[][]{
                 {"embedding.enabled",  eff.getProperty("embedding.enabled",  "true"),                          null},
                 {"embedding.model",    eff.getProperty("embedding.model",    "text-embedding-3-small"),        null},
@@ -145,6 +169,16 @@ public class ConfigTools {
             sb.append(row[0]).append(" = ").append(val).append("\n");
         }
         sb.append("\n");
+    }
+
+    private String audioRuntimeStatus() {
+        if (audioRuntimeStatusSupplier == null) return null;
+        try {
+            String status = audioRuntimeStatusSupplier.get();
+            return status == null || status.isBlank() ? "unknown" : status;
+        } catch (Exception e) {
+            return "unknown";
+        }
     }
 
     private static String maskKey(String key) {

@@ -1,7 +1,8 @@
 package com.selfanalyst.desktop;
 
 import com.selfanalyst.agent.SelfAnalystAgent;
-import com.selfanalyst.audio.AudioWatcher;
+import com.selfanalyst.audio.AudioCaptureManager;
+import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
 import com.selfanalyst.aw.watcher.WatcherManager;
 import com.selfanalyst.config.Config;
@@ -37,7 +38,7 @@ import java.nio.file.Path;
  *   DesktopServer desktop = new DesktopServer(app, config, agent,
  *           awServer.eventStore(),
  *           agent.memory(),
- *           watcherManager, contentWatcher, audioWatcher);
+ *           watcherManager, contentWatcher, audioCaptureManager);
  *   desktop.start(); // registers routes, no listen()
  *   awServer.start();
  * }</pre>
@@ -51,6 +52,8 @@ public class DesktopServer {
     private final DesktopConfigController configCtrl;
     private final DesktopTaskController taskCtrl;
     private final DesktopStatusController statusCtrl;
+    private final DesktopAudioController audioCtrl;
+    private final DesktopAudioEventsController audioEventsCtrl;
     private final DesktopChatSessionController chatSessionCtrl;
     private final DesktopMemoryController memoryCtrl;
 
@@ -64,7 +67,7 @@ public class DesktopServer {
      * @param memoryStore    optional memory store for goal context in summaries
      * @param watcherManager optional – for collector status reporting
      * @param contentWatcher optional – for collector status reporting
-     * @param audioWatcher   optional – for collector status reporting
+     * @param audioCaptureManager optional – for runtime audio collector control/reporting
      */
     public DesktopServer(Javalin app,
                          Config config,
@@ -73,7 +76,20 @@ public class DesktopServer {
                          MemoryStore memoryStore,
                          WatcherManager watcherManager,
                          ContentWatcher contentWatcher,
-                         AudioWatcher audioWatcher) {
+                         AudioCaptureManager audioCaptureManager) {
+        this(app, config, agent, eventStore, null, memoryStore,
+                watcherManager, contentWatcher, audioCaptureManager);
+    }
+
+    public DesktopServer(Javalin app,
+                         Config config,
+                         SelfAnalystAgent agent,
+                         EventStore eventStore,
+                         BucketStore bucketStore,
+                         MemoryStore memoryStore,
+                         WatcherManager watcherManager,
+                         ContentWatcher contentWatcher,
+                         AudioCaptureManager audioCaptureManager) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
@@ -92,7 +108,10 @@ public class DesktopServer {
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.statusCtrl = new DesktopStatusController(
-                config, watcherManager, contentWatcher, audioWatcher);
+                config, watcherManager, contentWatcher, audioCaptureManager);
+        this.audioCtrl = new DesktopAudioController(audioCaptureManager);
+        this.audioEventsCtrl = new DesktopAudioEventsController(
+                eventStore, bucketStore, audioCaptureManager);
         this.memoryCtrl = longTermMemoryService != null
                 ? new DesktopMemoryController(longTermMemoryService)
                 : null;
@@ -173,6 +192,8 @@ public class DesktopServer {
 
         // ── Status ───────────────────────────────────────────
         app.get("/desktop/status", statusCtrl::getStatus);
+        app.post("/desktop/audio", audioCtrl::setAudioCapture);
+        app.get("/desktop/audio/events", audioEventsCtrl::getEvents);
 
         // Catch-all exception handler so no error returns an empty body
         app.exception(Exception.class, (e, ctx) -> {
@@ -213,6 +234,7 @@ public class DesktopServer {
     public DesktopConfigController configController() { return configCtrl; }
     public DesktopTaskController taskController() { return taskCtrl; }
     public DesktopStatusController statusController() { return statusCtrl; }
+    public DesktopAudioController audioController() { return audioCtrl; }
     public DesktopChatSessionController chatSessionController() { return chatSessionCtrl; }
     public DesktopMemoryController memoryController() { return memoryCtrl; }
 }

@@ -5,7 +5,8 @@ import com.selfanalyst.aw.AwServer;
 import com.selfanalyst.aw.watcher.WatcherManager;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
-import com.selfanalyst.audio.AudioWatcher;
+import com.selfanalyst.audio.AudioCaptureOptions;
+import com.selfanalyst.audio.AudioCaptureManager;
 import com.selfanalyst.desktop.DesktopServer;
 import com.selfanalyst.desktop.store.ConfigMigration;
 import com.selfanalyst.desktop.store.UserConfigStore;
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 
 public class AppSession implements AutoCloseable {
 
@@ -35,7 +37,7 @@ public class AppSession implements AutoCloseable {
     private AwServer awServer;
     private WatcherManager watcherManager;
     private ContentWatcher contentWatcher;
-    private AudioWatcher audioWatcher;
+    private AudioCaptureManager audioCaptureManager;
     private DesktopServer desktopServer;
     private WikiStore wikiStore;
     private WikiWorker wikiWorker;
@@ -142,7 +144,11 @@ public class AppSession implements AutoCloseable {
 
         SelfAnalystAgent a = null;
         try {
-            a = new SelfAnalystAgent(config, wikiStore, wikiTools, userConfigStore, fileTools, usageMeter);
+            Supplier<String> audioRuntimeStatus = audioCaptureManager != null
+                    ? () -> audioCaptureManager.status().status()
+                    : null;
+            a = new SelfAnalystAgent(config, wikiStore, wikiTools, userConfigStore, fileTools,
+                    usageMeter, audioRuntimeStatus);
         } catch (Exception e) {
             log.warn("Agent 初始化失败 (API key 无效?): {}", e.getMessage());
         }
@@ -224,7 +230,8 @@ public class AppSession implements AutoCloseable {
         if (awServer != null && awServer.app() != null) {
             var memoryStore = agent != null ? agent.memory() : null;
             desktopServer = new DesktopServer(awServer.app(), config, agent,
-                    awServer.eventStore(), memoryStore, watcherManager, contentWatcher, audioWatcher);
+                    awServer.eventStore(), awServer.bucketStore(), memoryStore,
+                    watcherManager, contentWatcher, audioCaptureManager);
             desktopServer.start();
             awServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));
@@ -266,13 +273,24 @@ public class AppSession implements AutoCloseable {
             } catch (Exception e2) {
                 log.warn("内容采集未启动: {}", e2.getMessage());
             }
-            if (config.audioEnabled()) {
-                try {
-                    audioWatcher = new AudioWatcher("http://localhost:" + config.awPort());
-                    audioWatcher.start();
-                } catch (Exception e3) {
-                    log.warn("音频采集未启动: {}", e3.getMessage());
+            try {
+                audioCaptureManager = new AudioCaptureManager(
+                        "http://localhost:" + config.awPort(),
+                        config.audioEnabled(),
+                        new AudioCaptureOptions(
+                                config.audioWhisperPath(),
+                                config.audioVadThreshold(),
+                                config.audioChunkSeconds(),
+                                config.audioSource(),
+                                config.audioEngine(),
+                                config.llmBaseUrl(),
+                                config.llmApiKey(),
+                                config.audioModel()));
+                if (!config.audioEnabled()) {
+                    log.info("音频采集已按配置禁用 (aw.audio.enabled=false)");
                 }
+            } catch (Exception e3) {
+                log.warn("音频采集控制器未启动: {}", e3.getMessage());
             }
         } catch (Exception e) {
             log.warn("嵌入式 AW 启动失败: {}", e.getMessage());
@@ -331,8 +349,8 @@ public class AppSession implements AutoCloseable {
     }
 
     private void shutdownEmbeddedAW() {
-        if (audioWatcher != null) {
-            audioWatcher.shutdown();
+        if (audioCaptureManager != null) {
+            audioCaptureManager.shutdown();
         }
         if (contentWatcher != null) {
             contentWatcher.shutdown();

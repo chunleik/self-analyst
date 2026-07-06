@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -83,7 +84,7 @@ public final class TomlSupport {
         if (value instanceof String s) return s;
         if (value instanceof Boolean b) return b ? "true" : "false";
         if (value instanceof Long l) return Long.toString(l);
-        if (value instanceof Double d) return Double.toString(d);
+        if (value instanceof Double d) return normalizeDouble(d);
         if (value instanceof TomlArray arr) return normalizeArray(key, arr, errors);
         if (value instanceof LocalDate || value instanceof LocalTime
                 || value instanceof LocalDateTime || value instanceof OffsetDateTime) {
@@ -116,7 +117,7 @@ public final class TomlSupport {
             if (el instanceof String s) { elKind = "string"; norm = s; }
             else if (el instanceof Boolean b) { elKind = "boolean"; norm = b ? "true" : "false"; }
             else if (el instanceof Long l) { elKind = "integer"; norm = Long.toString(l); }
-            else if (el instanceof Double d) { elKind = "float"; norm = Double.toString(d); }
+            else if (el instanceof Double d) { elKind = "float"; norm = normalizeDouble(d); }
             else if (el instanceof TomlArray) {
                 errors.add(key + ": 数组不支持嵌套数组");
                 return "";
@@ -325,13 +326,17 @@ public final class TomlSupport {
         }
         if (type == KeyType.FLOAT) {
             try {
-                return Double.toString(Double.parseDouble(value.trim()));
+                return normalizeDouble(Double.parseDouble(value.trim()));
             } catch (NumberFormatException ignored) { /* fall through to string */ }
         }
         if (value.indexOf('\\') >= 0 && value.indexOf('\'') < 0) {
             return "'" + value + "'"; // literal string — backslashes preserved verbatim
         }
         return "\"" + escapeBasic(value) + "\"";
+    }
+
+    private static String normalizeDouble(double value) {
+        return BigDecimal.valueOf(value).stripTrailingZeros().toPlainString();
     }
 
     private static String escapeBasic(String s) {

@@ -295,6 +295,115 @@ a:hover {
   line-height: 1;
 }
 
+.audio-toggle-btn {
+  width: 30px;
+  height: 30px;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.audio-toggle-btn.active {
+  color: var(--red);
+  background: var(--red-dim);
+  border-color: rgba(180, 35, 24, 0.24);
+}
+
+.audio-toggle-btn .audio-icon {
+  flex-shrink: 0;
+}
+
+.audio-toggle-btn .audio-icon-on {
+  display: none;
+}
+
+.audio-toggle-btn.active .audio-icon-on {
+  display: block;
+}
+
+.audio-toggle-btn.active .audio-icon-off {
+  display: none;
+}
+
+.audio-tab-layout {
+  height: 100%;
+  padding: var(--space-4);
+  overflow: hidden;
+}
+
+.audio-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.audio-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.audio-subtitle {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.audio-status-pill {
+  flex-shrink: 0;
+}
+
+.audio-transcript-list {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-4);
+}
+
+.audio-transcript-item {
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.audio-transcript-item:first-child {
+  padding-top: 0;
+}
+
+.audio-transcript-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: var(--space-2);
+}
+
+.audio-transcript-text {
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.audio-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 15px;
+}
+
+.audio-error {
+  color: var(--red);
+}
+
 /* ----- Main Content ----- */
 #main-content {
   height: calc(100vh - var(--nav-height));

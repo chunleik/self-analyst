@@ -2,7 +2,7 @@ package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
-import com.selfanalyst.audio.AudioWatcher;
+import com.selfanalyst.audio.AudioCaptureManager;
 import com.selfanalyst.aw.watcher.Watcher;
 import com.selfanalyst.aw.watcher.WatcherManager;
 import io.javalin.http.Context;
@@ -31,7 +31,7 @@ public class DesktopStatusController {
     private final Config config;
     private final WatcherManager watcherManager;
     private final ContentWatcher contentWatcher;
-    private final AudioWatcher audioWatcher;
+    private final AudioCaptureManager audioCaptureManager;
 
     private final AtomicBoolean llmAvailableCache = new AtomicBoolean(false);
     private final AtomicLong llmCacheUpdatedAt = new AtomicLong(0);
@@ -45,11 +45,11 @@ public class DesktopStatusController {
     public DesktopStatusController(Config config,
                                    WatcherManager watcherManager,
                                    ContentWatcher contentWatcher,
-                                   AudioWatcher audioWatcher) {
+                                   AudioCaptureManager audioCaptureManager) {
         this.config = config;
         this.watcherManager = watcherManager;
         this.contentWatcher = contentWatcher;
-        this.audioWatcher = audioWatcher;
+        this.audioCaptureManager = audioCaptureManager;
         // Kick off first check immediately, then every 60 seconds
         llmChecker.scheduleAtFixedRate(this::refreshLlmAvailability, 0, 60, TimeUnit.SECONDS);
     }
@@ -115,8 +115,8 @@ public class DesktopStatusController {
     }
 
     private String audioStatus() {
-        if (audioWatcher == null) return "disabled";
-        return audioWatcher.isAlive() ? "running" : "disabled";
+        if (audioCaptureManager == null) return "disabled";
+        return audioCaptureManager.status().status();
     }
 
     private boolean doCheckLlmAvailability() {

@@ -51,6 +51,12 @@ public record Config(
         boolean collectAfk,
         boolean collectContent,
         boolean audioEnabled,
+        Path audioWhisperPath,
+        double audioVadThreshold,
+        String audioSource,
+        String audioEngine,
+        String audioModel,
+        int audioChunkSeconds,
         boolean fileWatchEnabled,
         String fileWatchPaths,
         int fileWatchMaxFileSizeKb,
@@ -186,6 +192,25 @@ public record Config(
                 envOrProp(props, "aw.collection.content", "AW_COLLECTION_CONTENT", "true"));
         boolean audioEnabled = Boolean.parseBoolean(
                 envOrProp(props, "aw.audio.enabled", "AW_AUDIO_ENABLED", "false"));
+        Path audioWhisperPath = Path.of(
+                envOrProp(props, "aw.audio.whisperPath", "AW_AUDIO_WHISPER_PATH", "tools/whisper"));
+        double audioVadThreshold = parseDoubleOr(
+                envOrProp(props, "aw.audio.vadThreshold", "AW_AUDIO_VAD_THRESHOLD", "0.0001"), 0.0001);
+        if (audioVadThreshold <= 0 || audioVadThreshold > 1) {
+            audioVadThreshold = 0.0001;
+        }
+        String audioSource = normalizeChoice(
+                envOrProp(props, "aw.audio.source", "AW_AUDIO_SOURCE", "mic"),
+                "mic", "mic", "system", "both");
+        String audioEngine = normalizeChoice(
+                envOrProp(props, "aw.audio.engine", "AW_AUDIO_ENGINE", "auto"),
+                "auto", "local-whisper", "cloud-asr", "auto");
+        String audioModel = envOrProp(props, "aw.audio.model", "AW_AUDIO_MODEL", "gpt-4o-transcribe");
+        int audioChunkSeconds = parseIntOr(props,
+                envOrProp(props, "aw.audio.chunkSeconds", "AW_AUDIO_CHUNK_SECONDS", "10"), 10);
+        if (audioChunkSeconds < 1 || audioChunkSeconds > 60) {
+            audioChunkSeconds = 10;
+        }
 
         // ── File Watch (SPEC-FILE-*) ──
         boolean fileWatchEnabled = Boolean.parseBoolean(
@@ -254,6 +279,8 @@ public record Config(
                 ocrExcludedApps, ocrTitleStripHeight,
                 webSearchEnabled, webSearchMcpUrl, webSearchApiKey,
                 llmTemperature, collectWindow, collectAfk, collectContent, audioEnabled,
+                audioWhisperPath, audioVadThreshold, audioSource, audioEngine, audioModel,
+                audioChunkSeconds,
                 fileWatchEnabled, fileWatchPaths, fileWatchMaxFileSizeKb,
                 fileWatchMaxContentChars, fileWatchWorkerIntervalSeconds,
                 fileWatchDebounceSeconds, fileWatchMinReindexIntervalMinutes,
@@ -293,6 +320,8 @@ public record Config(
                 baseDir.resolve("ocr-samples"), "", 80,
                 false, "https://search.parallel.ai/mcp", "",
                 0.7, false, false, false, false,
+                Path.of("tools/whisper"), 0.0001,
+                "mic", "auto", "gpt-4o-transcribe", 10,
                 false, "", 512, 8000, 60, 5, 5, 5, "", "", "", true,
                 baseDir.resolve("file-semantic-index"),
                 2048, 8, 4, "warn", 100000000L, 0.8, "auto");
@@ -383,6 +412,14 @@ public record Config(
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    private static String normalizeChoice(String value, String defaultValue, String... allowed) {
+        String candidate = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        for (String option : allowed) {
+            if (option.equals(candidate)) return candidate;
+        }
+        return defaultValue;
     }
 
     public void validate() {

@@ -36,6 +36,30 @@ class ConfigTest {
         assertEquals(false, audioEnabled.invoke(cfg));
     }
 
+    @Test
+    void exposesAudioWhisperPathAsConfigValue(@TempDir Path dir) {
+        Config cfg = Config.testDefaults(dir);
+
+        assertEquals(Path.of("tools/whisper"), cfg.audioWhisperPath());
+    }
+
+    @Test
+    void exposesAudioVadThresholdAsConfigValue(@TempDir Path dir) {
+        Config cfg = Config.testDefaults(dir);
+
+        assertEquals(0.0001, cfg.audioVadThreshold(), 0.00001);
+    }
+
+    @Test
+    void exposesAudioAsrOptionsAsConfigValues(@TempDir Path dir) {
+        Config cfg = Config.testDefaults(dir);
+
+        assertEquals("mic", cfg.audioSource());
+        assertEquals("auto", cfg.audioEngine());
+        assertEquals("gpt-4o-transcribe", cfg.audioModel());
+        assertEquals(10, cfg.audioChunkSeconds());
+    }
+
     // ── TOML overlay load priority (SPEC-TOML-MIG-002a) ──────────────────
 
     @Test

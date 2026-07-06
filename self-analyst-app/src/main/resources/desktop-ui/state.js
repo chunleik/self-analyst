@@ -40,6 +40,14 @@ var state = {
   memoryLoadError: null,
   pendingMemoryCount: 0,
   memoryDraft: "",
+  audioEvents: [],
+  audioEventsLoading: false,
+  audioEventsError: null,
+  audioEventsStatus: "disabled",
+  audioEventsUpdatedAt: null,
+  audioEventsLatestAt: null,
+  audioEventsCount: 0,
+  audioDiagnostics: null,
 };
 
 // Legacy localStorage key. No longer a data source (sessions live in the

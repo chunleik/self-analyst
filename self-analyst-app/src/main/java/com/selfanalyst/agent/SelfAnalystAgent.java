@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 public class SelfAnalystAgent {
 
@@ -72,6 +73,13 @@ public class SelfAnalystAgent {
     public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter) throws IOException {
+        this(config, wikiStore, wikiTools, userConfigStore, fileTools, usageMeter, null);
+    }
+
+    public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
+                             UserConfigStore userConfigStore, FileTools fileTools,
+                             UsageMeter usageMeter,
+                             Supplier<String> audioRuntimeStatusSupplier) throws IOException {
         this.usageMeter = usageMeter;
         this.lang = config.effectiveLanguage();
         this.wikiStore = wikiStore;
@@ -90,7 +98,7 @@ public class SelfAnalystAgent {
             toolkit.registerTool(fileTools);
         }
         if (userConfigStore != null) {
-            toolkit.registerTool(new ConfigTools(userConfigStore));
+            toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier));
         }
         registerWebSearchMcp(toolkit, config);
 

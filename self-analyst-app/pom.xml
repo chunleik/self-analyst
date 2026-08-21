@@ -107,11 +107,44 @@
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                             <mainClass>com.selfanalyst.App</mainClass>
                         </transformer>
-                        <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
-                            <resource>META-INF/services/</resource>
-                        </transformer>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                     </transformers>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>verify-shaded-imageio-services</id>
+                        <phase>verify</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <target>
+                                <delete dir="${project.build.directory}/shade-verification" quiet="true"/>
+                                <unzip src="${project.build.directory}/${project.build.finalName}.jar"
+                                       dest="${project.build.directory}/shade-verification">
+                                    <patternset>
+                                        <include name="META-INF/services/javax.imageio.spi.ImageReaderSpi"/>
+                                    </patternset>
+                                </unzip>
+                                <loadfile property="imageio.services"
+                                          srcFile="${project.build.directory}/shade-verification/META-INF/services/javax.imageio.spi.ImageReaderSpi"/>
+                                <fail message="Shaded JAR lost an ImageIO ServiceLoader provider">
+                                    <condition>
+                                        <not>
+                                            <and>
+                                                <contains string="${imageio.services}" substring="com.github.jaiimageio.impl.plugins.tiff.TIFFImageReaderSpi"/>
+                                                <contains string="${imageio.services}" substring="org.apache.pdfbox.jbig2.JBIG2ImageReaderSpi"/>
+                                            </and>
+                                        </not>
+                                    </condition>
+                                </fail>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

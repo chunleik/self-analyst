@@ -6,7 +6,10 @@ import com.selfanalyst.aw.settings.SettingsManager;
 import com.selfanalyst.aw.store.*;
 import com.selfanalyst.aw.webui.WebUiHandler;
 import io.javalin.Javalin;
+import io.javalin.http.HandlerType;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class AwServer {
     private final Javalin app;
@@ -16,9 +19,16 @@ public class AwServer {
     private final SettingsManager settings;
     private final ServerLog serverLog;
     private final int port;
+    private final String desktopToken;
+    private final AtomicBoolean stopped = new AtomicBoolean();
 
     public AwServer(Path dataDir, int port) {
+        this(dataDir, port, System.getenv("SELF_ANALYST_DESKTOP_TOKEN"));
+    }
+
+    AwServer(Path dataDir, int port, String desktopToken) {
         this.port = port;
+        this.desktopToken = desktopToken;
         this.db = new Database(dataDir);
         PulseTimeConfig pulseConfig = PulseTimeConfig.DEFAULT;
         this.eventStore = new EventStore(db, pulseConfig);
@@ -39,17 +49,36 @@ public class AwServer {
             cfg.http.defaultContentType = "application/json";
         });
 
-        // Manual CORS — avoid Javalin 6.4.0 CorsUtils "explicit port" bug
+        // Enforce the loopback trust boundary before any API route can mutate state.
         this.app.before(ctx -> {
+            if (!LocalRequestGuard.isAllowedHost(ctx.header("Host"), port)) {
+                ctx.status(403).json(Map.of("error", "Invalid Host header"));
+                ctx.skipRemainingHandlers();
+                return;
+            }
+
             String origin = ctx.header("Origin");
-            if (origin != null && (origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1"))) {
+            if (origin != null && !LocalRequestGuard.isAllowedOrigin(origin)) {
+                ctx.status(403).json(Map.of("error", "Origin is not allowed"));
+                ctx.skipRemainingHandlers();
+                return;
+            }
+            if (origin != null) {
                 ctx.header("Access-Control-Allow-Origin", origin);
                 ctx.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-                ctx.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-                ctx.header("Access-Control-Allow-Credentials", "true");
+                ctx.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-SelfAnalyst-Token");
+                ctx.header("Vary", "Origin");
             }
-            if (ctx.method() == io.javalin.http.HandlerType.OPTIONS) {
-                ctx.status(200).result("");
+            if (LocalRequestGuard.isProtectedDesktopPath(ctx.path())
+                    && !LocalRequestGuard.hasDesktopCredential(
+                            desktopToken, ctx.header("X-SelfAnalyst-Token"), ctx.cookie("self_analyst_session"))) {
+                ctx.status(401).json(Map.of("error", "Desktop authentication required"));
+                ctx.skipRemainingHandlers();
+                return;
+            }
+            if (ctx.method() == HandlerType.OPTIONS) {
+                ctx.status(204).result("");
+                ctx.skipRemainingHandlers();
             }
         });
 
@@ -91,7 +120,15 @@ public class AwServer {
     }
 
     public void stop() {
+        if (!stopped.compareAndSet(false, true)) {
+            return;
+        }
         app.stop();
+        try {
+            db.close();
+        } catch (Exception error) {
+            serverLog.error("Failed to close ActivityWatch database: " + error.getMessage());
+        }
     }
 
     public Database db() {

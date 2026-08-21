@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PcmAudioTest {
 
@@ -38,6 +39,17 @@ class PcmAudioTest {
         assertEquals(16, littleEndianShort(wav, 34));
         assertEquals("data", ascii(wav, 36, 4));
         assertEquals(4, littleEndianInt(wav, 40));
+    }
+
+    @Test
+    void computesNormalizedRmsForSilenceAndFullScalePcm() {
+        assertEquals(0f, PcmAudio.rms(new byte[200]));
+        byte[] fullScale = new byte[200];
+        for (int i = 0; i < fullScale.length; i += 2) {
+            fullScale[i] = (byte) 0xFF;
+            fullScale[i + 1] = 0x7F;
+        }
+        assertTrue(PcmAudio.rms(fullScale) > 0.99f);
     }
 
     private static short firstSample(byte[] bytes) {

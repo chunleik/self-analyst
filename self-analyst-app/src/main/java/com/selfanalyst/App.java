@@ -16,6 +16,8 @@ public class App {
 
         try {
             session = new AppSession();
+            session.registerDesktopLifecycle(
+                    System.getenv("SELF_ANALYST_DESKTOP_TOKEN"), shutdownLatch::countDown);
             log.info("SelfAnalyst 已启动 (http://localhost:5700)");
 
             // Register shutdown hook for clean close on Ctrl+C
@@ -28,6 +30,9 @@ public class App {
             }));
 
             shutdownLatch.await();
+            log.info("正在关闭...");
+            session.close();
+            log.info("已关闭");
         } catch (Exception e) {
             log.error("启动失败: {}", e.getMessage(), e);
             if (session != null) session.close();

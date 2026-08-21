@@ -16,6 +16,10 @@
     <name>SelfAnalyst :: Integration Test :: App</name>
     <description>Integration smoke tests for self-analyst-app</description>
 
+    <properties>
+        <integration.verification.skip>false</integration.verification.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.selfanalyst</groupId>

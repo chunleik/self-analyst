@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 public class AppSession implements AutoCloseable {
@@ -51,6 +52,7 @@ public class AppSession implements AutoCloseable {
     private FileEmbeddingWorker fileEmbeddingWorker;
     private FileIndexWorker fileIndexWorker;
     private FileWatcher fileWatcher;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     public AppSession() throws IOException {
         // Migrate the user config to TOML before it is first read. AppSession is the
@@ -307,7 +309,47 @@ public class AppSession implements AutoCloseable {
     public Config config() { return config; }
     public SelfAnalystAgent agent() { return agent; }
 
+    public void registerDesktopLifecycle(String token, Runnable shutdownSignal) {
+        if (awServer == null || token == null || token.isBlank()) {
+            return;
+        }
+        awServer.app().get("/desktop/session", ctx -> {
+            if (!token.equals(ctx.queryParam("token"))) {
+                ctx.status(403).json(java.util.Map.of("error", "Invalid desktop session token"));
+                return;
+            }
+            ctx.header("Set-Cookie", "self_analyst_session=" + token
+                    + "; Path=/; HttpOnly; SameSite=Strict");
+            ctx.redirect("/desktop-ui/");
+        });
+        awServer.app().get("/desktop/lifecycle/health", ctx -> {
+            if (!token.equals(ctx.header("X-SelfAnalyst-Token"))) {
+                ctx.status(403);
+                return;
+            }
+            ctx.status(204);
+        });
+        awServer.app().post("/desktop/lifecycle/shutdown", ctx -> {
+            if (!token.equals(ctx.header("X-SelfAnalyst-Token"))) {
+                ctx.status(403);
+                return;
+            }
+            ctx.status(202).json(java.util.Map.of("accepted", true));
+            Thread.ofPlatform().name("desktop-shutdown-signal").start(() -> {
+                try {
+                    Thread.sleep(150);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+                shutdownSignal.run();
+            });
+        });
+    }
+
     public void saveAndShutdown() {
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
         try {
             if (agent != null) {
                 agent.saveMemory();

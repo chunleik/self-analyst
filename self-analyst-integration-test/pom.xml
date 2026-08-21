@@ -16,6 +16,10 @@
     <name>SelfAnalyst :: Integration Tests</name>
     <description>Integration smoke tests for all self-analyst modules</description>
 
+    <properties>
+        <integration.verification.skip>true</integration.verification.skip>
+    </properties>
+
     <modules>
         <module>self-analyst-app-test</module>
         <module>self-analyst-audio-test</module>
@@ -37,4 +41,29 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>run-packaged-integration-verifier</id>
+                        <phase>verify</phase>
+                        <goals><goal>exec</goal></goals>
+                        <configuration>
+                            <skip>${integration.verification.skip}</skip>
+                            <executable>${java.home}/bin/java</executable>
+                            <arguments>
+                                <argument>-jar</argument>
+                                <argument>${project.build.directory}/${project.build.finalName}-jar-with-dependencies.jar</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

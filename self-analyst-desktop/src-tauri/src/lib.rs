@@ -1,3 +1,7 @@
+use std::fs::OpenOptions;
+use std::io;
+use std::mem::size_of;
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -10,11 +14,67 @@ use tauri::{
 };
 use windows_sys::Win32::{
     Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE},
-    System::Threading::CreateMutexW,
+    Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG},
+    System::{
+        JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        },
+        Threading::CreateMutexW,
+    },
     UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND},
 };
 
-struct JavaBackend(Mutex<Option<Child>>);
+struct JavaBackend {
+    child: Mutex<Option<Child>>,
+    job: isize,
+    token: String,
+    port: u16,
+}
+
+impl JavaBackend {
+    fn shutdown_gracefully(&self) {
+        let url = backend_url(self.port, "/desktop/lifecycle/shutdown");
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(2)))
+            .build()
+            .into();
+        let _ = agent
+            .post(&url)
+            .header("X-SelfAnalyst-Token", &self.token)
+            .send_empty();
+
+        if let Ok(mut guard) = self.child.lock() {
+            if let Some(mut child) = guard.take() {
+                for _ in 0..100 {
+                    match child.try_wait() {
+                        Ok(Some(_)) => return,
+                        Ok(None) => thread::sleep(Duration::from_millis(100)),
+                        Err(_) => break,
+                    }
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
+impl Drop for JavaBackend {
+    fn drop(&mut self) {
+        if self.job != 0 {
+            unsafe {
+                let _ = CloseHandle(self.job as HANDLE);
+            }
+        }
+        if let Ok(child) = self.child.get_mut() {
+            if let Some(mut child) = child.take() {
+                let _ = child.wait();
+            }
+        }
+    }
+}
 
 struct SingleInstanceGuard(HANDLE);
 
@@ -84,22 +144,30 @@ fn find_java() -> Option<std::path::PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let bundled = dir.join("runtime").join("bin").join("java.exe");
-            if bundled.exists() { return Some(bundled); }
+            if bundled.exists() {
+                return Some(bundled);
+            }
         }
     }
     // Check JAVA_HOME
     for env_key in &["JAVA_HOME", "JDK_HOME"] {
         if let Ok(home) = std::env::var(env_key) {
             let java = std::path::Path::new(&home).join("bin").join("java.exe");
-            if java.exists() { return Some(java); }
+            if java.exists() {
+                return Some(java);
+            }
         }
     }
     // Check common install paths — prefer highest version >= 21
     let mut candidates: Vec<(u32, std::path::PathBuf)> = Vec::new();
-    let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
+    let program_files =
+        std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
     let roots = [
         format!("{}\\Java", program_files),
-        format!("{}\\Java", program_files.replace("Program Files", "Program Files (x86)")),
+        format!(
+            "{}\\Java",
+            program_files.replace("Program Files", "Program Files (x86)")
+        ),
         format!("{}\\Eclipse Adoptium", program_files),
     ];
     for root in &roots {
@@ -115,7 +183,9 @@ fn find_java() -> Option<std::path::PathBuf> {
     }
     candidates.sort_by(|a, b| b.0.cmp(&a.0));
     for (ver, java) in &candidates {
-        if *ver >= 21 { return Some(java.clone()); }
+        if *ver >= 21 {
+            return Some(java.clone());
+        }
     }
     // Any version if no 21+
     candidates.first().map(|(_, j)| j.clone())
@@ -130,8 +200,12 @@ fn parse_java_version(path: &str) -> u32 {
             if let Some(dot) = rest.find('.') {
                 return rest[..dot].parse().unwrap_or(0);
             }
-            return rest.chars().take_while(|c| c.is_ascii_digit())
-                .collect::<String>().parse().unwrap_or(0);
+            return rest
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0);
         }
     }
     0
@@ -149,11 +223,59 @@ fn backend_url(port: u16, path: &str) -> String {
     format!("http://localhost:{}{}", port, path)
 }
 
-fn start_java(app: AppHandle, port: u16) {
+fn lifecycle_token() -> io::Result<String> {
+    let mut bytes = [0u8; 32];
+    let status = unsafe {
+        BCryptGenRandom(
+            std::ptr::null_mut(),
+            bytes.as_mut_ptr(),
+            bytes.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    if status < 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("BCryptGenRandom failed: {status}"),
+        ));
+    }
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn create_kill_on_close_job(child: &Child) -> io::Result<isize> {
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &limits as *const _ as *const std::ffi::c_void,
+            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) == 0
+        {
+            let error = io::Error::last_os_error();
+            let _ = CloseHandle(job);
+            return Err(error);
+        }
+        if AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE) == 0 {
+            let error = io::Error::last_os_error();
+            let _ = CloseHandle(job);
+            return Err(error);
+        }
+        Ok(job as isize)
+    }
+}
+
+fn start_java(app: AppHandle, port: u16) -> String {
     // jar is alongside the exe in dist/
     let exe_dir = std::env::current_exe()
         .unwrap_or_default()
-        .parent().unwrap_or(std::path::Path::new("."))
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
     let jar = exe_dir.join("self-analyst-app.jar");
     println!("[SelfAnalyst] Jar path: {}", jar.display());
@@ -166,53 +288,143 @@ fn start_java(app: AppHandle, port: u16) {
     let java = find_java().unwrap_or_else(|| std::path::PathBuf::from("java"));
     eprintln!("Using Java: {}", java.display());
 
-    let child = Command::new(java)
+    let token = lifecycle_token().expect("Failed to create desktop lifecycle token");
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(exe_dir.join("self-analyst-backend.log"))
+        .expect("Failed to open backend log");
+    let error_log = log_file
+        .try_clone()
+        .expect("Failed to clone backend log handle");
+    let mut child = Command::new(java)
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         // Run with CWD = exe dir so the backend resolves its relative paths
         // (tools/PaddleOCR-json, tools/whisper, ./data, ./config) next to the exe.
         .current_dir(&exe_dir)
         .env("AW_PORT", port.to_string())
+        .env("SELF_ANALYST_DESKTOP_TOKEN", &token)
         .arg("-jar")
         .arg(jar.to_string_lossy().to_string())
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(error_log))
         .spawn()
         .expect("Failed to start Java backend");
 
-    app.manage(JavaBackend(Mutex::new(Some(child))));
+    let job = create_kill_on_close_job(&child).unwrap_or_else(|error| {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("Failed to secure Java backend in a Windows Job Object: {error}");
+    });
+    app.manage(JavaBackend {
+        child: Mutex::new(Some(child)),
+        job,
+        token: token.clone(),
+        port,
+    });
 
     // Poll until backend is ready
     let handle = app.clone();
-    let health_url = backend_url(port, "/0/info");
+    let health_token = token.clone();
+    let health_url = backend_url(port, "/desktop/lifecycle/health");
     thread::spawn(move || {
-        for _ in 0..20 {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(2)))
+            .build()
+            .into();
+        for _ in 0..3600 {
             thread::sleep(Duration::from_millis(500));
-            if ureq::get(&health_url).call().is_ok() {
+            if agent
+                .get(&health_url)
+                .header("X-SelfAnalyst-Token", &health_token)
+                .call()
+                .is_ok()
+            {
                 println!("Java backend ready");
+                let window_handle = handle.clone();
+                let window_token = health_token.clone();
+                if let Err(error) = handle.run_on_main_thread(move || {
+                    if let Err(error) = create_main_window(&window_handle, port, &window_token) {
+                        eprintln!("Failed to create desktop window: {error}");
+                        window_handle.exit(1);
+                    }
+                }) {
+                    eprintln!("Failed to schedule desktop window creation: {error}");
+                    handle.exit(1);
+                }
                 return;
+            }
+            if let Some(state) = handle.try_state::<JavaBackend>() {
+                if let Ok(mut guard) = state.child.lock() {
+                    if let Some(child) = guard.as_mut() {
+                        if matches!(child.try_wait(), Ok(Some(_))) {
+                            eprintln!(
+                                "Java backend exited during startup; see self-analyst-backend.log"
+                            );
+                            handle.exit(1);
+                            return;
+                        }
+                    }
+                }
             }
         }
         eprintln!("Java backend failed to start");
         handle.exit(1);
     });
+    token
 }
 
-fn create_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon> {
+fn create_main_window(app: &AppHandle, port: u16, token: &str) -> tauri::Result<()> {
+    let auth_script = format!(
+        r#"
+        (() => {{
+            const originalFetch = window.fetch.bind(window);
+            window.fetch = (input, init = {{}}) => {{
+                const rawUrl = typeof input === 'string' ? input : input.url;
+                const url = new URL(rawUrl, window.location.href);
+                if (url.origin === window.location.origin && url.pathname.startsWith('/desktop/')) {{
+                    const inherited = input instanceof Request ? input.headers : undefined;
+                    const headers = new Headers(init.headers || inherited);
+                    headers.set('X-SelfAnalyst-Token', '{}');
+                    init = {{ ...init, headers }};
+                }}
+                return originalFetch(input, init);
+            }};
+        }})();
+        "#,
+        token
+    );
+
+    WebviewWindowBuilder::new(
+        app,
+        "main",
+        WebviewUrl::External(backend_url(port, "/desktop-ui/").parse().unwrap()),
+    )
+    .title("SelfAnalyst")
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .center()
+    .initialization_script(auth_script)
+    .build()?;
+    Ok(())
+}
+
+fn create_tray(app: &AppHandle, token: &str) -> tauri::Result<tauri::tray::TrayIcon> {
     let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
     let web_desktop_item = MenuItem::with_id(app, "web_desktop", "Web版桌面", true, None::<&str>)?;
     let about_item = MenuItem::with_id(app, "about", "关于", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[
-            &show_item,
-            &web_desktop_item,
-            &about_item,
-            &quit_item,
-        ],
+        &[&show_item, &web_desktop_item, &about_item, &quit_item],
     )?;
 
+    let desktop_session_url = format!(
+        "{}?token={}",
+        backend_url(backend_port(), "/desktop/session"),
+        token
+    );
     TrayIconBuilder::new()
         .icon(
             app.default_window_icon()
@@ -220,7 +432,7 @@ fn create_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon> {
                 .expect("default window icon missing"),
         )
         .menu(&menu)
-        .on_menu_event(|app, event| match event.id.as_ref() {
+        .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.show();
@@ -228,19 +440,12 @@ fn create_tray(app: &AppHandle) -> tauri::Result<tauri::tray::TrayIcon> {
                 }
             }
             "web_desktop" => {
-                let _ = open::that(backend_url(backend_port(), "/desktop-ui/"));
+                let _ = open::that(&desktop_session_url);
             }
             "about" => {
                 show_about_message();
             }
             "quit" => {
-                if let Some(state) = app.try_state::<JavaBackend>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        if let Some(ref mut child) = *guard {
-                            let _ = child.kill();
-                        }
-                    }
-                }
                 app.exit(0);
             }
             _ => {}
@@ -276,25 +481,19 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let port = backend_port();
-            start_java(app.handle().clone(), port);
-            let _tray = create_tray(app.handle())?;
-
-            let _window = WebviewWindowBuilder::new(
-                app, "main",
-                WebviewUrl::External(backend_url(port, "/desktop-ui/").parse().unwrap()),
-            )
-            .title("SelfAnalyst")
-            .inner_size(1200.0, 800.0)
-            .min_inner_size(800.0, 600.0)
-            .center()
-            .build()?;
+            let token = start_java(app.handle().clone(), port);
+            let _tray = create_tray(app.handle(), &token)?;
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error building app")
         .run(|app, event| {
-            if let RunEvent::WindowEvent {
+            if let RunEvent::ExitRequested { .. } = event {
+                if let Some(state) = app.try_state::<JavaBackend>() {
+                    state.shutdown_gracefully();
+                }
+            } else if let RunEvent::WindowEvent {
                 event: WindowEvent::CloseRequested { api, .. },
                 ..
             } = event

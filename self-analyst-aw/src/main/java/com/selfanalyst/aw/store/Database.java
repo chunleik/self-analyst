@@ -24,6 +24,7 @@ public class Database implements AutoCloseable {
         try {
             Files.createDirectories(dataDir);
             Class.forName("org.sqlite.JDBC");
+            LegacyDatabaseMigrator.migrate(dataDir);
             metaConn = openConnection(dbPath);
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize database at " + dataDir, e);

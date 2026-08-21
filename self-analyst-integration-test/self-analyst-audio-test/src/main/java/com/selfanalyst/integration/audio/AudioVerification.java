@@ -10,6 +10,12 @@ public class AudioVerification {
     private static int failed;
 
     public static void main(String[] args) {
+        Class<?> pcmAudio;
+        try {
+            pcmAudio = Class.forName("com.selfanalyst.audio.PcmAudio");
+        } catch (ClassNotFoundException e) {
+            throw new IllegalStateException("PcmAudio implementation is missing", e);
+        }
         step("AudioCapturer constructor + isAvailable + close", () -> {
             AudioCapturer capturer = new AudioCapturer(5, 0.01f);
             // isAvailable depends on mic hardware — just verify no exception
@@ -31,7 +37,7 @@ public class AudioVerification {
         });
 
         step("RMS computation: silence vs full-scale", () -> {
-            Method rms = AudioCapturer.class.getDeclaredMethod("rms", byte[].class);
+            Method rms = pcmAudio.getDeclaredMethod("rms", byte[].class);
             rms.setAccessible(true);
 
             // Silent audio
@@ -50,7 +56,7 @@ public class AudioVerification {
         });
 
         step("WAV container header structure", () -> {
-            Method toWav = AudioCapturer.class.getDeclaredMethod("toWav", byte[].class);
+            Method toWav = pcmAudio.getDeclaredMethod("toWav", byte[].class);
             toWav.setAccessible(true);
 
             byte[] pcm = new byte[100];
@@ -80,9 +86,9 @@ public class AudioVerification {
         });
 
         step("little-endian byte encoding", () -> {
-            Method intToBytes = AudioCapturer.class.getDeclaredMethod("intToBytes", int.class);
+            Method intToBytes = pcmAudio.getDeclaredMethod("intToBytes", int.class);
             intToBytes.setAccessible(true);
-            Method shortToBytes = AudioCapturer.class.getDeclaredMethod("shortToBytes", short.class);
+            Method shortToBytes = pcmAudio.getDeclaredMethod("shortToBytes", short.class);
             shortToBytes.setAccessible(true);
 
             byte[] ib = (byte[]) intToBytes.invoke(null, 0x01020304);

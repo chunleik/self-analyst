@@ -16,7 +16,7 @@
 | 主要前端逻辑 | `self-analyst-app/src/main/resources/desktop-ui/`（chat/api/state/init.js） |
 | 主要后端逻辑 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/controller/DesktopChatSessionController.java`（新增） |
 | 路由注册 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/DesktopServer.java` |
-| 会话存储 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/store/ChatSessionStore.java`（新增，`{memoryDir}/chat-sessions/` 目录：`index.json` + 每会话一个分片文件，UTF-8，原子写） |
+| 会话存储 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/store/ChatSessionStore.java`（`{memoryDir}/chat-sessions/`：`index.json` + `index.state` + 每会话分片，UTF-8，原子写） |
 
 ---
 
@@ -65,6 +65,10 @@
 
 - **SPEC-CSP-DEC-014**（请求资源边界）：桌面 chat/session mutation body 最多 256 KiB，JSON 最大深度 32；超限返回 413，错误根类型、字段类型、空消息批次、null 消息以及非法 role/status 返回 400，且不得修改 shard/index。
 
+- **SPEC-CSP-DEC-015**（跨文件恢复）：shard 是正文权威，`index.json` 是派生投影，`index.state` 以 CLEAN/DIRTY 记录唯一在途 mutation 及 active before/after。shard 原子 replace（或删除目录项）是业务 commit point；其后的 index/CLEAN 写失败保留 DIRTY 并仍返回已提交操作的成功结果，下一次任意访问先从 shards 恢复，避免 500 重试重复 append/create。升级前没有 `index.state` 的 v1 数据在首次访问时执行一次 canonical rebuild，修复 stale/orphan/ghost/duplicate meta。
+
+- **SPEC-CSP-DEC-016**（有界索引响应）：无参数 `GET /sessions` 保持旧版全量响应；新前端使用 `limit/cursor/q` 游标分页，默认首屏 50、单页最多 200，排序固定为 `updatedAt DESC, id DESC`。搜索先覆盖完整元数据索引再分页；active 不在当前页时单独 GET，不得改写 active。分页先约束网络/DOM，后端 index.json 的线性写放大留待 SQLite 派生索引阶段解决，不手写多文件索引分段。
+
 - **SPEC-CSP-DEC-006**：`active session` 指针随索引一并持久化于后端，使「上次选中的会话」在刷新 / 重启后端后仍能恢复。
 
 - **SPEC-CSP-DEC-007**：会话内容以**明文**存于 `{memoryDir}/chat-sessions/`，与 `tasks.json` 一致；后端仅绑定 `localhost`。不得把 `llm.api-key` 等配置敏感值写入这些文件。
@@ -74,15 +78,16 @@
   ```text
   {memoryDir}/chat-sessions/
   ├── index.json            # activeSessionId + 每个会话的元信息投影（含摘要/预览/消息数）
+  ├── index.state           # CLEAN/DIRTY 恢复状态，不属于 shard 扫描范围
   ├── <sessionId>.json      # 单个会话的完整数据（含全部 messages）
   └── ...
   ```
 
   - **分片文件**是单个会话 UI 可见 transcript 的**事实来源**；**index.json** 是从各分片派生的**投影/缓存**（用于列表与搜索），可在损坏/缺失时由分片重建。模型历史的事实来源另为 AgentState（SPEC-CSP-DEC-002）。
-  - 写一条消息只重写**该会话的分片**（≤200 条，有界）+ 更新 **index.json 中对应一行**。写成本与历史会话总数无关。
-  - *取舍*：index.json 仍随会话数线性增长，但只含**元信息**（无消息正文），量级约为"会话数 × 数百字节"，远小于全量；其重写发生在会话元信息变化（新建/删除/标题或摘要/`updatedAt` 变更）时。这是为"会话数不限"换取的可接受成本。
+  - 写一条消息只重写**该会话的分片**（≤200 条，有界）以及全局 `index.json` 投影；其它 session shard 保持字节不变。当前 index 解析/重写仍为 O(会话数)，不得宣称历史规模无关。
+  - *取舍*：index.json 只含元信息，远小于全文；分页限制网络和前端渲染，但不消除后端线性写放大。达到性能阈值后应迁移到可从 shards 重建的 SQLite 派生索引。
 
-- **SPEC-CSP-DEC-009**（会话搜索数据来源）：会话搜索为**前端对 index.json 各会话条目的本地过滤**，匹配字段为 **title + 最后一条消息预览 + 会话摘要**（`summary`）。不把全部历史消息正文加载到前端、也不在每次查询时扫描分片文件。
+- **SPEC-CSP-DEC-009**（会话搜索数据来源）：会话搜索由后端对完整 index 元数据执行过滤，匹配 **title + 最后一条消息预览 + 会话摘要**，再游标分页返回；不扫描消息正文或 shard 全文。
   - *取舍*：会话数不限后，"前端加载全部消息正文做全文搜索"不可行、"每次查询扫盘"会随会话增多变慢；改为搜索一份**压缩进索引的摘要**，兼顾零扫盘与"能搜到聊过的内容"。代价：搜索召回受摘要质量限制，非逐字全文。
 
 - **SPEC-CSP-DEC-010**（会话摘要生成）：每个会话维护一段**简短摘要**（约一句话），作为搜索的"正文代理"并可用于展示提示。摘要由 **LLM 基于会话内容生成**，**LLM 不可用 / 预算受限（`SPEC-BUDGET-*`）/ 失败**时回退到**确定性兜底摘要**（由会话内若干用户消息片段拼接得到）。生成是**异步、best-effort、不得阻断**消息收发；后端可对再生成做节流/合并。
@@ -114,6 +119,7 @@
 
 - 目录：`{memoryDir}/chat-sessions/`
 - 索引：`index.json` —— `{ "activeSessionId": <string|null>, "sessions": [ <SessionMeta> ... ] }`
+- 恢复状态：`index.state` —— CLEAN，或 DIRTY + operation/sessionId/activeBefore/activeAfter
 - 分片：`<sessionId>.json` —— 单个 `Session`（含 `messages`）
 
 ### 6.2 `SessionMeta`（index.json 中的投影项）
@@ -175,7 +181,8 @@
 - 返回 `{ "activeSessionId": <string|null>, "sessions": [ <SessionMeta> ... ] }`——**仅元信息投影，不含 `messages`**。
 - `sessions` 按 `updatedAt` **降序**（newest-first），与会话列表展示顺序一致（`SPEC-CHAT-TAB-004`）。
 - 目录/索引不存在时返回 `{ "activeSessionId": null, "sessions": [] }`，HTTP 200。
-- 用途：前端初始化时一次性加载列表 + 搜索字段（title/preview/summary），不加载任何消息正文。
+- 用途：旧客户端可一次性加载列表；新前端分页加载 title/preview/summary，不加载非 active 会话正文。
+- 无 query 参数时保持上述旧版全量结构。提供任一 `limit/cursor/q` 时返回 `{ activeSessionId, sessions, nextCursor, hasMore }`；`limit` 默认 50、范围 1..200。cursor 绑定规范化查询、anchor 和 index generation；任一元数据 mutation 后旧 cursor 返回 400，前端重载首屏，避免页间并发更新造成静默漏项。
 
 ### SPEC-CSP-API-002：`GET /desktop/chat/sessions/{id}`（单会话全量）
 
@@ -237,11 +244,13 @@
 - **SPEC-CSP-API-009e**：辅助字段和 opaque JSON 必须满足 DEC-013；所有 public mutation（含异步 summary）均不得绕过。
 - **SPEC-CSP-API-009f**：最终 shard 超 16 MiB 时按完整旧 user turn 继续淘汰，直至满足总预算；若最新唯一 turn 本身超过 200 条或 16 MiB，则整次 mutation 原子拒绝，不得删除其 user 锚点后保留 orphan assistant。
 
-### SPEC-CSP-API-010：原子写、分片隔离与降级
+### SPEC-CSP-API-010：原子写、跨文件恢复、分片隔离与降级
 
-- **SPEC-CSP-API-010a**：每个分片文件与 index.json 各自以「临时文件 + 原子 rename」写入（沿用 `TaskStore.save`）；写失败返回 HTTP 500 且对应磁盘原文件保持不变。
-- **SPEC-CSP-API-010b**：对某会话的写入**只触及该会话分片 + index.json**，不重写其它会话分片（分片隔离，SPEC-CSP-DEC-008）。
-- **SPEC-CSP-API-010c**：读取损坏/不可解析的分片或索引时不抛未捕获异常致进程级故障：记录 warning 并按既定降级处理（索引可由分片重建，SPEC-CSP-MODEL-005），不静默删除原文件。
+- **SPEC-CSP-API-010a**：分片、index 和 state 均使用唯一临时文件、flush、同目录 `ATOMIC_MOVE`；不支持原子 move 时 fail closed，不降级成普通覆盖。
+- **SPEC-CSP-API-010b**：对某会话的写入只触及**该会话分片 + index.json + index.state**，不重写其它会话分片（分片隔离，SPEC-CSP-DEC-008）。
+- **SPEC-CSP-API-010c**：缺失/损坏 index 或 v1 缺 state 时从 shards canonical rebuild；DIRTY 时按 CREATE/UPSERT/DELETE 和目标 shard 是否存在恢复 active。目录枚举 I/O 失败必须中止，不得写出部分/空 index；单个损坏 shard 仍 skip+warn、不删除。
+- **SPEC-CSP-API-010d**：DIRTY/state 写或 shard commit 前失败返回 500 且权威数据不变；shard/delete commit 后的 index/CLEAN 失败记录 warning、保留 DIRTY并返回成功，下一次访问幂等恢复。
+- **SPEC-CSP-API-010e**：只有物理缺失的 `index.state` 才按 v1 迁移。损坏、字段缺失、未知 operation、违反 CREATE/UPSERT/DELETE active 不变量的 intent 或未来 protocolVersion 均 fail closed，不得覆盖 index/state 恢复证据；目录存在但不是可访问目录、或 DELETE 目标的物理存在状态无法确定时同样失败，不得伪装为空会话库或误判 commit point。
 
 ### SPEC-CSP-API-011：会话摘要生成（异步、可降级）
 
@@ -263,7 +272,7 @@
 ## 8. 前端集成契约
 
 - **SPEC-CSP-FE-001**：`api.js` 新增对应 §7 各接口的方法（listSessions / getSession / createSession / updateSession / deleteSession / appendMessages / updateMessage / setActiveSession）。
-- **SPEC-CSP-FE-002**：`chat.js` 的 `loadChatSessions()` 改为异步调用 `GET /desktop/chat/sessions`，把**索引元信息**填入 `state.chatSessions`（条目此时 `messages` 为空/未加载）与 `state.activeChatSessionId`；初始化须确保索引加载完成后再渲染列表。
+- **SPEC-CSP-FE-002**：`chat.js` 初始化调用 `GET /desktop/chat/sessions?limit=50`，把首屏元信息和 cursor 放入 state；active 不在首屏时单独 GET 完整 session 并保留原 active，不得选择首行覆盖。
 - **SPEC-CSP-FE-003**：会话被激活/打开时，若其消息尚未加载，调用 `GET /desktop/chat/sessions/{id}` 拉取完整消息并缓存到该会话条目（懒加载正文）。
 - **SPEC-CSP-FE-004**：原同步 `saveChatSessions()`「整块写 localStorage」移除；改为各交互点调用细粒度接口：
   - 新建会话 → `POST /sessions`（`SPEC-CHAT-TAB-003`）。
@@ -272,7 +281,7 @@
   - 重命名 / 首条消息回填标题 / 绑定上下文 → `PUT /sessions/{id}`（`SPEC-CHAT-TAB-003`、`-007`）。
   - 发送：先 `POST /sessions/{id}/messages` 追加 `user` + pending `assistant` 并采用服务端返回的两个消息 ID；再以顶层 `sessionId + userMessageId` 调用 `POST /desktop/chat`；最后只更新原 `pendingId` 为 `sent`/`error`（`SPEC-CHAT-TAB-005`、`-011`）。
   - append 成功前不得清空 composer；失败时保留未持久化文本。append/update 后采用服务端 canonical Message，并重新读取 authoritative session，使本地缓存同时镜像 200 条与 16 MiB 的完整-turn tail。
-- **SPEC-CSP-FE-005**：会话搜索（`SPEC-CHAT-TAB-004`）改为对 `state.chatSessions` 的索引字段过滤——匹配 `title` + `lastMessagePreview` + `summary`（SPEC-CSP-DEC-009），不依赖已加载的消息正文。
+- **SPEC-CSP-FE-005**：搜索输入 200ms debounce 后调用服务端 `q` 分页，使用 search request id、mutation generation 与 list-load request id 忽略乱序/启动期旧响应。发送中或 mutation 后失效的启动加载会补发首屏，并以保留已加载正文对象的方式合并；补载失败保留 live cache 与可重试标记。搜索与 active 选择可并行接收普通首屏，但不得被其清空或改写。普通页与搜索页 cursor 分离，“加载更多”不得混入另一查询。
 - **SPEC-CSP-FE-006**：前端不再读取 `localStorage` key `selfAnalyst.chatSessions.v1`，并主动删除该旧 key（SPEC-CSP-DEC-004）。
 - **SPEC-CSP-FE-007**：写接口失败时按既有降级语义处理，不得因持久化失败丢弃用户已输入文本。`POST /desktop/chat` 的 409 按可重试错误处理，并把原 pending best-effort 更新为 error；不得把 409 body 渲染为成功 assistant。
 - **SPEC-CSP-FE-008**：`POST /desktop/chat` 增加顶层 `sessionId + userMessageId`；会话 tab 两者必传，且均使用本轮消息追加响应中的服务端 ID。旧抽屉同时省略二者时保持 legacy fallback（`desktop-chat-tab.md` §10.1）。
@@ -289,7 +298,7 @@
 - **SPEC-CSP-NON-001**：不改变 `会话` tab 的布局、视觉和键盘交互；业务上下文字段仍由 `desktop-chat-tab.md` 约束，但 history、ID、发送/重试顺序和 busy/delete 语义以本 spec 为准。
 - **SPEC-CSP-NON-002**：不迁移既有 `localStorage` 历史会话（SPEC-CSP-DEC-004）。
 - **SPEC-CSP-NON-003**：不实现云同步、跨设备同步、多端实时协同或账号体系。
-- **SPEC-CSP-NON-004**：不提供消息级删除、会话归档；不建立倒排/全文检索索引——搜索为前端对会话**摘要**的本地过滤（SPEC-CSP-DEC-009），非逐字全文。
+- **SPEC-CSP-NON-004**：不提供消息级删除、会话归档；不建立倒排/全文检索索引——搜索由后端对完整会话**元数据投影**过滤并分页（SPEC-CSP-DEC-009），非逐字全文。
 - **SPEC-CSP-NON-005**：除 `POST /desktop/chat` 的向后兼容 `sessionId + userMessageId` 扩展外，不改变 `/desktop/tasks`、`/desktop/config*` 等既有接口契约。
 - **SPEC-CSP-NON-006**：不引入流式输出（与 `desktop-chat-tab.md` 一致）。
 - **SPEC-CSP-NON-007**：摘要不保证逐字精确或实时一致；允许滞后于最新消息、允许在无 LLM/预算时为确定性兜底（SPEC-CSP-API-011）。
@@ -334,6 +343,15 @@
 | SPEC-CSP-TST-032 | mutation body 超 256 KiB、深度超 32、错误 shape/空 batch/null message | 返回 413/400，原 shard 字节不变 |
 | SPEC-CSP-TST-033 | sent assistant 收到晚到 error 更新，或尝试更新 user | 返回/抛出非法 lifecycle，已完成结果字节不变 |
 | SPEC-CSP-TST-034 | append 失败、lazy GET 失败、服务端 canonical 截断 | composer 文本不丢；GET 可重试；前端缓存采用服务端消息并镜像完整-turn retention |
+| SPEC-CSP-TST-035 | v1 stale/orphan/ghost/duplicate meta 首次访问 | 从权威 shards 重建唯一 canonical index，保留仍可解析的 active，写 CLEAN |
+| SPEC-CSP-TST-036 | shard move 前失败 | 返回失败、shard/index 原字节不变；重启清理 DIRTY 并保留旧状态 |
+| SPEC-CSP-TST-037 | shard/delete commit 后 index 或 CLEAN 失败 | 调用返回成功、DIRTY 保留；重启修复 meta/active，append 不因普通 500 重复 |
+| SPEC-CSP-TST-038 | 相同 updatedAt 的会话跨 cursor 分页 | 按 `(updatedAt,id)` 稳定排序，无重复/遗漏；q 可命中首屏之外摘要 |
+| SPEC-CSP-TST-039 | active 不在首屏、搜索响应乱序 | 前端单独加载 active 且不改写指针；旧搜索响应不覆盖新结果 |
+| SPEC-CSP-TST-040 | 损坏/未来/不完整 index.state，目录 scan 失败 | fail closed；index/state 原字节不变，下一次有效恢复仍可执行 |
+| SPEC-CSP-TST-041 | 页间元数据并发变化、blank cursor/limit | generation 不匹配及空参数返回 400；前端自动重载首屏，不永久卡住 |
+| SPEC-CSP-TST-042 | DIRTY 语义损坏、DELETE 目标状态不确定 | fail closed，保留 DIRTY/index 原字节；恢复条件明确后可幂等完成 |
+| SPEC-CSP-TST-043 | 搜索/续页请求期间 mutation、换查询或发送 | 旧响应与旧 400 不覆盖新查询/会话缓存；搜索自动重启，恢复期间续页锁不提前释放 |
 
 ---
 
@@ -342,7 +360,7 @@
 | 规格 ID | 对应文件/组件 | 验证方式 |
 |---------|--------------|---------|
 | SPEC-CSP-DEC-001 | 本 spec（取代说明）、`desktop-chat-tab.md` | 代码审查 |
-| SPEC-CSP-DEC-002..014 | 本 spec（设计决策） | 代码审查 |
+| SPEC-CSP-DEC-002..016 | 本 spec（设计决策） | 代码审查 |
 | SPEC-CSP-GOAL-001..008 | 全特性 | 验收测试 |
 | SPEC-CSP-MODEL-001..005 | `ChatSessionStore.java`（模型、id 安全、索引重建） | 单元测试 |
 | SPEC-CSP-API-001..002 | `DesktopChatSessionController.java`、`DesktopServer.java`、`ChatSessionStore.java` | 单元测试 |

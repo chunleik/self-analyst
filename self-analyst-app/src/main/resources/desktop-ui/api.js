@@ -114,8 +114,13 @@ var api = {
     }).then(function (r) { return chatJsonResponse(r, "Chat failed"); });
   },
   // ---- Chat sessions (SPEC-CSP-FE-001) ----
-  listSessions: function () {
-    return fetch(API_BASE + "/desktop/chat/sessions").then(function (r) {
+  listSessions: function (options) {
+    var params = new URLSearchParams();
+    if (options && options.limit != null) params.set("limit", options.limit);
+    if (options && options.cursor) params.set("cursor", options.cursor);
+    if (options && options.q) params.set("q", options.q);
+    var query = params.toString();
+    return fetch(API_BASE + "/desktop/chat/sessions" + (query ? "?" + query : "")).then(function (r) {
       return chatJsonResponse(r, "List sessions failed");
     });
   },

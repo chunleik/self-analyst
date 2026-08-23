@@ -32,6 +32,7 @@ function Assert-NotContains {
 $apiJs = Join-Path $AppUi "api.js"
 $chatJs = Join-Path $AppUi "chat.js"
 $initJs = Join-Path $AppUi "init.js"
+$storeJava = Join-Path $Root "self-analyst-app\src\main\java\com\selfanalyst\desktop\store\ChatSessionStore.java"
 
 # api.js: 8 session/message REST client methods (SPEC-CSP-FE-001)
 Assert-Contains $apiJs 'listSessions\s*:'    "api.js missing listSessions (SPEC-CSP-FE-001)"
@@ -48,9 +49,17 @@ Assert-Contains $chatJs 'api\.listSessions'  "chat.js must load the session inde
 Assert-Contains $chatJs 'api\.appendMessages' "chat.js must persist messages via api.appendMessages (SPEC-CSP-FE-004)"
 Assert-NotContains $chatJs 'localStorage\.setItem\(CHAT_STORAGE_KEY' "chat.js must not write sessions to localStorage (SPEC-CSP-DEC-002)"
 
-# chat.js: search matches index fields, not message bodies (SPEC-CSP-FE-005)
-Assert-Contains $chatJs 'lastMessagePreview' "chat.js search must reference lastMessagePreview (SPEC-CSP-FE-005)"
-Assert-Contains $chatJs 's\.summary'         "chat.js search must reference summary (SPEC-CSP-FE-005)"
+# Paged search runs against the full server index and ignores stale async responses.
+Assert-Contains $apiJs 'params\.set\("q"' "api.js must send the server-side chat search query (SPEC-CSP-FE-005)"
+Assert-Contains $chatJs 'scheduleChatSessionSearch' "chat.js missing debounced server search (SPEC-CSP-FE-005)"
+Assert-Contains $chatJs 'chatSessionSearchRequestId' "chat.js must reject stale search responses (SPEC-CSP-FE-005)"
+Assert-Contains $chatJs 'chatSessionLoadRequestId' "chat.js must reject stale startup/list responses (SPEC-CSP-FE-005)"
+Assert-Contains $storeJava 'matchesQuery' "ChatSessionStore missing metadata search (SPEC-CSP-FE-005)"
+Assert-Contains $storeJava 'lastMessagePreview' "server search/index must retain lastMessagePreview (SPEC-CSP-FE-005)"
+Assert-Contains $storeJava 'meta\.summary' "server search must include summary (SPEC-CSP-FE-005)"
+Assert-Contains $storeJava 'index\.state' "ChatSessionStore missing recovery state (SPEC-CSP-API-010)"
+Assert-Contains $storeJava 'listIndexPage' "ChatSessionStore missing cursor pagination (SPEC-CSP-API-001)"
+Assert-Contains $chatJs 'loadMoreChatSessions' "chat.js missing paged load-more flow (SPEC-CSP-FE-002)"
 
 # init.js: legacy key removed and never read (SPEC-CSP-FE-006)
 Assert-Contains $initJs 'localStorage\.removeItem\(CHAT_STORAGE_KEY' "init.js must remove the legacy localStorage key (SPEC-CSP-FE-006)"

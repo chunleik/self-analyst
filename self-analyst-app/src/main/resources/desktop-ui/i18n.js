@@ -124,6 +124,9 @@ var MESSAGES = {
   "chat.searchPlaceholder": { zh: "搜索会话...", en: "Search chats..." },
   "chat.emptyHint": { zh: '暂无会话，点击"+ 新建"开始', en: 'No chats yet — click "+ New" to start' },
   "chat.noMatch": { zh: "没有匹配的会话", en: "No matching chats" },
+  "chat.searching": { zh: "正在搜索会话...", en: "Searching chats..." },
+  "chat.loadMore": { zh: "加载更多", en: "Load more" },
+  "chat.loadMoreFailed": { zh: "加载更多会话失败: {msg}", en: "Failed to load more chats: {msg}" },
   "chat.selectOrCreate": { zh: "选择或创建会话", en: "Select or create a chat" },
   "chat.selectOrCreateThread": { zh: "选择或创建一个会话", en: "Select or create a chat" },
   "chat.selectFromListHint": {

@@ -81,7 +81,25 @@ public class DesktopChatSessionController {
     /** GET /desktop/chat/sessions (SPEC-CSP-API-001; rebuild-on-corrupt via store, SPEC-CSP-API-010c). */
     public void listSessions(Context ctx) {
         try {
-            ctx.json(store.listIndex());
+            String limitValue = ctx.queryParam("limit");
+            String cursor = ctx.queryParam("cursor");
+            String query = ctx.queryParam("q");
+            if (limitValue == null && cursor == null && query == null) {
+                ChatSessionStore.Index index = store.listIndex();
+                Map<String, Object> legacy = new java.util.LinkedHashMap<>();
+                legacy.put("activeSessionId", index.activeSessionId);
+                legacy.put("sessions", index.sessions);
+                ctx.json(legacy);
+                return;
+            }
+            if (limitValue != null && limitValue.isBlank()) {
+                throw new IllegalArgumentException("limit must not be blank");
+            }
+            int limit = limitValue == null ? 50 : Integer.parseInt(limitValue);
+            ctx.json(store.listIndexPage(limit, cursor, query));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error",
+                    e.getMessage() == null ? "Invalid chat index query" : e.getMessage()));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to list sessions: " + e.getMessage()));
         }

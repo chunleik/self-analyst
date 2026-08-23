@@ -82,6 +82,46 @@ class DesktopMemoryControllerTest {
     }
 
     @Test
+    void chatControllerSupportsOptionalPagedIndexAndRejectsBadLimit() {
+        ChatSessionStore store = new ChatSessionStore(tempDir);
+        store.create(req("one"));
+        store.create(req("two"));
+        store.create(req("three"));
+        DesktopChatSessionController controller = new DesktopChatSessionController(
+                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), null);
+        FakeContext legacy = FakeContext.empty();
+        controller.listSessions(legacy.ctx());
+        assertEquals(200, legacy.status);
+        assertEquals(java.util.Set.of("activeSessionId", "sessions"),
+                ((Map<?, ?>) legacy.json).keySet());
+        FakeContext page = FakeContext.empty();
+        page.queryParams.put("limit", "2");
+
+        controller.listSessions(page.ctx());
+
+        assertEquals(200, page.status);
+        ChatSessionStore.IndexPage response = (ChatSessionStore.IndexPage) page.json;
+        assertEquals(2, response.sessions().size());
+        assertTrue(response.hasMore());
+        assertNotNull(response.nextCursor());
+
+        FakeContext invalid = FakeContext.empty();
+        invalid.queryParams.put("limit", "0");
+        controller.listSessions(invalid.ctx());
+        assertEquals(400, invalid.status);
+
+        FakeContext blankLimit = FakeContext.empty();
+        blankLimit.queryParams.put("limit", " ");
+        controller.listSessions(blankLimit.ctx());
+        assertEquals(400, blankLimit.status);
+
+        FakeContext blankCursor = FakeContext.empty();
+        blankCursor.queryParams.put("cursor", "");
+        controller.listSessions(blankCursor.ctx());
+        assertEquals(400, blankCursor.status);
+    }
+
+    @Test
     void chatControllerRejectsOversizedMalformedAndEmptyMessageBodies() throws Exception {
         ChatSessionStore store = new ChatSessionStore(tempDir);
         DesktopChatSessionController controller = new DesktopChatSessionController(

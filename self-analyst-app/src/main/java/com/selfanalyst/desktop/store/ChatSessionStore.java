@@ -11,19 +11,20 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,13 +76,32 @@ public class ChatSessionStore {
     /** Server-generated IDs are the only valid shard names. */
     private static final Pattern GENERATED_SESSION_ID = Pattern.compile("^[a-f0-9]{32}$");
     private static final Pattern GENERATED_MESSAGE_ID = Pattern.compile("^[a-f0-9]{12}$");
+    private static final Pattern STORE_TEMP_FILE = Pattern.compile(
+            "^\\.(?:index\\.json|index\\.state|[a-f0-9]{32}\\.json)\\..+\\.chat-tmp$");
+    private static final int RECOVERY_PROTOCOL_VERSION = 1;
+    private static final String TEMP_SUFFIX = ".chat-tmp";
+    private static final Comparator<SessionMeta> META_ORDER = Comparator
+            .comparing((SessionMeta meta) -> meta.updatedAt != null
+                    ? meta.updatedAt : Instant.EPOCH)
+            .reversed()
+            .thenComparing(meta -> meta.id != null ? meta.id : "", Comparator.reverseOrder());
 
     private final Path dir;
     private final Path indexFile;
+    private final Path stateFile;
+    private final ChatSessionStoreIo io;
+    private boolean recovered;
+    private boolean recovering;
 
     public ChatSessionStore(Path memoryDir) {
+        this(memoryDir, ChatSessionStoreIo.nio());
+    }
+
+    ChatSessionStore(Path memoryDir, ChatSessionStoreIo io) {
         this.dir = memoryDir.resolve("chat-sessions").toAbsolutePath().normalize();
         this.indexFile = dir.resolve("index.json");
+        this.stateFile = dir.resolve("index.state");
+        this.io = java.util.Objects.requireNonNull(io, "io");
     }
 
     // ── Atomic persistence ───────────────────────────────────────
@@ -93,13 +113,24 @@ public class ChatSessionStore {
      * thrown so the controller maps it to HTTP 500.
      */
     private void writeJson(Path target, Object value) {
+        Path tmp = null;
         try {
-            Files.createDirectories(dir);
-            Path tmp = dir.resolve(target.getFileName() + ".tmp");
-            MAPPER.writeValue(tmp.toFile(), value);
-            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            io.createDirectories(dir);
+            tmp = io.createTempFile(dir, "." + target.getFileName() + ".", TEMP_SUFFIX);
+            io.writeJson(MAPPER, tmp, value);
+            io.atomicReplace(tmp, target);
+            tmp = null;
         } catch (IOException e) {
             throw new RuntimeException("Failed to write " + target.getFileName(), e);
+        } finally {
+            if (tmp != null) {
+                try {
+                    io.deleteIfExists(tmp);
+                } catch (IOException cleanupFailure) {
+                    log.debug("Failed to clean chat temp {}: {}", tmp.getFileName(),
+                            cleanupFailure.getMessage());
+                }
+            }
         }
     }
 
@@ -138,6 +169,7 @@ public class ChatSessionStore {
      * (SPEC-CSP-MODEL-005, SPEC-CSP-API-010c)
      */
     private Index loadIndex() {
+        ensureRecovered();
         if (!Files.exists(indexFile)) {
             return Files.isDirectory(dir) ? rebuildIndex() : new Index();
         }
@@ -153,7 +185,7 @@ public class ChatSessionStore {
             }
             normalizeIndexMemoryPolicy(idx);
             return idx;
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             log.warn("chat-sessions index.json unreadable ({}), rebuilding from shards", e.getMessage());
             return rebuildIndex();
         }
@@ -166,51 +198,224 @@ public class ChatSessionStore {
      * resolvable, else null. The rebuilt index is persisted and returned.
      */
     private Index rebuildIndex() {
-        Index rebuilt = new Index();
-        if (!Files.isDirectory(dir)) {
-            return rebuilt;
+        Index raw = readRawIndex();
+        Index rebuilt = scanCanonicalIndex();
+        rebuilt.generation = raw != null ? raw.generation : 0;
+        applyActiveHint(rebuilt, raw != null ? raw.activeSessionId : null);
+        writeIndex(rebuilt);
+        return rebuilt;
+    }
+
+    private void ensureRecovered() {
+        if (recovering) return;
+        if (recovered) return;
+        if (Files.notExists(dir)) {
+            recovered = true;
+            return;
         }
-        // Preserve the previous activeSessionId if the (possibly corrupt) index still parses.
-        String prevActive = null;
-        if (Files.exists(indexFile)) {
-            try {
-                Index old = MAPPER.readValue(indexFile.toFile(), Index.class);
-                if (old != null && isGeneratedSessionId(old.activeSessionId)) {
-                    prevActive = old.activeSessionId;
+        if (!Files.isDirectory(dir)) {
+            throw new IllegalStateException(
+                    "chat-sessions path exists but is not an accessible directory: " + dir);
+        }
+        RecoveryStateRead stateRead = readRecoveryState();
+        if (stateRead.kind == RecoveryStateKind.INVALID) {
+            throw new IllegalStateException(
+                    "chat-sessions index.state is invalid; refusing to overwrite recovery evidence",
+                    stateRead.error);
+        }
+        RecoveryState state = stateRead.state;
+        if (state != null && RecoveryStatus.CLEAN.name().equals(state.state)) {
+            if (!recovered) cleanupTempFiles();
+            recovered = true;
+            return;
+        }
+        recovering = true;
+        recovered = false;
+        try {
+            cleanupTempFiles();
+            Index raw = readRawIndex();
+            Index canonical = scanCanonicalIndex();
+            canonical.generation = raw != null ? raw.generation : 0;
+            String activeHint = raw != null ? raw.activeSessionId : null;
+            if (state != null && RecoveryStatus.DIRTY.name().equals(state.state)) {
+                MutationOperation operation = parseOperation(state.operation);
+                boolean targetIsCanonical = resolves(canonical.sessions, state.sessionId);
+                ChatSessionStoreIo.PathStatus targetStatus;
+                try {
+                    targetStatus = io.status(shardFile(state.sessionId));
+                } catch (IOException error) {
+                    throw new IllegalStateException(
+                            "Cannot determine recovery target status", error);
                 }
-            } catch (IOException ignored) {
-                // corrupt index → no pointer to preserve
+                activeHint = switch (operation) {
+                    case CREATE -> targetIsCanonical ? state.activeAfter : state.activeBefore;
+                    case DELETE -> targetStatus == ChatSessionStoreIo.PathStatus.MISSING
+                            ? state.activeAfter : state.activeBefore;
+                    case UPSERT -> state.activeBefore;
+                };
+            }
+            applyActiveHint(canonical, activeHint);
+            writeIndex(canonical);
+            writeRecoveryState(RecoveryState.clean());
+            cleanupTempFiles();
+            recovered = true;
+        } finally {
+            recovering = false;
+        }
+    }
+
+    private RecoveryStateRead readRecoveryState() {
+        if (Files.notExists(stateFile)) return RecoveryStateRead.missing();
+        try {
+            RecoveryState state = MAPPER.readValue(stateFile.toFile(), RecoveryState.class);
+            validateRecoveryState(state);
+            return RecoveryStateRead.valid(state);
+        } catch (IOException | RuntimeException error) {
+            return RecoveryStateRead.invalid(error);
+        }
+    }
+
+    private static void validateRecoveryState(RecoveryState state) {
+        if (state == null) throw new IllegalArgumentException("index.state is empty");
+        if (state.protocolVersion != RECOVERY_PROTOCOL_VERSION) {
+            throw new IllegalArgumentException(
+                    "Unsupported recovery protocol version: " + state.protocolVersion);
+        }
+        if (RecoveryStatus.CLEAN.name().equals(state.state)) return;
+        if (!RecoveryStatus.DIRTY.name().equals(state.state)) {
+            throw new IllegalArgumentException("Invalid recovery state: " + state.state);
+        }
+        MutationOperation operation = MutationOperation.valueOf(state.operation);
+        if (!isGeneratedSessionId(state.sessionId)) {
+            throw new IllegalArgumentException("Invalid recovery session id");
+        }
+        if (state.activeBefore != null && !isGeneratedSessionId(state.activeBefore)) {
+            throw new IllegalArgumentException("Invalid recovery activeBefore");
+        }
+        if (state.activeAfter != null && !isGeneratedSessionId(state.activeAfter)) {
+            throw new IllegalArgumentException("Invalid recovery activeAfter");
+        }
+        switch (operation) {
+            case CREATE -> {
+                if (!state.sessionId.equals(state.activeAfter)
+                        || state.sessionId.equals(state.activeBefore)) {
+                    throw new IllegalArgumentException("Invalid CREATE recovery intent");
+                }
+            }
+            case UPSERT -> {
+                if (!java.util.Objects.equals(state.activeBefore, state.activeAfter)) {
+                    throw new IllegalArgumentException("Invalid UPSERT recovery intent");
+                }
+            }
+            case DELETE -> {
+                boolean deletingActive = state.sessionId.equals(state.activeBefore);
+                if (deletingActive) {
+                    if (state.sessionId.equals(state.activeAfter)) {
+                        throw new IllegalArgumentException("Invalid active DELETE recovery intent");
+                    }
+                } else if (!java.util.Objects.equals(state.activeBefore, state.activeAfter)) {
+                    throw new IllegalArgumentException("Invalid inactive DELETE recovery intent");
+                }
             }
         }
-        try (Stream<Path> files = Files.list(dir)) {
-            files.filter(p -> {
-                        String n = p.getFileName().toString();
-                        return n.endsWith(".json") && !n.equals("index.json");
-                    })
-                    .forEach(p -> {
+    }
+
+    private void writeRecoveryState(RecoveryState state) {
+        writeJson(stateFile, state);
+    }
+
+    private Index readRawIndex() {
+        if (!Files.exists(indexFile)) return null;
+        try {
+            Index index = MAPPER.readValue(indexFile.toFile(), Index.class);
+            if (index != null && index.sessions == null) index.sessions = new ArrayList<>();
+            return index;
+        } catch (IOException | RuntimeException error) {
+            return null;
+        }
+    }
+
+    private Index scanCanonicalIndex() {
+        Index rebuilt = new Index();
+        if (Files.notExists(dir)) return rebuilt;
+        if (!Files.isDirectory(dir)) {
+            throw new IllegalStateException(
+                    "chat-sessions path is not an accessible directory: " + dir);
+        }
+
+        List<Path> shards;
+        try {
+            shards = io.list(dir).stream()
+                    .filter(ChatSessionStore::isShardPath).sorted().toList();
+        } catch (IOException error) {
+            throw new RuntimeException("Failed to scan chat-sessions directory", error);
+        }
+        for (Path shard : shards) {
+            try {
+                Session session = MAPPER.readValue(shard.toFile(), Session.class);
+                String fileName = shard.getFileName().toString();
+                String fileId = fileName.substring(0, fileName.length() - 5);
+                if (session != null && fileId.equals(session.id)) {
+                    normalizeSessionForRead(session);
+                    rebuilt.sessions.add(toMeta(session));
+                } else {
+                    log.warn("Skipping chat shard with mismatched/invalid id: {}",
+                            shard.getFileName());
+                }
+            } catch (IOException | RuntimeException error) {
+                log.warn("Skipping unreadable chat shard {}: {}",
+                        shard.getFileName(), error.getMessage());
+            }
+        }
+        rebuilt.sessions.sort(META_ORDER);
+        return rebuilt;
+    }
+
+    private static boolean isShardPath(Path path) {
+        String name = path.getFileName().toString();
+        return name.length() == 37 && name.endsWith(".json")
+                && isGeneratedSessionId(name.substring(0, 32));
+    }
+
+    private static void applyActiveHint(Index index, String activeHint) {
+        index.activeSessionId = isGeneratedSessionId(activeHint)
+                && resolves(index.sessions, activeHint) ? activeHint : null;
+    }
+
+    private void writeIndex(Index index) {
+        writeIndex(index, true);
+    }
+
+    private void writeIndex(Index index, boolean metadataChanged) {
+        if (index.sessions == null) index.sessions = new ArrayList<>();
+        index.sessions.sort(META_ORDER);
+        if (metadataChanged) {
+            index.generation = index.generation == Long.MAX_VALUE ? 1 : index.generation + 1;
+        }
+        writeJson(indexFile, index);
+    }
+
+    private void cleanupTempFiles() {
+        if (!Files.isDirectory(dir)) return;
+        try {
+            io.list(dir).stream()
+                    .filter(path -> STORE_TEMP_FILE.matcher(
+                            path.getFileName().toString()).matches())
+                    .forEach(path -> {
                         try {
-                            Session s = MAPPER.readValue(p.toFile(), Session.class);
-                            String fileName = p.getFileName().toString();
-                            String fileId = fileName.substring(0, fileName.length() - 5);
-                            if (s != null && isGeneratedSessionId(s.id) && s.id.equals(fileId)) {
-                                normalizeSessionForRead(s);
-                                rebuilt.sessions.add(toMeta(s));
-                            } else {
-                                log.warn("Skipping chat shard with mismatched/invalid id: {}",
-                                        p.getFileName());
-                            }
-                        } catch (IOException | RuntimeException e) {
-                            log.warn("Skipping unreadable chat shard {}: {}", p.getFileName(), e.getMessage());
+                            io.deleteIfExists(path);
+                        } catch (IOException error) {
+                            log.debug("Failed to clean chat temp {}: {}", path.getFileName(),
+                                    error.getMessage());
                         }
                     });
-        } catch (IOException e) {
-            log.warn("Failed to scan chat-sessions dir: {}", e.getMessage());
+        } catch (IOException error) {
+            log.debug("Failed to scan chat temp files: {}", error.getMessage());
         }
-        if (prevActive != null && resolves(rebuilt.sessions, prevActive)) {
-            rebuilt.activeSessionId = prevActive;
-        }
-        writeJson(indexFile, rebuilt);
-        return rebuilt;
+    }
+
+    private static MutationOperation parseOperation(String value) {
+        return MutationOperation.valueOf(value);
     }
 
     private static boolean resolves(List<SessionMeta> metas, String id) {
@@ -247,13 +452,98 @@ public class ChatSessionStore {
     /** Index with {@code sessions} sorted by {@code updatedAt} descending (SPEC-CSP-API-001). */
     public synchronized Index listIndex() {
         Index idx = loadIndex();
-        idx.sessions.sort(Comparator.comparing(
-                (SessionMeta m) -> m.updatedAt != null ? m.updatedAt : Instant.EPOCH).reversed());
+        idx.sessions.sort(META_ORDER);
         return idx;
+    }
+
+    /** Optional cursor-paged metadata view; the legacy no-parameter list remains unchanged. */
+    public synchronized IndexPage listIndexPage(int limit, String cursor, String query) {
+        if (limit < 1 || limit > 200) {
+            throw new IllegalArgumentException("limit must be between 1 and 200");
+        }
+        String normalizedQuery = query == null ? "" : query.strip().toLowerCase(Locale.ROOT);
+        if (normalizedQuery.length() > 200) {
+            throw new IllegalArgumentException("q must be at most 200 characters");
+        }
+        Index index = listIndex();
+        List<SessionMeta> filtered = index.sessions.stream()
+                .filter(meta -> matchesQuery(meta, normalizedQuery))
+                .toList();
+        int start = 0;
+        if (cursor != null) {
+            PageCursor decoded = decodeCursor(cursor);
+            if (!normalizedQuery.equals(decoded.query)) {
+                throw new IllegalArgumentException("Cursor does not belong to this query");
+            }
+            if (decoded.generation.longValue() != index.generation) {
+                throw new IllegalArgumentException("Cursor is stale; reload the first page");
+            }
+            start = findCursorPosition(filtered, decoded) + 1;
+        }
+        int end = Math.min(filtered.size(), start + limit);
+        List<SessionMeta> page = new ArrayList<>(filtered.subList(start, end));
+        boolean hasMore = end < filtered.size();
+        String nextCursor = hasMore && !page.isEmpty()
+                ? encodeCursor(page.getLast(), normalizedQuery, index.generation) : null;
+        return new IndexPage(index.activeSessionId, page, nextCursor, hasMore);
+    }
+
+    private static boolean matchesQuery(SessionMeta meta, String query) {
+        if (query.isEmpty()) return true;
+        return containsIgnoreCase(meta.title, query)
+                || containsIgnoreCase(meta.lastMessagePreview, query)
+                || containsIgnoreCase(meta.summary, query);
+    }
+
+    private static boolean containsIgnoreCase(String value, String normalizedQuery) {
+        return value != null && value.toLowerCase(Locale.ROOT).contains(normalizedQuery);
+    }
+
+    private static int findCursorPosition(List<SessionMeta> metas, PageCursor cursor) {
+        for (int i = 0; i < metas.size(); i++) {
+            SessionMeta meta = metas.get(i);
+            String updatedAt = meta.updatedAt != null ? meta.updatedAt.toString() : "";
+            if (java.util.Objects.equals(meta.id, cursor.id)
+                    && updatedAt.equals(cursor.updatedAt)) {
+                return i;
+            }
+        }
+        throw new IllegalArgumentException("Cursor is stale or invalid");
+    }
+
+    private static String encodeCursor(SessionMeta meta, String query, long generation) {
+        PageCursor cursor = new PageCursor();
+        cursor.id = meta.id;
+        cursor.updatedAt = meta.updatedAt != null ? meta.updatedAt.toString() : "";
+        cursor.query = query;
+        cursor.generation = generation;
+        try {
+            return Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(MAPPER.writeValueAsBytes(cursor));
+        } catch (IOException error) {
+            throw new IllegalStateException("Failed to encode chat cursor", error);
+        }
+    }
+
+    private static PageCursor decodeCursor(String cursor) {
+        if (cursor.length() > 2048) throw new IllegalArgumentException("Cursor is too long");
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(cursor.getBytes(StandardCharsets.US_ASCII));
+            PageCursor parsed = MAPPER.readValue(decoded, PageCursor.class);
+            if (parsed == null || !isGeneratedSessionId(parsed.id)
+                    || parsed.updatedAt == null || parsed.query == null
+                    || parsed.generation == null || parsed.generation < 0) {
+                throw new IllegalArgumentException("Invalid chat cursor");
+            }
+            return parsed;
+        } catch (IOException | IllegalArgumentException error) {
+            throw new IllegalArgumentException("Invalid chat cursor", error);
+        }
     }
 
     /** Read a session shard, or {@code null} if absent (SPEC-CSP-API-002). */
     public synchronized Session getSession(String id) {
+        ensureRecovered();
         if (id == null) return null;
         Path shard = shardFile(id);
         if (!Files.exists(shard)) return null;
@@ -268,6 +558,56 @@ public class ChatSessionStore {
         } catch (IOException | RuntimeException e) {
             log.warn("Failed to read chat shard {}: {}", id, e.getMessage());
             return null;
+        }
+    }
+
+    private void commitSessionMutation(
+            Session session, Index index, MutationOperation operation, boolean makeActive) {
+        normalizeSessionForWrite(session);
+        String activeBefore = index.activeSessionId;
+        upsertMeta(index, session);
+        if (makeActive) index.activeSessionId = session.id;
+        RecoveryState dirty = RecoveryState.dirty(
+                operation, session.id, activeBefore, index.activeSessionId);
+        writeRecoveryState(dirty);
+        recovered = false;
+        writeJson(shardFile(session.id), session);
+        finishCommittedProjection(index, dirty);
+    }
+
+    private void commitDeleteMutation(Path shard, String id, Index index, String activeBefore) {
+        RecoveryState dirty = RecoveryState.dirty(
+                MutationOperation.DELETE, id, activeBefore, index.activeSessionId);
+        writeRecoveryState(dirty);
+        recovered = false;
+        try {
+            io.deleteIfExists(shard);
+        } catch (IOException error) {
+            throw new RuntimeException("Failed to delete chat shard " + id, error);
+        }
+        finishCommittedProjection(index, dirty);
+    }
+
+    /**
+     * The authoritative shard operation has committed. Projection/state failures are therefore
+     * recoverable and must not be reported as an uncommitted mutation to callers.
+     */
+    private void finishCommittedProjection(Index index, RecoveryState dirty) {
+        try {
+            writeIndex(index);
+        } catch (RuntimeException indexFailure) {
+            log.warn("Chat mutation {} for session {} committed, but index refresh failed; "
+                            + "DIRTY recovery will run on the next access: {}",
+                    dirty.operation, dirty.sessionId, indexFailure.getMessage());
+            return;
+        }
+        try {
+            writeRecoveryState(RecoveryState.clean());
+            recovered = true;
+        } catch (RuntimeException cleanFailure) {
+            log.warn("Chat mutation {} for session {} committed, but CLEAN marker failed; "
+                            + "recovery will run on the next access: {}",
+                    dirty.operation, dirty.sessionId, cleanFailure.getMessage());
         }
     }
 
@@ -301,11 +641,8 @@ public class ChatSessionStore {
                 s.messages.add(stored);
             }
         }
-        writeSession(s);
         Index idx = loadIndex();
-        upsertMeta(idx, s);
-        idx.activeSessionId = s.id;
-        writeJson(indexFile, idx);
+        commitSessionMutation(s, idx, MutationOperation.CREATE, true);
         return s;
     }
 
@@ -321,10 +658,8 @@ public class ChatSessionStore {
         if (contextLabel != null) s.contextLabel = contextLabel;
         if (contextSnapshot != null) s.contextSnapshot = contextSnapshot;
         s.updatedAt = Instant.now();
-        writeSession(s);
         Index idx = loadIndex();
-        upsertMeta(idx, s);
-        writeJson(indexFile, idx);
+        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
         return s;
     }
 
@@ -333,10 +668,8 @@ public class ChatSessionStore {
         if (s == null) return null;
         s.memoryPolicy = normalizeMemoryPolicy(memoryPolicy);
         s.updatedAt = Instant.now();
-        writeSession(s);
         Index idx = loadIndex();
-        upsertMeta(idx, s);
-        writeJson(indexFile, idx);
+        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
         return s;
     }
 
@@ -347,15 +680,12 @@ public class ChatSessionStore {
      * (controller's 404 source).
      */
     public synchronized DeleteResult delete(String id) {
+        ensureRecovered();
         if (id == null) return null;
         Path shard = shardFile(id);
         if (!Files.exists(shard)) return null;
-        try {
-            Files.deleteIfExists(shard);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to delete chat shard " + id, e);
-        }
         Index idx = loadIndex();
+        String activeBefore = idx.activeSessionId;
         idx.sessions.removeIf(m -> id.equals(m.id));
         if (id.equals(idx.activeSessionId)) {
             idx.activeSessionId = idx.sessions.stream()
@@ -363,7 +693,7 @@ public class ChatSessionStore {
                     .map(m -> m.id)
                     .orElse(null);
         }
-        writeJson(indexFile, idx);
+        commitDeleteMutation(shard, id, idx, activeBefore);
         return new DeleteResult(true, id, idx.activeSessionId);
     }
 
@@ -386,14 +716,12 @@ public class ChatSessionStore {
             appended.add(stored);
         }
         s.updatedAt = Instant.now();
-        writeSession(s);
+        Index idx = loadIndex();
+        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
         java.util.Set<String> retainedIds = s.messages.stream()
                 .map(message -> message.id)
                 .collect(java.util.stream.Collectors.toSet());
         appended.removeIf(message -> !retainedIds.contains(message.id));
-        Index idx = loadIndex();
-        upsertMeta(idx, s);
-        writeJson(indexFile, idx);
         return appended;
     }
 
@@ -446,10 +774,8 @@ public class ChatSessionStore {
             target.suggestedTasks = new ArrayList<>(suggestedTasks);
         }
         s.updatedAt = Instant.now();
-        writeSession(s);
         Index idx = loadIndex();
-        upsertMeta(idx, s);
-        writeJson(indexFile, idx);
+        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
         return target;
     }
 
@@ -459,12 +785,13 @@ public class ChatSessionStore {
      * leaves the on-disk pointer unchanged. Returns the persisted pointer.
      */
     public synchronized String setActiveSession(String idOrNull) {
+        ensureRecovered();
         if (idOrNull != null && !Files.exists(shardFile(idOrNull))) {
             throw new IllegalArgumentException("Unknown session: " + idOrNull);
         }
         Index idx = loadIndex();
         idx.activeSessionId = idOrNull;
-        writeJson(indexFile, idx);
+        writeIndex(idx, false);
         return idx.activeSessionId;
     }
 
@@ -476,10 +803,8 @@ public class ChatSessionStore {
         Session s = getSession(id);
         if (s == null) return;
         s.summary = summary;
-        writeSession(s);
         Index idx = loadIndex();
-        upsertMeta(idx, s);
-        writeJson(indexFile, idx);
+        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
     }
 
     // ── Helpers ──────────────────────────────────────────────────
@@ -547,11 +872,6 @@ public class ChatSessionStore {
             }
             s.messages = new ArrayList<>(s.messages.subList(from, s.messages.size()));
         }
-    }
-
-    private void writeSession(Session s) {
-        normalizeSessionForWrite(s);
-        writeJson(shardFile(s.id), s);
     }
 
     private static void normalizeSessionForRead(Session s) {
@@ -844,6 +1164,82 @@ public class ChatSessionStore {
 
     // ── Models ───────────────────────────────────────────────────
 
+    private enum RecoveryStatus { CLEAN, DIRTY }
+
+    private enum MutationOperation { CREATE, UPSERT, DELETE }
+
+    private enum RecoveryStateKind { MISSING, VALID, INVALID }
+
+    private static final class RecoveryStateRead {
+        private final RecoveryStateKind kind;
+        private final RecoveryState state;
+        private final Throwable error;
+
+        private RecoveryStateRead(
+                RecoveryStateKind kind, RecoveryState state, Throwable error) {
+            this.kind = kind;
+            this.state = state;
+            this.error = error;
+        }
+
+        private static RecoveryStateRead missing() {
+            return new RecoveryStateRead(RecoveryStateKind.MISSING, null, null);
+        }
+
+        private static RecoveryStateRead valid(RecoveryState state) {
+            return new RecoveryStateRead(RecoveryStateKind.VALID, state, null);
+        }
+
+        private static RecoveryStateRead invalid(Throwable error) {
+            return new RecoveryStateRead(RecoveryStateKind.INVALID, null, error);
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class RecoveryState {
+        public int protocolVersion;
+        public String state;
+        public String operation;
+        public String sessionId;
+        public String activeBefore;
+        public String activeAfter;
+
+        public RecoveryState() {
+        }
+
+        private static RecoveryState clean() {
+            RecoveryState state = new RecoveryState();
+            state.protocolVersion = RECOVERY_PROTOCOL_VERSION;
+            state.state = RecoveryStatus.CLEAN.name();
+            return state;
+        }
+
+        private static RecoveryState dirty(
+                MutationOperation operation,
+                String sessionId,
+                String activeBefore,
+                String activeAfter) {
+            RecoveryState state = clean();
+            state.state = RecoveryStatus.DIRTY.name();
+            state.operation = operation.name();
+            state.sessionId = sessionId;
+            state.activeBefore = activeBefore;
+            state.activeAfter = activeAfter;
+            return state;
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class PageCursor {
+        public String id;
+        public String updatedAt;
+        public String query;
+        public Long generation;
+
+        public PageCursor() {
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Session {
         public String id;
@@ -903,6 +1299,15 @@ public class ChatSessionStore {
     public static class Index {
         public String activeSessionId;
         public List<SessionMeta> sessions = new ArrayList<>();
+        public long generation;
+    }
+
+    /** Cursor-paged index response; active remains global even when absent from this page. */
+    public record IndexPage(
+            String activeSessionId,
+            List<SessionMeta> sessions,
+            String nextCursor,
+            boolean hasMore) {
     }
 
     /** Create-session request body (SPEC-CSP-API-003). */

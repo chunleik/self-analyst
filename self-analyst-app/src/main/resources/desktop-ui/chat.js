@@ -8,28 +8,111 @@
 // session list below is an in-memory cache that drives rendering. Index meta
 // rows carry no `messages` — bodies are lazy-loaded on activation.
 
-function loadChatSessions() {
-  return api.listSessions().then(function (index) {
+function loadChatSessions(acceptResult, preserveCachedSessions) {
+  state.chatSessionLoadRequestId = (state.chatSessionLoadRequestId || 0) + 1;
+  var loadRequestId = state.chatSessionLoadRequestId;
+  state.chatSessionLatestLoadRequestId = loadRequestId;
+  var mutationGeneration = state.chatSessionMutationGeneration;
+  var activeSessionIdAtStart = state.activeChatSessionId;
+  var preservedLoadFailed = false;
+  function resultIsCurrent() {
+    return loadRequestId === state.chatSessionLoadRequestId
+      && mutationGeneration === state.chatSessionMutationGeneration
+      && !state.chatSending
+      && (!acceptResult || acceptResult());
+  }
+  function recoverStaleBaseLoad() {
+    if (acceptResult || state.chatSessionLatestLoadRequestId !== loadRequestId) return;
+    state.chatSessionListReloadNeeded = true;
+    if (!state.chatSending) return refreshChatSessionListIfNeeded();
+  }
+  return api.listSessions({ limit: 50 }).then(function (index) {
+    if (!resultIsCurrent()) return recoverStaleBaseLoad();
+    var activeChangedLocally = state.activeChatSessionId !== activeSessionIdAtStart;
     var rows = (index && index.sessions) || [];
-    state.chatSessions = rows.map(function (meta) {
-      meta.messages = [];
-      meta.messagesLoaded = false;
-      return meta;
-    });
-    state.activeChatSessionId = (index && index.activeSessionId) || null;
+    var cached = preserveCachedSessions ? (state.chatSessions || []).slice() : [];
+    var nextSessions = [];
+    for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      var meta = rows[rowIndex];
+      var existing = null;
+      for (var cachedIndex = 0; cachedIndex < cached.length; cachedIndex++) {
+        if (cached[cachedIndex].id === meta.id) {
+          existing = cached[cachedIndex];
+          cached.splice(cachedIndex, 1);
+          break;
+        }
+      }
+      if (existing) {
+        mergeSessionFields(existing, meta);
+        nextSessions.push(existing);
+      } else {
+        meta.messages = [];
+        meta.messagesLoaded = false;
+        nextSessions.push(meta);
+      }
+    }
+    if (preserveCachedSessions) nextSessions = nextSessions.concat(cached);
+    state.chatSessions = nextSessions;
+    state.activeChatSessionId = activeChangedLocally
+      ? state.activeChatSessionId : ((index && index.activeSessionId) || null);
+    state.chatSessionsNextCursor = (index && index.nextCursor) || null;
+    state.chatSessionsHasMore = !!(index && index.hasMore);
+    if (!(state.chatSessionSearch || "").trim()) {
+      state.chatSessionSearchResults = null;
+      state.chatSessionSearchCursor = null;
+      state.chatSessionSearchHasMore = false;
+    }
     state.chatSessionsLoaded = true;
     state.chatSessionsLoadError = null;
+    var activePresent = state.chatSessions.some(function (session) {
+      return session.id === state.activeChatSessionId;
+    });
+    if (state.activeChatSessionId && !activePresent) {
+      var requestedActiveId = state.activeChatSessionId;
+      return api.getSession(requestedActiveId).then(function (full) {
+        if (!resultIsCurrent() || state.activeChatSessionId !== requestedActiveId) return;
+        full.messages = full.messages || [];
+        full.messagesLoaded = true;
+        state.chatSessions.unshift(full);
+      }).catch(function (error) {
+        if (!resultIsCurrent() || state.activeChatSessionId !== requestedActiveId) return;
+        var alreadyCached = state.chatSessions.some(function (session) {
+          return session.id === requestedActiveId;
+        });
+        if (alreadyCached) return;
+        state.chatSessions.unshift({
+          id: requestedActiveId,
+          title: t("chat.loadSessionFailed", {
+            msg: error && error.message ? error.message : t("common.unknownError"),
+          }),
+          messages: [],
+          messagesLoaded: false,
+          messagesLoadError: error && error.message ? error.message : t("common.unknownError"),
+        });
+      });
+    }
     if (!state.activeChatSessionId && state.chatSessions.length > 0) {
       state.activeChatSessionId = state.chatSessions[0].id;
       if (api.setActiveSession) api.setActiveSession(state.activeChatSessionId).catch(function () {});
     }
   }).catch(function (err) {
+    if (!resultIsCurrent()) return recoverStaleBaseLoad();
+    if (preserveCachedSessions) {
+      preservedLoadFailed = true;
+      state.chatSessionListReloadNeeded = true;
+      state.chatSessionsLoadError = err && err.message
+        ? err.message : t("common.unknownError");
+      return;
+    }
     // Keep an empty list rather than breaking init (SPEC-CSP-FE-007).
     state.chatSessions = [];
     state.activeChatSessionId = null;
     state.chatSessionsLoaded = false;
     state.chatSessionsLoadError = err && err.message ? err.message : t("common.unknownError");
   }).then(function () {
+    if (!resultIsCurrent()) return recoverStaleBaseLoad();
+    if (preservedLoadFailed) return false;
+    state.chatSessionListReloadNeeded = false;
     return loadMemoryForChat();
   });
 }
@@ -47,6 +130,162 @@ function loadMemoryForChat() {
   }).then(function () {
     state.memoryLoading = false;
   });
+}
+
+function appendSessionMetaRows(target, rows) {
+  for (var i = 0; i < rows.length; i++) {
+    var meta = rows[i];
+    var existing = null;
+    for (var j = 0; j < target.length; j++) {
+      if (target[j].id === meta.id) { existing = target[j]; break; }
+    }
+    if (existing) {
+      mergeSessionFields(existing, meta);
+    } else {
+      meta.messages = [];
+      meta.messagesLoaded = false;
+      target.push(meta);
+    }
+  }
+}
+
+function invalidateChatSessionLoads() {
+  state.chatSessionLoadRequestId = (state.chatSessionLoadRequestId || 0) + 1;
+}
+
+function refreshChatSessionListIfNeeded() {
+  if (!state.chatSessionListReloadNeeded || state.chatSending) return Promise.resolve();
+  state.chatSessionListReloadNeeded = false;
+  return loadChatSessions(null, true).then(function (reloaded) {
+    if (reloaded === false) return false;
+    if (state.chatSessionListReloadNeeded && !state.chatSending) {
+      return refreshChatSessionListIfNeeded();
+    }
+    return true;
+  });
+}
+
+function noteChatSessionMutation() {
+  invalidateChatSessionLoads();
+  state.chatSessionMutationGeneration += 1;
+  var query = (state.chatSessionSearch || "").trim();
+  if (!query) return;
+  if (state.chatSessionSearchTimer) {
+    clearTimeout(state.chatSessionSearchTimer);
+    state.chatSessionSearchTimer = null;
+  }
+  state.chatSessionSearchRequestId += 1;
+  var requestId = state.chatSessionSearchRequestId;
+  state.chatSessionSearchLoading = true;
+  runChatSessionSearch(query, requestId, state.chatSessionMutationGeneration);
+}
+
+function chatSessionPageRequestIsCurrent(
+    searching, requestedQuery, searchRequestId, mutationGeneration) {
+  if (mutationGeneration !== state.chatSessionMutationGeneration
+      || searchRequestId !== state.chatSessionSearchRequestId) return false;
+  var currentQuery = (state.chatSessionSearch || "").trim();
+  return currentQuery === requestedQuery && (!!currentQuery) === searching;
+}
+
+function loadMoreChatSessions() {
+  var query = (state.chatSessionSearch || "").trim();
+  var requestedQuery = query;
+  var searching = !!query;
+  var searchRequestId = state.chatSessionSearchRequestId;
+  var mutationGeneration = state.chatSessionMutationGeneration;
+  var hasMore = searching ? state.chatSessionSearchHasMore : state.chatSessionsHasMore;
+  var cursor = searching ? state.chatSessionSearchCursor : state.chatSessionsNextCursor;
+  if (!hasMore || !cursor || state.chatSessionsLoadingMore) return Promise.resolve();
+  state.chatSessionsLoadingMore = true;
+  var request = api.listSessions({ limit: 50, cursor: cursor, q: query || null })
+    .then(function (page) {
+      if (!chatSessionPageRequestIsCurrent(
+          searching, requestedQuery, searchRequestId, mutationGeneration)) return;
+      var rows = (page && page.sessions) || [];
+      if (searching) {
+        if (!state.chatSessionSearchResults) state.chatSessionSearchResults = [];
+        appendSessionMetaRows(state.chatSessionSearchResults, rows);
+        state.chatSessionSearchCursor = (page && page.nextCursor) || null;
+        state.chatSessionSearchHasMore = !!(page && page.hasMore);
+      } else {
+        appendSessionMetaRows(state.chatSessions, rows);
+        state.chatSessionsNextCursor = (page && page.nextCursor) || null;
+        state.chatSessionsHasMore = !!(page && page.hasMore);
+      }
+    }, function (error) {
+      if (!chatSessionPageRequestIsCurrent(
+          searching, requestedQuery, searchRequestId, mutationGeneration)) return;
+      if (error && error.status === 400) {
+        if (searching) {
+          state.chatSessionSearchRequestId += 1;
+          var retryId = state.chatSessionSearchRequestId;
+          state.chatSessionSearchLoading = true;
+          return runChatSessionSearch(requestedQuery, retryId,
+            state.chatSessionMutationGeneration);
+        }
+        if (state.chatSending) return;
+        return loadChatSessions(function () {
+          return !state.chatSending && chatSessionPageRequestIsCurrent(
+            false, requestedQuery, searchRequestId, mutationGeneration);
+        }, true);
+      }
+      throw error;
+    });
+  return request.then(function (value) {
+    state.chatSessionsLoadingMore = false;
+    renderChatSessionList();
+    return value;
+  }, function (error) {
+    state.chatSessionsLoadingMore = false;
+    renderChatSessionList();
+    throw error;
+  });
+}
+
+function runChatSessionSearch(query, requestId, mutationGeneration) {
+  return api.listSessions({ limit: 50, q: query })
+    .then(function (page) {
+      if (requestId !== state.chatSessionSearchRequestId
+          || mutationGeneration !== state.chatSessionMutationGeneration
+          || (state.chatSessionSearch || "").trim() !== query) return;
+      state.chatSessionSearchResults = [];
+      appendSessionMetaRows(state.chatSessionSearchResults, (page && page.sessions) || []);
+      state.chatSessionSearchCursor = (page && page.nextCursor) || null;
+      state.chatSessionSearchHasMore = !!(page && page.hasMore);
+      state.chatSessionSearchLoading = false;
+      renderChatSessionList();
+    }).catch(function () {
+      if (requestId !== state.chatSessionSearchRequestId
+          || mutationGeneration !== state.chatSessionMutationGeneration
+          || (state.chatSessionSearch || "").trim() !== query) return;
+      state.chatSessionSearchResults = [];
+      state.chatSessionSearchCursor = null;
+      state.chatSessionSearchHasMore = false;
+      state.chatSessionSearchLoading = false;
+      renderChatSessionList();
+    });
+}
+
+function scheduleChatSessionSearch(query) {
+  state.chatSessionSearch = String(query || "").substring(0, 200).trim();
+  state.chatSessionSearchRequestId += 1;
+  var requestId = state.chatSessionSearchRequestId;
+  if (state.chatSessionSearchTimer) clearTimeout(state.chatSessionSearchTimer);
+  if (!state.chatSessionSearch.trim()) {
+    state.chatSessionSearchResults = null;
+    state.chatSessionSearchCursor = null;
+    state.chatSessionSearchHasMore = false;
+    state.chatSessionSearchLoading = false;
+    renderChatSessionList();
+    return;
+  }
+  state.chatSessionSearchLoading = true;
+  renderChatSessionList();
+  state.chatSessionSearchTimer = setTimeout(function () {
+    runChatSessionSearch(
+      state.chatSessionSearch, requestId, state.chatSessionMutationGeneration);
+  }, 200);
 }
 
 // Lazy-load a session's message bodies + summary (SPEC-CSP-FE-003).
@@ -87,14 +326,18 @@ function resortChatSessions() {
 // Replace the cached row's meta/fields from a server Session/meta response.
 function mergeSessionFields(session, fresh) {
   if (!session || !fresh) return;
+  if (fresh.createdAt != null) session.createdAt = fresh.createdAt;
   if (fresh.title != null) session.title = fresh.title;
   if (fresh.updatedAt != null) session.updatedAt = fresh.updatedAt;
+  if (fresh.source != null) session.source = fresh.source;
   if (fresh.summary != null) session.summary = fresh.summary;
   if (fresh.contextLabel != null) session.contextLabel = fresh.contextLabel;
   if (Object.prototype.hasOwnProperty.call(fresh, "contextSnapshot")) {
     session.contextSnapshot = fresh.contextSnapshot;
   }
   if (fresh.memoryPolicy != null) session.memoryPolicy = fresh.memoryPolicy;
+  if (fresh.lastMessagePreview != null) session.lastMessagePreview = fresh.lastMessagePreview;
+  if (fresh.messageCount != null) session.messageCount = fresh.messageCount;
 }
 
 function normalizeSuggestedTasks(tasks) {
@@ -185,6 +428,7 @@ function markAssistantPersistenceError(session, message, error) {
     content: message.content,
     error: message.error,
   }).then(function (updated) {
+    noteChatSessionMutation();
     mergeMessageFields(message, updated);
     return refreshCanonicalSession(session).catch(function (refreshError) {
       return freezeSessionForReconciliation(session, message, refreshError);
@@ -208,6 +452,7 @@ function reconcileAmbiguousAssistantUpdate(session, message, persistenceError) {
   return refreshCanonicalSession(session).then(function () {
     var canonical = findSessionMessage(session, message.id);
     if (canonical && canonical.status === "sent") {
+      noteChatSessionMutation();
       renderChatTab();
       return canonical;
     }
@@ -241,6 +486,13 @@ function getActiveChatSession() {
   for (var i = 0; i < state.chatSessions.length; i++) {
     if (state.chatSessions[i].id === state.activeChatSessionId) return state.chatSessions[i];
   }
+  var searchRows = state.chatSessionSearchResults || [];
+  for (var j = 0; j < searchRows.length; j++) {
+    if (searchRows[j].id === state.activeChatSessionId) {
+      state.chatSessions.push(searchRows[j]);
+      return searchRows[j];
+    }
+  }
   return null;
 }
 
@@ -268,6 +520,7 @@ function createChatSession(opts) {
     contextSnapshot: (opts && opts.contextSnapshot) || null,
     initialMessages: (opts && opts.initialMessages) || null,
   }).then(function (session) {
+    noteChatSessionMutation();
     session.messages = session.messages || [];
     session.messagesLoaded = true;
     state.chatSessions.unshift(session);
@@ -278,7 +531,13 @@ function createChatSession(opts) {
 
 function deleteChatSession(id) {
   return api.deleteSession(id).then(function (resp) {
+    noteChatSessionMutation();
     state.chatSessions = state.chatSessions.filter(function (s) { return s.id !== id; });
+    if (state.chatSessionSearchResults) {
+      state.chatSessionSearchResults = state.chatSessionSearchResults.filter(function (s) {
+        return s.id !== id;
+      });
+    }
     state.activeChatSessionId = (resp && resp.activeSessionId) || null;
     return resp;
   });
@@ -557,15 +816,12 @@ function renderChatTab() {
 function renderChatSessionList() {
   var list = state.dom.chatSessionList;
   var search = state.chatSessionSearch || "";
-  // Search matches index fields only (title + preview + summary), not message
-  // bodies (SPEC-CSP-FE-005 / DEC-009).
-  var filtered = state.chatSessions.filter(function (s) {
-    if (!search) return true;
-    var q = search.toLowerCase();
-    return (s.title && s.title.toLowerCase().indexOf(q) >= 0) ||
-           (s.lastMessagePreview && s.lastMessagePreview.toLowerCase().indexOf(q) >= 0) ||
-           (s.summary && s.summary.toLowerCase().indexOf(q) >= 0);
-  });
+  if (search && state.chatSessionSearchLoading) {
+    list.innerHTML = '<div class="chat-session-empty">' + escHtml(t("chat.searching")) + '</div>';
+    return;
+  }
+  // Paged search is performed against the full server index, not just loaded rows.
+  var filtered = search ? (state.chatSessionSearchResults || []) : state.chatSessions;
 
   if (filtered.length === 0) {
     list.innerHTML = '<div class="chat-session-empty">' + escHtml(search ? t("chat.noMatch") : t("chat.emptyHint")) + '</div>';
@@ -592,10 +848,23 @@ function renderChatSessionList() {
       '</button>' +
       '</div>';
   }
+  var hasMore = search ? state.chatSessionSearchHasMore : state.chatSessionsHasMore;
+  if (hasMore) {
+    html += '<button class="btn btn-secondary chat-load-more" data-action="load-more-sessions">' +
+      escHtml(state.chatSessionsLoadingMore ? t("common.loadingEllipsis") : t("chat.loadMore")) +
+      '</button>';
+  }
   list.innerHTML = html;
 
   // Click delegation: select session or delete
   list.onclick = function (e) {
+    var loadMore = e.target.closest("[data-action='load-more-sessions']");
+    if (loadMore) {
+      loadMoreChatSessions().catch(function (err) {
+        alert(t("chat.loadMoreFailed", { msg: err && err.message ? err.message : err }));
+      });
+      return;
+    }
     var deleteBtn = e.target.closest("[data-action='delete-session']");
     if (deleteBtn) {
       e.stopPropagation();
@@ -772,11 +1041,12 @@ function sendChatTabMessage() {
   var text = input.value.trim();
   if (!text) return;
 
+  invalidateChatSessionLoads();
   state.chatSending = true;
   renderChatTab();
 
   var inputPersisted = false;
-  ensureActiveChatSession().then(function (session) {
+  return ensureActiveChatSession().then(function (session) {
     return ensureSessionMessagesLoaded(session);
   }).then(function (session) {
     var context = buildChatContext(session);
@@ -789,6 +1059,7 @@ function sendChatTabMessage() {
         var savedUser = appended[0];
         var savedPending = appended[1];
         if (!savedUser || !savedPending) throw new Error("Invalid append response");
+        noteChatSessionMutation();
         input.value = "";
         inputPersisted = true;
         syncSessionMessageCache(session, [savedUser, savedPending]);
@@ -807,6 +1078,7 @@ function sendChatTabMessage() {
           renderChatTab();
           return api.updateMessage(session.id, savedPending.id,
             { status: "sent", content: content, suggestedTasks: tasks }).then(function (updated) {
+              noteChatSessionMutation();
               mergeMessageFields(savedPending, updated);
               syncSessionMessageCache(session, []);
               renderChatTab();
@@ -827,6 +1099,9 @@ function sendChatTabMessage() {
   }).then(function () {
     state.chatSending = false;
     renderChatTab();
+    return refreshChatSessionListIfNeeded().then(function () {
+      renderChatTab();
+    });
   });
 }
 
@@ -836,6 +1111,7 @@ function backfillSessionTitle(session, text) {
   var txt = (text || "").replace(/\n/g, " ").trim().substring(0, 18);
   if (!txt) return;
   api.updateSession(session.id, { title: txt }).then(function (fresh) {
+    noteChatSessionMutation();
     mergeSessionFields(session, fresh);
     renderChatSessionList();
   }).catch(function () { /* non-fatal */ });
@@ -861,6 +1137,7 @@ function retryChatMessage(msgId) {
   }
   if (!userMsg) return;
 
+  invalidateChatSessionLoads();
   state.chatSending = true;
   pendingMsg.status = "pending";
   pendingMsg.content = t("chat.thinking");
@@ -869,6 +1146,7 @@ function retryChatMessage(msgId) {
 
   return api.updateMessage(session.id, pendingMsg.id,
     { status: "pending", content: pendingMsg.content }).then(function (updated) {
+    noteChatSessionMutation();
     mergeMessageFields(pendingMsg, updated);
     return api.postChat(
       userMsg.content,
@@ -885,6 +1163,7 @@ function retryChatMessage(msgId) {
       pendingMsg.suggestedTasks = tasks;
       return api.updateMessage(session.id, pendingMsg.id,
         { status: "sent", content: content, suggestedTasks: tasks }).then(function (sent) {
+          noteChatSessionMutation();
           mergeMessageFields(pendingMsg, sent);
           syncSessionMessageCache(session, []);
           refreshMemoryPanelSoon();
@@ -902,6 +1181,9 @@ function retryChatMessage(msgId) {
   }).then(function () {
     state.chatSending = false;
     renderChatTab();
+    return refreshChatSessionListIfNeeded().then(function () {
+      renderChatTab();
+    });
   });
 }
 

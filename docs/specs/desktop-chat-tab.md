@@ -341,8 +341,8 @@ type SuggestedTask = {
 
 完整 REST 与落盘契约由 [`chat-session-store.md`](chat-session-store.md) 定义。本文件只保留会话 tab 必须遵守的集成约束。
 
-- UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 为权威：`index.json` 保存 active 指针和列表投影，每个服务端生成的 lowercase hex32 `sessionId` 对应一个 `<sessionId>.json` 分片。
-- 前端初始化只加载索引；激活会话时再按需加载该分片正文。`state.chatSessions` 仅用于渲染缓存，不是持久化事实来源。
+- UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 为权威：`index.json` 保存 active 指针和列表投影，`index.state` 记录跨文件恢复状态，每个 lowercase hex32 `sessionId` 对应一个 shard。
+- 前端初始化只加载 50 条索引元数据；active 不在首屏时单独加载，激活其它会话时再懒加载正文。`state.chatSessions` 仅是分页渲染缓存。
 - 创建、切换 active、重命名、删除、追加消息和更新 pending 状态全部通过细粒度 REST 接口完成。客户端不得生成或覆盖会话 ID、消息 ID、`createdAt` 或 `updatedAt`。
 - 会话数量不设上限。单会话最多 200 条消息且按完整 user turn 保留；单条输入 `content` 最多保留 20000 code point 后追加 `...`。opaque 快照、建议任务、请求体和最终 shard 同样受服务端资源预算约束。
 - 模型历史以 `{memoryDir}/agent-state/self-analyst-chat/desktop/<sessionId>/` 下的 AgentState 为权威。UI transcript 不得在每轮请求中重新注入模型上下文。
@@ -498,7 +498,7 @@ Content-Type: application/json
 - 按 `updatedAt` 降序排列。
 - active session 有明显高亮和左侧强调条。
 - 每项展示 title、最后一条消息摘要、更新时间。
-- 搜索框按索引中的 `title`、`lastMessagePreview` 和 `summary` 过滤，不加载或扫描全部消息正文。
+- 搜索框 debounce 后调用服务端元数据搜索，按 `title`、`lastMessagePreview` 和 `summary` 过滤并游标分页，不扫描消息正文；search/mutation/list-load 三类请求代次共同阻止乱序搜索、启动期旧列表或过期续页覆盖新交互，失效的启动首屏会安全补载并保留 live session 正文对象。
 - 没有匹配结果时显示 `没有匹配的会话`。
 
 会话列表 item 点击后:
@@ -716,7 +716,7 @@ Agent 回复如包含建议任务:
    - 不破坏已有 Agent/Config 样式。
 
 4. Java 后端
-   - `ChatSessionStore` — `index.json` + 每会话分片、服务端 ID、原子写和裁剪不变量。
+   - `ChatSessionStore` — `index.json` + `index.state` + 每会话分片、DIRTY 崩溃恢复、服务端 ID、原子写和裁剪不变量。
    - `DesktopChatSessionController` / `DesktopServer` — 注册并实现会话 REST CRUD。
    - `DesktopAgentController` — 校验 `sessionId + userMessageId`、执行旧 server transcript 懒迁移，并把 busy 映射为 409。
    - `SelfAnalystAgent` — 按 `(desktop, sessionId)` 持久化 AgentState、幂等重试和生命周期 gate。
@@ -967,7 +967,7 @@ function retryChatMessage(pendingId) {
 
 ### 16.3 会话与消息体量
 
-- 会话数量不设上限，前端不得按数量淘汰会话。
+- 会话数量不设上限；前端按 50 条游标页加载并提供“加载更多”，不得把“未加载”解释为“已淘汰”。
 - 每个会话只保留最近 200 条且从完整 user turn 起始的消息，由后端写入时裁剪；最终 mutation 后前端重新读取 authoritative session，同时镜像 200 条和 16 MiB 两项规则。
 - 单条输入消息最多保留 20000 code point 后追加 `...`；辅助字段、opaque JSON 和最终 UTF-8 shard 还须满足 `chat-session-store.md` 的 DEC-013/014。
 

@@ -9,11 +9,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const apiJs = fs.readFileSync(
   path.resolve(here, "../../main/resources/desktop-ui/api.js"), "utf8");
 
-function sandboxWith(response) {
+function sandboxWith(response, capture) {
   const sandbox = {
     window: { location: { origin: "http://localhost:5700" } },
     URLSearchParams,
-    fetch() { return Promise.resolve(response); },
+    fetch(url) {
+      if (capture) capture.url = url;
+      return Promise.resolve(response);
+    },
   };
   vm.createContext(sandbox);
   vm.runInContext(apiJs, sandbox);
@@ -33,6 +36,22 @@ test("chat API errors preserve HTTP status and server JSON message", async () =>
     assert.equal(error.body.error, "payload too large");
     return true;
   });
+});
+
+test("session list encodes optional pagination and search parameters", async () => {
+  const capture = {};
+  const sandbox = sandboxWith({
+    ok: true,
+    status: 200,
+    json() { return Promise.resolve({ sessions: [] }); },
+  }, capture);
+
+  await sandbox.api.listSessions({ limit: 50, cursor: "a+b/c", q: "focus work" });
+
+  const url = new URL(capture.url);
+  assert.equal(url.searchParams.get("limit"), "50");
+  assert.equal(url.searchParams.get("cursor"), "a+b/c");
+  assert.equal(url.searchParams.get("q"), "focus work");
 });
 
 test("session API errors retain status when the body is plain text", async () => {

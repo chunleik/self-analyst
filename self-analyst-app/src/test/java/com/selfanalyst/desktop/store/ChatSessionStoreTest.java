@@ -11,7 +11,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -482,6 +486,64 @@ class ChatSessionStoreTest {
         assertFalse(preview.contains("�"));
     }
 
+    @Test
+    void cursorPagesAreStableAndSearchCoversTheWholeIndex(@TempDir Path memoryDir)
+            throws Exception {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        List<Session> sessions = new ArrayList<>();
+        for (int i = 0; i < 5; i++) sessions.add(store.create(req("session-" + i)));
+        Path chatDir = memoryDir.resolve("chat-sessions");
+        Instant sameTime = Instant.parse("2026-08-23T00:00:00Z");
+        ObjectMapper mapper = new ObjectMapper().registerModule(
+                new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        for (int i = 0; i < sessions.size(); i++) {
+            Path shard = chatDir.resolve(sessions.get(i).id + ".json");
+            Session raw = mapper.readValue(shard.toFile(), Session.class);
+            raw.updatedAt = sameTime;
+            if (i == 4) raw.summary = "needle in an older page";
+            mapper.writeValue(shard.toFile(), raw);
+        }
+        Files.delete(chatDir.resolve("index.state"));
+        ChatSessionStore restarted = new ChatSessionStore(memoryDir);
+        List<String> fullOrder = restarted.listIndex().sessions.stream()
+                .map(meta -> meta.id).toList();
+        List<String> expectedTieOrder = sessions.stream().map(session -> session.id)
+                .sorted(Comparator.reverseOrder()).toList();
+        assertEquals(expectedTieOrder, fullOrder);
+        List<String> pagedOrder = new ArrayList<>();
+        String cursor = null;
+        do {
+            ChatSessionStore.IndexPage page = restarted.listIndexPage(2, cursor, null);
+            pagedOrder.addAll(page.sessions().stream().map(meta -> meta.id).toList());
+            cursor = page.nextCursor();
+            if (!page.hasMore()) break;
+        } while (true);
+
+        assertEquals(fullOrder, pagedOrder);
+        assertEquals(5, pagedOrder.stream().distinct().count());
+        ChatSessionStore.IndexPage search = restarted.listIndexPage(2, null, "NEEDLE");
+        assertEquals(1, search.sessions().size());
+        assertEquals("needle in an older page", search.sessions().getFirst().summary);
+        assertThrows(IllegalArgumentException.class,
+                () -> restarted.listIndexPage(2, "not-base64", null));
+        assertThrows(IllegalArgumentException.class,
+                () -> restarted.listIndexPage(2, "", null));
+        String missingGeneration = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                ("{\"id\":\"" + fullOrder.getFirst()
+                        + "\",\"updatedAt\":\"" + sameTime + "\",\"query\":\"\"}")
+                        .getBytes(StandardCharsets.UTF_8));
+        assertThrows(IllegalArgumentException.class,
+                () -> restarted.listIndexPage(2, missingGeneration, null));
+
+        ChatSessionStore.IndexPage first = restarted.listIndexPage(2, null, null);
+        assertThrows(IllegalArgumentException.class,
+                () -> restarted.listIndexPage(2, first.nextCursor(), "different"));
+        String unseenId = fullOrder.get(3);
+        restarted.updateMeta(unseenId, "moved ahead", null, null);
+        assertThrows(IllegalArgumentException.class,
+                () -> restarted.listIndexPage(2, first.nextCursor(), null));
+    }
+
     // ── TST-014 ──
     @Test
     void corruptIndexRebuiltFromShards(@TempDir Path memoryDir) throws Exception {
@@ -666,7 +728,7 @@ class ChatSessionStoreTest {
     }
 
     @Test
-    void invalidMemoryPolicyInIndexDefaultsToSmartOnRead(@TempDir Path memoryDir) throws Exception {
+    void ghostMetaWithoutShardIsDroppedDuringV1Recovery(@TempDir Path memoryDir) throws Exception {
         Path chatDir = memoryDir.resolve("chat-sessions");
         Files.createDirectories(chatDir);
         String id = "c".repeat(32);
@@ -689,6 +751,8 @@ class ChatSessionStoreTest {
 
         ChatSessionStore store = new ChatSessionStore(memoryDir);
 
-        assertEquals("smart", store.listIndex().sessions.get(0).memoryPolicy);
+        Index recovered = store.listIndex();
+        assertTrue(recovered.sessions.isEmpty());
+        assertNull(recovered.activeSessionId);
     }
 }

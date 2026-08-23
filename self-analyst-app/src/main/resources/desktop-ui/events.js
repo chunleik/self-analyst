@@ -337,8 +337,7 @@ function setupEvents() {
 
   // Chat tab - session search
   state.dom.chatSessionSearchInput.addEventListener("input", function () {
-    state.chatSessionSearch = this.value;
-    renderChatSessionList();
+    scheduleChatSessionSearch(this.value);
   });
 
   // Chat tab - send button

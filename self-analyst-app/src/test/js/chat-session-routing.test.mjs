@@ -58,7 +58,20 @@ function createChatSandbox({ status = "pending", chatSending = false, api = {} }
     state: {
       activeChatSessionId: session.id,
       chatSessions: [session],
+      chatSessionsLoaded: true,
+      chatSessionsHasMore: false,
+      chatSessionsLoadingMore: false,
       chatSending,
+      chatSessionSearch: "",
+      chatSessionSearchResults: null,
+      chatSessionSearchHasMore: false,
+      chatSessionSearchLoading: false,
+      chatSessionSearchRequestId: 0,
+      chatSessionSearchTimer: null,
+      chatSessionMutationGeneration: 0,
+      chatSessionLoadRequestId: 0,
+      chatSessionLatestLoadRequestId: 0,
+      chatSessionListReloadNeeded: false,
       chatContextToggles: {},
       summary: null,
       tasks: [],
@@ -84,6 +97,8 @@ function createChatSandbox({ status = "pending", chatSending = false, api = {} }
         .replace(/'/g, "&#39;");
     },
     formatRelativeTime() { return "now"; },
+    setTimeout,
+    clearTimeout,
   };
   vm.createContext(sandbox);
   vm.runInContext(chatJs, sandbox);
@@ -320,6 +335,62 @@ test("send mirrors retention and adopts the canonical updated assistant", async 
   assert.equal(sandbox.state.dom.chatTabInput.value, "");
 });
 
+test("send completion waits for replacement metadata and renders it", async () => {
+  const replacement = deferred();
+  let listCalls = 0;
+  const savedUser = {
+    id: "user-new",
+    role: "user",
+    content: "new question",
+    status: "sent",
+  };
+  const savedPending = {
+    id: "assistant-new",
+    role: "assistant",
+    content: "Thinking",
+    status: "pending",
+  };
+  const api = {
+    appendMessages() { return Promise.resolve([savedUser, savedPending]); },
+    postChat() { return Promise.resolve({ message: "answer", suggestedTasks: [] }); },
+    updateMessage() {
+      return Promise.resolve({ ...savedPending, status: "sent", content: "answer" });
+    },
+    listSessions() { listCalls += 1; return replacement.promise; },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox, session } = createChatSandbox({ status: "sent", api });
+  sandbox.state.chatSessionListReloadNeeded = true;
+  sandbox.state.dom.chatTabInput = { value: "new question" };
+  sandbox.resortChatSessions = () => {};
+  sandbox.refreshMemoryPanelSoon = () => {};
+  sandbox.backfillSessionTitle = () => {};
+  sandbox.alert = () => {};
+  let renders = 0;
+  sandbox.renderChatTab = () => { renders += 1; };
+
+  const sending = sandbox.sendChatTabMessage();
+  await nextTurn();
+  assert.equal(listCalls, 1);
+  assert.equal(sandbox.state.chatSending, false);
+  const rendersBeforeReplacement = renders;
+
+  replacement.resolve({
+    activeSessionId: session.id,
+    sessions: [
+      { id: session.id, title: "refreshed", messageCount: 4 },
+      { id: "history-old", title: "history" },
+    ],
+    hasMore: false,
+  });
+  await sending;
+
+  assert.equal(sandbox.state.chatSessions[0], session);
+  assert.equal(sandbox.state.chatSessions.some((row) => row.id === "history-old"), true);
+  assert.equal(session.title, "refreshed");
+  assert.ok(renders > rendersBeforeReplacement);
+});
+
 test("failed lazy load stays retryable and restores the bound session context", async () => {
   let calls = 0;
   const api = {
@@ -348,6 +419,452 @@ test("failed lazy load stays retryable and restores the bound session context", 
   assert.equal(session.messages[0].content, "old");
   assert.equal(context.boundContext.title, "bound task");
   assert.equal(calls, 2);
+});
+
+test("paged index keeps an active session that is outside the first page", async () => {
+  let activeWrites = 0;
+  const api = {
+    listSessions() {
+      return Promise.resolve({
+        activeSessionId: "active-old",
+        sessions: [{ id: "newest", title: "newest" }],
+        nextCursor: "cursor-1",
+        hasMore: true,
+      });
+    },
+    getSession(id) {
+      assert.equal(id, "active-old");
+      return Promise.resolve({ id, title: "active", messages: [] });
+    },
+    setActiveSession() { activeWrites += 1; return Promise.resolve({}); },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox } = createChatSandbox({ api });
+
+  await sandbox.loadChatSessions();
+
+  assert.equal(sandbox.state.activeChatSessionId, "active-old");
+  assert.equal(sandbox.state.chatSessions[0].id, "active-old");
+  assert.equal(sandbox.state.chatSessionsHasMore, true);
+  assert.equal(sandbox.state.chatSessionsNextCursor, "cursor-1");
+  assert.equal(activeWrites, 0);
+});
+
+test("a startup list response cannot overwrite a newly created session", async () => {
+  const initialList = deferred();
+  let listCalls = 0;
+  const api = {
+    listSessions() {
+      listCalls += 1;
+      if (listCalls === 1) return initialList.promise;
+      return Promise.resolve({
+        activeSessionId: "created-new",
+        sessions: [
+          { id: "created-new", title: "new" },
+          { id: "history-old", title: "history" },
+        ],
+        hasMore: false,
+      });
+    },
+    createSession() {
+      return Promise.resolve({ id: "created-new", title: "new", messages: [] });
+    },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessions = [];
+  sandbox.state.activeChatSessionId = null;
+  sandbox.state.chatSessionsLoaded = false;
+
+  const startup = sandbox.loadChatSessions();
+  const creation = sandbox.createChatSession({ title: "new" });
+  await creation;
+  initialList.resolve({
+    activeSessionId: "stale-old",
+    sessions: [{ id: "stale-old", title: "stale" }],
+    hasMore: false,
+  });
+  await startup;
+  await nextTurn();
+
+  assert.equal(sandbox.state.activeChatSessionId, "created-new");
+  assert.equal(sandbox.state.chatSessions.some((row) => row.id === "created-new"), true);
+  assert.equal(sandbox.state.chatSessions.some((row) => row.id === "history-old"), true);
+  assert.equal(sandbox.state.chatSessionsLoaded, true);
+  assert.equal(listCalls, 2);
+});
+
+test("a startup list response cannot clear a search started while it was pending", async () => {
+  const initialList = deferred();
+  const timers = [];
+  const api = {
+    listSessions() { return initialList.promise; },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessions = [];
+  sandbox.state.activeChatSessionId = null;
+  sandbox.state.chatSessionsLoaded = false;
+  sandbox.state.dom.chatSessionList = { innerHTML: "", onclick: null };
+  sandbox.setTimeout = (callback) => { timers.push(callback); return timers.length; };
+  sandbox.clearTimeout = () => {};
+
+  const startup = sandbox.loadChatSessions();
+  sandbox.scheduleChatSessionSearch("needle");
+  initialList.resolve({
+    activeSessionId: "stale-old",
+    sessions: [{ id: "stale-old", title: "stale" }],
+    hasMore: false,
+  });
+  await startup;
+
+  assert.equal(timers.length, 1);
+  assert.equal(sandbox.state.chatSessionSearch, "needle");
+  assert.equal(sandbox.state.chatSessionSearchLoading, true);
+  assert.equal(sandbox.state.activeChatSessionId, "stale-old");
+  assert.equal(sandbox.state.chatSessions.some((row) => row.id === "stale-old"), true);
+  assert.equal(sandbox.state.chatSessionsLoaded, true);
+});
+
+test("a startup list invalidated by sending reloads without detaching the live session", async () => {
+  const initialList = deferred();
+  let listCalls = 0;
+  const api = {
+    listSessions() {
+      listCalls += 1;
+      if (listCalls === 1) return initialList.promise;
+      return Promise.resolve({
+        activeSessionId: "live-session",
+        sessions: [
+          { id: "live-session", title: "fresh title", messageCount: 1 },
+          { id: "history-old", title: "history" },
+        ],
+        hasMore: false,
+      });
+    },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessions = [];
+  sandbox.state.activeChatSessionId = null;
+  sandbox.state.chatSessionsLoaded = false;
+
+  const startup = sandbox.loadChatSessions();
+  const live = {
+    id: "live-session",
+    title: "local title",
+    messagesLoaded: true,
+    messages: [{ id: "persisted-message", role: "user", content: "keep" }],
+  };
+  sandbox.invalidateChatSessionLoads();
+  sandbox.state.chatSending = true;
+  sandbox.state.chatSessions = [live];
+  sandbox.state.activeChatSessionId = live.id;
+  initialList.resolve({
+    activeSessionId: "stale-old",
+    sessions: [{ id: "stale-old", title: "stale" }],
+    hasMore: false,
+  });
+  await startup;
+
+  assert.equal(sandbox.state.chatSessionListReloadNeeded, true);
+  sandbox.state.chatSending = false;
+  await sandbox.refreshChatSessionListIfNeeded();
+
+  assert.equal(listCalls, 2);
+  assert.equal(sandbox.state.chatSessions[0], live);
+  assert.equal(live.title, "fresh title");
+  assert.equal(live.messages[0].id, "persisted-message");
+  assert.equal(sandbox.state.chatSessions.some((row) => row.id === "history-old"), true);
+});
+
+test("a failed replacement page keeps the live cache and remains retryable", async () => {
+  const api = {
+    listSessions() { return Promise.reject(new Error("temporary list failure")); },
+  };
+  const { sandbox, session } = createChatSandbox({ api });
+  sandbox.state.chatSessionListReloadNeeded = true;
+  sandbox.state.activeChatSessionId = session.id;
+  sandbox.state.chatSessionsLoaded = true;
+
+  const reloaded = await sandbox.refreshChatSessionListIfNeeded();
+
+  assert.equal(reloaded, false);
+  assert.equal(sandbox.state.chatSessions[0], session);
+  assert.equal(sandbox.state.activeChatSessionId, session.id);
+  assert.equal(sandbox.state.chatSessionsLoaded, true);
+  assert.equal(sandbox.state.chatSessionListReloadNeeded, true);
+  assert.match(sandbox.state.chatSessionsLoadError, /temporary list failure/);
+});
+
+test("server search ignores an older out-of-order response", async () => {
+  const requests = new Map();
+  const timers = [];
+  const api = {
+    listSessions(options) {
+      const request = deferred();
+      requests.set(options.q, request);
+      return request.promise;
+    },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.dom.chatSessionList = { innerHTML: "", onclick: null };
+  sandbox.setTimeout = (callback) => { timers.push(callback); return timers.length; };
+  sandbox.clearTimeout = () => {};
+
+  sandbox.scheduleChatSessionSearch("old");
+  timers.shift()();
+  sandbox.scheduleChatSessionSearch("new");
+  timers.shift()();
+  requests.get("new").resolve({ sessions: [{ id: "new", title: "new" }], hasMore: false });
+  await nextTurn();
+  requests.get("old").resolve({ sessions: [{ id: "old", title: "old" }], hasMore: false });
+  await nextTurn();
+
+  assert.equal(sandbox.state.chatSessionSearchResults.length, 1);
+  assert.equal(sandbox.state.chatSessionSearchResults[0].id, "new");
+  assert.equal(sandbox.state.chatSessionSearchLoading, false);
+});
+
+test("a session mutation restarts an in-flight search and clears loading", async () => {
+  const first = deferred();
+  const refreshed = deferred();
+  let callCount = 0;
+  const api = {
+    listSessions() {
+      callCount += 1;
+      return callCount === 1 ? first.promise : refreshed.promise;
+    },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessionSearch = "needle";
+  sandbox.state.chatSessionSearchLoading = true;
+  sandbox.state.chatSessionSearchRequestId = 1;
+  sandbox.renderChatSessionList = () => {};
+
+  const staleSearch = sandbox.runChatSessionSearch("needle", 1, 0);
+  sandbox.noteChatSessionMutation();
+  first.resolve({ sessions: [{ id: "stale", title: "stale" }], hasMore: false });
+  await staleSearch;
+
+  assert.equal(sandbox.state.chatSessionSearchLoading, true);
+  refreshed.resolve({ sessions: [{ id: "fresh", title: "fresh" }], hasMore: false });
+  await nextTurn();
+
+  assert.equal(callCount, 2);
+  assert.equal(sandbox.state.chatSessionSearchResults.map((row) => row.id).join(","), "fresh");
+  assert.equal(sandbox.state.chatSessionSearchLoading, false);
+});
+
+test("stale normal cursor reloads the first page instead of getting stuck", async () => {
+  const calls = [];
+  const api = {
+    listSessions(options) {
+      calls.push(options);
+      if (options.cursor) {
+        const error = new Error("Cursor is stale");
+        error.status = 400;
+        return Promise.reject(error);
+      }
+      return Promise.resolve({
+        activeSessionId: "session-original",
+        sessions: [{ id: "fresh", title: "fresh" }],
+        nextCursor: "fresh-cursor",
+        hasMore: true,
+      });
+    },
+    getSession() {
+      return Promise.resolve({ id: "session-original", title: "active", messages: [] });
+    },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessionsNextCursor = "stale-cursor";
+  sandbox.state.chatSessionsHasMore = true;
+  sandbox.renderChatSessionList = () => {};
+
+  await sandbox.loadMoreChatSessions();
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].cursor, "stale-cursor");
+  assert.equal(calls[1].cursor, undefined);
+  assert.equal(sandbox.state.chatSessionsNextCursor, "fresh-cursor");
+  assert.equal(sandbox.state.chatSessionsHasMore, true);
+});
+
+test("stale normal cursor keeps the continuation lock through first-page recovery", async () => {
+  const freshPage = deferred();
+  const api = {
+    listSessions(options) {
+      if (options.cursor) {
+        const error = new Error("Cursor is stale");
+        error.status = 400;
+        return Promise.reject(error);
+      }
+      return freshPage.promise;
+    },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessionsNextCursor = "stale-cursor";
+  sandbox.state.chatSessionsHasMore = true;
+  sandbox.renderChatSessionList = () => {};
+
+  const loading = sandbox.loadMoreChatSessions();
+  await nextTurn();
+  assert.equal(sandbox.state.chatSessionsLoadingMore, true);
+
+  freshPage.resolve({
+    activeSessionId: "fresh",
+    sessions: [{ id: "fresh", title: "fresh" }],
+    hasMore: false,
+  });
+  await loading;
+  assert.equal(sandbox.state.chatSessionsLoadingMore, false);
+});
+
+test("a stale search-cursor 400 cannot cancel a newer query", async () => {
+  const oldContinuation = deferred();
+  const newSearch = deferred();
+  const calls = [];
+  const api = {
+    listSessions(options) {
+      calls.push(options);
+      return options.cursor ? oldContinuation.promise : newSearch.promise;
+    },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessionSearch = "old";
+  sandbox.state.chatSessionSearchResults = [{ id: "old-1", title: "old" }];
+  sandbox.state.chatSessionSearchCursor = "old-cursor";
+  sandbox.state.chatSessionSearchHasMore = true;
+  sandbox.state.chatSessionSearchRequestId = 1;
+  sandbox.renderChatSessionList = () => {};
+
+  const continuation = sandbox.loadMoreChatSessions();
+  sandbox.state.chatSessionSearch = "new";
+  sandbox.state.chatSessionSearchRequestId = 2;
+  sandbox.state.chatSessionSearchLoading = true;
+  const currentSearch = sandbox.runChatSessionSearch("new", 2, 0);
+  const stale = new Error("Cursor is stale");
+  stale.status = 400;
+  oldContinuation.reject(stale);
+  await continuation;
+
+  newSearch.resolve({ sessions: [{ id: "new-1", title: "new" }], hasMore: false });
+  await currentSearch;
+  assert.equal(calls.length, 2);
+  assert.equal(sandbox.state.chatSessionSearchResults.map((row) => row.id).join(","), "new-1");
+  assert.equal(sandbox.state.chatSessionSearchLoading, false);
+});
+
+test("a stale normal-cursor 400 does not reload while a send is in progress", async () => {
+  const continuation = deferred();
+  let calls = 0;
+  const api = {
+    listSessions() {
+      calls += 1;
+      return continuation.promise;
+    },
+  };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessionsNextCursor = "old-cursor";
+  sandbox.state.chatSessionsHasMore = true;
+  sandbox.renderChatSessionList = () => {};
+
+  const loading = sandbox.loadMoreChatSessions();
+  sandbox.state.chatSending = true;
+  const stale = new Error("Cursor is stale");
+  stale.status = 400;
+  continuation.reject(stale);
+  await loading;
+
+  assert.equal(calls, 1);
+  assert.equal(sandbox.state.chatSessions[0].id, "session-original");
+});
+
+test("search continuation is bound to request and mutation generations", async () => {
+  const continuation = deferred();
+  const api = { listSessions() { return continuation.promise; } };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessionSearch = "A";
+  sandbox.state.chatSessionSearchResults = [{ id: "a1", title: "A1" }];
+  sandbox.state.chatSessionSearchCursor = "a-cursor";
+  sandbox.state.chatSessionSearchHasMore = true;
+  sandbox.state.chatSessionSearchRequestId = 1;
+  sandbox.renderChatSessionList = () => {};
+
+  const loading = sandbox.loadMoreChatSessions();
+  sandbox.state.chatSessionSearchRequestId = 3;
+  sandbox.state.chatSessionMutationGeneration = 1;
+  sandbox.state.chatSessionSearchResults = [{ id: "a-new", title: "new A" }];
+  sandbox.state.chatSessionSearchCursor = "new-cursor";
+  continuation.resolve({
+    sessions: [{ id: "a-old-page", title: "old continuation" }],
+    nextCursor: "old-cursor",
+    hasMore: false,
+  });
+  await loading;
+
+  assert.deepEqual(sandbox.state.chatSessionSearchResults.map((row) => row.id), ["a-new"]);
+  assert.equal(sandbox.state.chatSessionSearchCursor, "new-cursor");
+});
+
+test("in-flight page cannot resurrect a row after a local mutation", async () => {
+  const continuation = deferred();
+  const api = { listSessions() { return continuation.promise; } };
+  const { sandbox } = createChatSandbox({ api });
+  sandbox.state.chatSessionsNextCursor = "cursor";
+  sandbox.state.chatSessionsHasMore = true;
+  sandbox.renderChatSessionList = () => {};
+
+  const loading = sandbox.loadMoreChatSessions();
+  sandbox.noteChatSessionMutation();
+  continuation.resolve({
+    sessions: [{ id: "deleted", title: "must not return" }],
+    hasMore: false,
+  });
+  await loading;
+
+  assert.equal(sandbox.state.chatSessions.some((row) => row.id === "deleted"), false);
+});
+
+test("active-page failure cannot insert a placeholder for a newly selected session", async () => {
+  const activeLoad = deferred();
+  const api = {
+    listSessions() {
+      return Promise.resolve({
+        activeSessionId: "old-active",
+        sessions: [{ id: "newest", title: "newest" }],
+        hasMore: false,
+      });
+    },
+    getSession() { return activeLoad.promise; },
+    listMemory() { return Promise.resolve({ memories: [] }); },
+  };
+  const { sandbox } = createChatSandbox({ api });
+
+  const loading = sandbox.loadChatSessions();
+  await nextTurn();
+  sandbox.state.activeChatSessionId = "newest";
+  activeLoad.reject(new Error("old active unavailable"));
+  await loading;
+
+  assert.equal(sandbox.state.activeChatSessionId, "newest");
+  assert.equal(sandbox.state.chatSessions.filter((row) => row.id === "newest").length, 1);
+  assert.equal(sandbox.state.chatSessions.some((row) => row.id === "old-active"), false);
+});
+
+test("whitespace-only search restores the normal session list", () => {
+  const { sandbox } = createChatSandbox();
+  sandbox.state.dom.chatSessionList = { innerHTML: "", onclick: null };
+  sandbox.state.chatSessionSearchResults = [{ id: "search-only" }];
+
+  sandbox.scheduleChatSessionSearch("   ");
+
+  assert.equal(sandbox.state.chatSessionSearch, "");
+  assert.equal(sandbox.state.chatSessionSearchResults, null);
+  assert.match(sandbox.state.dom.chatSessionList.innerHTML, /session-original/);
 });
 
 test("lazy-load completion triggers a full render so the composer state refreshes", async () => {
@@ -392,7 +909,11 @@ test("selecting an unloaded session renders its loading state immediately", () =
   const item = { dataset: { sid: other.id } };
 
   list.onclick({
-    target: { closest(selector) { return selector.includes("delete") ? null : item; } },
+    target: {
+      closest(selector) {
+        return selector.includes("delete") || selector.includes("load-more") ? null : item;
+      },
+    },
   });
 
   assert.equal(sandbox.state.activeChatSessionId, other.id);

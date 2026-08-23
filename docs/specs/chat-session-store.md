@@ -69,6 +69,10 @@
 
 - **SPEC-CSP-DEC-016**（有界索引响应）：无参数 `GET /sessions` 保持旧版全量响应；新前端使用 `limit/cursor/q` 游标分页，默认首屏 50、单页最多 200，排序固定为 `updatedAt DESC, id DESC`。搜索先覆盖完整元数据索引再分页；active 不在当前页时单独 GET，不得改写 active。分页先约束网络/DOM，后端 index.json 的线性写放大留待 SQLite 派生索引阶段解决，不手写多文件索引分段。
 
+- **SPEC-CSP-DEC-017**（跨存储删除 saga）：删除会话先在 chat-sessions 目录原子写入 `delete-<sessionId>.state` PENDING tombstone，再删除 AgentScope AgentState 与 transcript。tombstone 是不可逆删除意图的 commit point：写入前失败时两边保持不变；写入后任一崩溃/失败均保留 tombstone。任一 store 访问先幂等完成 transcript 删除，DELETE 重试或下次启动再补齐 AgentState 并清理 tombstone；只有两边都确认删除后才 best-effort 清 tombstone。
+
+- **SPEC-CSP-DEC-018**（单生产 writer）：DesktopServer 以 `.writer.lock` 获取 chat-sessions 的进程级独占 lease，并在 shutdown 释放。第二个指向同一 memoryDir 的生产实例必须 fail fast，不得与现有实例同时执行 index/state/tombstone 恢复或写入；崩溃后由操作系统释放 lease。
+
 - **SPEC-CSP-DEC-006**：`active session` 指针随索引一并持久化于后端，使「上次选中的会话」在刷新 / 重启后端后仍能恢复。
 
 - **SPEC-CSP-DEC-007**：会话内容以**明文**存于 `{memoryDir}/chat-sessions/`，与 `tasks.json` 一致；后端仅绑定 `localhost`。不得把 `llm.api-key` 等配置敏感值写入这些文件。
@@ -77,8 +81,10 @@
 
   ```text
   {memoryDir}/chat-sessions/
+  ├── .writer.lock          # DesktopServer 进程级独占 writer lease
   ├── index.json            # activeSessionId + 每个会话的元信息投影（含摘要/预览/消息数）
   ├── index.state           # CLEAN/DIRTY 恢复状态，不属于 shard 扫描范围
+  ├── delete-<id>.state     # AgentState + transcript 跨存储删除 tombstone
   ├── <sessionId>.json      # 单个会话的完整数据（含全部 messages）
   └── ...
   ```
@@ -120,6 +126,7 @@
 - 目录：`{memoryDir}/chat-sessions/`
 - 索引：`index.json` —— `{ "activeSessionId": <string|null>, "sessions": [ <SessionMeta> ... ] }`
 - 恢复状态：`index.state` —— CLEAN，或 DIRTY + operation/sessionId/activeBefore/activeAfter
+- 删除恢复：`delete-<sessionId>.state` —— protocolVersion + PENDING + sessionId + requestedAt
 - 分片：`<sessionId>.json` —— 单个 `Session`（含 `messages`）
 
 ### 6.2 `SessionMeta`（index.json 中的投影项）
@@ -206,8 +213,9 @@
 
 ### SPEC-CSP-API-005：`DELETE /desktop/chat/sessions/{id}`（删除会话）
 
-- 删除必须作为一个 Agent 生命周期 gate 内的有序操作完成：清除 ReActAgent cache → 删除 `(desktop, sessionId)` 的完整 AgentState → 删除会话分片并更新 index.json；中途不得释放 gate，使聊天请求无法在隐藏状态删除后、可见正文删除前插入。
-- gate 已被聊天占用时返回 HTTP 409 与 `{ "error": "Session is currently processing a chat request" }`，且 AgentState、分片和索引都保持不变。
+- 删除必须作为一个 Agent 生命周期 gate 内的有序 saga 完成：原子写 PENDING tombstone → 清除 ReActAgent cache → 删除 `(desktop, sessionId)` 的完整 AgentState → 删除会话分片并更新 index.json → best-effort 清 tombstone；中途不得释放 gate。
+- gate 已被聊天占用时返回 HTTP 409 与 `{ "error": "Session is currently processing a chat request" }`，且 tombstone、AgentState、分片和索引都保持不变。即 409 必须发生在 durable intent 之前。
+- tombstone 写入前失败返回 500 且两套权威存储保持不变；写入后失败允许暂时半删除，但 tombstone 必须保留并阻止 transcript/AgentState 被重新使用，DELETE 重试或下次启动最终完成两边删除。清 tombstone 失败不得把已完成删除报告成失败。
 - 即使 LLM 未配置或 `SelfAnalystAgent` 未初始化，仍须直接打开 `{memoryDir}/agent-state/self-analyst-chat/` 对应的 `AgentStateStore` 清除持久化状态，再删除可见 transcript；不得因 `agent == null` 遗留隐藏状态。
 - 已经提取为独立长期记忆的条目保留，由用户在记忆面板单独审阅/删除；删除会话不隐式删除已确认的长期记忆。
 - 若删除的是当前 `activeSessionId`，服务端把 active 重选为剩余会话中 `updatedAt` 最新者；无剩余则置 `null`。
@@ -251,6 +259,8 @@
 - **SPEC-CSP-API-010c**：缺失/损坏 index 或 v1 缺 state 时从 shards canonical rebuild；DIRTY 时按 CREATE/UPSERT/DELETE 和目标 shard 是否存在恢复 active。目录枚举 I/O 失败必须中止，不得写出部分/空 index；单个损坏 shard 仍 skip+warn、不删除。
 - **SPEC-CSP-API-010d**：DIRTY/state 写或 shard commit 前失败返回 500 且权威数据不变；shard/delete commit 后的 index/CLEAN 失败记录 warning、保留 DIRTY并返回成功，下一次访问幂等恢复。
 - **SPEC-CSP-API-010e**：只有物理缺失的 `index.state` 才按 v1 迁移。损坏、字段缺失、未知 operation、违反 CREATE/UPSERT/DELETE active 不变量的 intent 或未来 protocolVersion 均 fail closed，不得覆盖 index/state 恢复证据；目录存在但不是可访问目录、或 DELETE 目标的物理存在状态无法确定时同样失败，不得伪装为空会话库或误判 commit point。
+- **SPEC-CSP-API-010f**：`delete-<id>.state` 必须严格校验 protocol/state/sessionId/文件名/requestedAt；损坏或未来版本 fail closed 并保留证据。存在有效 tombstone 时，任一 store 访问先幂等删除对应 transcript；完整 AgentState 补偿由删除协调器在 DELETE 重试/启动恢复中完成。
+- **SPEC-CSP-API-010g**：生产 DesktopServer 必须通过 `ChatSessionStore.openExclusive` 持有 `.writer.lock`；无法取得 lease 时启动失败，shutdown 后同一路径可重新取得。
 
 ### SPEC-CSP-API-011：会话摘要生成（异步、可降级）
 
@@ -352,6 +362,11 @@
 | SPEC-CSP-TST-041 | 页间元数据并发变化、blank cursor/limit | generation 不匹配及空参数返回 400；前端自动重载首屏，不永久卡住 |
 | SPEC-CSP-TST-042 | DIRTY 语义损坏、DELETE 目标状态不确定 | fail closed，保留 DIRTY/index 原字节；恢复条件明确后可幂等完成 |
 | SPEC-CSP-TST-043 | 搜索/续页请求期间 mutation、换查询或发送 | 旧响应与旧 400 不覆盖新查询/会话缓存；搜索自动重启，恢复期间续页锁不提前释放 |
+| SPEC-CSP-TST-044 | tombstone 原子写失败 | AgentState、transcript、index 原样保留，不产生删除 intent |
+| SPEC-CSP-TST-045 | intent 后崩溃、AgentState 后 transcript 删除失败 | tombstone 保留；DELETE 重试/重启后两套存储均删除且 tombstone 清理 |
+| SPEC-CSP-TST-046 | transcript 已删但 tombstone 清理失败 | 首次 DELETE 仍成功；重启幂等清 tombstone，不复活会话 |
+| SPEC-CSP-TST-047 | 损坏/未来删除 tombstone | fail closed，保留 tombstone 与 shard 原字节 |
+| SPEC-CSP-TST-048 | 同 memoryDir 两个生产 writer | 第二个 lease fail fast；第一个 close 后可重新打开 |
 
 ---
 
@@ -360,7 +375,7 @@
 | 规格 ID | 对应文件/组件 | 验证方式 |
 |---------|--------------|---------|
 | SPEC-CSP-DEC-001 | 本 spec（取代说明）、`desktop-chat-tab.md` | 代码审查 |
-| SPEC-CSP-DEC-002..016 | 本 spec（设计决策） | 代码审查 |
+| SPEC-CSP-DEC-002..018 | 本 spec（设计决策） | 代码审查 |
 | SPEC-CSP-GOAL-001..008 | 全特性 | 验收测试 |
 | SPEC-CSP-MODEL-001..005 | `ChatSessionStore.java`（模型、id 安全、索引重建） | 单元测试 |
 | SPEC-CSP-API-001..002 | `DesktopChatSessionController.java`、`DesktopServer.java`、`ChatSessionStore.java` | 单元测试 |

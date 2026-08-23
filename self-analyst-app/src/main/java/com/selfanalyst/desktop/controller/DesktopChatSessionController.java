@@ -5,6 +5,7 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.desktop.service.ChatSummaryService;
 import com.selfanalyst.desktop.service.MemoryExtractionService;
 import com.selfanalyst.desktop.service.SummaryPromptService;
+import com.selfanalyst.desktop.store.ChatSessionDeletionCoordinator;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -57,6 +58,7 @@ public class DesktopChatSessionController {
     private final SelfAnalystAgent agent;
     private final Config config;
     private final MemoryExtractionService memoryExtractionService;
+    private final ChatSessionDeletionCoordinator deletionCoordinator;
 
     private final ScheduledExecutorService summaryPool = Executors.newScheduledThreadPool(
             1, r -> { Thread t = new Thread(r, "chat-summary"); t.setDaemon(true); return t; });
@@ -69,11 +71,22 @@ public class DesktopChatSessionController {
                                         SelfAnalystAgent agent,
                                         Config config,
                                         MemoryExtractionService memoryExtractionService) {
+        this(store, summaryService, agent, config, memoryExtractionService,
+                new ChatSessionDeletionCoordinator(store, agent, config));
+    }
+
+    public DesktopChatSessionController(ChatSessionStore store,
+                                        ChatSummaryService summaryService,
+                                        SelfAnalystAgent agent,
+                                        Config config,
+                                        MemoryExtractionService memoryExtractionService,
+                                        ChatSessionDeletionCoordinator deletionCoordinator) {
         this.store = store;
         this.summaryService = summaryService;
         this.agent = agent;
         this.config = config;
         this.memoryExtractionService = memoryExtractionService;
+        this.deletionCoordinator = deletionCoordinator;
     }
 
     // ── Handlers ─────────────────────────────────────────────────
@@ -182,34 +195,22 @@ public class DesktopChatSessionController {
         try {
             String id = ctx.pathParam("id");
             if (!requireGeneratedSessionId(ctx, id)) return;
-            if (store.getSession(id) == null) {
+            boolean exists = store.getSession(id) != null;
+            boolean pendingDeletion = store.pendingDeletionIds().contains(id);
+            if (!exists && !pendingDeletion) {
                 ctx.status(404).json(Map.of("error", "Session not found: " + id));
                 return;
             }
             ChatSessionStore.DeleteResult result;
-            if (agent != null) {
-                try {
-                    // Both mutations stay inside the same gate used by chat execution. A chat can
-                    // therefore run before deletion or be rejected after it, but cannot recreate
-                    // hidden state between the state and transcript deletes.
-                    result = agent.deleteChatSessionStateThen(id, () -> store.delete(id));
-                } catch (IllegalStateException busy) {
-                    if (DesktopAgentController.hasAgentStillRunning(busy)) {
-                        ctx.status(409).json(Map.of(
-                                "error", "Session is currently processing a chat request"));
-                        return;
-                    }
-                    throw busy;
+            try {
+                result = deletionCoordinator.delete(id);
+            } catch (IllegalStateException busy) {
+                if (DesktopAgentController.hasAgentStillRunning(busy)) {
+                    ctx.status(409).json(Map.of(
+                            "error", "Session is currently processing a chat request"));
+                    return;
                 }
-            } else {
-                if (config == null) {
-                    throw new IllegalStateException(
-                            "Cannot locate persisted AgentState without application config");
-                }
-                // Agent construction is optional. Privacy deletion is not: remove the same
-                // file-backed state directly and retain the transcript if that removal fails.
-                SelfAnalystAgent.deletePersistedChatSessionState(config.memoryDir(), id);
-                result = store.delete(id);
+                throw busy;
             }
             if (result == null) {
                 ctx.status(404).json(Map.of("error", "Session not found: " + id));

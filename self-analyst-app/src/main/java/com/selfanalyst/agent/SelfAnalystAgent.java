@@ -478,8 +478,21 @@ public class SelfAnalystAgent implements AutoCloseable {
      * the application chat gate between those operations.
      */
     public <T> T deleteChatSessionStateThen(String sessionId, Supplier<T> transcriptDeletion) {
+        return deleteChatSessionStateWithIntent(sessionId, () -> { }, transcriptDeletion);
+    }
+
+    /**
+     * Runs the durable deletion intent, AgentState deletion and transcript deletion under the same
+     * application chat gate. A busy gate rejects before the intent is written, so HTTP 409 never
+     * means that an irreversible deletion has already started.
+     */
+    public <T> T deleteChatSessionStateWithIntent(
+            String sessionId,
+            Runnable durableIntent,
+            Supplier<T> transcriptDeletion) {
         String validated = requireDesktopSessionId(sessionId);
         return runExclusive(() -> Mono.fromCallable(() -> {
+            durableIntent.run();
             agent.clearStateCache(DESKTOP_USER_ID, validated);
             agentStateStore.delete(DESKTOP_USER_ID, validated);
             return transcriptDeletion.get();

@@ -33,6 +33,8 @@ $apiJs = Join-Path $AppUi "api.js"
 $chatJs = Join-Path $AppUi "chat.js"
 $initJs = Join-Path $AppUi "init.js"
 $storeJava = Join-Path $Root "self-analyst-app\src\main\java\com\selfanalyst\desktop\store\ChatSessionStore.java"
+$deletionJava = Join-Path $Root "self-analyst-app\src\main\java\com\selfanalyst\desktop\store\ChatSessionDeletionCoordinator.java"
+$serverJava = Join-Path $Root "self-analyst-app\src\main\java\com\selfanalyst\desktop\DesktopServer.java"
 
 # api.js: 8 session/message REST client methods (SPEC-CSP-FE-001)
 Assert-Contains $apiJs 'listSessions\s*:'    "api.js missing listSessions (SPEC-CSP-FE-001)"
@@ -60,6 +62,13 @@ Assert-Contains $storeJava 'meta\.summary' "server search must include summary (
 Assert-Contains $storeJava 'index\.state' "ChatSessionStore missing recovery state (SPEC-CSP-API-010)"
 Assert-Contains $storeJava 'listIndexPage' "ChatSessionStore missing cursor pagination (SPEC-CSP-API-001)"
 Assert-Contains $chatJs 'loadMoreChatSessions' "chat.js missing paged load-more flow (SPEC-CSP-FE-002)"
+
+# Cross-store deletion is journaled and production has a single writer.
+Assert-Contains $storeJava 'delete-.*\.state' "ChatSessionStore missing durable delete tombstones (SPEC-CSP-DEC-017)"
+Assert-Contains $deletionJava 'beginDeletion' "Deletion coordinator must commit intent before deleting stores (SPEC-CSP-DEC-017)"
+Assert-Contains $deletionJava 'recoverPendingDeletions' "Deletion coordinator missing startup recovery (SPEC-CSP-DEC-017)"
+Assert-Contains $serverJava 'openExclusive' "DesktopServer must acquire the chat writer lease (SPEC-CSP-DEC-018)"
+Assert-Contains $serverJava 'chatSessionStore\.close' "DesktopServer must release the chat writer lease (SPEC-CSP-DEC-018)"
 
 # init.js: legacy key removed and never read (SPEC-CSP-FE-006)
 Assert-Contains $initJs 'localStorage\.removeItem\(CHAT_STORAGE_KEY' "init.js must remove the legacy localStorage key (SPEC-CSP-FE-006)"

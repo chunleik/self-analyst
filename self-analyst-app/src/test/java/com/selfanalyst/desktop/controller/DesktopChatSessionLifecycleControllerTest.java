@@ -73,6 +73,17 @@ class DesktopChatSessionLifecycleControllerTest {
             assertEquals(409, captured.status);
             assertTrue(captured.json instanceof Map<?, ?>);
             assertTrue(((Map<?, ?>) captured.json).containsKey("error"));
+
+            CapturedContext deleteCaptured = new CapturedContext("", session.id);
+            DesktopChatSessionController sessionController = new DesktopChatSessionController(
+                    store, null, agent, config, null);
+            sessionController.deleteSession(deleteCaptured.context());
+            assertEquals(409, deleteCaptured.status);
+            assertTrue(Files.exists(config.memoryDir().resolve("chat-sessions")
+                    .resolve(session.id + ".json")));
+            assertFalse(Files.exists(config.memoryDir().resolve("chat-sessions")
+                    .resolve("delete-" + session.id + ".state")));
+
             releaseGate.countDown();
             assertNotNull(running.get(2, TimeUnit.SECONDS));
         }
@@ -103,6 +114,36 @@ class DesktopChatSessionLifecycleControllerTest {
         assertEquals(200, captured.status);
         assertNull(store.getSession(session.id));
         assertFalse(Files.exists(stateDir));
+    }
+
+    @Test
+    void deleteRetryCompletesAnExistingTombstoneAfterTranscriptIsGone(
+            @TempDir Path tempDir) {
+        Config config = Config.testDefaults(tempDir);
+        ChatSessionStore store = new ChatSessionStore(config.memoryDir());
+        ChatSessionStore.Session session = store.create(new ChatSessionStore.CreateRequest());
+        Path stateRoot = config.memoryDir().resolve("agent-state/self-analyst-chat");
+        JsonFileAgentStateStore stateStore = new JsonFileAgentStateStore(stateRoot);
+        stateStore.save("desktop", session.id, "agent_state", AgentState.builder()
+                .userId("desktop")
+                .sessionId(session.id)
+                .build());
+        stateStore.close();
+        store.beginDeletion(session.id);
+        store.deletePendingTranscript(session.id);
+        assertNull(store.getSession(session.id));
+        assertTrue(store.pendingDeletionIds().contains(session.id));
+
+        CapturedContext captured = new CapturedContext("", session.id);
+        DesktopChatSessionController controller = new DesktopChatSessionController(
+                store, null, null, config, null);
+
+        controller.deleteSession(captured.context());
+
+        assertEquals(200, captured.status);
+        assertFalse(Files.exists(stateRoot.resolve("desktop").resolve(session.id)));
+        assertFalse(Files.exists(config.memoryDir().resolve("chat-sessions")
+                .resolve("delete-" + session.id + ".state")));
     }
 
     @Test

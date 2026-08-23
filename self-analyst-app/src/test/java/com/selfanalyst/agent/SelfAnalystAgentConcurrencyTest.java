@@ -11,8 +11,10 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,6 +30,14 @@ class SelfAnalystAgentConcurrencyTest {
             RuntimeException error = assertThrows(RuntimeException.class,
                     () -> agent.runExclusiveChat(() -> Mono.just("second")).block());
             assertTrue(hasMessage(error, "still running"));
+            AtomicBoolean deletionIntentWritten = new AtomicBoolean();
+            RuntimeException busyDelete = assertThrows(RuntimeException.class,
+                    () -> agent.deleteChatSessionStateWithIntent(
+                            "a".repeat(32),
+                            () -> deletionIntentWritten.set(true),
+                            () -> "must-not-delete"));
+            assertTrue(hasMessage(busyDelete, "still running"));
+            assertFalse(deletionIntentWritten.get());
 
             gate.tryEmitValue("first");
             assertEquals("first", first.get(2, TimeUnit.SECONDS));

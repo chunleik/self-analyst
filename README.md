@@ -140,6 +140,7 @@ PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
 - **聊天正文**：以 `{memory.dir}/chat-sessions/index.json` + 每会话一个分片保存；会话与消息 ID 由本机后端生成
 - **分片资源边界**：请求体、opaque 上下文、建议任务和最终 UTF-8 shard 均由服务端限额；前端采用服务端 canonical 消息并镜像完整-turn retention
 - **崩溃恢复与分页**：`index.state` 记录跨文件 DIRTY intent，重启从 authoritative shards 修复投影；会话列表/搜索按 50 条游标分页
+- **删除一致性与单 writer**：`delete-<sessionId>.state` 保证 AgentState 与正文最终同时删除；DesktopServer 以 `.writer.lock` 阻止同一数据目录被两个进程并发写入
 - **Agent 会话状态**：模型历史按桌面聊天会话隔离，存于 `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/`，重启后自动恢复
 - **长会话压缩**：达到 message/token 阈值后把旧前缀滚动写入 `AgentState.summary`，仅保留近期原始消息；摘要失败不会覆盖旧历史
 

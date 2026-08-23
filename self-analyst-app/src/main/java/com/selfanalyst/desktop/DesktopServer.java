@@ -12,6 +12,7 @@ import com.selfanalyst.desktop.service.BehaviorAdviceService;
 import com.selfanalyst.desktop.service.ChatSummaryService;
 import com.selfanalyst.desktop.service.MemoryExtractionService;
 import com.selfanalyst.desktop.service.SummaryService;
+import com.selfanalyst.desktop.store.ChatSessionDeletionCoordinator;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
@@ -57,6 +58,7 @@ public class DesktopServer {
     private final DesktopAudioEventsController audioEventsCtrl;
     private final DesktopChatSessionController chatSessionCtrl;
     private final DesktopMemoryController memoryCtrl;
+    private final ChatSessionStore chatSessionStore;
 
     /**
      * Create and register all desktop API routes.
@@ -110,7 +112,16 @@ public class DesktopServer {
         Path memoryDir = config.memoryDir();
         TaskStore taskStore = new TaskStore(memoryDir);
         UserConfigStore userConfigStore = new UserConfigStore(memoryDir);
-        ChatSessionStore chatSessionStore = new ChatSessionStore(memoryDir);
+        ChatSessionStore chatSessionStore = ChatSessionStore.openExclusive(memoryDir);
+        ChatSessionDeletionCoordinator deletionCoordinator =
+                new ChatSessionDeletionCoordinator(chatSessionStore, agent, config);
+        try {
+            deletionCoordinator.recoverPendingDeletions();
+        } catch (RuntimeException recoveryFailure) {
+            chatSessionStore.close();
+            throw recoveryFailure;
+        }
+        this.chatSessionStore = chatSessionStore;
         SummaryService summaryService = new SummaryService(eventStore, memoryStore);
         BehaviorAdviceService adviceService = new BehaviorAdviceService();
         LongTermMemoryService longTermMemoryService = memoryStore != null
@@ -135,7 +146,8 @@ public class DesktopServer {
 
         ChatSummaryService chatSummaryService = new ChatSummaryService(config.effectiveLanguage());
         this.chatSessionCtrl = new DesktopChatSessionController(
-                chatSessionStore, chatSummaryService, agent, config, memoryExtractionService);
+                chatSessionStore, chatSummaryService, agent, config, memoryExtractionService,
+                deletionCoordinator);
     }
 
     /**
@@ -227,8 +239,10 @@ public class DesktopServer {
     }
 
     public void shutdown() {
-        if (statusCtrl != null) {
-            statusCtrl.close();
+        try {
+            if (statusCtrl != null) statusCtrl.close();
+        } finally {
+            chatSessionStore.close();
         }
     }
 

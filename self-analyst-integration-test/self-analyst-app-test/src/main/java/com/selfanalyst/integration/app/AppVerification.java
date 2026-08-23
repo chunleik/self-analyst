@@ -119,6 +119,7 @@ public class AppVerification {
 
         } finally {
             javalin.stop();
+            desktop.shutdown();
             db.close();
             deleteDir(tmpDir);
         }

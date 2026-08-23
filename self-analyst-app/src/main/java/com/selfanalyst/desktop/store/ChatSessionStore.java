@@ -11,9 +11,13 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -23,6 +27,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -41,7 +47,7 @@ import org.slf4j.LoggerFactory;
  * The index is a derived projection: when missing/corrupt it is rebuilt from
  * the shards (SPEC-CSP-MODEL-005 / API-010c).
  */
-public class ChatSessionStore {
+public class ChatSessionStore implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ChatSessionStore.class);
     private static final ObjectMapper MAPPER = new ObjectMapper()
@@ -76,9 +82,13 @@ public class ChatSessionStore {
     /** Server-generated IDs are the only valid shard names. */
     private static final Pattern GENERATED_SESSION_ID = Pattern.compile("^[a-f0-9]{32}$");
     private static final Pattern GENERATED_MESSAGE_ID = Pattern.compile("^[a-f0-9]{12}$");
+    private static final Pattern DELETION_INTENT_FILE = Pattern.compile(
+            "^delete-([a-f0-9]{32})\\.state$");
     private static final Pattern STORE_TEMP_FILE = Pattern.compile(
-            "^\\.(?:index\\.json|index\\.state|[a-f0-9]{32}\\.json)\\..+\\.chat-tmp$");
+            "^\\.(?:index\\.json|index\\.state|[a-f0-9]{32}\\.json|"
+                    + "delete-[a-f0-9]{32}\\.state)\\..+\\.chat-tmp$");
     private static final int RECOVERY_PROTOCOL_VERSION = 1;
+    private static final int DELETION_PROTOCOL_VERSION = 1;
     private static final String TEMP_SUFFIX = ".chat-tmp";
     private static final Comparator<SessionMeta> META_ORDER = Comparator
             .comparing((SessionMeta meta) -> meta.updatedAt != null
@@ -90,18 +100,69 @@ public class ChatSessionStore {
     private final Path indexFile;
     private final Path stateFile;
     private final ChatSessionStoreIo io;
+    private final FileChannel writerLockChannel;
+    private final FileLock writerLock;
+    private final Set<String> pendingDeletionIds = new TreeSet<>();
     private boolean recovered;
     private boolean recovering;
+    private boolean deletionIntentsLoaded;
+    private boolean recoveringDeletions;
+    private boolean closed;
 
     public ChatSessionStore(Path memoryDir) {
-        this(memoryDir, ChatSessionStoreIo.nio());
+        this(memoryDir, ChatSessionStoreIo.nio(), null, null);
     }
 
     ChatSessionStore(Path memoryDir, ChatSessionStoreIo io) {
+        this(memoryDir, io, null, null);
+    }
+
+    private ChatSessionStore(
+            Path memoryDir,
+            ChatSessionStoreIo io,
+            FileChannel writerLockChannel,
+            FileLock writerLock) {
         this.dir = memoryDir.resolve("chat-sessions").toAbsolutePath().normalize();
         this.indexFile = dir.resolve("index.json");
         this.stateFile = dir.resolve("index.state");
         this.io = java.util.Objects.requireNonNull(io, "io");
+        this.writerLockChannel = writerLockChannel;
+        this.writerLock = writerLock;
+    }
+
+    /** Open the production store with a process-wide exclusive writer lease. */
+    public static ChatSessionStore openExclusive(Path memoryDir) {
+        Path storeDir = memoryDir.resolve("chat-sessions").toAbsolutePath().normalize();
+        FileChannel channel = null;
+        FileLock lock = null;
+        try {
+            Files.createDirectories(storeDir);
+            channel = FileChannel.open(storeDir.resolve(".writer.lock"),
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+            lock = channel.tryLock();
+            if (lock == null) {
+                throw new IllegalStateException(
+                        "Another SelfAnalyst process is already writing " + storeDir);
+            }
+            return new ChatSessionStore(memoryDir, ChatSessionStoreIo.nio(), channel, lock);
+        } catch (IOException | OverlappingFileLockException error) {
+            if (lock != null) {
+                try { lock.release(); } catch (IOException ignored) { }
+            }
+            if (channel != null) {
+                try { channel.close(); } catch (IOException ignored) { }
+            }
+            throw new IllegalStateException(
+                    "Cannot acquire the chat-session writer lock for " + storeDir, error);
+        } catch (RuntimeException error) {
+            if (lock != null) {
+                try { lock.release(); } catch (IOException ignored) { }
+            }
+            if (channel != null) {
+                try { channel.close(); } catch (IOException ignored) { }
+            }
+            throw error;
+        }
     }
 
     // ── Atomic persistence ───────────────────────────────────────
@@ -207,6 +268,14 @@ public class ChatSessionStore {
     }
 
     private void ensureRecovered() {
+        ensureOpen();
+        // Validate deletion evidence before index recovery performs any write.
+        ensureDeletionIntentsLoaded();
+        ensureIndexRecovered();
+        if (!recoveringDeletions) recoverPendingTranscriptDeletions();
+    }
+
+    private void ensureIndexRecovered() {
         if (recovering) return;
         if (recovered) return;
         if (Files.notExists(dir)) {
@@ -414,8 +483,151 @@ public class ChatSessionStore {
         }
     }
 
+    private Path deletionIntentFile(String id) {
+        requireValidSessionId(id);
+        return dir.resolve("delete-" + id + ".state");
+    }
+
+    private void ensureDeletionIntentsLoaded() {
+        if (deletionIntentsLoaded) return;
+        if (Files.notExists(dir)) {
+            deletionIntentsLoaded = true;
+            return;
+        }
+        List<Path> paths;
+        try {
+            paths = io.list(dir);
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot scan chat deletion intents", error);
+        }
+        Set<String> discovered = new TreeSet<>();
+        for (Path path : paths) {
+            String name = path.getFileName().toString();
+            var matcher = DELETION_INTENT_FILE.matcher(name);
+            if (!matcher.matches()) continue;
+            String fileId = matcher.group(1);
+            try {
+                DeletionIntent intent = MAPPER.readValue(path.toFile(), DeletionIntent.class);
+                validateDeletionIntent(intent, fileId);
+                discovered.add(fileId);
+            } catch (IOException | RuntimeException error) {
+                throw new IllegalStateException(
+                        "Invalid chat deletion intent; refusing to overwrite evidence: " + name,
+                        error);
+            }
+        }
+        pendingDeletionIds.addAll(discovered);
+        deletionIntentsLoaded = true;
+    }
+
+    private static void validateDeletionIntent(DeletionIntent intent, String fileId) {
+        if (intent == null || intent.protocolVersion != DELETION_PROTOCOL_VERSION
+                || !"PENDING".equals(intent.state)
+                || !fileId.equals(intent.sessionId)
+                || !isGeneratedSessionId(intent.sessionId)
+                || intent.requestedAt == null) {
+            throw new IllegalArgumentException("Invalid chat deletion intent");
+        }
+    }
+
+    /** Durably commits a monotonic delete request before either backing store is changed. */
+    public synchronized void beginDeletion(String id) {
+        ensureRecovered();
+        requireValidSessionId(id);
+        ensureDeletionIntentsLoaded();
+        if (pendingDeletionIds.contains(id)) return;
+        writeJson(deletionIntentFile(id), DeletionIntent.pending(id));
+        pendingDeletionIds.add(id);
+    }
+
+    /** Pending intents are retained until AgentState and transcript deletion both complete. */
+    public synchronized Set<String> pendingDeletionIds() {
+        ensureRecovered();
+        ensureDeletionIntentsLoaded();
+        return java.util.Collections.unmodifiableSet(new TreeSet<>(pendingDeletionIds));
+    }
+
+    synchronized Set<String> deletionIntentIdsForRecovery() {
+        ensureOpen();
+        ensureDeletionIntentsLoaded();
+        ensureIndexRecovered();
+        return java.util.Collections.unmodifiableSet(new TreeSet<>(pendingDeletionIds));
+    }
+
+    /**
+     * Completes the transcript half of a durable deletion intent. The operation is idempotent:
+     * a missing shard still scrubs stale index metadata and returns a successful delete result.
+     */
+    public synchronized DeleteResult deletePendingTranscript(String id) {
+        ensureOpen();
+        requireValidSessionId(id);
+        ensureIndexRecovered();
+        ensureDeletionIntentsLoaded();
+        if (!pendingDeletionIds.contains(id)) {
+            throw new IllegalStateException("No pending deletion intent for session " + id);
+        }
+        boolean previousRecovery = recoveringDeletions;
+        recoveringDeletions = true;
+        try {
+            Index idx = loadIndex();
+            String activeBefore = idx.activeSessionId;
+            boolean removedMeta = idx.sessions.removeIf(meta -> id.equals(meta.id));
+            if (id.equals(idx.activeSessionId)) selectReplacementActive(idx);
+            ChatSessionStoreIo.PathStatus shardStatus;
+            try {
+                shardStatus = io.status(shardFile(id));
+            } catch (IOException error) {
+                throw new IllegalStateException(
+                        "Cannot determine pending-delete shard status", error);
+            }
+            if (shardStatus == ChatSessionStoreIo.PathStatus.EXISTS
+                    || removedMeta || id.equals(activeBefore)) {
+                commitDeleteMutation(shardFile(id), id, idx, activeBefore);
+            }
+            return new DeleteResult(true, id, idx.activeSessionId);
+        } finally {
+            recoveringDeletions = previousRecovery;
+        }
+    }
+
+    /** Best-effort tombstone cleanup after both authoritative stores confirm deletion. */
+    public synchronized boolean finishDeletion(String id) {
+        ensureOpen();
+        requireValidSessionId(id);
+        ensureDeletionIntentsLoaded();
+        try {
+            io.deleteIfExists(deletionIntentFile(id));
+            pendingDeletionIds.remove(id);
+            return true;
+        } catch (IOException error) {
+            log.warn("Chat session {} is fully deleted, but its tombstone cleanup failed: {}",
+                    id, error.getMessage());
+            return false;
+        }
+    }
+
+    private void recoverPendingTranscriptDeletions() {
+        ensureDeletionIntentsLoaded();
+        if (pendingDeletionIds.isEmpty() || recoveringDeletions) return;
+        RuntimeException firstFailure = null;
+        for (String id : List.copyOf(pendingDeletionIds)) {
+            try {
+                deletePendingTranscript(id);
+            } catch (RuntimeException error) {
+                if (firstFailure == null) firstFailure = error;
+                log.warn("Failed to recover pending transcript deletion {}: {}",
+                        id, error.getMessage());
+            }
+        }
+        if (firstFailure != null) throw firstFailure;
+    }
+
     private static MutationOperation parseOperation(String value) {
         return MutationOperation.valueOf(value);
+    }
+
+    private void ensureOpen() {
+        if (closed) throw new IllegalStateException("ChatSessionStore is closed");
     }
 
     private static boolean resolves(List<SessionMeta> metas, String id) {
@@ -687,12 +899,7 @@ public class ChatSessionStore {
         Index idx = loadIndex();
         String activeBefore = idx.activeSessionId;
         idx.sessions.removeIf(m -> id.equals(m.id));
-        if (id.equals(idx.activeSessionId)) {
-            idx.activeSessionId = idx.sessions.stream()
-                    .max(Comparator.comparing(m -> m.updatedAt != null ? m.updatedAt : Instant.EPOCH))
-                    .map(m -> m.id)
-                    .orElse(null);
-        }
+        if (id.equals(idx.activeSessionId)) selectReplacementActive(idx);
         commitDeleteMutation(shard, id, idx, activeBefore);
         return new DeleteResult(true, id, idx.activeSessionId);
     }
@@ -1162,6 +1369,13 @@ public class ChatSessionStore {
         idx.sessions.add(meta);
     }
 
+    private static void selectReplacementActive(Index index) {
+        index.activeSessionId = index.sessions.stream()
+                .min(META_ORDER)
+                .map(meta -> meta.id)
+                .orElse(null);
+    }
+
     // ── Models ───────────────────────────────────────────────────
 
     private enum RecoveryStatus { CLEAN, DIRTY }
@@ -1169,6 +1383,28 @@ public class ChatSessionStore {
     private enum MutationOperation { CREATE, UPSERT, DELETE }
 
     private enum RecoveryStateKind { MISSING, VALID, INVALID }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private static final class DeletionIntent {
+        public int protocolVersion;
+        public String state;
+        public String sessionId;
+
+        @JsonFormat(shape = JsonFormat.Shape.STRING)
+        public Instant requestedAt;
+
+        public DeletionIntent() {
+        }
+
+        private static DeletionIntent pending(String sessionId) {
+            DeletionIntent intent = new DeletionIntent();
+            intent.protocolVersion = DELETION_PROTOCOL_VERSION;
+            intent.state = "PENDING";
+            intent.sessionId = sessionId;
+            intent.requestedAt = Instant.now();
+            return intent;
+        }
+    }
 
     private static final class RecoveryStateRead {
         private final RecoveryStateKind kind;
@@ -1323,5 +1559,30 @@ public class ChatSessionStore {
 
     /** Result of {@link #delete(String)} (SPEC-CSP-API-005). */
     public record DeleteResult(boolean deleted, String id, String activeSessionId) {
+    }
+
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        IOException failure = null;
+        if (writerLock != null) {
+            try {
+                writerLock.release();
+            } catch (IOException error) {
+                failure = error;
+            }
+        }
+        if (writerLockChannel != null) {
+            try {
+                writerLockChannel.close();
+            } catch (IOException error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            }
+        }
+        if (failure != null) {
+            throw new IllegalStateException("Failed to release chat-session writer lock", failure);
+        }
     }
 }

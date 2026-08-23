@@ -38,10 +38,10 @@ import org.slf4j.LoggerFactory;
  * Sharded persistent store for desktop chat sessions, backed by
  * {@code {memoryDir}/chat-sessions/}: one {@code <sessionId>.json} shard per
  * session (the authoritative copy, including {@code messages}) plus an
- * {@code index.json} projection ({@code activeSessionId} + one
+ * rebuildable SQLite {@code index.db} projection ({@code activeSessionId} + one
  * {@link SessionMeta} row per session, for the list view + search).
  * <p>
- * Each write touches only the affected shard + {@code index.json} (per-shard
+ * Each write touches only the affected shard + one SQLite projection row (per-shard
  * isolation, SPEC-CSP-API-010b) and is persisted atomically via temp-file +
  * {@code ATOMIC_MOVE} (SPEC-CSP-API-010a, mirroring {@link TaskStore#save}).
  * The index is a derived projection: when missing/corrupt it is rebuilt from
@@ -85,7 +85,7 @@ public class ChatSessionStore implements AutoCloseable {
     private static final Pattern DELETION_INTENT_FILE = Pattern.compile(
             "^delete-([a-f0-9]{32})\\.state$");
     private static final Pattern STORE_TEMP_FILE = Pattern.compile(
-            "^\\.(?:index\\.json|index\\.state|[a-f0-9]{32}\\.json|"
+            "^\\.(?:index\\.json|index\\.state|index\\.db\\.ready|[a-f0-9]{32}\\.json|"
                     + "delete-[a-f0-9]{32}\\.state)\\..+\\.chat-tmp$");
     private static final int RECOVERY_PROTOCOL_VERSION = 1;
     private static final int DELETION_PROTOCOL_VERSION = 1;
@@ -98,34 +98,47 @@ public class ChatSessionStore implements AutoCloseable {
 
     private final Path dir;
     private final Path indexFile;
+    private final Path sqliteIndexFile;
+    private final Path sqliteReadyFile;
     private final Path stateFile;
     private final ChatSessionStoreIo io;
+    private final ChatSessionIndex projectionIndex;
     private final FileChannel writerLockChannel;
     private final FileLock writerLock;
     private final Set<String> pendingDeletionIds = new TreeSet<>();
     private boolean recovered;
     private boolean recovering;
+    private boolean recoveringLegacyIndex;
     private boolean deletionIntentsLoaded;
     private boolean recoveringDeletions;
     private boolean closed;
 
     public ChatSessionStore(Path memoryDir) {
-        this(memoryDir, ChatSessionStoreIo.nio(), null, null);
+        this(memoryDir, ChatSessionStoreIo.nio(), null, null, null);
     }
 
     ChatSessionStore(Path memoryDir, ChatSessionStoreIo io) {
-        this(memoryDir, io, null, null);
+        this(memoryDir, io, null, null, null);
+    }
+
+    ChatSessionStore(Path memoryDir, ChatSessionStoreIo io, ChatSessionIndex projectionIndex) {
+        this(memoryDir, io, projectionIndex, null, null);
     }
 
     private ChatSessionStore(
             Path memoryDir,
             ChatSessionStoreIo io,
+            ChatSessionIndex projectionIndex,
             FileChannel writerLockChannel,
             FileLock writerLock) {
         this.dir = memoryDir.resolve("chat-sessions").toAbsolutePath().normalize();
         this.indexFile = dir.resolve("index.json");
+        this.sqliteIndexFile = dir.resolve("index.db");
+        this.sqliteReadyFile = dir.resolve("index.db.ready");
         this.stateFile = dir.resolve("index.state");
         this.io = java.util.Objects.requireNonNull(io, "io");
+        this.projectionIndex = projectionIndex != null
+                ? projectionIndex : new SqliteChatSessionIndex(sqliteIndexFile);
         this.writerLockChannel = writerLockChannel;
         this.writerLock = writerLock;
     }
@@ -144,7 +157,8 @@ public class ChatSessionStore implements AutoCloseable {
                 throw new IllegalStateException(
                         "Another SelfAnalyst process is already writing " + storeDir);
             }
-            return new ChatSessionStore(memoryDir, ChatSessionStoreIo.nio(), channel, lock);
+            return new ChatSessionStore(
+                    memoryDir, ChatSessionStoreIo.nio(), null, channel, lock);
         } catch (IOException | OverlappingFileLockException error) {
             if (lock != null) {
                 try { lock.release(); } catch (IOException ignored) { }
@@ -224,47 +238,21 @@ public class ChatSessionStore implements AutoCloseable {
 
     // ── Index load / rebuild ─────────────────────────────────────
 
-    /**
-     * Load {@code index.json}. Missing → empty index. Parse failure → warn and
-     * rebuild from shards (never silently delete the corrupt file).
-     * (SPEC-CSP-MODEL-005, SPEC-CSP-API-010c)
-     */
+    /** Load the SQLite projection after migration/recovery has made it canonical. */
     private Index loadIndex() {
         ensureRecovered();
-        if (!Files.exists(indexFile)) {
-            return Files.isDirectory(dir) ? rebuildIndex() : new Index();
-        }
         try {
-            Index idx = MAPPER.readValue(indexFile.toFile(), Index.class);
-            if (idx == null) idx = new Index();
-            if (idx.sessions == null) idx.sessions = new ArrayList<>();
-            // Public routes and storage share the same server-generated ID contract.
-            idx.sessions.removeIf(meta -> meta == null || !isGeneratedSessionId(meta.id));
-            if (!isGeneratedSessionId(idx.activeSessionId)
-                    || !resolves(idx.sessions, idx.activeSessionId)) {
-                idx.activeSessionId = null;
-            }
+            Index idx = projectionIndex.load();
             normalizeIndexMemoryPolicy(idx);
             return idx;
-        } catch (IOException | RuntimeException e) {
-            log.warn("chat-sessions index.json unreadable ({}), rebuilding from shards", e.getMessage());
-            return rebuildIndex();
+        } catch (RuntimeException error) {
+            log.warn("chat-sessions index.db unreadable ({}), rebuilding from shards",
+                    error.getMessage());
+            projectionIndex.resetCorrupt();
+            recovered = false;
+            ensureRecovered();
+            return projectionIndex.load();
         }
-    }
-
-    /**
-     * Rebuild {@code index.json} by scanning every {@code *.json} shard (except
-     * the index itself). Per-shard parse failures are skipped with a warning,
-     * never process-fatal. {@code activeSessionId} is preserved only if still
-     * resolvable, else null. The rebuilt index is persisted and returned.
-     */
-    private Index rebuildIndex() {
-        Index raw = readRawIndex();
-        Index rebuilt = scanCanonicalIndex();
-        rebuilt.generation = raw != null ? raw.generation : 0;
-        applyActiveHint(rebuilt, raw != null ? raw.activeSessionId : null);
-        writeIndex(rebuilt);
-        return rebuilt;
     }
 
     private void ensureRecovered() {
@@ -278,7 +266,15 @@ public class ChatSessionStore implements AutoCloseable {
     private void ensureIndexRecovered() {
         if (recovering) return;
         if (recovered) return;
+        boolean migrateLegacyIndex = legacyIndexMigrationRequired();
+        recoveringLegacyIndex = migrateLegacyIndex;
         if (Files.notExists(dir)) {
+            Index empty = new Index();
+            empty.generation = freshProjectionGeneration(0);
+            projectionIndex.replaceAll(empty);
+            writeRecoveryState(RecoveryState.clean());
+            ensureProjectionMarker();
+            recoveringLegacyIndex = false;
             recovered = true;
             return;
         }
@@ -294,9 +290,31 @@ public class ChatSessionStore implements AutoCloseable {
         }
         RecoveryState state = stateRead.state;
         if (state != null && RecoveryStatus.CLEAN.name().equals(state.state)) {
-            if (!recovered) cleanupTempFiles();
-            recovered = true;
-            return;
+            if (migrateLegacyIndex) {
+                Index bootstrap = readLegacyRawIndex();
+                if (bootstrap == null) bootstrap = scanCanonicalIndex();
+                normalizeProjectionIndex(bootstrap);
+                bootstrap.generation = freshProjectionGeneration(bootstrap.generation);
+                projectionIndex.replaceAll(bootstrap);
+                ensureProjectionMarker();
+                recoveringLegacyIndex = false;
+                cleanupTempFiles();
+                recovered = true;
+                return;
+            }
+            if (projectionIndex.exists()) {
+                try {
+                    projectionIndex.validate();
+                    ensureProjectionMarker();
+                    cleanupTempFiles();
+                    recovered = true;
+                    return;
+                } catch (RuntimeException corruptIndex) {
+                    log.warn("chat-sessions index.db is corrupt; preserving and rebuilding: {}",
+                            corruptIndex.getMessage());
+                    projectionIndex.resetCorrupt();
+                }
+            }
         }
         recovering = true;
         recovered = false;
@@ -326,9 +344,18 @@ public class ChatSessionStore implements AutoCloseable {
             applyActiveHint(canonical, activeHint);
             writeIndex(canonical);
             writeRecoveryState(RecoveryState.clean());
+            if (migrateLegacyIndex) {
+                Index migrated = readLegacyRawIndex();
+                if (migrated == null) migrated = canonical;
+                normalizeProjectionIndex(migrated);
+                migrated.generation = freshProjectionGeneration(migrated.generation);
+                projectionIndex.replaceAll(migrated);
+            }
+            ensureProjectionMarker();
             cleanupTempFiles();
             recovered = true;
         } finally {
+            recoveringLegacyIndex = false;
             recovering = false;
         }
     }
@@ -394,6 +421,18 @@ public class ChatSessionStore implements AutoCloseable {
     }
 
     private Index readRawIndex() {
+        if (!recoveringLegacyIndex) {
+            if (!projectionIndex.exists()) return null;
+            try {
+                return projectionIndex.load();
+            } catch (RuntimeException error) {
+                return null;
+            }
+        }
+        return readLegacyRawIndex();
+    }
+
+    private Index readLegacyRawIndex() {
         if (!Files.exists(indexFile)) return null;
         try {
             Index index = MAPPER.readValue(indexFile.toFile(), Index.class);
@@ -461,7 +500,58 @@ public class ChatSessionStore implements AutoCloseable {
         if (metadataChanged) {
             index.generation = index.generation == Long.MAX_VALUE ? 1 : index.generation + 1;
         }
-        writeJson(indexFile, index);
+        if (recoveringLegacyIndex) writeJson(indexFile, index);
+        else projectionIndex.replaceAll(index);
+    }
+
+    private static void normalizeProjectionIndex(Index index) {
+        if (index.sessions == null) index.sessions = new ArrayList<>();
+        index.sessions.removeIf(meta -> meta == null || !isGeneratedSessionId(meta.id));
+        if (!isGeneratedSessionId(index.activeSessionId)
+                || !resolves(index.sessions, index.activeSessionId)) {
+            index.activeSessionId = null;
+        }
+        normalizeIndexMemoryPolicy(index);
+        index.sessions.sort(META_ORDER);
+    }
+
+    private static long freshProjectionGeneration(long previous) {
+        long wallClock = System.currentTimeMillis();
+        if (previous == Long.MAX_VALUE) return Math.max(1L, wallClock);
+        return Math.max(previous + 1L, wallClock);
+    }
+
+    private boolean legacyIndexMigrationRequired() {
+        if (projectionIndex.exists()) {
+            projectionMarkerPresent();
+            return false;
+        }
+        return !projectionMarkerPresent();
+    }
+
+    private void ensureProjectionMarker() {
+        if (projectionMarkerPresent()) return;
+        writeJson(sqliteReadyFile, Map.of(
+                "protocolVersion", 1,
+                "projection", "sqlite"));
+    }
+
+    private boolean projectionMarkerPresent() {
+        if (Files.notExists(sqliteReadyFile)) return false;
+        if (!Files.isRegularFile(sqliteReadyFile)) {
+            throw new IllegalStateException("SQLite chat-index migration marker is not a file");
+        }
+        try {
+            JsonNode marker = MAPPER.readTree(sqliteReadyFile.toFile());
+            if (marker == null || !marker.isObject()
+                    || marker.path("protocolVersion").asInt(-1) != 1
+                    || !"sqlite".equals(marker.path("projection").asText())) {
+                throw new IllegalStateException("Invalid SQLite chat-index migration marker");
+            }
+            return true;
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot read SQLite chat-index migration marker", error);
+        }
     }
 
     private void cleanupTempFiles() {
@@ -569,10 +659,10 @@ public class ChatSessionStore implements AutoCloseable {
         boolean previousRecovery = recoveringDeletions;
         recoveringDeletions = true;
         try {
-            Index idx = loadIndex();
-            String activeBefore = idx.activeSessionId;
-            boolean removedMeta = idx.sessions.removeIf(meta -> id.equals(meta.id));
-            if (id.equals(idx.activeSessionId)) selectReplacementActive(idx);
+            String activeBefore = projectionIndex.activeSessionId();
+            String activeAfter = id.equals(activeBefore)
+                    ? projectionIndex.newestSessionIdExcluding(id) : activeBefore;
+            boolean indexed = projectionIndex.contains(id);
             ChatSessionStoreIo.PathStatus shardStatus;
             try {
                 shardStatus = io.status(shardFile(id));
@@ -581,10 +671,10 @@ public class ChatSessionStore implements AutoCloseable {
                         "Cannot determine pending-delete shard status", error);
             }
             if (shardStatus == ChatSessionStoreIo.PathStatus.EXISTS
-                    || removedMeta || id.equals(activeBefore)) {
-                commitDeleteMutation(shardFile(id), id, idx, activeBefore);
+                    || indexed || id.equals(activeBefore)) {
+                commitDeleteMutation(shardFile(id), id, activeBefore, activeAfter);
             }
-            return new DeleteResult(true, id, idx.activeSessionId);
+            return new DeleteResult(true, id, activeAfter);
         } finally {
             recoveringDeletions = previousRecovery;
         }
@@ -670,6 +760,7 @@ public class ChatSessionStore implements AutoCloseable {
 
     /** Optional cursor-paged metadata view; the legacy no-parameter list remains unchanged. */
     public synchronized IndexPage listIndexPage(int limit, String cursor, String query) {
+        ensureRecovered();
         if (limit < 1 || limit > 200) {
             throw new IllegalArgumentException("limit must be between 1 and 200");
         }
@@ -677,50 +768,27 @@ public class ChatSessionStore implements AutoCloseable {
         if (normalizedQuery.length() > 200) {
             throw new IllegalArgumentException("q must be at most 200 characters");
         }
-        Index index = listIndex();
-        List<SessionMeta> filtered = index.sessions.stream()
-                .filter(meta -> matchesQuery(meta, normalizedQuery))
-                .toList();
-        int start = 0;
+        long generation = projectionIndex.generation();
+        PageCursor decoded = null;
         if (cursor != null) {
-            PageCursor decoded = decodeCursor(cursor);
+            decoded = decodeCursor(cursor);
             if (!normalizedQuery.equals(decoded.query)) {
                 throw new IllegalArgumentException("Cursor does not belong to this query");
             }
-            if (decoded.generation.longValue() != index.generation) {
+            if (decoded.generation.longValue() != generation) {
                 throw new IllegalArgumentException("Cursor is stale; reload the first page");
             }
-            start = findCursorPosition(filtered, decoded) + 1;
         }
-        int end = Math.min(filtered.size(), start + limit);
-        List<SessionMeta> page = new ArrayList<>(filtered.subList(start, end));
-        boolean hasMore = end < filtered.size();
+        List<SessionMeta> page = new ArrayList<>(projectionIndex.page(
+                limit + 1,
+                normalizedQuery,
+                decoded != null ? decoded.updatedAt : null,
+                decoded != null ? decoded.id : null));
+        boolean hasMore = page.size() > limit;
+        if (hasMore) page.removeLast();
         String nextCursor = hasMore && !page.isEmpty()
-                ? encodeCursor(page.getLast(), normalizedQuery, index.generation) : null;
-        return new IndexPage(index.activeSessionId, page, nextCursor, hasMore);
-    }
-
-    private static boolean matchesQuery(SessionMeta meta, String query) {
-        if (query.isEmpty()) return true;
-        return containsIgnoreCase(meta.title, query)
-                || containsIgnoreCase(meta.lastMessagePreview, query)
-                || containsIgnoreCase(meta.summary, query);
-    }
-
-    private static boolean containsIgnoreCase(String value, String normalizedQuery) {
-        return value != null && value.toLowerCase(Locale.ROOT).contains(normalizedQuery);
-    }
-
-    private static int findCursorPosition(List<SessionMeta> metas, PageCursor cursor) {
-        for (int i = 0; i < metas.size(); i++) {
-            SessionMeta meta = metas.get(i);
-            String updatedAt = meta.updatedAt != null ? meta.updatedAt.toString() : "";
-            if (java.util.Objects.equals(meta.id, cursor.id)
-                    && updatedAt.equals(cursor.updatedAt)) {
-                return i;
-            }
-        }
-        throw new IllegalArgumentException("Cursor is stale or invalid");
+                ? encodeCursor(page.getLast(), normalizedQuery, generation) : null;
+        return new IndexPage(projectionIndex.activeSessionId(), page, nextCursor, hasMore);
     }
 
     private static String encodeCursor(SessionMeta meta, String query, long generation) {
@@ -774,22 +842,24 @@ public class ChatSessionStore implements AutoCloseable {
     }
 
     private void commitSessionMutation(
-            Session session, Index index, MutationOperation operation, boolean makeActive) {
+            Session session, MutationOperation operation, boolean makeActive) {
         normalizeSessionForWrite(session);
-        String activeBefore = index.activeSessionId;
-        upsertMeta(index, session);
-        if (makeActive) index.activeSessionId = session.id;
+        String activeBefore = projectionIndex.activeSessionId();
+        String activeAfter = makeActive ? session.id : activeBefore;
+        SessionMeta meta = toMeta(session);
         RecoveryState dirty = RecoveryState.dirty(
-                operation, session.id, activeBefore, index.activeSessionId);
+                operation, session.id, activeBefore, activeAfter);
         writeRecoveryState(dirty);
         recovered = false;
         writeJson(shardFile(session.id), session);
-        finishCommittedProjection(index, dirty);
+        finishCommittedProjection(dirty,
+                () -> projectionIndex.upsert(meta, activeAfter));
     }
 
-    private void commitDeleteMutation(Path shard, String id, Index index, String activeBefore) {
+    private void commitDeleteMutation(
+            Path shard, String id, String activeBefore, String activeAfter) {
         RecoveryState dirty = RecoveryState.dirty(
-                MutationOperation.DELETE, id, activeBefore, index.activeSessionId);
+                MutationOperation.DELETE, id, activeBefore, activeAfter);
         writeRecoveryState(dirty);
         recovered = false;
         try {
@@ -797,16 +867,17 @@ public class ChatSessionStore implements AutoCloseable {
         } catch (IOException error) {
             throw new RuntimeException("Failed to delete chat shard " + id, error);
         }
-        finishCommittedProjection(index, dirty);
+        finishCommittedProjection(dirty,
+                () -> projectionIndex.delete(id, activeAfter));
     }
 
     /**
      * The authoritative shard operation has committed. Projection/state failures are therefore
      * recoverable and must not be reported as an uncommitted mutation to callers.
      */
-    private void finishCommittedProjection(Index index, RecoveryState dirty) {
+    private void finishCommittedProjection(RecoveryState dirty, Runnable projectionMutation) {
         try {
-            writeIndex(index);
+            projectionMutation.run();
         } catch (RuntimeException indexFailure) {
             log.warn("Chat mutation {} for session {} committed, but index refresh failed; "
                             + "DIRTY recovery will run on the next access: {}",
@@ -853,8 +924,8 @@ public class ChatSessionStore implements AutoCloseable {
                 s.messages.add(stored);
             }
         }
-        Index idx = loadIndex();
-        commitSessionMutation(s, idx, MutationOperation.CREATE, true);
+        ensureRecovered();
+        commitSessionMutation(s, MutationOperation.CREATE, true);
         return s;
     }
 
@@ -870,8 +941,7 @@ public class ChatSessionStore implements AutoCloseable {
         if (contextLabel != null) s.contextLabel = contextLabel;
         if (contextSnapshot != null) s.contextSnapshot = contextSnapshot;
         s.updatedAt = Instant.now();
-        Index idx = loadIndex();
-        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, MutationOperation.UPSERT, false);
         return s;
     }
 
@@ -880,8 +950,7 @@ public class ChatSessionStore implements AutoCloseable {
         if (s == null) return null;
         s.memoryPolicy = normalizeMemoryPolicy(memoryPolicy);
         s.updatedAt = Instant.now();
-        Index idx = loadIndex();
-        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, MutationOperation.UPSERT, false);
         return s;
     }
 
@@ -896,12 +965,11 @@ public class ChatSessionStore implements AutoCloseable {
         if (id == null) return null;
         Path shard = shardFile(id);
         if (!Files.exists(shard)) return null;
-        Index idx = loadIndex();
-        String activeBefore = idx.activeSessionId;
-        idx.sessions.removeIf(m -> id.equals(m.id));
-        if (id.equals(idx.activeSessionId)) selectReplacementActive(idx);
-        commitDeleteMutation(shard, id, idx, activeBefore);
-        return new DeleteResult(true, id, idx.activeSessionId);
+        String activeBefore = projectionIndex.activeSessionId();
+        String activeAfter = id.equals(activeBefore)
+                ? projectionIndex.newestSessionIdExcluding(id) : activeBefore;
+        commitDeleteMutation(shard, id, activeBefore, activeAfter);
+        return new DeleteResult(true, id, activeAfter);
     }
 
     /**
@@ -923,8 +991,7 @@ public class ChatSessionStore implements AutoCloseable {
             appended.add(stored);
         }
         s.updatedAt = Instant.now();
-        Index idx = loadIndex();
-        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, MutationOperation.UPSERT, false);
         java.util.Set<String> retainedIds = s.messages.stream()
                 .map(message -> message.id)
                 .collect(java.util.stream.Collectors.toSet());
@@ -981,8 +1048,7 @@ public class ChatSessionStore implements AutoCloseable {
             target.suggestedTasks = new ArrayList<>(suggestedTasks);
         }
         s.updatedAt = Instant.now();
-        Index idx = loadIndex();
-        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, MutationOperation.UPSERT, false);
         return target;
     }
 
@@ -996,10 +1062,8 @@ public class ChatSessionStore implements AutoCloseable {
         if (idOrNull != null && !Files.exists(shardFile(idOrNull))) {
             throw new IllegalArgumentException("Unknown session: " + idOrNull);
         }
-        Index idx = loadIndex();
-        idx.activeSessionId = idOrNull;
-        writeIndex(idx, false);
-        return idx.activeSessionId;
+        projectionIndex.setActive(idOrNull);
+        return idOrNull;
     }
 
     /**
@@ -1010,8 +1074,7 @@ public class ChatSessionStore implements AutoCloseable {
         Session s = getSession(id);
         if (s == null) return;
         s.summary = summary;
-        Index idx = loadIndex();
-        commitSessionMutation(s, idx, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, MutationOperation.UPSERT, false);
     }
 
     // ── Helpers ──────────────────────────────────────────────────
@@ -1357,25 +1420,6 @@ public class ChatSessionStore implements AutoCloseable {
         return value == null ? 0 : value.codePointCount(0, value.length());
     }
 
-    /** Replace or append the {@link SessionMeta} row for a session (single-row mutation). */
-    private static void upsertMeta(Index idx, Session s) {
-        SessionMeta meta = toMeta(s);
-        for (int i = 0; i < idx.sessions.size(); i++) {
-            if (s.id.equals(idx.sessions.get(i).id)) {
-                idx.sessions.set(i, meta);
-                return;
-            }
-        }
-        idx.sessions.add(meta);
-    }
-
-    private static void selectReplacementActive(Index index) {
-        index.activeSessionId = index.sessions.stream()
-                .min(META_ORDER)
-                .map(meta -> meta.id)
-                .orElse(null);
-    }
-
     // ── Models ───────────────────────────────────────────────────
 
     private enum RecoveryStatus { CLEAN, DIRTY }
@@ -1565,6 +1609,12 @@ public class ChatSessionStore implements AutoCloseable {
     public synchronized void close() {
         if (closed) return;
         closed = true;
+        RuntimeException projectionFailure = null;
+        try {
+            projectionIndex.close();
+        } catch (RuntimeException error) {
+            projectionFailure = error;
+        }
         IOException failure = null;
         if (writerLock != null) {
             try {
@@ -1582,7 +1632,9 @@ public class ChatSessionStore implements AutoCloseable {
             }
         }
         if (failure != null) {
+            if (projectionFailure != null) failure.addSuppressed(projectionFailure);
             throw new IllegalStateException("Failed to release chat-session writer lock", failure);
         }
+        if (projectionFailure != null) throw projectionFailure;
     }
 }

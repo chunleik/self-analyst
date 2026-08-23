@@ -19,6 +19,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -67,10 +68,13 @@ class ChatSessionStoreTest {
         assertEquals(1, meta.messageCount);
         assertEquals("你好世界", meta.lastMessagePreview);
 
-        // The on-disk index.json must not carry message bodies.
-        Path indexFile = memoryDir.resolve("chat-sessions").resolve("index.json");
-        String json = Files.readString(indexFile);
-        assertFalse(json.contains("\"messages\""), "index.json must not contain messages");
+        Path indexFile = memoryDir.resolve("chat-sessions").resolve("index.db");
+        assertTrue(Files.isRegularFile(indexFile));
+        String projectionJson = new ObjectMapper().registerModule(
+                new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+                .writeValueAsString(idx);
+        assertFalse(projectionJson.contains("\"messages\""),
+                "SQLite projection rows must not contain messages");
     }
 
     // ── TST-003 ──
@@ -552,8 +556,11 @@ class ChatSessionStoreTest {
         store.appendMessages(a.id, List.of(msg("user", "正文A")));
         Session b = store.create(req("B"));
 
-        // Corrupt index.json.
-        Path indexFile = memoryDir.resolve("chat-sessions").resolve("index.json");
+        Files.writeString(memoryDir.resolve("chat-sessions").resolve("index.json"), """
+                {"activeSessionId":null,"sessions":[{"id":"%s","title":"stale"}]}
+                """.formatted("f".repeat(32)));
+        // Corrupt the rebuildable SQLite projection.
+        Path indexFile = memoryDir.resolve("chat-sessions").resolve("index.db");
         Files.writeString(indexFile, "{ this is not valid json");
 
         Index rebuilt = store.listIndex();
@@ -561,6 +568,29 @@ class ChatSessionStoreTest {
         // Bodies survive.
         assertEquals("正文A", store.getSession(a.id).messages.get(0).content);
         assertNotNull(store.getSession(b.id));
+        try (var paths = Files.list(indexFile.getParent())) {
+            assertTrue(paths.anyMatch(path ->
+                    path.getFileName().toString().startsWith("index.db.corrupt-")));
+        }
+    }
+
+    @Test
+    void invalidSqliteMigrationMarkerFailsClosed(@TempDir Path memoryDir) throws Exception {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        Session session = store.create(req("marker"));
+        Path chatDir = memoryDir.resolve("chat-sessions");
+        Path marker = chatDir.resolve("index.db.ready");
+        Files.writeString(marker, "{\"protocolVersion\":99,\"projection\":\"future\"}");
+        byte[] databaseBefore = Files.readAllBytes(chatDir.resolve("index.db"));
+        byte[] shardBefore = Files.readAllBytes(chatDir.resolve(session.id + ".json"));
+        byte[] stateBefore = Files.readAllBytes(chatDir.resolve("index.state"));
+
+        assertThrows(IllegalStateException.class,
+                () -> new ChatSessionStore(memoryDir).listIndex());
+
+        assertArrayEquals(databaseBefore, Files.readAllBytes(chatDir.resolve("index.db")));
+        assertArrayEquals(shardBefore, Files.readAllBytes(chatDir.resolve(session.id + ".json")));
+        assertArrayEquals(stateBefore, Files.readAllBytes(chatDir.resolve("index.state")));
     }
 
     // ── TST-012 / TST-013 preconditions: not-found + invalid-pointer signals ──
@@ -703,6 +733,13 @@ class ChatSessionStoreTest {
 
         assertEquals("smart", store.getSession(id).memoryPolicy);
         assertEquals("smart", store.listIndex().sessions.get(0).memoryPolicy);
+        byte[] legacyIndex = Files.readAllBytes(chatDir.resolve("index.json"));
+        store.updateMeta(id, "SQLite row update", null, null);
+        assertArrayEquals(legacyIndex, Files.readAllBytes(chatDir.resolve("index.json")),
+                "normal mutations must not rewrite the migrated v1 JSON projection");
+        assertEquals("SQLite row update", store.listIndex().sessions.getFirst().title);
+        assertTrue(Files.isRegularFile(chatDir.resolve("index.db")));
+        assertTrue(Files.isRegularFile(chatDir.resolve("index.db.ready")));
     }
 
     @Test

@@ -137,7 +137,7 @@ PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
 - **Goal（目标）**：描述、衡量指标、基线值、目标值、设置日期
 - **KnownPattern（已知模式）**：发现的行为模式 + 置信度评分
 - **ImprovementLog（改进记录）**：行动 → 结果 → 日期，追踪闭环
-- **聊天正文**：以 `{memory.dir}/chat-sessions/index.json` + 每会话一个分片保存；会话与消息 ID 由本机后端生成
+- **聊天正文**：以 `{memory.dir}/chat-sessions/index.db` 元数据投影 + 每会话一个权威分片保存；会话与消息 ID 由本机后端生成
 - **分片资源边界**：请求体、opaque 上下文、建议任务和最终 UTF-8 shard 均由服务端限额；前端采用服务端 canonical 消息并镜像完整-turn retention
 - **崩溃恢复与分页**：`index.state` 记录跨文件 DIRTY intent，重启从 authoritative shards 修复投影；会话列表/搜索按 50 条游标分页
 - **删除一致性与单 writer**：`delete-<sessionId>.state` 保证 AgentState 与正文最终同时删除；DesktopServer 以 `.writer.lock` 阻止同一数据目录被两个进程并发写入

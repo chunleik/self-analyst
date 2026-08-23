@@ -45,6 +45,8 @@ class ChatSessionStoreRecoveryTest {
         ChatSessionStore.SessionMeta staleA = meta(a.id, "stale A");
         stale.sessions = new ArrayList<>(List.of(staleA, staleA, meta("c".repeat(32), "ghost")));
         MAPPER.writeValue(chatDir.resolve("index.json").toFile(), stale);
+        Files.delete(chatDir.resolve("index.db"));
+        Files.delete(chatDir.resolve("index.db.ready"));
         Files.delete(chatDir.resolve("index.state"));
 
         ChatSessionStore.Index recovered = new ChatSessionStore(memoryDir).listIndex();
@@ -84,15 +86,16 @@ class ChatSessionStoreRecoveryTest {
         ChatSessionStore initial = new ChatSessionStore(memoryDir);
         ChatSessionStore.Session session = initial.create(request("append"));
         Path chatDir = memoryDir.resolve("chat-sessions");
-        ScriptedIo io = ScriptedIo.beforeMove("index.json", 1);
-        ChatSessionStore failing = new ChatSessionStore(memoryDir, io);
+        ChatSessionStore failing = new ChatSessionStore(
+                memoryDir, ChatSessionStoreIo.nio(),
+                FailingIndex.failUpsert(chatDir.resolve("index.db")));
 
         List<ChatSessionStore.Message> appended =
                 failing.appendMessages(session.id, turn("committed once"));
 
         assertEquals(2, appended.size());
-        assertEquals(0, MAPPER.readValue(chatDir.resolve("index.json").toFile(),
-                ChatSessionStore.Index.class).sessions.getFirst().messageCount);
+        assertEquals(0, new SqliteChatSessionIndex(chatDir.resolve("index.db"))
+                .load().sessions.getFirst().messageCount);
         assertEquals("DIRTY", state(chatDir).get("state").asText());
 
         ChatSessionStore restarted = new ChatSessionStore(memoryDir);
@@ -104,12 +107,13 @@ class ChatSessionStoreRecoveryTest {
 
     @Test
     void createIndexFailureRecoversNewSessionAsActive(@TempDir Path memoryDir) throws Exception {
+        Path chatDir = memoryDir.resolve("chat-sessions");
         ChatSessionStore creating = new ChatSessionStore(
-                memoryDir, ScriptedIo.beforeMove("index.json", 1));
+                memoryDir, ChatSessionStoreIo.nio(),
+                FailingIndex.failUpsert(chatDir.resolve("index.db")));
 
         ChatSessionStore.Session created = creating.create(request("created"));
 
-        Path chatDir = memoryDir.resolve("chat-sessions");
         assertTrue(Files.exists(chatDir.resolve(created.id + ".json")));
         assertEquals("DIRTY", state(chatDir).get("state").asText());
         ChatSessionStore.Index recovered = new ChatSessionStore(memoryDir).listIndex();
@@ -144,7 +148,8 @@ class ChatSessionStoreRecoveryTest {
         ChatSessionStore.Session b = initial.create(request("B"));
         Path chatDir = memoryDir.resolve("chat-sessions");
         ChatSessionStore failing = new ChatSessionStore(
-                memoryDir, ScriptedIo.beforeMove("index.json", 1));
+                memoryDir, ChatSessionStoreIo.nio(),
+                FailingIndex.failDelete(chatDir.resolve("index.db")));
 
         ChatSessionStore.DeleteResult result = failing.delete(b.id);
 
@@ -165,19 +170,19 @@ class ChatSessionStoreRecoveryTest {
         Path chatDir = memoryDir.resolve("chat-sessions");
         Path shard = chatDir.resolve(session.id + ".json");
         byte[] shardBefore = Files.readAllBytes(shard);
-        byte[] indexBefore = Files.readAllBytes(chatDir.resolve("index.json"));
+        byte[] indexBefore = Files.readAllBytes(chatDir.resolve("index.db"));
         ChatSessionStore failing = new ChatSessionStore(
                 memoryDir, ScriptedIo.beforeDelete(session.id + ".json", 1));
 
         assertThrows(RuntimeException.class, () -> failing.delete(session.id));
 
         assertArrayEquals(shardBefore, Files.readAllBytes(shard));
-        assertArrayEquals(indexBefore, Files.readAllBytes(chatDir.resolve("index.json")));
+        assertArrayEquals(indexBefore, Files.readAllBytes(chatDir.resolve("index.db")));
         byte[] dirtyBefore = Files.readAllBytes(chatDir.resolve("index.state"));
         ChatSessionStore indeterminate = new ChatSessionStore(
                 memoryDir, ScriptedIo.failStatus(session.id + ".json"));
         assertThrows(IllegalStateException.class, indeterminate::listIndex);
-        assertArrayEquals(indexBefore, Files.readAllBytes(chatDir.resolve("index.json")));
+        assertArrayEquals(indexBefore, Files.readAllBytes(chatDir.resolve("index.db")));
         assertArrayEquals(dirtyBefore, Files.readAllBytes(chatDir.resolve("index.state")));
         ChatSessionStore restarted = new ChatSessionStore(memoryDir);
         assertNotNull(restarted.getSession(session.id));
@@ -223,7 +228,7 @@ class ChatSessionStoreRecoveryTest {
         ChatSessionStore.Session session = initial.create(request("state validation"));
         Path chatDir = memoryDir.resolve("chat-sessions");
         Path stateFile = chatDir.resolve("index.state");
-        Path indexFile = chatDir.resolve("index.json");
+        Path indexFile = chatDir.resolve("index.db");
         byte[] indexBefore = Files.readAllBytes(indexFile);
         String other = session.id.charAt(0) == 'a' ? "b".repeat(32) : "a".repeat(32);
         String third = "c".repeat(32);
@@ -262,7 +267,7 @@ class ChatSessionStoreRecoveryTest {
         initial.create(request("scan"));
         Path chatDir = memoryDir.resolve("chat-sessions");
         Path stateFile = chatDir.resolve("index.state");
-        Path indexFile = chatDir.resolve("index.json");
+        Path indexFile = chatDir.resolve("index.db");
         Files.delete(stateFile);
         byte[] indexBefore = Files.readAllBytes(indexFile);
 
@@ -317,6 +322,56 @@ class ChatSessionStoreRecoveryTest {
         private SimulatedCrash(String message) {
             super(message);
         }
+    }
+
+    private static final class FailingIndex implements ChatSessionIndex {
+        private final ChatSessionIndex delegate;
+        private final boolean failUpsert;
+        private final boolean failDelete;
+
+        private FailingIndex(Path database, boolean failUpsert, boolean failDelete) {
+            this.delegate = new SqliteChatSessionIndex(database);
+            this.failUpsert = failUpsert;
+            this.failDelete = failDelete;
+        }
+
+        static FailingIndex failUpsert(Path database) {
+            return new FailingIndex(database, true, false);
+        }
+
+        static FailingIndex failDelete(Path database) {
+            return new FailingIndex(database, false, true);
+        }
+
+        @Override public boolean exists() { return delegate.exists(); }
+        @Override public void validate() { delegate.validate(); }
+        @Override public ChatSessionStore.Index load() { return delegate.load(); }
+        @Override public String activeSessionId() { return delegate.activeSessionId(); }
+        @Override public long generation() { return delegate.generation(); }
+        @Override public boolean contains(String sessionId) { return delegate.contains(sessionId); }
+        @Override public String newestSessionIdExcluding(String sessionId) {
+            return delegate.newestSessionIdExcluding(sessionId);
+        }
+        @Override public List<ChatSessionStore.SessionMeta> page(
+                int limit, String query, String updatedAt, String id) {
+            return delegate.page(limit, query, updatedAt, id);
+        }
+        @Override public void replaceAll(ChatSessionStore.Index index) {
+            delegate.replaceAll(index);
+        }
+        @Override public void upsert(
+                ChatSessionStore.SessionMeta meta, String activeSessionId) {
+            if (failUpsert) throw new IllegalStateException("simulated SQLite upsert failure");
+            delegate.upsert(meta, activeSessionId);
+        }
+        @Override public void delete(String sessionId, String activeSessionId) {
+            if (failDelete) throw new IllegalStateException("simulated SQLite delete failure");
+            delegate.delete(sessionId, activeSessionId);
+        }
+        @Override public void setActive(String activeSessionId) {
+            delegate.setActive(activeSessionId);
+        }
+        @Override public void resetCorrupt() { delegate.resetCorrupt(); }
     }
 
     private static final class ScriptedIo implements ChatSessionStoreIo {

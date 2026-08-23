@@ -16,7 +16,7 @@
 | 主要前端逻辑 | `self-analyst-app/src/main/resources/desktop-ui/`（chat/api/state/init.js） |
 | 主要后端逻辑 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/controller/DesktopChatSessionController.java`（新增） |
 | 路由注册 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/DesktopServer.java` |
-| 会话存储 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/store/ChatSessionStore.java`（`{memoryDir}/chat-sessions/`：`index.json` + `index.state` + 每会话分片，UTF-8，原子写） |
+| 会话存储 | `ChatSessionStore.java` + `SqliteChatSessionIndex.java`（`index.db` + `index.state` + 每会话权威分片） |
 
 ---
 
@@ -65,9 +65,9 @@
 
 - **SPEC-CSP-DEC-014**（请求资源边界）：桌面 chat/session mutation body 最多 256 KiB，JSON 最大深度 32；超限返回 413，错误根类型、字段类型、空消息批次、null 消息以及非法 role/status 返回 400，且不得修改 shard/index。
 
-- **SPEC-CSP-DEC-015**（跨文件恢复）：shard 是正文权威，`index.json` 是派生投影，`index.state` 以 CLEAN/DIRTY 记录唯一在途 mutation 及 active before/after。shard 原子 replace（或删除目录项）是业务 commit point；其后的 index/CLEAN 写失败保留 DIRTY 并仍返回已提交操作的成功结果，下一次任意访问先从 shards 恢复，避免 500 重试重复 append/create。升级前没有 `index.state` 的 v1 数据在首次访问时执行一次 canonical rebuild，修复 stale/orphan/ghost/duplicate meta。
+- **SPEC-CSP-DEC-015**（跨文件恢复）：shard 是正文权威，SQLite `index.db` 是派生投影，`index.state` 以 CLEAN/DIRTY 记录唯一在途 mutation 及 active before/after。shard 原子 replace（或删除目录项）是业务 commit point；其后的 SQLite row/CLEAN 写失败保留 DIRTY 并仍返回成功，下一次访问从 shards 幂等恢复。
 
-- **SPEC-CSP-DEC-016**（有界索引响应）：无参数 `GET /sessions` 保持旧版全量响应；新前端使用 `limit/cursor/q` 游标分页，默认首屏 50、单页最多 200，排序固定为 `updatedAt DESC, id DESC`。搜索先覆盖完整元数据索引再分页；active 不在当前页时单独 GET，不得改写 active。分页先约束网络/DOM，后端 index.json 的线性写放大留待 SQLite 派生索引阶段解决，不手写多文件索引分段。
+- **SPEC-CSP-DEC-016**（SQLite 有界索引）：无参数 `GET /sessions` 保持旧版全量响应；`limit/cursor/q` 由 SQLite 按 `updated_at DESC, id DESC` 执行 keyset 查询、字段过滤和 `LIMIT`。普通 mutation 只 UPSERT/DELETE 一个 metadata row 并在同一 SQLite 事务更新 generation/active，不再解析或重写全部索引。
 
 - **SPEC-CSP-DEC-017**（跨存储删除 saga）：删除会话先在 chat-sessions 目录原子写入 `delete-<sessionId>.state` PENDING tombstone，再删除 AgentScope AgentState 与 transcript。tombstone 是不可逆删除意图的 commit point：写入前失败时两边保持不变；写入后任一崩溃/失败均保留 tombstone。任一 store 访问先幂等完成 transcript 删除，DELETE 重试或下次启动再补齐 AgentState 并清理 tombstone；只有两边都确认删除后才 best-effort 清 tombstone。
 
@@ -82,16 +82,18 @@
   ```text
   {memoryDir}/chat-sessions/
   ├── .writer.lock          # DesktopServer 进程级独占 writer lease
-  ├── index.json            # activeSessionId + 每个会话的元信息投影（含摘要/预览/消息数）
+  ├── index.db              # SQLite 派生投影：metadata + sessions row
+  ├── index.db.ready        # v1 JSON → SQLite 已完成的单调标记
+  ├── index.json            # 仅首次升级读取；迁移后不再写
   ├── index.state           # CLEAN/DIRTY 恢复状态，不属于 shard 扫描范围
   ├── delete-<id>.state     # AgentState + transcript 跨存储删除 tombstone
   ├── <sessionId>.json      # 单个会话的完整数据（含全部 messages）
   └── ...
   ```
 
-  - **分片文件**是单个会话 UI 可见 transcript 的**事实来源**；**index.json** 是从各分片派生的**投影/缓存**（用于列表与搜索），可在损坏/缺失时由分片重建。模型历史的事实来源另为 AgentState（SPEC-CSP-DEC-002）。
-  - 写一条消息只重写**该会话的分片**（≤200 条，有界）以及全局 `index.json` 投影；其它 session shard 保持字节不变。当前 index 解析/重写仍为 O(会话数)，不得宣称历史规模无关。
-  - *取舍*：index.json 只含元信息，远小于全文；分页限制网络和前端渲染，但不消除后端线性写放大。达到性能阈值后应迁移到可从 shards 重建的 SQLite 派生索引。
+  - **分片文件**是 UI transcript 的事实来源；**index.db** 是可从 shards 重建的投影/缓存。模型历史的事实来源另为 AgentState（SPEC-CSP-DEC-002）。
+  - 写消息只重写该会话分片（≤200 条）并 UPSERT 一个 SQLite row；其它 shard 与 v1 `index.json` 保持字节不变。
+  - `index.db.ready` 存在后，DB 丢失/损坏不得重新信任可能陈旧的 `index.json`；须保留损坏 DB 备份并从 shards 重建。
 
 - **SPEC-CSP-DEC-009**（会话搜索数据来源）：会话搜索由后端对完整 index 元数据执行过滤，匹配 **title + 最后一条消息预览 + 会话摘要**，再游标分页返回；不扫描消息正文或 shard 全文。
   - *取舍*：会话数不限后，"前端加载全部消息正文做全文搜索"不可行、"每次查询扫盘"会随会话增多变慢；改为搜索一份**压缩进索引的摘要**，兼顾零扫盘与"能搜到聊过的内容"。代价：搜索召回受摘要质量限制，非逐字全文。
@@ -124,12 +126,13 @@
 ### 6.1 存储布局（见 SPEC-CSP-DEC-008）
 
 - 目录：`{memoryDir}/chat-sessions/`
-- 索引：`index.json` —— `{ "activeSessionId": <string|null>, "sessions": [ <SessionMeta> ... ] }`
+- 索引：`index.db` —— `metadata(schema_version,generation,active_session_id)` + `sessions` 表
+- 迁移标记：`index.db.ready`；旧 `index.json` 仅允许在该标记物理缺失时导入
 - 恢复状态：`index.state` —— CLEAN，或 DIRTY + operation/sessionId/activeBefore/activeAfter
 - 删除恢复：`delete-<sessionId>.state` —— protocolVersion + PENDING + sessionId + requestedAt
 - 分片：`<sessionId>.json` —— 单个 `Session`（含 `messages`）
 
-### 6.2 `SessionMeta`（index.json 中的投影项）
+### 6.2 `SessionMeta`（index.db `sessions` 表投影项）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -175,7 +178,7 @@
 - **SPEC-CSP-MODEL-002**：`createdAt` / `updatedAt` / `summary` 由服务端写入；客户端提交值被忽略。
 - **SPEC-CSP-MODEL-003**：`contextSnapshot` / `suggestedTasks` 保持业务结构不透明，后端不解释其业务含义；但必须执行 DEC-013 的资源归一化（字节、深度、节点、宽度和集合数量），所以超限对象不承诺逐字 round-trip。
 - **SPEC-CSP-MODEL-004**：未知字段读取时忽略、不报错（`@JsonIgnoreProperties(ignoreUnknown=true)` 范式）。
-- **SPEC-CSP-MODEL-005**：`index.json` 是派生投影；当其缺失或不可解析时，后端**应**能从分片文件重建索引，不得因索引损坏丢失会话正文。
+- **SPEC-CSP-MODEL-005**：`index.db` 是派生投影；缺失、不可打开或 schema 不兼容时保留损坏备份并从 shards 重建，不得因索引损坏丢失会话正文。
 
 ---
 
@@ -202,18 +205,18 @@
 - 请求体：`{ "title"?, "source"?, "contextLabel"?, "contextSnapshot"?, "initialMessages"?: [<Message>] }`，均可缺省。
 - 服务端：生成文件系统安全的 `id`、`createdAt`、`updatedAt`；`title` 缺省 `新会话`；`source` 缺省 `manual`；`initialMessages` 逐条分配 `id`/`createdAt` 后写入。
 - 创建后该会话成为 `activeSessionId`（SPEC-CSP-DEC-006）。
-- 写入新分片文件并更新 index.json。返回 HTTP 201 与创建后的完整 `Session`。
+- 写入新分片文件并 UPSERT SQLite 投影行。返回 HTTP 201 与创建后的完整 `Session`。
 - **不**做会话数量裁剪（SPEC-CSP-DEC-005）。
 
 ### SPEC-CSP-API-004：`PUT /desktop/chat/sessions/{id}`（更新会话元信息）
 
 - 请求体部分字段：`{ "title"?, "contextLabel"?, "contextSnapshot"? }`；仅更新提交的非空字段（重命名、首条消息后回填标题、绑定上下文）。
-- 更新 `updatedAt`，同步 index.json 对应项；返回更新后的 `Session`；`id` 不存在返回 404。
+- 更新 `updatedAt`，同步 SQLite 对应行；返回更新后的 `Session`；`id` 不存在返回 404。
 - **不**通过本接口改 `messages`（走 API-006/007）。
 
 ### SPEC-CSP-API-005：`DELETE /desktop/chat/sessions/{id}`（删除会话）
 
-- 删除必须作为一个 Agent 生命周期 gate 内的有序 saga 完成：原子写 PENDING tombstone → 清除 ReActAgent cache → 删除 `(desktop, sessionId)` 的完整 AgentState → 删除会话分片并更新 index.json → best-effort 清 tombstone；中途不得释放 gate。
+- 删除必须作为一个 Agent 生命周期 gate 内的有序 saga 完成：原子写 PENDING tombstone → 清除 ReActAgent cache → 删除 AgentState → 删除会话分片及 SQLite row → best-effort 清 tombstone；中途不得释放 gate。
 - gate 已被聊天占用时返回 HTTP 409 与 `{ "error": "Session is currently processing a chat request" }`，且 tombstone、AgentState、分片和索引都保持不变。即 409 必须发生在 durable intent 之前。
 - tombstone 写入前失败返回 500 且两套权威存储保持不变；写入后失败允许暂时半删除，但 tombstone 必须保留并阻止 transcript/AgentState 被重新使用，DELETE 重试或下次启动最终完成两边删除。清 tombstone 失败不得把已完成删除报告成失败。
 - 即使 LLM 未配置或 `SelfAnalystAgent` 未初始化，仍须直接打开 `{memoryDir}/agent-state/self-analyst-chat/` 对应的 `AgentStateStore` 清除持久化状态，再删除可见 transcript；不得因 `agent == null` 遗留隐藏状态。
@@ -225,7 +228,7 @@
 ### SPEC-CSP-API-006：`POST /desktop/chat/sessions/{id}/messages`（追加消息）
 
 - 请求体为单条 `Message`，或 `{ "messages": [<Message>, ...] }`（支持一次追加 user + pending assistant）。
-- 服务端为每条分配 `id`/`createdAt`，按序追加；对 `content` 执行截断（SPEC-CSP-DEC-005）；更新会话 `updatedAt`；执行单会话消息数裁剪（SPEC-CSP-API-009）；更新 index.json 的 `lastMessagePreview`/`messageCount`/`updatedAt`。
+- 服务端为每条分配 `id`/`createdAt`，按序追加；执行截断与完整 turn 裁剪；更新会话 `updatedAt` 并 UPSERT SQLite 的 preview/count/updatedAt。
 - 触发摘要异步再生成（SPEC-CSP-API-011）。
 - 返回追加后的消息（含服务端 `id`/`createdAt`），HTTP 201；会话 `id` 不存在返回 404。
 
@@ -235,12 +238,12 @@
 - 用于把 pending assistant 更新为 `sent`（写回回复与建议任务）或 `error`（写错误文案），以及「重试」时把 error 改回 pending。
 - `status` 切换为 `pending` 或 `sent` 时必须清除旧 `error`；失败写入 `error` 时同时持久化格式化后的错误 `content`，避免重载后继续显示陈旧的“思考中”。
 - 重试或重载恢复只能更新原 assistant 记录，不得追加新的 user/pending。允许对从 shard 重新加载到的遗留 pending 执行同一恢复流程；其前一条有效 user 消息的服务端 ID 是下一次 `/desktop/chat` 的 `userMessageId`。
-- 更新会话 `updatedAt` 与 index.json 投影；触发摘要异步再生成（SPEC-CSP-API-011）；返回更新后的 `Message`；会话或 `msgId` 不存在返回 404。
+- 更新会话 `updatedAt` 与 SQLite 投影行；触发摘要异步再生成；返回更新后的 `Message`。
 
 ### SPEC-CSP-API-008：`PUT /desktop/chat/active-session`（设置 active 指针）
 
 - 请求体：`{ "activeSessionId": <string|null> }`。
-- 持久化 active 指针（写 index.json）；非 `null` 且不指向已存在会话时返回 HTTP 400。
+- 在 SQLite metadata 中持久化 active 指针；非 `null` 且不指向已存在会话时返回 HTTP 400。
 - 返回 `{ "activeSessionId": <string|null> }`。
 
 ### SPEC-CSP-API-009：服务端裁剪不变量
@@ -254,17 +257,17 @@
 
 ### SPEC-CSP-API-010：原子写、跨文件恢复、分片隔离与降级
 
-- **SPEC-CSP-API-010a**：分片、index 和 state 均使用唯一临时文件、flush、同目录 `ATOMIC_MOVE`；不支持原子 move 时 fail closed，不降级成普通覆盖。
-- **SPEC-CSP-API-010b**：对某会话的写入只触及**该会话分片 + index.json + index.state**，不重写其它会话分片（分片隔离，SPEC-CSP-DEC-008）。
-- **SPEC-CSP-API-010c**：缺失/损坏 index 或 v1 缺 state 时从 shards canonical rebuild；DIRTY 时按 CREATE/UPSERT/DELETE 和目标 shard 是否存在恢复 active。目录枚举 I/O 失败必须中止，不得写出部分/空 index；单个损坏 shard 仍 skip+warn、不删除。
-- **SPEC-CSP-API-010d**：DIRTY/state 写或 shard commit 前失败返回 500 且权威数据不变；shard/delete commit 后的 index/CLEAN 失败记录 warning、保留 DIRTY并返回成功，下一次访问幂等恢复。
+- **SPEC-CSP-API-010a**：分片、state、tombstone 和 migration marker 使用唯一临时文件、flush、同目录 `ATOMIC_MOVE`；SQLite row/metadata 使用单一 FULL-synchronous transaction。任一原子机制不可用时 fail closed。
+- **SPEC-CSP-API-010b**：普通 mutation 只触及**该会话分片 + 一个 SQLite row/metadata 事务 + index.state**，不重写其它 shard 或 v1 `index.json`。
+- **SPEC-CSP-API-010c**：缺失/损坏 SQLite index 或 v1 缺 state 时从 shards canonical rebuild；DIRTY 时按 CREATE/UPSERT/DELETE 和目标 shard 是否存在恢复 active。目录枚举失败不得写出部分投影。
+- **SPEC-CSP-API-010d**：DIRTY/state 写或 shard commit 前失败返回 500 且权威数据不变；shard/delete commit 后的 SQLite/CLEAN 失败记录 warning、保留 DIRTY 并返回成功，下一次访问幂等恢复。
 - **SPEC-CSP-API-010e**：只有物理缺失的 `index.state` 才按 v1 迁移。损坏、字段缺失、未知 operation、违反 CREATE/UPSERT/DELETE active 不变量的 intent 或未来 protocolVersion 均 fail closed，不得覆盖 index/state 恢复证据；目录存在但不是可访问目录、或 DELETE 目标的物理存在状态无法确定时同样失败，不得伪装为空会话库或误判 commit point。
 - **SPEC-CSP-API-010f**：`delete-<id>.state` 必须严格校验 protocol/state/sessionId/文件名/requestedAt；损坏或未来版本 fail closed 并保留证据。存在有效 tombstone 时，任一 store 访问先幂等删除对应 transcript；完整 AgentState 补偿由删除协调器在 DELETE 重试/启动恢复中完成。
 - **SPEC-CSP-API-010g**：生产 DesktopServer 必须通过 `ChatSessionStore.openExclusive` 持有 `.writer.lock`；无法取得 lease 时启动失败，shutdown 后同一路径可重新取得。
 
 ### SPEC-CSP-API-011：会话摘要生成（异步、可降级）
 
-- **SPEC-CSP-API-011a**：当会话内容发生实质变化（assistant 回复落定 / 新消息追加）后，后端**异步、best-effort** 地（重新）生成该会话 `summary`（约一句话），写入分片与 index.json；可对再生成做节流/合并。
+- **SPEC-CSP-API-011a**：会话内容发生实质变化后，后端异步、best-effort 生成 `summary`，写入分片与 SQLite row。
 - **SPEC-CSP-API-011b**：摘要由 LLM 基于会话内容生成；**LLM 不可用 / 预算受限（`SPEC-BUDGET-*`）/ 调用失败**时回退**确定性兜底摘要**（会话内若干用户消息片段的拼接）。
 - **SPEC-CSP-API-011c**：摘要生成**不得阻断** API-006/007 的响应；GET 返回**当前已有**摘要，允许滞后于最新消息。
 - **SPEC-CSP-API-011d**：摘要的 LLM 输入仅为会话自身内容，**绝不**包含配置敏感值（SPEC-CSP-DEC-007/-010）；摘要调用计入 LLM 用量并受预算约束。
@@ -324,15 +327,15 @@
 | SPEC-CSP-TST-003 | `POST /sessions` 创建后 `GET /sessions/{id}` | 服务端分配了 `id`/`createdAt`/`updatedAt`，落盘为独立分片文件，新会话为 `activeSessionId` |
 | SPEC-CSP-TST-004 | `POST /sessions/{id}/messages` 追加 user+pending 后 `GET /sessions/{id}` | 两条消息按序存在并各有服务端 `id` |
 | SPEC-CSP-TST-005 | `PUT /sessions/{id}/messages/{msgId}` 把 pending 改为 sent + suggestedTasks | 消息 `status=sent`、内容/建议已更新，会话 `updatedAt` 前移 |
-| SPEC-CSP-TST-006 | `PUT /sessions/{id}` 改标题 | 标题更新，`messages` 不受影响，index.json 投影同步 |
+| SPEC-CSP-TST-006 | `PUT /sessions/{id}` 改标题 | 标题更新，`messages` 不受影响，SQLite row 同步 |
 | SPEC-CSP-TST-007 | `DELETE /sessions/{id}`，删除的是 active | 返回 `deleted:true` 且 `activeSessionId` 重选为剩余最新者（无则 null），分片文件被移除 |
 | SPEC-CSP-TST-008 | 创建大量会话（如 200 个） | **无淘汰**，全部保留且可读（SPEC-CSP-API-009a / DEC-005） |
-| SPEC-CSP-TST-009 | 向会话 A 追加消息 | 仅会话 A 分片与 index.json 被改写，会话 B 分片文件内容/时间戳不变（分片隔离，SPEC-CSP-API-010b） |
+| SPEC-CSP-TST-009 | 向会话 A 追加消息 | 仅会话 A 分片与一个 SQLite row 被改写，会话 B 分片不变 |
 | SPEC-CSP-TST-010 | 单会话追加超过 200 条消息 | 仅保留最近 200 条（SPEC-CSP-API-009b） |
 | SPEC-CSP-TST-011 | 追加 `content` 超 20000 字符的消息 | 落盘内容被截断且以 `...` 结尾（SPEC-CSP-API-009c） |
 | SPEC-CSP-TST-012 | `GET/PUT/DELETE /sessions/{id}` 未知 id | 返回 HTTP 404 |
 | SPEC-CSP-TST-013 | `PUT /active-session` 指向不存在会话 | 返回 HTTP 400，磁盘 active 指针不变 |
-| SPEC-CSP-TST-014 | 删除/损坏 index.json 后 `GET /sessions` | 从分片重建索引、会话正文不丢（SPEC-CSP-MODEL-005 / API-010c） |
+| SPEC-CSP-TST-014 | 删除/损坏 index.db 后 `GET /sessions` | 保留损坏备份并从 shards 重建；marker 后不读陈旧 v1 JSON |
 | SPEC-CSP-TST-015 | 追加消息后摘要再生成（LLM 不可用） | 会话 `summary` 为确定性兜底文本（非空），收发未被阻断（SPEC-CSP-API-011b/c） |
 | SPEC-CSP-TST-016 | 前端按摘要搜索（手动/UI） | 输入命中某会话 `summary` 的词，列表过滤出该会话（SPEC-CSP-FE-005） |
 | SPEC-CSP-TST-017 | 前端发送消息（手动/UI） | Network 出现 `POST .../messages` → 带服务端 `sessionId + userMessageId` 的 `POST /desktop/chat` → `PUT .../messages/{pendingId}`，刷新后消息仍在 |
@@ -367,6 +370,10 @@
 | SPEC-CSP-TST-046 | transcript 已删但 tombstone 清理失败 | 首次 DELETE 仍成功；重启幂等清 tombstone，不复活会话 |
 | SPEC-CSP-TST-047 | 损坏/未来删除 tombstone | fail closed，保留 tombstone 与 shard 原字节 |
 | SPEC-CSP-TST-048 | 同 memoryDir 两个生产 writer | 第二个 lease fail fast；第一个 close 后可重新打开 |
+| SPEC-CSP-TST-049 | v1 index.json 首次升级 | 构建 index.db + ready marker；后续 mutation 不再改写旧 JSON |
+| SPEC-CSP-TST-050 | SQLite UPSERT/DELETE/active | row mutation 与 generation/active 同事务；active-only 不增加 generation |
+| SPEC-CSP-TST-051 | SQL keyset + q（含 `%`/`_`） | 稳定分页且 LIKE 通配符按字面量搜索，不扫描/返回全索引 |
+| SPEC-CSP-TST-052 | marker 后 index.db 损坏/丢失 | 备份损坏 DB，从 shards 重建且忽略陈旧 index.json |
 
 ---
 

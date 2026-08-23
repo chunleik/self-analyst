@@ -341,7 +341,7 @@ type SuggestedTask = {
 
 完整 REST 与落盘契约由 [`chat-session-store.md`](chat-session-store.md) 定义。本文件只保留会话 tab 必须遵守的集成约束。
 
-- UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 为权威：`index.json` 保存 active 指针和列表投影，`index.state` 记录跨文件恢复状态，每个 lowercase hex32 `sessionId` 对应一个 shard。
+- UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 的每会话 shard 为权威；`index.db` 保存 active 指针和可重建列表投影，`index.state` 记录跨文件恢复状态。
 - 前端初始化只加载 50 条索引元数据；active 不在首屏时单独加载，激活其它会话时再懒加载正文。`state.chatSessions` 仅是分页渲染缓存。
 - 创建、切换 active、重命名、删除、追加消息和更新 pending 状态全部通过细粒度 REST 接口完成。客户端不得生成或覆盖会话 ID、消息 ID、`createdAt` 或 `updatedAt`。
 - 会话数量不设上限。单会话最多 200 条消息且按完整 user turn 保留；单条输入 `content` 最多保留 20000 code point 后追加 `...`。opaque 快照、建议任务、请求体和最终 shard 同样受服务端资源预算约束。
@@ -716,7 +716,7 @@ Agent 回复如包含建议任务:
    - 不破坏已有 Agent/Config 样式。
 
 4. Java 后端
-   - `ChatSessionStore` — `index.json` + `index.state` + 每会话分片、DIRTY 崩溃恢复、服务端 ID、原子写和裁剪不变量。
+   - `ChatSessionStore` — `index.db` + `index.state` + 每会话分片、SQLite 行级投影、DIRTY 崩溃恢复、服务端 ID 和裁剪不变量。
    - `DesktopChatSessionController` / `DesktopServer` — 注册并实现会话 REST CRUD。
    - `DesktopAgentController` — 校验 `sessionId + userMessageId`、执行旧 server transcript 懒迁移，并把 busy 映射为 409。
    - `SelfAnalystAgent` — 按 `(desktop, sessionId)` 持久化 AgentState、幂等重试和生命周期 gate。

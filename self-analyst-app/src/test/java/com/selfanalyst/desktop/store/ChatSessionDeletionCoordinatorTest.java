@@ -129,7 +129,7 @@ class ChatSessionDeletionCoordinatorTest {
         Files.writeString(intent, "{\"protocolVersion\":99,\"state\":\"PENDING\","
                 + "\"sessionId\":\"" + session.id + "\"}");
         byte[] shardBefore = Files.readAllBytes(shard(memoryDir, session.id));
-        byte[] indexBefore = Files.readAllBytes(chatDir(memoryDir).resolve("index.json"));
+        byte[] indexBefore = Files.readAllBytes(chatDir(memoryDir).resolve("index.db"));
         byte[] stateBefore = Files.readAllBytes(chatDir(memoryDir).resolve("index.state"));
 
         assertThrows(IllegalStateException.class,
@@ -138,7 +138,7 @@ class ChatSessionDeletionCoordinatorTest {
         assertTrue(Files.exists(intent));
         assertNotNull(new ObjectMapper().readTree(intent.toFile()));
         assertArrayEquals(shardBefore, Files.readAllBytes(shard(memoryDir, session.id)));
-        assertArrayEquals(indexBefore, Files.readAllBytes(chatDir(memoryDir).resolve("index.json")));
+        assertArrayEquals(indexBefore, Files.readAllBytes(chatDir(memoryDir).resolve("index.db")));
         assertArrayEquals(stateBefore, Files.readAllBytes(chatDir(memoryDir).resolve("index.state")));
     }
 

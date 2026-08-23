@@ -122,6 +122,41 @@ test("chat requests route by server-issued session id", () => {
   assert.match(drawer, /api\s*\.postChat\(msg,\s*context\)/);
 });
 
+test("desktop turn context uses bounded projections instead of whole task and timeline objects", () => {
+  const { sandbox, session } = createChatSandbox();
+  sandbox.state.chatContextToggles = { currentStatus: true, futureTasks: true };
+  sandbox.state.summary = {
+    current: { headline: "focus", evidence: ["e".repeat(500), "two", "three", "four"] },
+    timeline: Array.from({ length: 5 }, (_, i) => ({
+      key: `k${i}`,
+      label: `l${i}`,
+      headline: "h".repeat(500),
+      evidence: ["x".repeat(500), "two", "three", "four"],
+      hugeInternalPayload: "must-not-leak",
+    })),
+  };
+  sandbox.state.tasks = Array.from({ length: 12 }, (_, i) => ({
+    id: `t${i}`,
+    title: "t".repeat(250),
+    notes: "n".repeat(500),
+    priority: "medium",
+    status: "open",
+    hugeInternalPayload: "must-not-leak",
+  }));
+
+  const context = sandbox.buildChatContext(session);
+
+  assert.equal(context.currentStatus.evidence.length, 3);
+  assert.equal(context.currentStatus.evidence[0].length, 300);
+  assert.equal(context.futureTasks.length, 10);
+  assert.equal(context.futureTasks[0].title.length, 200);
+  assert.equal(context.futureTasks[0].notes.length, 300);
+  assert.equal(context.futureTasks[0].hugeInternalPayload, undefined);
+  assert.equal(context.recentActivity.length, 4);
+  assert.equal(context.recentActivity[0].headline.length, 300);
+  assert.equal(context.recentActivity[0].hugeInternalPayload, undefined);
+});
+
 test("a persisted pending assistant is retryable only when no local request is in flight", () => {
   const idle = createChatSandbox({ status: "pending", chatSending: false });
   let clickedMessageId = null;

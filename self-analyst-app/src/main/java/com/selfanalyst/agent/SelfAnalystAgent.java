@@ -30,6 +30,7 @@ import io.agentscope.core.tool.ToolkitConfig;
 import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
 import io.agentscope.extensions.model.openai.OpenAIChatModel;
+import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
@@ -68,6 +69,7 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final HeadroomService headroomService;
     private final McpClientWrapper webSearchMcpClient;
     private final AgentStateStore agentStateStore;
+    private final TransactionalAgentStateCompactor stateCompactor;
     private final Lang lang;
     private final AtomicBoolean chatRunning = new AtomicBoolean();
     private volatile boolean usageMissingLogged;
@@ -172,6 +174,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                     .model(chatModel)
                     .toolkit(toolkit)
                     .middlewares(List.of(
+                            new ConversationContextMiddleware(),
                             new DynamicMemoryContextMiddleware(
                                     lang, () -> memory.profile().buildContextSummary()),
                             new PlanMiddleware(usageMeter)))
@@ -202,6 +205,26 @@ public class SelfAnalystAgent implements AutoCloseable {
         this.agent = builtAgent;
         this.webSearchMcpClient = registeredWebSearchMcpClient;
         this.agentStateStore = builtStateStore;
+        if (config.agentCompactionEnabled()) {
+            io.agentscope.core.model.Model compactionModel = new UsageMeteredModel(
+                    builtPlainModel, usageMeter, UsageMeter.Category.SUMMARY);
+            CompactionConfig compactionConfig = CompactionConfig.builder()
+                    .triggerMessages(config.agentCompactionTriggerMessages())
+                    .triggerTokens(config.agentCompactionTriggerTokens())
+                    .keepMessages(config.agentCompactionKeepMessages())
+                    .keepTokens(config.agentCompactionKeepTokens())
+                    .flushBeforeCompact(false)
+                    .offloadBeforeCompact(false)
+                    .model(compactionModel)
+                    .build();
+            this.stateCompactor = new TransactionalAgentStateCompactor(
+                    builtAgent,
+                    config.memoryDir().resolve("agent-workspace").resolve("self-analyst-chat"),
+                    compactionModel,
+                    compactionConfig);
+        } else {
+            this.stateCompactor = null;
+        }
     }
 
     static String effectiveLlmBaseUrl(Config config, HeadroomService headroomService) {
@@ -254,7 +277,8 @@ public class SelfAnalystAgent implements AutoCloseable {
     }
 
     public Mono<String> chat(String userInput) {
-        return chatInternal(LEGACY_SESSION_ID, null, userInput, null);
+        return chatInternal(LEGACY_SESSION_ID, null,
+                () -> new PersistedDesktopTurn(userInput, null, null));
     }
 
     public Mono<String> chat(String sessionId, String userInput) {
@@ -262,7 +286,10 @@ public class SelfAnalystAgent implements AutoCloseable {
     }
 
     public Mono<String> chat(String sessionId, String userMessageId, String userInput) {
-        return chat(sessionId, userMessageId, userInput, null);
+        String validatedSessionId = requireDesktopSessionId(sessionId);
+        String validatedMessageId = requireDesktopMessageId(userMessageId);
+        return chatInternal(validatedSessionId, validatedMessageId,
+                () -> new PersistedDesktopTurn(userInput, null, null));
     }
 
     /**
@@ -278,55 +305,93 @@ public class SelfAnalystAgent implements AutoCloseable {
             Supplier<List<Msg>> existingSessionHistorySupplier) {
         String validatedSessionId = requireDesktopSessionId(sessionId);
         String validatedMessageId = requireDesktopMessageId(userMessageId);
-        return chatInternal(validatedSessionId, validatedMessageId, userInput,
-                existingSessionHistorySupplier);
+        return chatInternal(validatedSessionId, validatedMessageId, () -> {
+            List<Msg> history = existingSessionHistorySupplier != null
+                    ? existingSessionHistorySupplier.get() : null;
+            return existingSessionHistorySupplier != null && history == null
+                    ? null : new PersistedDesktopTurn(userInput, null, history);
+        });
+    }
+
+    /** Session-owned turn loaded under the application gate. */
+    public record PersistedDesktopTurn(
+            String userInput, Object contextSnapshot, List<Msg> existingHistory) {
+        public PersistedDesktopTurn {
+            userInput = userInput != null ? userInput : "";
+            existingHistory = existingHistory != null ? List.copyOf(existingHistory) : null;
+        }
+    }
+
+    public Mono<String> chat(
+            String sessionId,
+            String userMessageId,
+            Supplier<PersistedDesktopTurn> persistedTurnSupplier) {
+        String validatedSessionId = requireDesktopSessionId(sessionId);
+        String validatedMessageId = requireDesktopMessageId(userMessageId);
+        if (persistedTurnSupplier == null) {
+            throw new IllegalArgumentException("Persisted desktop turn supplier is required");
+        }
+        return chatInternal(validatedSessionId, validatedMessageId, persistedTurnSupplier);
     }
 
     private Mono<String> chatInternal(
             String sessionId,
             String userMessageId,
-            String userInput,
-            Supplier<List<Msg>> existingSessionHistorySupplier) {
+            Supplier<PersistedDesktopTurn> persistedTurnSupplier) {
         return runExclusiveChat(() -> {
-            List<Msg> existingHistory = null;
-            if (existingSessionHistorySupplier != null) {
-                existingHistory = existingSessionHistorySupplier.get();
-                if (existingHistory == null) {
-                    throw new ChatSessionUnavailableException(sessionId);
-                }
-            }
+            PersistedDesktopTurn turn = persistedTurnSupplier.get();
+            if (turn == null) throw new ChatSessionUnavailableException(sessionId);
             if (usageMeter != null && usageMeter.isBlocked()) {
-                return Mono.just(lang == Lang.EN
-                        ? "The daily token budget has been reached; the conversation is paused to control cost. "
-                          + "You can adjust llm.budget.dailyTokens / llm.budget.mode in the configuration, "
-                          + "or wait for the automatic daily reset."
-                        : "已达到今日 token 使用上限，已暂停对话以控制成本。"
-                          + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
+                return Mono.just(budgetBlockedMessage());
             }
-            seedSessionHistoryIfAbsent(sessionId, existingHistory);
-            RuntimeContext context = RuntimeContext.builder()
-                    .userId(DESKTOP_USER_ID)
-                    .sessionId(sessionId)
-                    .build();
-            // With a persistent store every call reloads its slot. Eagerly evict the local
-            // cache after completion/error/cancel so long-running desktop sessions stay bounded.
-            return Mono.using(
-                            () -> context,
-                            activeContext -> {
-                                CallPreparation prepared = prepareCall(
-                                        sessionId, userMessageId, userInput);
-                                return prepared.completedReply() != null
-                                        ? Mono.just(Msg.builder()
-                                                .name("assistant")
-                                                .role(MsgRole.ASSISTANT)
-                                                .textContent(prepared.completedReply())
-                                                .build())
-                                        : agent.call(prepared.messages(), activeContext);
-                            },
-                            ignored -> agent.clearStateCache(DESKTOP_USER_ID, sessionId),
-                            true)
-                    .map(Msg::getTextContent);
+            seedSessionHistoryIfAbsent(sessionId, turn.existingHistory());
+            CallPreparation prepared;
+            try {
+                prepared = prepareCall(sessionId, userMessageId, turn.userInput());
+            } catch (RuntimeException | Error failure) {
+                agent.clearStateCache(DESKTOP_USER_ID, sessionId);
+                throw failure;
+            }
+            if (prepared.completedReply() != null) {
+                agent.clearStateCache(DESKTOP_USER_ID, sessionId);
+                return Mono.just(prepared.completedReply());
+            }
+            Mono<Boolean> compact = stateCompactor != null
+                    ? stateCompactor.compactIfNeeded(DESKTOP_USER_ID, sessionId)
+                    : Mono.just(false);
+            return compact.then(Mono.defer(() -> {
+                if (usageMeter != null && usageMeter.isBlocked()) {
+                    agent.clearStateCache(DESKTOP_USER_ID, sessionId);
+                    return Mono.just(budgetBlockedMessage());
+                }
+                RuntimeContext.Builder contextBuilder = RuntimeContext.builder()
+                        .userId(DESKTOP_USER_ID)
+                        .sessionId(sessionId);
+                if (turn.contextSnapshot() != null) {
+                    contextBuilder.put(ConversationContextMiddleware.DesktopTurnContext.class,
+                            new ConversationContextMiddleware.DesktopTurnContext(
+                                    turn.contextSnapshot()));
+                }
+                RuntimeContext context = contextBuilder.build();
+                // With a persistent store every call reloads its slot. Eagerly evict the local
+                // cache after completion/error/cancel so long-running desktop sessions stay bounded.
+                return Mono.using(
+                                () -> context,
+                                activeContext -> agent.call(prepared.messages(), activeContext),
+                                ignored -> agent.clearStateCache(DESKTOP_USER_ID, sessionId),
+                                true)
+                        .map(Msg::getTextContent);
+            }));
         });
+    }
+
+    private String budgetBlockedMessage() {
+        return lang == Lang.EN
+                ? "The daily token budget has been reached; the conversation is paused to control cost. "
+                  + "You can adjust llm.budget.dailyTokens / llm.budget.mode in the configuration, "
+                  + "or wait for the automatic daily reset."
+                : "已达到今日 token 使用上限，已暂停对话以控制成本。"
+                  + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。";
     }
 
     private void seedSessionHistoryIfAbsent(String sessionId, List<Msg> existingHistory) {

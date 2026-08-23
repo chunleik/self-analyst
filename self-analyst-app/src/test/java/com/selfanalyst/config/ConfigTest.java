@@ -27,6 +27,9 @@ class ConfigTest {
         assertEquals("false", props.getProperty("wiki.enabled"));
         assertEquals("false", props.getProperty("embedding.enabled"));
         assertEquals("false", props.getProperty("websearch.enabled"));
+        assertEquals("true", props.getProperty("agent.compaction.enabled"));
+        assertEquals("30", props.getProperty("agent.compaction.triggerMessages"));
+        assertEquals("60000", props.getProperty("agent.compaction.triggerTokens"));
     }
 
     @Test
@@ -49,6 +52,64 @@ class ConfigTest {
         assertEquals("http://127.0.0.1:8787/v1", c.headroomProxyUrl());
         assertTrue(c.headroomStatsEnabled());
         assertFalse(c.headroomOutputShaper());
+        assertFalse(c.agentCompactionEnabled(), "unit tests opt in to compaction explicitly");
+    }
+
+    @Test
+    void loadsAndNormalizesCompactionSettings(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [agent.compaction]
+                enabled = true
+                triggerMessages = 12
+                triggerTokens = 20000
+                keepMessages = 4
+                keepTokens = 5000
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> {
+            Config c = Config.load();
+            assertTrue(c.agentCompactionEnabled());
+            assertEquals(12, c.agentCompactionTriggerMessages());
+            assertEquals(20000, c.agentCompactionTriggerTokens());
+            assertEquals(4, c.agentCompactionKeepMessages());
+            assertEquals(5000, c.agentCompactionKeepTokens());
+        });
+    }
+
+    @Test
+    void singleThresholdCompactionKeepsABoundedUsableCutoff(@TempDir Path dir)
+            throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [agent.compaction]
+                enabled = true
+                triggerMessages = 12
+                triggerTokens = 0
+                keepMessages = 999999
+                keepTokens = 999999
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> {
+            Config c = Config.load();
+            assertEquals(4, c.agentCompactionKeepMessages());
+            assertEquals(0, c.agentCompactionKeepTokens(),
+                    "message-only mode must use AgentScope's message cutoff");
+        });
+
+        Files.writeString(dir.resolve("config.toml"), """
+                [agent.compaction]
+                enabled = true
+                triggerMessages = 0
+                triggerTokens = 20000
+                keepMessages = 999999
+                keepTokens = 0
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> {
+            Config c = Config.load();
+            assertEquals(10, c.agentCompactionKeepMessages());
+            assertEquals(5000, c.agentCompactionKeepTokens(),
+                    "token-only mode needs a positive cutoff below its trigger");
+        });
     }
 
     @Test

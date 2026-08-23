@@ -19,7 +19,7 @@ SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集�
 | 音频转写文本 | 同上（aw-data） | 仅在开启音频时产生 |
 | 成长记忆（目标 / 模式 / 改进记录） | `~/.self-analyst/memory/` | |
 | 聊天正文（UI transcript） | `{memory.dir}/chat-sessions/` | `index.json` + 每会话分片，按服务端会话 ID 明文存储 |
-| Agent 模型上下文 | `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/` | 与聊天正文分开保存；按会话隔离，是模型执行历史的权威 |
+| Agent 模型上下文 | `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/` | 与聊天正文分开保存；按会话隔离，包含近期消息与滚动摘要，是模型执行历史的权威 |
 | Wiki 摘要 + 语义索引 | `~/.self-analyst/` 下的 SQLite / Lucene 索引 | |
 | API 密钥 | 环境变量或 `application.properties` | **不**随数据上传，仅用于调用你配置的服务 |
 
@@ -46,6 +46,7 @@ SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集�
 | 出口 | 发送的内容 | 目的地（可配） | 默认 |
 |------|-----------|---------------|------|
 | Agent 对话 | 当前提问 + 同会话 AgentState 模型历史 + 本轮选择/检索的活动、任务或内容片段 | `llm.base-url` | 随提问触发 |
+| AgentState 压缩 | 达到阈值的旧会话前缀，用于生成有界滚动摘要 | `llm.base-url` | 默认开启；仅达到 message/token 阈值时触发 |
 | 会话摘要 | 该会话中的聊天正文（不含配置敏感值） | `llm.base-url` | 消息实质变化后异步触发；失败时本地确定性降级 |
 | Wiki 摘要 | 时段内的活动标题 / OCR 文本片段 | `llm.base-url` | **开启**（`wiki.enabled=true`）|
 | 语义索引 Embedding | 待索引文本 | `embedding.base-url` | **开启**（`embedding.enabled=true`）|

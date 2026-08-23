@@ -185,6 +185,15 @@ class DesktopConfigControllerTest {
 
         var r2 = ctrl.applyRawSave("[llm]\nmodel = \"gpt-4o-mini\"\napi-key = \"sk-x\"\n");
         assertFalse(r2.restartRequired().contains("llm.api-key"));
+
+        var r3 = ctrl.applyRawSave("""
+                [llm]
+                model = "gpt-4o-mini"
+                api-key = "sk-x"
+                [agent.compaction]
+                triggerMessages = 24
+                """);
+        assertTrue(r3.restartRequired().contains("agent.compaction.triggerMessages"));
     }
 
     @Test
@@ -257,6 +266,24 @@ class DesktopConfigControllerTest {
     }
 
     @Test
+    void structuredPutMapsNestedAgentCompactionKeys(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+
+        var result = ctrl.applyStructuredSave(Map.of(
+                "agent", Map.of("compaction", Map.of(
+                        "enabled", false,
+                        "triggerMessages", 24,
+                        "keepMessages", 8))));
+
+        Properties user = store.loadUser();
+        assertEquals("false", user.getProperty("agent.compaction.enabled"));
+        assertEquals("24", user.getProperty("agent.compaction.triggerMessages"));
+        assertEquals("8", user.getProperty("agent.compaction.keepMessages"));
+        assertTrue(result.restartRequired().contains("agent.compaction.triggerMessages"));
+    }
+
+    @Test
     void structuredPutDoesNotOverrideUnchangedHeadroomDefaults(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         var ctrl = controller(dir, store);
@@ -292,6 +319,27 @@ class DesktopConfigControllerTest {
         assertEquals("http://127.0.0.1:8787/v1", headroom.get("headroomProxyUrl").get("effectiveValue"));
         assertEquals("true", headroom.get("headroomStatsEnabled").get("effectiveValue"));
         assertEquals("false", headroom.get("headroomOutputShaper").get("effectiveValue"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void structuredCompactionFieldsUseTheirFullConfigKeyForMetadata(@TempDir Path dir)
+            throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("[agent.compaction]\ntriggerMessages = 24\n");
+        var ctrl = controller(dir, store);
+        Method method = DesktopConfigController.class.getDeclaredMethod(
+                "buildAgentSection", Properties.class);
+        method.setAccessible(true);
+
+        Map<String, Object> agent = (Map<String, Object>) method.invoke(ctrl, store.load());
+        Map<String, Map<String, Object>> compaction =
+                (Map<String, Map<String, Object>>) agent.get("compaction");
+        Map<String, Object> triggerMessages = compaction.get("triggerMessages");
+
+        assertEquals("24", triggerMessages.get("savedValue"));
+        assertEquals("user_config", triggerMessages.get("source"));
+        assertEquals(true, triggerMessages.get("restartRequiredOnChange"));
     }
 
     @Test

@@ -72,6 +72,11 @@ public record Config(
         Path fileSemanticIndexDir,
         int llmMaxTokens,
         int agentMaxIters,
+        boolean agentCompactionEnabled,
+        int agentCompactionTriggerMessages,
+        int agentCompactionTriggerTokens,
+        int agentCompactionKeepMessages,
+        int agentCompactionKeepTokens,
         int desktopSummaryMaxTimelineLlm,
         String budgetMode,
         long budgetDailyTokens,
@@ -248,6 +253,61 @@ public record Config(
         int agentMaxIters = parseIntOr(props,
                 envOrProp(props, "llm.agent.maxIters", "LLM_AGENT_MAX_ITERS", "8"), 8);
         if (agentMaxIters < 1) agentMaxIters = 8;
+        boolean agentCompactionEnabled = Boolean.parseBoolean(
+                envOrProp(props, "agent.compaction.enabled", "AGENT_COMPACTION_ENABLED", "true"));
+        int agentCompactionTriggerMessages = parseIntOr(props,
+                envOrProp(props, "agent.compaction.triggerMessages",
+                        "AGENT_COMPACTION_TRIGGER_MESSAGES", "30"), 30);
+        if (agentCompactionTriggerMessages < 0
+                || (agentCompactionTriggerMessages > 0 && agentCompactionTriggerMessages < 3)
+                || agentCompactionTriggerMessages > 10000) {
+            agentCompactionTriggerMessages = 30;
+        }
+        int agentCompactionTriggerTokens = parseIntOr(props,
+                envOrProp(props, "agent.compaction.triggerTokens",
+                        "AGENT_COMPACTION_TRIGGER_TOKENS", "60000"), 60000);
+        if (agentCompactionTriggerTokens < 0
+                || (agentCompactionTriggerTokens > 0 && agentCompactionTriggerTokens < 4000)) {
+            agentCompactionTriggerTokens = 60000;
+        }
+        if (agentCompactionEnabled
+                && agentCompactionTriggerMessages == 0
+                && agentCompactionTriggerTokens == 0) {
+            agentCompactionTriggerMessages = 30;
+            agentCompactionTriggerTokens = 60000;
+        }
+        int agentCompactionKeepMessages = parseIntOr(props,
+                envOrProp(props, "agent.compaction.keepMessages",
+                        "AGENT_COMPACTION_KEEP_MESSAGES", "10"), 10);
+        if (agentCompactionKeepMessages < 2
+                || agentCompactionKeepMessages > 100
+                || (agentCompactionTriggerMessages > 0
+                    && agentCompactionKeepMessages >= agentCompactionTriggerMessages)) {
+            agentCompactionKeepMessages = agentCompactionTriggerMessages > 3
+                    ? Math.min(100, Math.max(2, agentCompactionTriggerMessages / 3))
+                    : agentCompactionTriggerMessages == 3 ? 2 : 10;
+        }
+        int agentCompactionKeepTokens = parseIntOr(props,
+                envOrProp(props, "agent.compaction.keepTokens",
+                        "AGENT_COMPACTION_KEEP_TOKENS", "12000"), 12000);
+        if (agentCompactionTriggerTokens == 0) {
+            // AgentScope chooses token-based retention whenever keepTokens > 0. In a
+            // message-only configuration that can make an oversized token window yield a
+            // zero cutoff forever, so use the bounded message window explicitly.
+            agentCompactionKeepTokens = 0;
+        } else {
+            int safeTokenWindow = Math.min(12_000,
+                    Math.max(1_000, agentCompactionTriggerTokens / 4));
+            if (agentCompactionKeepTokens < 0
+                    || agentCompactionKeepTokens > 64_000
+                    || agentCompactionKeepTokens >= agentCompactionTriggerTokens
+                    || (agentCompactionTriggerMessages == 0
+                        && agentCompactionKeepTokens == 0)
+                    || (agentCompactionKeepTokens > 0
+                        && agentCompactionKeepTokens < 1_000)) {
+                agentCompactionKeepTokens = safeTokenWindow;
+            }
+        }
         int desktopSummaryMaxTimelineLlm = parseIntOr(props,
                 envOrProp(props, "desktop.summary.maxTimelineLlm", "DESKTOP_SUMMARY_MAX_TIMELINE_LLM", "4"), 4);
         if (desktopSummaryMaxTimelineLlm < 0) desktopSummaryMaxTimelineLlm = 0;
@@ -300,7 +360,10 @@ public record Config(
                 fileWatchHeartbeatThrottleSeconds, fileWatchExtensions,
                 fileWatchExcludeDirs, fileWatchExcludeGlobs,
                 fileWatchSemanticEnabled, fileSemanticIndexDir,
-                llmMaxTokens, agentMaxIters, desktopSummaryMaxTimelineLlm,
+                llmMaxTokens, agentMaxIters,
+                agentCompactionEnabled, agentCompactionTriggerMessages,
+                agentCompactionTriggerTokens, agentCompactionKeepMessages,
+                agentCompactionKeepTokens, desktopSummaryMaxTimelineLlm,
                 budgetMode, budgetDailyTokens, budgetWarnRatio,
                 headroomEnabled, headroomProxyUrl, headroomStatsEnabled, headroomOutputShaper,
                 appLanguage);
@@ -339,7 +402,8 @@ public record Config(
                 "mic", "auto", "gpt-4o-transcribe", 10,
                 false, "", 512, 8000, 60, 5, 5, 5, "", "", "", true,
                 baseDir.resolve("file-semantic-index"),
-                2048, 8, 4, "warn", 100000000L, 0.8,
+                2048, 8, false, 30, 60000, 10, 12000,
+                4, "warn", 100000000L, 0.8,
                 false, "http://127.0.0.1:8787/v1", true, false,
                 "auto");
     }

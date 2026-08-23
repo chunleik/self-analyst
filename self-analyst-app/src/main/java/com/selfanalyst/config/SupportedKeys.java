@@ -50,6 +50,11 @@ public final class SupportedKeys {
         put("agent.summaryRefreshMinutes", "5", KeyType.INTEGER);
         put("agent.allowAgentTasks", "false", KeyType.BOOLEAN);
         put("agent.cacheSummaries", "true", KeyType.BOOLEAN);
+        put("agent.compaction.enabled", "true", KeyType.BOOLEAN);
+        put("agent.compaction.triggerMessages", "30", KeyType.INTEGER);
+        put("agent.compaction.triggerTokens", "60000", KeyType.INTEGER);
+        put("agent.compaction.keepMessages", "10", KeyType.INTEGER);
+        put("agent.compaction.keepTokens", "12000", KeyType.INTEGER);
 
         put("desktop.hideToTray", "true", KeyType.BOOLEAN);
         put("desktop.autoOpenWindow", "true", KeyType.BOOLEAN);

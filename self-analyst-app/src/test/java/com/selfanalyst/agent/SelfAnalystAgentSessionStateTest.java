@@ -1,12 +1,14 @@
 package com.selfanalyst.agent;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.usage.UsageMeter;
 import com.sun.net.httpserver.HttpServer;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.message.GenerateReason;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.state.AgentState;
+import io.agentscope.core.state.JsonFileAgentStateStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -17,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -31,6 +34,8 @@ class SelfAnalystAgentSessionStateTest {
     private static final String SESSION_B = "b".repeat(32);
     private static final String SESSION_C = "c".repeat(32);
     private static final String SESSION_D = "d".repeat(32);
+    private static final String SESSION_E = "e".repeat(32);
+    private static final String SESSION_F = "f".repeat(32);
     private static final String MESSAGE_A1 = "1".repeat(12);
 
     @Test
@@ -149,6 +154,177 @@ class SelfAnalystAgentSessionStateTest {
         }
     }
 
+    @Test
+    void compactsPersistedHistoryAndKeepsDesktopContextTransient(@TempDir Path tempDir)
+            throws Exception {
+        List<String> mainRequests = new CopyOnWriteArrayList<>();
+        AtomicInteger chatSequence = new AtomicInteger();
+        AtomicInteger summaryCalls = new AtomicInteger();
+        AtomicInteger totalCalls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8);
+            totalCalls.incrementAndGet();
+            boolean summary = body.contains("Context Extraction Assistant");
+            byte[] response;
+            if (summary) {
+                summaryCalls.incrementAndGet();
+                response = jsonResponse("summary-of-older-turns")
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+            } else {
+                mainRequests.add(body);
+                response = sseResponse("chat-" + chatSequence.incrementAndGet())
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            }
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        Config config = withOverrides(Config.testDefaults(tempDir), Map.of(
+                "llmApiKey", "test-key",
+                "llmBaseUrl", "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                "llmModel", "test-model",
+                "agentCompactionEnabled", true,
+                "agentCompactionTriggerMessages", 5,
+                "agentCompactionTriggerTokens", 0,
+                "agentCompactionKeepMessages", 2,
+                "agentCompactionKeepTokens", 0));
+        try {
+            try (SelfAnalystAgent first = new SelfAnalystAgent(config)) {
+                for (int turn = 1; turn <= 4; turn++) {
+                    String id = Integer.toHexString(turn).repeat(12);
+                    String text = "turn-" + turn;
+                    String marker = "ctx-" + turn;
+                    assertEquals("chat-" + turn, first.chat(SESSION_E, id,
+                            () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                                    text, Map.of("marker", marker), List.of())).block());
+                }
+            }
+
+            assertEquals(1, summaryCalls.get());
+            assertEquals(4, mainRequests.size());
+            assertTrue(mainRequests.get(0).contains("ctx-1"));
+            assertTrue(mainRequests.get(3).contains("summary-of-older-turns"));
+            assertTrue(mainRequests.get(3).contains("ctx-4"));
+
+            Path stateRoot = config.memoryDir().resolve("agent-state/self-analyst-chat");
+            JsonFileAgentStateStore store = new JsonFileAgentStateStore(stateRoot);
+            AgentState compacted;
+            try {
+                compacted = store.get("desktop", SESSION_E, "agent_state", AgentState.class)
+                        .orElseThrow();
+            } finally {
+                store.close();
+            }
+            assertEquals("summary-of-older-turns", compacted.getSummary());
+            assertEquals(4, compacted.getContext().size());
+            List<String> persistedText = compacted.getContext().stream()
+                    .map(Msg::getTextContent).toList();
+            assertFalse(persistedText.contains("turn-1"));
+            assertTrue(persistedText.contains("turn-3"));
+            assertTrue(persistedText.contains("turn-4"));
+            String stateJson = Files.readString(stateRoot.resolve("desktop")
+                    .resolve(SESSION_E).resolve("agent_state.json"));
+            assertFalse(stateJson.contains("ctx-"),
+                    "per-turn desktop snapshots must not inflate persisted AgentState");
+
+            try (SelfAnalystAgent restarted = new SelfAnalystAgent(config)) {
+                String latestId = "5".repeat(12);
+                assertEquals("chat-5", restarted.chat(SESSION_E, latestId,
+                        () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                                "turn-5", Map.of("marker", "ctx-5"), List.of())).block());
+                assertTrue(mainRequests.getLast().contains("summary-of-older-turns"));
+                assertTrue(mainRequests.getLast().contains("ctx-5"));
+
+                int callsBeforeRetry = totalCalls.get();
+                int summariesBeforeRetry = summaryCalls.get();
+                assertEquals("chat-5", restarted.chat(SESSION_E, latestId,
+                        () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                                "spoofed retry", Map.of("marker", "changed"), List.of())).block());
+                assertEquals(callsBeforeRetry, totalCalls.get(),
+                        "completed idempotent retry must not compact or call the chat model");
+                assertEquals(summariesBeforeRetry, summaryCalls.get());
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void stopsBeforeMainModelWhenCompactionCrossesDailyBudget(@TempDir Path tempDir)
+            throws Exception {
+        AtomicInteger summaryCalls = new AtomicInteger();
+        AtomicInteger mainCalls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8);
+            byte[] response;
+            if (body.contains("Context Extraction Assistant")) {
+                summaryCalls.incrementAndGet();
+                response = jsonResponse("budget-crossing-summary")
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+            } else {
+                mainCalls.incrementAndGet();
+                response = sseResponse("must-not-run").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            }
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        Config config = withOverrides(Config.testDefaults(tempDir), Map.ofEntries(
+                Map.entry("llmApiKey", "test-key"),
+                Map.entry("llmBaseUrl",
+                        "http://127.0.0.1:" + server.getAddress().getPort() + "/v1"),
+                Map.entry("llmModel", "test-model"),
+                Map.entry("agentCompactionEnabled", true),
+                Map.entry("agentCompactionTriggerMessages", 5),
+                Map.entry("agentCompactionTriggerTokens", 0),
+                Map.entry("agentCompactionKeepMessages", 2),
+                Map.entry("agentCompactionKeepTokens", 0),
+                Map.entry("budgetMode", "block"),
+                Map.entry("budgetDailyTokens", 20L)));
+        UsageMeter meter = new UsageMeter(config, tempDir);
+        try {
+            try (SelfAnalystAgent owner = new SelfAnalystAgent(
+                    config, null, null, null, null, meter)) {
+                ReActAgent reactAgent = reactAgent(owner);
+                AgentState state = reactAgent.getAgentState("desktop", SESSION_F);
+                state.contextMutable().addAll(List.of(
+                        message("1".repeat(12), MsgRole.USER, "question-1"),
+                        message("2".repeat(12), MsgRole.ASSISTANT, "answer-1"),
+                        message("3".repeat(12), MsgRole.USER, "question-2"),
+                        message("4".repeat(12), MsgRole.ASSISTANT, "answer-2"),
+                        message("5".repeat(12), MsgRole.USER, "question-3"),
+                        message("6".repeat(12), MsgRole.ASSISTANT, "answer-3")));
+                reactAgent.saveAgentState("desktop", SESSION_F);
+                reactAgent.clearStateCache("desktop", SESSION_F);
+
+                String reply = owner.chat(SESSION_F, "7".repeat(12),
+                        () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                                "new question", Map.of(), List.of())).block();
+
+                assertTrue(reply.contains("token"));
+                assertTrue(meter.isBlocked());
+                assertEquals(1, summaryCalls.get());
+                assertEquals(0, mainCalls.get(),
+                        "a summary call that consumes the remaining budget must stop the turn");
+            }
+        } finally {
+            meter.flush();
+            server.stop(0);
+        }
+    }
+
     private static Msg message(String id, MsgRole role, String text) {
         return Msg.builder()
                 .id(id)
@@ -179,7 +355,23 @@ class SelfAnalystAgentSessionStateTest {
                 + "data: [DONE]\n\n";
     }
 
+    private static String jsonResponse(String text) {
+        return "{\"id\":\"chatcmpl-summary\",\"object\":\"chat.completion\","
+                + "\"created\":1,\"model\":\"test-model\",\"choices\":[{\"index\":0,"
+                + "\"message\":{\"role\":\"assistant\",\"content\":\"" + text
+                + "\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,"
+                + "\"completion_tokens\":4,\"total_tokens\":24}}";
+    }
+
     private static Config withLlm(Config base, String apiKey, String baseUrl, String model)
+            throws Exception {
+        return withOverrides(base, Map.of(
+                "llmApiKey", apiKey,
+                "llmBaseUrl", baseUrl,
+                "llmModel", model));
+    }
+
+    private static Config withOverrides(Config base, Map<String, Object> overrides)
             throws Exception {
         RecordComponent[] components = Config.class.getRecordComponents();
         Class<?>[] types = new Class<?>[components.length];
@@ -187,12 +379,9 @@ class SelfAnalystAgentSessionStateTest {
         for (int i = 0; i < components.length; i++) {
             RecordComponent component = components[i];
             types[i] = component.getType();
-            values[i] = switch (component.getName()) {
-                case "llmApiKey" -> apiKey;
-                case "llmBaseUrl" -> baseUrl;
-                case "llmModel" -> model;
-                default -> component.getAccessor().invoke(base);
-            };
+            values[i] = overrides.containsKey(component.getName())
+                    ? overrides.get(component.getName())
+                    : component.getAccessor().invoke(base);
         }
         return Config.class.getDeclaredConstructor(types).newInstance(values);
     }

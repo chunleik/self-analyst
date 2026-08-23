@@ -49,7 +49,7 @@
 
 ## 4. 设计结论（决策与取舍）
 
-- **SPEC-CSP-DEC-002**（双权威）：UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 分片为唯一事实来源；模型执行历史以 `{memoryDir}/agent-state/self-analyst-chat/desktop/<sessionId>/` 下的 AgentState 为唯一事实来源。前端 `state.chatSessions` 仅是渲染缓存，所有 transcript 写操作必须经 REST 落盘；UI transcript 不得在每轮请求中再次作为模型历史注入。
+- **SPEC-CSP-DEC-002**（双权威）：UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 分片为唯一事实来源；模型执行历史以 `{memoryDir}/agent-state/self-analyst-chat/desktop/<sessionId>/` 下的 AgentState（滚动 summary + recent context）为唯一事实来源。前端 `state.chatSessions` 仅是渲染缓存，所有 transcript 写操作必须经 REST 落盘；UI transcript 不得在每轮请求中再次作为模型历史注入。
   - *取舍*：与 `tasks.json` 同目录范式，数据可被后端复用、随用户数据目录迁移；放弃纯前端零依赖（本就是 localhost 单机后端，前后端共生）。
 
 - **SPEC-CSP-DEC-003**：写操作采用 **REST CRUD 粒度**（按会话、按消息的细粒度增删改），**不**采用「前端提交整份文档、后端整块覆盖」的 blob PUT。
@@ -85,6 +85,7 @@
   - *隐私*：摘要的 LLM 输入是**会话自身内容**——该内容在聊天时本就发送给同一 LLM 端点，故不引入新泄露面；但摘要输入**绝不**包含配置敏感值（与 `SPEC-CSP-DEC-007` 一致）。摘要生成计入 LLM 用量并受预算约束。
 
 - **SPEC-CSP-DEC-011**（旧服务端 transcript 单次懒迁移）：若服务端 shard 已有历史而 `(desktop, sessionId)` AgentState 尚不存在，后端在该会话下一次聊天请求取得 Agent 生命周期 gate 后、处理当前 user turn 前，使用当前 `userMessageId` 定位边界并 seed 一次。只导入边界之前有效的 user 与非 pending/error assistant，排除 system/UI notice；AgentState 已存在或已有内容时不得再次导入。
+- **SPEC-CSP-DEC-012**（有界模型历史）：达到 message/token 阈值后按 [`agent-context-compaction.md`](agent-context-compaction.md) 事务压缩旧前缀；本轮 `contextSnapshot` 仅通过 RuntimeContext 临时注入，不写入 AgentState user Msg。
 
 - **SPEC-CSP-DEC-012**（有序、幂等与生命周期 gate）：发送和重试由服务端 ID 串联。相同 `userMessageId` 已有 terminal assistant 时直接返回既有回复，不再次调用模型；只有 user turn 尚未完成时才继续。聊天与删除共享同一 application-wide Agent 生命周期 gate；gate 忙返回 409，不排队，也不做部分状态变更。
 
@@ -246,7 +247,7 @@
 
 - 会话 tab 请求体必须包含顶层 `{ "message", "context", "sessionId", "userMessageId" }`。`sessionId` 必须为服务端生成的 lowercase hex32；`userMessageId` 必须为服务端生成的 lowercase hex12，并且在该 shard 中对应一条 user 消息。只有 legacy drawer/client 可同时省略两个 ID。
 - ID 格式或 user turn 归属非法返回 HTTP 400；session 不存在或在取得 gate 后已被删除返回 404。
-- 后端取得 application-wide Agent 生命周期 gate 后重新读取 shard。在 AgentState 不存在时，按 `SPEC-CSP-DEC-011` 导入当前 user 之前的旧服务端 transcript；之后以 `(userId=desktop, sessionId)` 调用 Agent。`context` 只携带本轮业务上下文，不含 UI transcript/history。
+- 后端取得 application-wide Agent 生命周期 gate 后重新读取 shard，并以 shard 中 server-owned user content / `contextSnapshot` 为准。在 AgentState 不存在时，按 `SPEC-CSP-DEC-011` 导入当前 user 之前的旧服务端 transcript；之后以 `(userId=desktop, sessionId)` 调用 Agent。`contextSnapshot` 通过 RuntimeContext 临时进入本轮模型输入，不持久化进 user Msg，也不含 UI transcript/history。
 - 若同一 `userMessageId` 已存在于 AgentState 且已有 terminal assistant，直接返回该回复，LLM 调用次数不增加；若 user turn 已存在但尚未完成，则从该 turn 继续，不追加重复 user。
 - gate 已被其它聊天或删除占用时返回 HTTP 409 与 `{ "error": "..." }`。冲突请求不得追加 AgentState turn，也不得返回 HTTP 200 的占位 assistant 文案。
 
@@ -317,6 +318,8 @@
 | SPEC-CSP-TST-025 | 另一聊天占用 Agent gate 时发送 | 返回 HTTP 409 `error`；AgentState 不追加被拒绝 turn，UI 将原 pending 置为可重试 error |
 | SPEC-CSP-TST-026 | Agent gate 忙时删除会话 | 返回 409，shard/index/AgentState/cache 全部保持；稍后重试成功时在同一 gate 内全部清除 |
 | SPEC-CSP-TST-027 | LLM 未配置、agent 为 null 时删除有遗留 AgentState 的会话 | 直接打开状态存储清除 AgentState，再删除 shard/index，不遗留隐藏模型上下文 |
+| SPEC-CSP-TST-028 | 低阈值触发压缩并重启 | AgentState 保存 rolling summary + recent context；重启后的模型输入恢复两者，旧 raw prefix 不再反序列化/重写 |
+| SPEC-CSP-TST-029 | compaction summary 调用失败 | 原 AgentState 文件字节不变；不得持久化 `(Summarization failed: ...)` 覆盖旧前缀 |
 
 ---
 

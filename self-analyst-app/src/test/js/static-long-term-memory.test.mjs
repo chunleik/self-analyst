@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import assert from "node:assert/strict";
 
-const read = (path) => fs.readFileSync(path, "utf8");
+const read = (path) => fs.readFileSync(new URL(path, import.meta.url), "utf8");
 
-const api = read("self-analyst-app/src/main/resources/desktop-ui/api.js");
+const api = read("../../main/resources/desktop-ui/api.js");
 [
   "listMemory",
   "createMemory",
@@ -13,7 +13,7 @@ const api = read("self-analyst-app/src/main/resources/desktop-ui/api.js");
   "createSessionMemory",
 ].forEach((name) => assert.match(api, new RegExp(name + "\\s*:"), `api.js missing ${name}`));
 
-const chat = read("self-analyst-app/src/main/resources/desktop-ui/chat.js");
+const chat = read("../../main/resources/desktop-ui/chat.js");
 assert.match(chat, /renderChatMemoryPanel/, "chat.js should render memory panel");
 assert.match(chat, /memoryLoadError/, "chat.js should track memory load failure");
 assert.match(chat, /memory\.loadFailed/, "chat.js should render memory load failure copy");
@@ -24,12 +24,12 @@ assert.match(chat, /memory-edit-approve/, "chat.js should expose edit-before-app
 assert.match(chat, /memory-reject/, "chat.js should expose pending rejection");
 assert.match(chat, /memory-panel-disable/, "chat.js should let users disable active memories");
 
-const config = read("self-analyst-app/src/main/resources/desktop-ui/config.js");
+const config = read("../../main/resources/desktop-ui/config.js");
 assert.match(config, /renderMemoryManager/, "config.js should render memory manager");
 assert.match(config, /memory-manager-add/, "config.js should expose global manual memory add");
 assert.match(config, /memory-manager-edit/, "config.js should expose global memory edit");
 
-const i18n = read("self-analyst-app/src/main/resources/desktop-ui/i18n.js");
+const i18n = read("../../main/resources/desktop-ui/i18n.js");
 [
   "memory.chatTitle",
   "memory.loadFailed",
@@ -44,7 +44,7 @@ const i18n = read("self-analyst-app/src/main/resources/desktop-ui/i18n.js");
   "memory.pendingCount",
 ].forEach((key) => assert.match(i18n, new RegExp(`"${key}"`), `i18n missing ${key}`));
 
-const state = read("self-analyst-app/src/main/resources/desktop-ui/state.js");
+const state = read("../../main/resources/desktop-ui/state.js");
 assert.match(state, /memoryLoadError/, "state.js should persist memory load errors");
 
 console.log("static-long-term-memory checks passed");

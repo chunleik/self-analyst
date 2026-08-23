@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.desktop.store.ChatSessionStore;
+import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -12,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,6 +52,7 @@ class DesktopAgentControllerTest {
                 visible("3".repeat(12), "assistant", "old failed answer", "error"),
                 visible("4".repeat(12), "user", "current question", "sent"),
                 visible("5".repeat(12), "assistant", "thinking", "pending")));
+        session.messages.get(4).contextSnapshot = Map.of("snapshot", "server-owned");
 
         var history = DesktopAgentController.agentHistoryBeforeCurrentUser(
                 session, "4".repeat(12));
@@ -59,6 +62,14 @@ class DesktopAgentControllerTest {
         assertEquals("old question", history.get(0).getTextContent());
         assertEquals(MsgRole.ASSISTANT, history.get(1).getRole());
         assertEquals("old answer", history.get(1).getTextContent());
+        var persistedTurn = DesktopAgentController.persistedTurnFromSession(
+                session, "4".repeat(12));
+        assertEquals("current question", persistedTurn.userInput());
+        assertEquals(Map.of("snapshot", "server-owned"), persistedTurn.contextSnapshot());
+        assertEquals(history.stream().map(Msg::getId).toList(),
+                persistedTurn.existingHistory().stream().map(Msg::getId).toList());
+        assertEquals(history.stream().map(Msg::getTextContent).toList(),
+                persistedTurn.existingHistory().stream().map(Msg::getTextContent).toList());
         assertThrows(IllegalArgumentException.class,
                 () -> DesktopAgentController.agentHistoryBeforeCurrentUser(
                         session, "f".repeat(12)));
@@ -66,6 +77,8 @@ class DesktopAgentControllerTest {
         assertThrows(IllegalArgumentException.class,
                 () -> DesktopAgentController.agentHistoryBeforeCurrentUser(
                         session, "4".repeat(12)));
+        assertNull(DesktopAgentController.persistedTurnFromSession(
+                null, "4".repeat(12)));
     }
 
     @Test

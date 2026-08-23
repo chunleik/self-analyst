@@ -12,6 +12,8 @@ logs/
 tools/
 !self-analyst-app/src/main/java/com/selfanalyst/tools/
 !self-analyst-app/src/main/java/com/selfanalyst/tools/**
+!self-analyst-app/src/test/java/com/selfanalyst/tools/
+!self-analyst-app/src/test/java/com/selfanalyst/tools/**
 dist/
 .superpowers/
 .worktrees/

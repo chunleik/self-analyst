@@ -17,6 +17,7 @@
 
 - Java 21+
 - Maven 3.x (仅从源码构建时需要)
+- Node.js 20+（从源码运行 `mvn test` 时需要；仅使用内置 test runner，无需 npm install）
 - 7-Zip (运行 `download-tools.ps1` 解压 PaddleOCR 时需要)
 - 桌面端额外需要：Rust stable、Node.js、MSVC + Windows SDK（详见下方“桌面端开发”）
 
@@ -86,6 +87,10 @@ java -jar dist/self-analyst-app.jar
 | `llm.api-key` | `OPENAI_API_KEY` | - | LLM API 密钥 |
 | `llm.base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` | API 地址 |
 | `llm.model` | `LLM_MODEL` | `gpt-4o` | 模型名称 |
+| `agent.compaction.enabled` | `AGENT_COMPACTION_ENABLED` | `true` | 启用事务保护的 AgentState 长会话压缩 |
+| `agent.compaction.triggerMessages` | `AGENT_COMPACTION_TRIGGER_MESSAGES` | `30` | 达到该消息数触发压缩；`0` 关闭该触发器 |
+| `agent.compaction.triggerTokens` | `AGENT_COMPACTION_TRIGGER_TOKENS` | `60000` | 达到估算 token 数触发压缩；`0` 关闭该触发器 |
+| `agent.compaction.keepMessages` / `keepTokens` | `AGENT_COMPACTION_KEEP_MESSAGES` / `AGENT_COMPACTION_KEEP_TOKENS` | `10` / `12000` | 压缩后保留的近期原文预算；单 message 阈值按消息保留，单 token 阈值保证 token 窗口小于触发值 |
 | `aw.mode` | `AW_MODE` | `embedded` | AW 模式：`embedded` 或 `external` |
 | `aw.port` | `AW_PORT` | `5700` | AW 服务端口 |
 | `aw.data-dir` | `AW_DATA_DIR` | `./data/aw-data` | 活动数据存储目录（相对启动目录；可改为 `${user.home}/.self-analyst/aw-data`） |
@@ -134,6 +139,7 @@ PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
 - **ImprovementLog（改进记录）**：行动 → 结果 → 日期，追踪闭环
 - **聊天正文**：以 `{memory.dir}/chat-sessions/index.json` + 每会话一个分片保存；会话与消息 ID 由本机后端生成
 - **Agent 会话状态**：模型历史按桌面聊天会话隔离，存于 `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/`，重启后自动恢复
+- **长会话压缩**：达到 message/token 阈值后把旧前缀滚动写入 `AgentState.summary`，仅保留近期原始消息；摘要失败不会覆盖旧历史
 
 聊天正文分片是 UI transcript 的权威，AgentState 是模型执行历史的权威，前端不会把 transcript 每轮重复塞回 prompt。升级前已经存在于服务端分片、但尚无 AgentState 的会话，会在下一次发送时把当前 user 之前的有效 user/assistant 历史单次懒迁移到 AgentState；旧 WebView 会话数据不参与该迁移。
 
@@ -216,6 +222,7 @@ SDD (Specification-Driven Development) 规格文档:
 - [docs/specs/desktop.md](docs/specs/desktop.md) — Tauri 桌面壳 spec
 - [docs/specs/desktop-chat-tab.md](docs/specs/desktop-chat-tab.md) — 会话 tab spec
 - [docs/specs/chat-session-store.md](docs/specs/chat-session-store.md) — 会话后端分片、AgentState 与发送/重试契约
+- [docs/specs/agent-context-compaction.md](docs/specs/agent-context-compaction.md) — Harness 2.0.1 压缩边界、事务保护与统一测试入口
 - [docs/README.md](docs/README.md) — 文档导航索引
 
 ## 安装脚本
@@ -238,7 +245,7 @@ bash scripts/install.sh
 
 ```bash
 mvn compile                 # 编译
-mvn test                    # 运行测试 (38 tests)
+mvn test                    # 统一运行 Java + desktop UI Node 测试
 mvn package -DskipTests     # 生成 fat jar
 
 # 一键构建完整 dist/（jar + exe + tools）

@@ -714,17 +714,38 @@ function retryChatMessage(msgId) {
 function buildChatContext(session) {
   var ctx = { type: "global", title: session.title };
   if (state.chatContextToggles.currentStatus && state.summary && state.summary.current) {
+    var currentEvidence = Array.isArray(state.summary.current.evidence)
+      ? state.summary.current.evidence : [];
     ctx.currentStatus = {
       headline: state.summary.current.headline,
-      evidence: state.summary.current.evidence,
+      evidence: currentEvidence.slice(0, 3).map(function (item) {
+        return String(item || "").substring(0, 300);
+      }),
     };
   }
   if (state.chatContextToggles.futureTasks && state.tasks) {
     var open = state.tasks.filter(function (t) { return t.status === "open"; }).slice(0, 10);
-    ctx.futureTasks = open;
+    ctx.futureTasks = open.map(function (task) {
+      return {
+        id: task.id,
+        title: String(task.title || "").substring(0, 200),
+        notes: String(task.notes || "").substring(0, 300),
+        priority: task.priority,
+        dueAt: task.dueAt || null,
+      };
+    });
   }
-  if (state.summary && state.summary.timeline) {
-    ctx.recentActivity = state.summary.timeline.slice(0, 4);
+  if (state.summary && Array.isArray(state.summary.timeline)) {
+    ctx.recentActivity = state.summary.timeline.slice(0, 4).map(function (entry) {
+      return {
+        key: entry.key,
+        label: entry.label,
+        headline: String(entry.headline || "").substring(0, 300),
+        evidence: (Array.isArray(entry.evidence) ? entry.evidence : []).slice(0, 3).map(function (item) {
+          return String(item || "").substring(0, 300);
+        }),
+      };
+    });
   }
   return ctx;
 }

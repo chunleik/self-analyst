@@ -550,7 +550,9 @@ Content-Type: application/json
 - `currentStatus` 从 `state.summary.current` 或当前状态卡片数据提取。
 - `futureTasks` 从 `state.tasks` 中提取未完成任务，最多 10 条。
 - `recentActivity` 从 `state.summary.timeline` 中提取最近 4 条。
+- task/timeline/evidence 只传必要字段并限制单字段长度；服务端还会把本轮桌面上下文限制为 12000 字符。
 - 历史消息由 AgentScope `AgentStateStore` 按 `sessionId` 自动恢复，不得再嵌入 `context`，避免重复上下文。
+- 会话模式以 shard 中 server-owned user content 与 `contextSnapshot` 为准；本轮快照通过 RuntimeContext 临时注入，不写入 AgentState user Msg。
 - 每个字段都可为 `null`，后端必须能处理。
 
 ### SPEC-CHAT-TAB-007: 从 Agent tab 追问进入

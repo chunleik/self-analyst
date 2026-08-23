@@ -253,7 +253,7 @@ public class DesktopAgentController {
                 }
                 // Reject a valid-looking id that is not the server-owned user message for this
                 // visible transcript. The same validation is repeated under the agent gate below.
-                agentHistoryBeforeCurrentUser(
+                persistedTurnFromSession(
                         chatSessionStore.getSession(sessionId), userMessageId);
             }
 
@@ -265,13 +265,11 @@ public class DesktopAgentController {
                 return;
             }
 
-            String agentInput = buildChatAgentInput(message, body.get("context"));
             String response = (sessionId.isEmpty()
-                    ? agent.chat(agentInput)
+                    ? agent.chat(buildChatAgentInput(message, body.get("context")))
                     : agent.chat(sessionId,
                             userMessageId,
-                            agentInput,
-                            () -> agentHistoryBeforeCurrentUser(
+                            () -> persistedTurnFromSession(
                                     chatSessionStore.getSession(sessionId), userMessageId)))
                     .block(Duration.ofSeconds(180));
             if (response == null || response.isBlank()) {
@@ -382,6 +380,22 @@ public class DesktopAgentController {
             history.add(builder.build());
         }
         return List.copyOf(history);
+    }
+
+    static SelfAnalystAgent.PersistedDesktopTurn persistedTurnFromSession(
+            ChatSessionStore.Session session, String currentUserMessageId) {
+        if (session == null) return null;
+        List<Msg> history = agentHistoryBeforeCurrentUser(session, currentUserMessageId);
+        ChatSessionStore.Message current = session.messages.stream()
+                .filter(message -> message != null
+                        && currentUserMessageId.equals(message.id)
+                        && "user".equals(message.role))
+                .findFirst()
+                .orElseThrow(InvalidChatTurnException::new);
+        return new SelfAnalystAgent.PersistedDesktopTurn(
+                current.content != null ? current.content : "",
+                current.contextSnapshot,
+                history);
     }
 
     private static final class InvalidChatTurnException extends IllegalArgumentException {

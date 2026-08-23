@@ -12,6 +12,9 @@ import java.time.Duration;
 
 public class ActivityWatchTools {
 
+    static final int MAX_EVENT_LIMIT = 500;
+    static final int MAX_TOOL_RESULT_CHARS = 80_000;
+
     private final HttpClient client;
     private final String baseUrl;
     private final Duration timeout;
@@ -41,8 +44,9 @@ public class ActivityWatchTools {
             @ToolParam(name = "endTime", description = "结束时间 ISO-8601，可选")
             String endTime) {
 
+        int boundedLimit = limit <= 0 ? 100 : Math.min(limit, MAX_EVENT_LIMIT);
         StringBuilder url = new StringBuilder("buckets/")
-                .append(bucketId).append("/events?limit=").append(limit);
+                .append(bucketId).append("/events?limit=").append(boundedLimit);
         if (startTime != null && !startTime.isBlank()) {
             url.append("&start=").append(startTime);
         }
@@ -99,7 +103,7 @@ public class ActivityWatchTools {
                     .GET()
                     .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            return resp.body();
+            return boundResult(resp.body());
         } catch (IOException | InterruptedException e) {
             return "{\"error\": \"" + e.getMessage() + "\"}";
         }
@@ -114,9 +118,17 @@ public class ActivityWatchTools {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            return resp.body();
+            return boundResult(resp.body());
         } catch (IOException | InterruptedException e) {
             return "{\"error\": \"" + e.getMessage() + "\"}";
         }
+    }
+
+    private static String boundResult(String result) {
+        if (result == null || result.length() <= MAX_TOOL_RESULT_CHARS) return result;
+        int preview = (MAX_TOOL_RESULT_CHARS - 200) / 2;
+        return result.substring(0, preview)
+                + "\n...(ActivityWatch tool result truncated; narrow the time range or limit)...\n"
+                + result.substring(result.length() - preview);
     }
 }

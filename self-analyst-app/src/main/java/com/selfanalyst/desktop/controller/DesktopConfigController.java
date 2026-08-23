@@ -44,6 +44,9 @@ public class DesktopConfigController {
     private static final Set<String> RESTART_REQUIRED = Set.of(
             "llm.model", "aw.mode", "aw.port", "aw.data-dir",
             "memory.dir", "agent.summaryRefreshMinutes", "desktop.autoStartBackend",
+            "agent.compaction.enabled", "agent.compaction.triggerMessages",
+            "agent.compaction.triggerTokens", "agent.compaction.keepMessages",
+            "agent.compaction.keepTokens",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
             "headroom.enabled", "headroom.proxy-url", "headroom.stats.enabled", "headroom.output-shaper"
     );
@@ -821,11 +824,23 @@ public class DesktopConfigController {
         return m;
     }
 
-    private Map<String, Map<String, Object>> buildAgentSection(Properties eff) {
-        var m = new LinkedHashMap<String, Map<String, Object>>();
+    private Map<String, Object> buildAgentSection(Properties eff) {
+        var m = new LinkedHashMap<String, Object>();
         m.put("summaryRefreshMinutes", field("summaryRefreshMinutes", eff.getProperty("agent.summaryRefreshMinutes", "5")));
         m.put("allowAgentTasks", field("allowAgentTasks", eff.getProperty("agent.allowAgentTasks", "false")));
         m.put("cacheSummaries", field("cacheSummaries", eff.getProperty("agent.cacheSummaries", "true")));
+        var compaction = new LinkedHashMap<String, Map<String, Object>>();
+        compaction.put("enabled", field("agent.compaction.enabled",
+                eff.getProperty("agent.compaction.enabled", "true")));
+        compaction.put("triggerMessages", field("agent.compaction.triggerMessages",
+                eff.getProperty("agent.compaction.triggerMessages", "30")));
+        compaction.put("triggerTokens", field("agent.compaction.triggerTokens",
+                eff.getProperty("agent.compaction.triggerTokens", "60000")));
+        compaction.put("keepMessages", field("agent.compaction.keepMessages",
+                eff.getProperty("agent.compaction.keepMessages", "10")));
+        compaction.put("keepTokens", field("agent.compaction.keepTokens",
+                eff.getProperty("agent.compaction.keepTokens", "12000")));
+        m.put("compaction", compaction);
         return m;
     }
 

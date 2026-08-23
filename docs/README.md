@@ -21,6 +21,8 @@
 
 - [specs/desktop.md](specs/desktop.md) — Tauri desktop shell: window, tray, single-instance, Java backend lifecycle
 - [specs/desktop-chat-tab.md](specs/desktop-chat-tab.md) — Desktop chat tab: session management, messaging, context, task suggestions
+- [specs/chat-session-store.md](specs/chat-session-store.md) — Server-side chat shards, AgentState routing, idempotency, and deletion lifecycle
+- [specs/agent-context-compaction.md](specs/agent-context-compaction.md) — AgentScope Harness compaction boundaries, transaction safety, and bounded runtime context
 - [specs/llm-wiki.md](specs/llm-wiki.md) — LLM Wiki: multi-level task summaries and local semantic index
 - [specs/behavior-advice.md](specs/behavior-advice.md) — Behavior-based advice/encouragement display card on the desktop Agent tab
 - [specs/web-search.md](specs/web-search.md) — Agent web search via MCP (Parallel Search)

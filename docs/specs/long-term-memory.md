@@ -460,7 +460,7 @@ pendingMemoryCount: 0
 | SPEC-LTM-MDL-001..007 | `memory/GrowthProfile.java`、`memory/MemoryStore.java` | `MemoryStoreTest`、新增 `GrowthProfileMemoryItemTest` |
 | SPEC-LTM-MDL-010..011 | `desktop/store/ChatSessionStore.java` | `ChatSessionStoreTest` |
 | SPEC-LTM-EXTR-001..009 | `desktop/service/MemoryExtractionService.java`、`desktop/controller/DesktopChatSessionController.java`、`agent/SelfAnalystAgent.java` | `MemoryExtractionServiceTest`、控制器单测 |
-| SPEC-LTM-PROMPT-001..005 | `agent/SelfAnalystAgent.java`、`agent/DynamicMemoryContextHook.java`、`agent/AgentPrompts.java`、`memory/GrowthProfile.java` | `AgentPromptsTest`、prompt 记忆测试 |
+| SPEC-LTM-PROMPT-001..005 | `agent/SelfAnalystAgent.java`、`agent/DynamicMemoryContextMiddleware.java`、`agent/AgentPrompts.java`、`memory/GrowthProfile.java` | `AgentPromptsTest`、`DynamicMemoryContextMiddlewareTest` |
 | SPEC-LTM-API-001..009 | `desktop/controller/DesktopMemoryController.java`、`desktop/DesktopServer.java`、`memory/LongTermMemoryService.java`、`memory/MemoryStore.java` | 控制器单测、store 单测 |
 | SPEC-LTM-FE-001..008 | `desktop-ui/api.js`、`state.js`、`chat.js`、`index.html`、`styles.css`、`i18n.js` | JS 单测、手动 UI 验收 |
 | SPEC-LTM-SEC-001..005 | 提炼服务、记忆写入服务、前端记忆管理 UI | 安全过滤单测、代码审查 |

@@ -19,10 +19,11 @@ import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.model.ExecutionConfig;
 import io.agentscope.core.model.GenerateOptions;
-import io.agentscope.core.model.OpenAIChatModel;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.core.tool.ToolkitConfig;
 import io.agentscope.core.tool.mcp.McpClientBuilder;
 import io.agentscope.core.tool.mcp.McpClientWrapper;
+import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
@@ -34,9 +35,10 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-public class SelfAnalystAgent {
+public class SelfAnalystAgent implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(SelfAnalystAgent.class);
 
@@ -50,7 +52,9 @@ public class SelfAnalystAgent {
     private final boolean hasFileTools;
     private final UsageMeter usageMeter;
     private final HeadroomService headroomService;
+    private final McpClientWrapper webSearchMcpClient;
     private final Lang lang;
+    private final AtomicBoolean chatRunning = new AtomicBoolean();
     private volatile boolean usageMissingLogged;
 
     public SelfAnalystAgent(Config config) throws IOException {
@@ -101,7 +105,9 @@ public class SelfAnalystAgent {
         this.memory = MemoryStore.load(config.memoryDir());
         this.tools = new ActivityWatchTools(config.awBaseUrl(), config.awTimeout());
 
-        Toolkit toolkit = new Toolkit();
+        // AgentScope 2.x executes multiple tool calls in parallel by default. Keep the
+        // 1.x sequential semantics because several tools share local stores/connections.
+        Toolkit toolkit = new Toolkit(ToolkitConfig.builder().parallel(false).build());
         toolkit.registerTool(tools);
         if (wikiTools != null) {
             toolkit.registerTool(wikiTools);
@@ -113,46 +119,64 @@ public class SelfAnalystAgent {
             toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier,
                     headroomService != null ? headroomService::runtimeStatusLine : null));
         }
-        registerWebSearchMcp(toolkit, config);
+        McpClientWrapper registeredWebSearchMcpClient = registerWebSearchMcp(toolkit, config);
 
-        Integer maxTokens = config.llmMaxTokens() > 0 ? config.llmMaxTokens() : null;
-        String llmBaseUrl = effectiveLlmBaseUrl(config, headroomService);
+        OpenAIChatModel builtPlainModel;
+        ReActAgent builtAgent;
+        try {
+            Integer maxTokens = config.llmMaxTokens() > 0 ? config.llmMaxTokens() : null;
+            String llmBaseUrl = effectiveLlmBaseUrl(config, headroomService);
 
-        GenerateOptions.Builder chatOpts = GenerateOptions.builder()
-                .temperature(config.llmTemperature());
-        if (maxTokens != null) chatOpts.maxTokens(maxTokens);
-        OpenAIChatModel chatModel = OpenAIChatModel.builder()
-                .apiKey(config.llmApiKey())
-                .modelName(config.llmModel())
-                .baseUrl(llmBaseUrl)
-                .generateOptions(chatOpts.build())
-                .build();
+            GenerateOptions.Builder chatOpts = GenerateOptions.builder()
+                    .temperature(config.llmTemperature());
+            if (maxTokens != null) chatOpts.maxTokens(maxTokens);
+            OpenAIChatModel chatModel = OpenAIChatModel.builder()
+                    .apiKey(config.llmApiKey())
+                    .modelName(config.llmModel())
+                    .baseUrl(llmBaseUrl)
+                    .generateOptions(chatOpts.build())
+                    .build();
 
-        GenerateOptions.Builder plainOpts = GenerateOptions.builder()
-                .temperature(0.2)
-                .stream(false);
-        if (maxTokens != null) plainOpts.maxTokens(maxTokens);
-        this.plainModel = OpenAIChatModel.builder()
-                .apiKey(config.llmApiKey())
-                .modelName(config.llmModel())
-                .baseUrl(llmBaseUrl)
-                .stream(false)
-                .generateOptions(plainOpts.build())
-                .build();
+            GenerateOptions.Builder plainOpts = GenerateOptions.builder()
+                    .temperature(0.2)
+                    .stream(false);
+            if (maxTokens != null) plainOpts.maxTokens(maxTokens);
+            builtPlainModel = OpenAIChatModel.builder()
+                    .apiKey(config.llmApiKey())
+                    .modelName(config.llmModel())
+                    .baseUrl(llmBaseUrl)
+                    .stream(false)
+                    .generateOptions(plainOpts.build())
+                    .build();
 
-        this.agent = ReActAgent.builder()
-                .name("SelfAnalyst")
-                .sysPrompt(buildSystemPrompt())
-                .model(chatModel)
-                .toolkit(toolkit)
-                .hook(new DynamicMemoryContextHook(lang, () -> memory.profile().buildContextSummary()))
-                .hook(new PlanHook(usageMeter))
-                .maxIters(config.agentMaxIters())
-                .modelExecutionConfig(ExecutionConfig.builder()
-                        .timeout(Duration.ofSeconds(45))
-                        .maxAttempts(1)
-                        .build())
-                .build();
+            builtAgent = ReActAgent.builder()
+                    .name("SelfAnalyst")
+                    .sysPrompt(buildSystemPrompt())
+                    .model(chatModel)
+                    .toolkit(toolkit)
+                    .middlewares(List.of(
+                            new DynamicMemoryContextMiddleware(
+                                    lang, () -> memory.profile().buildContextSummary()),
+                            new PlanMiddleware(usageMeter)))
+                    .maxIters(config.agentMaxIters())
+                    .modelExecutionConfig(ExecutionConfig.builder()
+                            .timeout(Duration.ofSeconds(45))
+                            .maxAttempts(1)
+                            .build())
+                    .build();
+        } catch (RuntimeException | Error failure) {
+            if (registeredWebSearchMcpClient != null) {
+                try {
+                    registeredWebSearchMcpClient.close();
+                } catch (RuntimeException closeFailure) {
+                    failure.addSuppressed(closeFailure);
+                }
+            }
+            throw failure;
+        }
+        this.plainModel = builtPlainModel;
+        this.agent = builtAgent;
+        this.webSearchMcpClient = registeredWebSearchMcpClient;
     }
 
     static String effectiveLlmBaseUrl(Config config, HeadroomService headroomService) {
@@ -164,10 +188,11 @@ public class SelfAnalystAgent {
      * 配置了 websearch.api-key 则以 Bearer token 走更高额度。
      * 任意失败（网络、初始化超时）都只记录日志，不阻断 Agent 启动。
      */
-    private void registerWebSearchMcp(Toolkit toolkit, Config config) {
-        if (!config.webSearchEnabled()) return;
+    private McpClientWrapper registerWebSearchMcp(Toolkit toolkit, Config config) {
+        if (!config.webSearchEnabled()) return null;
         String endpoint = config.webSearchMcpUrl();
-        if (endpoint == null || endpoint.isBlank()) return;
+        if (endpoint == null || endpoint.isBlank()) return null;
+        McpClientWrapper client = null;
         try {
             McpClientBuilder builder = McpClientBuilder.create("parallel-search")
                     .streamableHttpTransport(endpoint)
@@ -179,10 +204,21 @@ public class SelfAnalystAgent {
                 builder.header("Authorization", "Bearer " + key);
             }
 
-            McpClientWrapper client = builder.buildSync();
+            client = builder.buildSync();
             toolkit.registerMcpClient(client).block(Duration.ofSeconds(30));
+            return client;
         } catch (Exception e) {
+            if (client != null) {
+                try {
+                    client.close();
+                } catch (RuntimeException closeFailure) {
+                    e.addSuppressed(closeFailure);
+                    log.warn("关闭失败的联网搜索 MCP 客户端时出错: {}",
+                            closeFailure.getMessage());
+                }
+            }
             System.err.println("[SelfAnalyst] 联网搜索 MCP 不可用，已跳过: " + e.getMessage());
+            return null;
         }
     }
 
@@ -193,20 +229,35 @@ public class SelfAnalystAgent {
     }
 
     public Mono<String> chat(String userInput) {
-        if (usageMeter != null && usageMeter.isBlocked()) {
-            return Mono.just(lang == Lang.EN
-                    ? "The daily token budget has been reached; the conversation is paused to control cost. "
-                      + "You can adjust llm.budget.dailyTokens / llm.budget.mode in the configuration, "
-                      + "or wait for the automatic daily reset."
-                    : "已达到今日 token 使用上限，已暂停对话以控制成本。"
-                      + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
-        }
-        return agent.call(Msg.builder()
-                        .name("user")
-                        .role(MsgRole.USER)
-                        .textContent(userInput)
-                .build())
-                .map(Msg::getTextContent);
+        return runExclusiveChat(() -> {
+            if (usageMeter != null && usageMeter.isBlocked()) {
+                return Mono.just(lang == Lang.EN
+                        ? "The daily token budget has been reached; the conversation is paused to control cost. "
+                          + "You can adjust llm.budget.dailyTokens / llm.budget.mode in the configuration, "
+                          + "or wait for the automatic daily reset."
+                        : "已达到今日 token 使用上限，已暂停对话以控制成本。"
+                          + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
+            }
+            return agent.call(Msg.builder()
+                            .name("user")
+                            .role(MsgRole.USER)
+                            .textContent(userInput)
+                    .build())
+                    .map(Msg::getTextContent);
+        });
+    }
+
+    Mono<String> runExclusiveChat(Supplier<Mono<String>> action) {
+        return Mono.using(
+                () -> {
+                    if (!chatRunning.compareAndSet(false, true)) {
+                        throw new IllegalStateException("Agent is still running");
+                    }
+                    return Boolean.TRUE;
+                },
+                ignored -> Mono.defer(action),
+                ignored -> chatRunning.set(false),
+                true);
     }
 
     public boolean isBudgetBlocked() {
@@ -301,5 +352,20 @@ public class SelfAnalystAgent {
 
     public void saveMemory() throws IOException {
         memory.save();
+    }
+
+    @Override
+    public void close() {
+        try {
+            agent.close();
+        } finally {
+            if (webSearchMcpClient != null) {
+                try {
+                    webSearchMcpClient.close();
+                } catch (RuntimeException closeFailure) {
+                    log.warn("关闭联网搜索 MCP 客户端时出错: {}", closeFailure.getMessage());
+                }
+            }
+        }
     }
 }

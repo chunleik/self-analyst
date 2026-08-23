@@ -351,49 +351,55 @@ public class AppSession implements AutoCloseable {
             return;
         }
         try {
-            if (agent != null) {
-                agent.saveMemory();
+            try {
+                if (agent != null) {
+                    agent.saveMemory();
+                }
+            } catch (IOException e) {
+                log.warn("memory not saved: {}", e.getMessage());
             }
-        } catch (IOException e) {
-            log.warn("memory not saved: {}", e.getMessage());
+            if (usageMeter != null) {
+                usageMeter.flush();
+            }
+            if (fileWatcher != null) {
+                fileWatcher.shutdown();
+            }
+            if (fileIndexWorker != null) {
+                fileIndexWorker.shutdown();
+            }
+            if (fileEmbeddingWorker != null) {
+                fileEmbeddingWorker.shutdown();
+            }
+            if (fileSemanticIndex != null) {
+                fileSemanticIndex.close();
+            }
+            if (fileWatchStore != null) {
+                fileWatchStore.close();
+            }
+            if (wikiSummaryWatcher != null) {
+                wikiSummaryWatcher.shutdown();
+            }
+            if (wikiWorker != null) {
+                wikiWorker.shutdown();
+            }
+            if (wikiEmbeddingWorker != null) {
+                wikiEmbeddingWorker.shutdown();
+            }
+            if (wikiSemanticIndex != null) {
+                wikiSemanticIndex.close();
+            }
+            if (wikiStore != null) {
+                wikiStore.close();
+            }
+            if (desktopServer != null) {
+                desktopServer.shutdown();
+            }
+            shutdownEmbeddedAW();
+        } finally {
+            if (agent != null) {
+                agent.close();
+            }
         }
-        if (usageMeter != null) {
-            usageMeter.flush();
-        }
-        if (fileWatcher != null) {
-            fileWatcher.shutdown();
-        }
-        if (fileIndexWorker != null) {
-            fileIndexWorker.shutdown();
-        }
-        if (fileEmbeddingWorker != null) {
-            fileEmbeddingWorker.shutdown();
-        }
-        if (fileSemanticIndex != null) {
-            fileSemanticIndex.close();
-        }
-        if (fileWatchStore != null) {
-            fileWatchStore.close();
-        }
-        if (wikiSummaryWatcher != null) {
-            wikiSummaryWatcher.shutdown();
-        }
-        if (wikiWorker != null) {
-            wikiWorker.shutdown();
-        }
-        if (wikiEmbeddingWorker != null) {
-            wikiEmbeddingWorker.shutdown();
-        }
-        if (wikiSemanticIndex != null) {
-            wikiSemanticIndex.close();
-        }
-        if (wikiStore != null) {
-            wikiStore.close();
-        }
-        if (desktopServer != null) {
-            desktopServer.shutdown();
-        }
-        shutdownEmbeddedAW();
     }
 
     private void shutdownEmbeddedAW() {

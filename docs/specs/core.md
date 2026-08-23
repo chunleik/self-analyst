@@ -37,7 +37,8 @@ App (入口) → AppSession (生命周期管理)
                       │     └── HTTP → ActivityWatch API
                       ├── ConfigTools (配置读写工具)
                       │     └── UserConfigStore → config.properties
-                      └── PlanHook (事件钩子)
+                      ├── DynamicMemoryContextMiddleware (动态记忆上下文)
+                      └── PlanMiddleware (生命周期与预算中间件)
 ```
 
 ### 2.2 模块依赖规则
@@ -319,21 +320,22 @@ System Prompt 必须包含以下四部分（按顺序）：
 
 ---
 
-## 8. PlanHook 规格
+## 8. PlanMiddleware 规格
 
-### SPEC-HOK-001: 事件处理
+### SPEC-HOK-001: Middleware 事件处理
 
-| 事件 | 日志级别 | 输出内容 |
+| Middleware 阶段 / 事件 | 日志级别 | 输出内容 |
 |------|---------|---------|
-| `PreReasoningEvent` | DEBUG | Agent 正在思考... |
-| `PostReasoningEvent` | DEBUG | 推理文本前 3 行 |
-| `PostActingEvent` | DEBUG | 工具执行完成 |
-| `PostCallEvent` | INFO | Agent 回复文本 |
+| `onReasoning` 开始 | DEBUG | Agent 正在思考... |
+| `TextBlockDeltaEvent` 汇总完成 | DEBUG | 推理文本前 3 行 |
+| `onActing` 完成 | DEBUG | 工具执行完成 |
+| `AgentResultEvent` | INFO | Agent 回复文本 |
 | 其他事件 | — | 忽略 |
 
-- **SPEC-HOK-001a**: 所有事件处理方法必须返回 `Mono.just(event)`，不可阻断事件链。
-- **SPEC-HOK-001b**: Hook 不得修改事件内容，仅做观测和日志输出。
+- **SPEC-HOK-001a**: 所有洋葱阶段必须调用 `next.apply(input)` 并原样透传事件；仅在预算阻断时可追加 `RequestStopEvent`。
+- **SPEC-HOK-001b**: 中间件不得修改既有事件内容。
 - **SPEC-HOK-001c**: 使用 SLF4J Logger 输出，不使用 System.out/err。
+- **SPEC-HOK-001d**: 优先使用 `ModelCallEndEvent` 的 `ChatUsage` 精确计量；未返回 usage 时才按文本长度估算。
 
 ---
 
@@ -425,7 +427,7 @@ System Prompt 必须包含以下四部分（按顺序）：
 | SPEC-MEM-001..003 | `memory/MemoryStore.java:27-41` | MemoryStoreTest |
 | SPEC-AW-001..007 | `tools/ActivityWatchTools.java:13-121` | — |
 | SPEC-AGT-001..004 | `agent/SelfAnalystAgent.java:16-95` | — |
-| SPEC-HOK-001 | `agent/PlanHook.java:11-38` | — |
+| SPEC-HOK-001 | `agent/PlanMiddleware.java` | `PlanMiddlewareTest` |
 | SPEC-APP-001..002 | `AppSession.java`, `App.java` | — |
 | SPEC-TST-001..002 | `memory/MemoryStoreTest.java` | — |
 | SPEC-BLD-001..002 | `pom.xml`, `self-analyst-aw/pom.xml`, `self-analyst-app/pom.xml` | — |

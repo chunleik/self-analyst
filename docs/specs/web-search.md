@@ -24,7 +24,7 @@
 
 当前 `SelfAnalystAgent` 基于 agentscope `ReActAgent` + `Toolkit`，已注册 `ActivityWatchTools` 和 `WikiTools`，只能回答本地活动数据相关问题，无法获取实时的外部网络信息（最新资讯、技术文档、外部事实）。
 
-agentscope 1.0.12 已传递引入官方 MCP Java SDK（`io.modelcontextprotocol.sdk:mcp:0.17.0`），`Toolkit` 提供 `registerMcpClient(McpClientWrapper)`，可将远程 MCP server 的工具自动拉取并注册。本功能据此为 Agent 增加联网搜索能力，默认接入 Parallel Search MCP 的匿名端点（免费、无需 API key）。
+agentscope-core 2.0.1 已传递引入官方 MCP Java SDK（`io.modelcontextprotocol.sdk:mcp:0.17.0`），`Toolkit` 提供 `registerMcpClient(McpClientWrapper)`，可将远程 MCP server 的工具自动拉取并注册。本功能据此为 Agent 增加联网搜索能力，默认接入 Parallel Search MCP 的匿名端点（免费、无需 API key）。
 
 ---
 

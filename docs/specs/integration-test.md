@@ -112,7 +112,7 @@ self-analyst/                              (根 pom, 新增 <module>)
 | 依赖 | scope | 说明 |
 |------|-------|------|
 | `org.junit.jupiter:junit-jupiter` | test | 版本由根 POM `dependencyManagement` 管理 |
-| `org.slf4j:slf4j-simple` | test | 版本号需显式指定（`2.0.16`），与根 POM `slf4j.version` 一致 |
+| `org.slf4j:slf4j-simple` | test | 版本号需显式指定为 `${slf4j.version}`，与根 POM 保持一致 |
 
 `junit-jupiter` 版本由根 POM `<dependencyManagement>` 统一控制，不在此处覆写。
 `slf4j-simple` 需在聚合 POM 中显式声明 `<version>`（根 POM `dependencyManagement` 中只有 `slf4j-api`，不含 `slf4j-simple`）。

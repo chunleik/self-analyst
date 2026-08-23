@@ -1,0 +1,66 @@
+package com.selfanalyst.agent;
+
+import com.selfanalyst.config.Config;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import reactor.core.Disposable;
+import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
+
+import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class SelfAnalystAgentConcurrencyTest {
+
+    @Test
+    void overlappingChatFailsFastAndGateReleasesOnTermination(@TempDir Path tempDir)
+            throws Exception {
+        try (SelfAnalystAgent agent = new SelfAnalystAgent(Config.testDefaults(tempDir))) {
+            Sinks.One<String> gate = Sinks.one();
+            CompletableFuture<String> first = agent.runExclusiveChat(gate::asMono).toFuture();
+
+            RuntimeException error = assertThrows(RuntimeException.class,
+                    () -> agent.runExclusiveChat(() -> Mono.just("second")).block());
+            assertTrue(hasMessage(error, "still running"));
+
+            gate.tryEmitValue("first");
+            assertEquals("first", first.get(2, TimeUnit.SECONDS));
+            assertEquals("third", agent.runExclusiveChat(() -> Mono.just("third")).block());
+
+            assertEquals("chained", agent.runExclusiveChat(() -> Mono.just("outer"))
+                    .flatMap(ignored -> agent.runExclusiveChat(() -> Mono.just("chained")))
+                    .block());
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> agent.runExclusiveChat(
+                            () -> Mono.error(new IllegalArgumentException("boom"))).block());
+            assertEquals("after-error",
+                    agent.runExclusiveChat(() -> Mono.just("after-error")).block());
+
+            Sinks.One<String> cancelledGate = Sinks.one();
+            Disposable cancelled = agent.runExclusiveChat(cancelledGate::asMono).subscribe();
+            cancelled.dispose();
+            assertEquals("after-cancel",
+                    agent.runExclusiveChat(() -> Mono.just("after-cancel")).block());
+
+            Mono<String> reusable = agent.runExclusiveChat(() -> Mono.just("reused"));
+            assertEquals("reused", reusable.block());
+            assertEquals("reused", reusable.block());
+        }
+    }
+
+    private static boolean hasMessage(Throwable error, String text) {
+        for (Throwable current = error; current != null; current = current.getCause()) {
+            if (current.getMessage() != null
+                    && current.getMessage().toLowerCase().contains(text)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}

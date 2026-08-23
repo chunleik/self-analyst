@@ -28,13 +28,14 @@ class SelfAnalystAgentMemoryPromptTest {
                 Instant.parse("2026-07-04T00:00:00Z"), Instant.parse("2026-07-04T00:00:00Z")));
         store.save();
 
-        SelfAnalystAgent agent = new SelfAnalystAgent(config);
-        Method method = SelfAnalystAgent.class.getDeclaredMethod("buildSystemPrompt");
-        method.setAccessible(true);
+        try (SelfAnalystAgent agent = new SelfAnalystAgent(config)) {
+            Method method = SelfAnalystAgent.class.getDeclaredMethod("buildSystemPrompt");
+            method.setAccessible(true);
 
-        String systemPrompt = (String) method.invoke(agent);
+            String systemPrompt = (String) method.invoke(agent);
 
-        assertFalse(systemPrompt.contains("用户偏好中文交流。"),
-                "mutable long-term memory must only be injected per chat turn");
+            assertFalse(systemPrompt.contains("用户偏好中文交流。"),
+                    "mutable long-term memory must only be injected per chat turn");
+        }
     }
 }

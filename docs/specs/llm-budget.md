@@ -71,7 +71,7 @@
 - **SPEC-BUDGET-MTR-003**: 必须持久化到 `{memoryDir}/usage/usage-YYYY-MM-DD.json`，启动时载入当天值，跨天自动滚动。
 - **SPEC-BUDGET-MTR-004**: `completePlain` 必须从响应 `ChatUsage` 读取真实 input/output token 并计入 `SUMMARY`。
 - **SPEC-BUDGET-MTR-005**: embedding 客户端必须解析响应 `usage`（`prompt_tokens`，回退 `total_tokens`）并经 `UsageRecorder` 计入 `EMBEDDING`。
-- **SPEC-BUDGET-MTR-006**: Agent 路径因 hook 无法获得精确 usage，可按文本长度近似计入 `AGENT`；此项为近似。
+- **SPEC-BUDGET-MTR-006**: Agent 路径必须优先读取每次 `ModelCallEndEvent` 的 `ChatUsage` 并计入 `AGENT`；供应商未返回 usage 时，基于 `ModelCallInput` 的消息/工具 schema 与 text/thinking/tool-call 增量保守估算。
 
 ---
 

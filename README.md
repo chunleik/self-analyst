@@ -192,7 +192,7 @@ self-analyst/
     │   ├── App.java             程序入口（启动 AppSession 后台服务）
     │   ├── AppSession.java      组装并启动各模块 + HTTP 服务
     │   ├── config/Config.java   配置加载
-    │   ├── agent/               ReActAgent + PlanHook
+    │   ├── agent/               ReActAgent + Middleware
     │   ├── desktop/             桌面 REST API + 桌面 UI 前端
     │   ├── tools/               Agent 工具集（AW / 文件 / 搜索等）
     │   ├── usage/               LLM token 计量与预算
@@ -301,7 +301,7 @@ java -jar self-analyst-app/target/self-analyst-app-1.0.0.jar
 ## 技术栈
 
 - Java 21
-- [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) — LLM Agent 框架
+- [AgentScope Java 2.0.1](https://github.com/agentscope-ai/agentscope-java) — LLM Agent 框架
 - [Javalin](https://javalin.io) — 嵌入式 HTTP 服务器
 - [picocli](https://picocli.info) — CLI 框架
 - SQLite + JDBC — 活动数据存储

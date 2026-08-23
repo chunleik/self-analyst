@@ -6,7 +6,7 @@ SelfAnalyst 是一个基于数据的自我提升工具。通过自动采集窗�
 
 **核心能力**：窗口追踪 + 内容识别 (UIA/OCR) + 音频转录 (whisper.cpp) + Web 仪表板 + 桌面应用。
 
-技术栈：Java 21、AgentScope Java、PaddleOCR-json、whisper.cpp、Tauri 2.x。
+技术栈：Java 21、AgentScope Java 2.0.1、PaddleOCR-json、whisper.cpp、Tauri 2.x。
 
 ---
 
@@ -154,7 +154,7 @@ Windows 上桌面端使用命名 mutex 保证单实例运行；重复启动只�
 
 | 组件 | 技术 |
 |------|------|
-| LLM Agent | AgentScope Java + Project Reactor |
+| LLM Agent | AgentScope Java 2.0.1 + Project Reactor |
 | HTTP 服务器 | Javalin (Jetty) |
 | 数据存储 | SQLite (AW 使用 aw.db 单库) |
 | 窗口追踪 | JNA → user32.dll |

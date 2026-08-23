@@ -72,6 +72,7 @@ function createChatSandbox({ status = "pending", chatSending = false, api = {} }
       if (key === "chat.thinking") return "Thinking";
       if (key === "chat.sendFailed") return `Send failed: ${params?.msg ?? ""}`;
       if (key === "chat.agentNoContent") return "No content";
+      if (key === "chat.reconciliationPending") return `Reconcile: ${params?.msg ?? ""}`;
       return key;
     },
     escHtml(value) {
@@ -82,6 +83,7 @@ function createChatSandbox({ status = "pending", chatSending = false, api = {} }
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
     },
+    formatRelativeTime() { return "now"; },
   };
   vm.createContext(sandbox);
   vm.runInContext(chatJs, sandbox);
@@ -111,7 +113,7 @@ test("chat requests route by server-issued session id", () => {
   assert.match(api, /sessionId:\s*sessionId/);
   assert.match(api, /userMessageId:\s*userMessageId/);
   assert.match(chat, /api\.postChat\(text,\s*context,\s*session\.id,\s*savedUser\.id\)/);
-  assert.match(chat, /api\.postChat\(userMsg\.content,[\s\S]*?,\s*session\.id,\s*userMsg\.id\)/);
+  assert.match(chat, /api\.postChat\(\s*userMsg\.content,[\s\S]*?,\s*session\.id,\s*userMsg\.id/);
 
   // AgentState is the model-history authority; UI transcript must not be re-injected each turn.
   assert.doesNotMatch(chat, /ctx\.history\s*=/);
@@ -229,6 +231,278 @@ test("starting a local send immediately hides a recovered pending retry", async 
   assert.equal(appendCalls, 1);
   append.reject(new Error("stop test send"));
   await nextTurn();
+});
+
+test("append failure preserves unpersisted input and does not create local messages", async () => {
+  let postCalls = 0;
+  const api = {
+    appendMessages() {
+      return Promise.reject(new Error("payload rejected"));
+    },
+    postChat() {
+      postCalls += 1;
+      return Promise.resolve({ message: "unexpected" });
+    },
+  };
+  const { sandbox, session } = createChatSandbox({ status: "sent", api });
+  sandbox.state.dom.chatTabInput = { value: "keep this draft" };
+  sandbox.renderChatTab = () => {};
+  sandbox.alert = () => {};
+  const beforeIds = session.messages.map((message) => message.id);
+
+  sandbox.sendChatTabMessage();
+  await nextTurn();
+  await nextTurn();
+
+  assert.equal(sandbox.state.dom.chatTabInput.value, "keep this draft");
+  assert.deepEqual(session.messages.map((message) => message.id), beforeIds);
+  assert.equal(postCalls, 0);
+  assert.equal(sandbox.state.chatSending, false);
+});
+
+test("send mirrors retention and adopts the canonical updated assistant", async () => {
+  const savedUser = {
+    id: "user-new",
+    role: "user",
+    content: "new question",
+    status: "sent",
+    createdAt: "2026-08-23T00:00:00Z",
+  };
+  const savedPending = {
+    id: "assistant-new",
+    role: "assistant",
+    content: "Thinking",
+    status: "pending",
+    createdAt: "2026-08-23T00:00:01Z",
+  };
+  const api = {
+    appendMessages() {
+      return Promise.resolve([savedUser, savedPending]);
+    },
+    postChat() {
+      return Promise.resolve({ message: "client-sized answer", suggestedTasks: [] });
+    },
+    updateMessage() {
+      return Promise.resolve({
+        ...savedPending,
+        status: "sent",
+        content: "canonical truncated answer",
+        suggestedTasks: [{ title: "canonical task" }],
+      });
+    },
+  };
+  const { sandbox, session } = createChatSandbox({ status: "sent", api });
+  session.messages = Array.from({ length: 199 }, (_, index) => ({
+    id: `old-${index}`,
+    role: index % 2 ? "assistant" : "user",
+    content: `old-${index}`,
+    status: "sent",
+  }));
+  sandbox.state.dom.chatTabInput = { value: "new question" };
+  sandbox.renderChatTab = () => {};
+  sandbox.resortChatSessions = () => {};
+  sandbox.refreshMemoryPanelSoon = () => {};
+  sandbox.backfillSessionTitle = () => {};
+  sandbox.alert = () => {};
+
+  sandbox.sendChatTabMessage();
+  await nextTurn();
+  await nextTurn();
+  await nextTurn();
+
+  assert.equal(session.messages.length, 199);
+  assert.equal(session.messages[0].role, "user");
+  assert.equal(session.messages.at(-2).id, "user-new");
+  assert.equal(session.messages.at(-1).id, "assistant-new");
+  assert.equal(session.messages.at(-1).content, "canonical truncated answer");
+  assert.equal(session.messages.at(-1).suggestedTasks[0].title, "canonical task");
+  assert.equal(session.lastMessagePreview, "canonical truncated answer");
+  assert.equal(sandbox.state.dom.chatTabInput.value, "");
+});
+
+test("failed lazy load stays retryable and restores the bound session context", async () => {
+  let calls = 0;
+  const api = {
+    getSession() {
+      calls += 1;
+      if (calls === 1) return Promise.reject(new Error("temporary read failure"));
+      return Promise.resolve({
+        summary: "restored",
+        memoryPolicy: "smart",
+        contextSnapshot: { type: "task", title: "bound task" },
+        messages: [{ id: "u", role: "user", content: "old", status: "sent" }],
+      });
+    },
+  };
+  const { sandbox, session } = createChatSandbox({ api });
+  session.messagesLoaded = false;
+  session.messages = [];
+
+  await assert.rejects(sandbox.ensureSessionMessagesLoaded(session), /temporary read failure/);
+  assert.equal(session.messagesLoaded, false);
+  assert.match(session.messagesLoadError, /temporary read failure/);
+
+  await sandbox.ensureSessionMessagesLoaded(session);
+  const context = sandbox.buildChatContext(session);
+  assert.equal(session.messagesLoaded, true);
+  assert.equal(session.messages[0].content, "old");
+  assert.equal(context.boundContext.title, "bound task");
+  assert.equal(calls, 2);
+});
+
+test("lazy-load completion triggers a full render so the composer state refreshes", async () => {
+  const load = deferred();
+  const api = { getSession() { return load.promise; } };
+  const { sandbox, session } = createChatSandbox({ api });
+  session.messagesLoaded = false;
+  session.messages = [];
+  let fullRenders = 0;
+  sandbox.renderChatTab = () => { fullRenders += 1; };
+
+  sandbox.renderChatThread();
+  assert.match(sandbox.state.dom.chatThread.innerHTML, /common.loadingEllipsis/);
+  load.resolve({ messages: [], memoryPolicy: "smart" });
+  await nextTurn();
+
+  assert.equal(fullRenders, 1);
+  assert.equal(session.messagesLoaded, true);
+});
+
+test("selecting an unloaded session renders its loading state immediately", () => {
+  const selectedLoad = deferred();
+  let getCalls = 0;
+  const api = {
+    setActiveSession() { return Promise.resolve({}); },
+    getSession() { getCalls += 1; return selectedLoad.promise; },
+  };
+  const { sandbox, session } = createChatSandbox({ api });
+  const other = {
+    id: "session-other",
+    title: "other",
+    updatedAt: "2026-08-23T00:00:00Z",
+    messages: [],
+    messagesLoaded: false,
+  };
+  sandbox.state.chatSessions = [session, other];
+  const list = { innerHTML: "", onclick: null };
+  sandbox.state.dom.chatSessionList = list;
+  let renders = 0;
+  sandbox.renderChatTab = () => { renders += 1; };
+  sandbox.renderChatSessionList();
+  const item = { dataset: { sid: other.id } };
+
+  list.onclick({
+    target: { closest(selector) { return selector.includes("delete") ? null : item; } },
+  });
+
+  assert.equal(sandbox.state.activeChatSessionId, other.id);
+  assert.equal(renders, 1);
+  assert.equal(getCalls, 1);
+});
+
+test("the composer is disabled for the whole in-flight send", () => {
+  const { sandbox } = createChatSandbox({ chatSending: true });
+  sandbox.state.status = { llm: { configured: true } };
+  sandbox.state.dom.chatTabInput = { disabled: false, placeholder: "" };
+  sandbox.state.dom.chatTabSendBtn = { disabled: false };
+
+  sandbox.updateChatInputState();
+
+  assert.equal(sandbox.state.dom.chatTabInput.disabled, true);
+  assert.equal(sandbox.state.dom.chatTabSendBtn.disabled, true);
+});
+
+test("a lost sent-PUT response reconciles a committed canonical reply", async () => {
+  const events = [];
+  const api = {
+    updateMessage(sessionId, messageId, patch) {
+      events.push({ type: "put", patch });
+      if (patch.status === "sent") return Promise.reject(new Error("response lost"));
+      return Promise.resolve({ ...patch, id: messageId, role: "assistant" });
+    },
+    postChat() {
+      events.push({ type: "post" });
+      return Promise.resolve({ message: "committed answer" });
+    },
+    getSession() {
+      events.push({ type: "get" });
+      return Promise.resolve({
+        messages: [
+          { id: "user-msg-01", role: "user", content: "original question", status: "sent" },
+          { id: "assistant-01", role: "assistant", content: "committed answer", status: "sent" },
+        ],
+      });
+    },
+  };
+  const { sandbox, session, assistant } = createChatSandbox({ status: "error", api });
+  sandbox.renderChatTab = () => {};
+  sandbox.refreshMemoryPanelSoon = () => {};
+
+  await sandbox.retryChatMessage(assistant.id);
+
+  assert.deepEqual(events.map((event) => event.type), ["put", "post", "put", "get"]);
+  assert.equal(session.messages.at(-1).status, "sent");
+  assert.equal(session.messages.at(-1).content, "committed answer");
+  assert.equal(events.filter((event) => event.patch?.status === "error").length, 0);
+});
+
+test("sent-PUT plus reconciliation-GET failure freezes the session", async () => {
+  const api = {
+    updateMessage(sessionId, messageId, patch) {
+      if (patch.status === "sent") return Promise.reject(new Error("sent response lost"));
+      return Promise.resolve({ ...patch, id: messageId, role: "assistant" });
+    },
+    postChat() { return Promise.resolve({ message: "uncertain answer" }); },
+    getSession() { return Promise.reject(new Error("canonical reload failed")); },
+  };
+  const { sandbox, session, assistant } = createChatSandbox({ status: "error", api });
+  sandbox.renderChatTab = () => {};
+  sandbox.refreshMemoryPanelSoon = () => {};
+
+  await sandbox.retryChatMessage(assistant.id);
+
+  assert.equal(session.reconciliationRequired, true);
+  assert.equal(session.messagesLoaded, false);
+  assert.match(session.messagesLoadError, /sent response lost/);
+  sandbox.state.status = { llm: { configured: true } };
+  sandbox.state.dom.chatTabInput = { disabled: false, placeholder: "" };
+  sandbox.state.dom.chatTabSendBtn = { disabled: false };
+  sandbox.updateChatInputState();
+  assert.equal(sandbox.state.dom.chatTabInput.disabled, true);
+  assert.equal(sandbox.state.dom.chatTabSendBtn.disabled, true);
+});
+
+test("a persisted terminal error refreshes the full canonical session", async () => {
+  const events = [];
+  const api = {
+    updateMessage(sessionId, messageId, patch) {
+      events.push({ type: "put", patch });
+      return Promise.resolve({ ...patch, id: messageId, role: "assistant" });
+    },
+    postChat() {
+      events.push({ type: "post" });
+      return Promise.reject(new Error("model unavailable"));
+    },
+    getSession() {
+      events.push({ type: "get" });
+      return Promise.resolve({
+        updatedAt: "2026-08-23T01:00:00Z",
+        messages: [
+          { id: "user-msg-01", role: "user", content: "original question", status: "sent" },
+          { id: "assistant-01", role: "assistant", content: "failed", status: "error", error: "model unavailable" },
+        ],
+      });
+    },
+  };
+  const { sandbox, session, assistant } = createChatSandbox({ status: "pending", api });
+  sandbox.renderChatTab = () => {};
+
+  await sandbox.retryChatMessage(assistant.id);
+
+  assert.deepEqual(events.map((event) => event.type), ["put", "post", "put", "get"]);
+  assert.equal(session.updatedAt, "2026-08-23T01:00:00Z");
+  assert.equal(session.messages.at(-1).status, "error");
+  assert.equal(session.reconciliationRequired, false);
 });
 
 test("retry persists pending before posting and reuses the original routing ids", async () => {

@@ -1,5 +1,6 @@
 package com.selfanalyst.desktop.controller;
 
+import com.selfanalyst.agent.SelfAnalystAgent;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -74,7 +75,7 @@ class DesktopAgentControllerTest {
                 () -> DesktopAgentController.agentHistoryBeforeCurrentUser(
                         session, "f".repeat(12)));
         session.messages.add(visible("6".repeat(12), "user", "newer question", "sent"));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(SelfAnalystAgent.StaleChatTurnException.class,
                 () -> DesktopAgentController.agentHistoryBeforeCurrentUser(
                         session, "4".repeat(12)));
         assertNull(DesktopAgentController.persistedTurnFromSession(

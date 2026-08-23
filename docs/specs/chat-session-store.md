@@ -58,8 +58,12 @@
 - **SPEC-CSP-DEC-004**：**不迁移**既有 WebView key `selfAnalyst.chatSessions.v1`，直接切换；前端不再读取并主动删除该旧 key。此决策只针对浏览器存储，不影响 `SPEC-CSP-DEC-011` 对已有服务端 shard 的 AgentState 懒迁移。
   - *取舍*：旧浏览器数据不成为后端事实来源；已经写入服务端的正文则保留并可继续对话。
 
-- **SPEC-CSP-DEC-005**（裁剪上限 / 会话数不限）：**会话数量不设上限**——不再按数量淘汰旧会话。保留两项与单会话体量相关的不变量：单会话最多 **200** 条消息（超出淘汰最旧）、单条消息 `content` ≤ **20000** 字符（超出截断并追加 `...`）。两项均由**后端**在写入时强制执行。
+- **SPEC-CSP-DEC-005**（裁剪上限 / 会话数不限）：**会话数量不设上限**——不再按数量淘汰旧会话。单会话最多 **200** 条消息；超出时从最旧的完整 user turn 开始淘汰，避免保留孤立 assistant。单条消息输入 `content` 最多保留 **20000 Unicode code point**，超出后追加 `...`（故落盘上限为 20003 code point）。两项均由**后端**在写入时强制执行。
   - *取舍*：取消会话数上限满足用户诉求；保留单会话两项上限以约束**单个分片文件**体量，使任一次写仍是有界成本。
+
+- **SPEC-CSP-DEC-013**（辅助字段与分片总预算）：所有 shard 写路径统一归一化辅助字段：`title/contextLabel/summary/error` 分别最多 256/256/512/2048 code point；单个 `contextSnapshot` canonical JSON 最多 64 KiB；每条消息最多 20 个建议任务、合计 64 KiB；单 shard 的最终 UTF-8 JSON 最多 16 MiB。opaque JSON 同时限制深度、节点和容器宽度，超限内容替换为带 `_truncated` 标记及少量识别字段的有界对象。旧 shard 在读取时可兼容，下一次成功 mutation 时按同一规则懒收敛。
+
+- **SPEC-CSP-DEC-014**（请求资源边界）：桌面 chat/session mutation body 最多 256 KiB，JSON 最大深度 32；超限返回 413，错误根类型、字段类型、空消息批次、null 消息以及非法 role/status 返回 400，且不得修改 shard/index。
 
 - **SPEC-CSP-DEC-006**：`active session` 指针随索引一并持久化于后端，使「上次选中的会话」在刷新 / 重启后端后仍能恢复。
 
@@ -97,7 +101,7 @@
 - **SPEC-CSP-GOAL-002**：提供按会话、按消息的 REST CRUD 接口，覆盖列表（索引）、单会话读取、创建会话、更新会话元信息、删除会话、追加消息、更新消息（pending→sent/error）、设置 active 会话。
 - **SPEC-CSP-GOAL-003**：`会话` tab 的布局与主要交互保持不变；存储通道、搜索、ID 所有权、模型历史、发送/重试顺序和 busy/delete 语义按本 spec 调整。
 - **SPEC-CSP-GOAL-004**：写入须原子落盘，任一接口失败须返回可读错误，且不破坏已落盘文件。
-- **SPEC-CSP-GOAL-005**：会话数不设上限；单会话消息数与单条消息长度上限由后端强制。
+- **SPEC-CSP-GOAL-005**：会话数不设上限；单会话消息数、单条消息、辅助字段、opaque JSON、mutation body 与最终 shard 上限由后端强制。
 - **SPEC-CSP-GOAL-006**：每个会话维护可搜索的摘要，支撑"按聊过的内容搜会话"，且其生成不阻断收发、可在无 LLM/预算时降级。
 - **SPEC-CSP-GOAL-007**：每个服务端会话对应独立、可重启恢复的 AgentState；旧服务端 transcript 在状态缺失时安全地单次懒迁移。
 - **SPEC-CSP-GOAL-008**：重载后遗留 pending 可用原 IDs 恢复；重复请求不会重复模型调用或 user turn，Agent 忙统一返回 409。
@@ -156,7 +160,7 @@
 
 - **SPEC-CSP-MODEL-001**：`id`（会话与消息）一律由**服务端**生成并返回，客户端提交的 `id` 被忽略；会话 `id` 必须文件系统安全（作为分片文件名）。
 - **SPEC-CSP-MODEL-002**：`createdAt` / `updatedAt` / `summary` 由服务端写入；客户端提交值被忽略。
-- **SPEC-CSP-MODEL-003**：`contextSnapshot` / `suggestedTasks` 作为不透明可序列化对象原样存取，后端不校验其内部结构。
+- **SPEC-CSP-MODEL-003**：`contextSnapshot` / `suggestedTasks` 保持业务结构不透明，后端不解释其业务含义；但必须执行 DEC-013 的资源归一化（字节、深度、节点、宽度和集合数量），所以超限对象不承诺逐字 round-trip。
 - **SPEC-CSP-MODEL-004**：未知字段读取时忽略、不报错（`@JsonIgnoreProperties(ignoreUnknown=true)` 范式）。
 - **SPEC-CSP-MODEL-005**：`index.json` 是派生投影；当其缺失或不可解析时，后端**应**能从分片文件重建索引，不得因索引损坏丢失会话正文。
 
@@ -229,6 +233,9 @@
 - **SPEC-CSP-API-009a**：**不限制会话数量**，不按会话数淘汰（SPEC-CSP-DEC-005）。
 - **SPEC-CSP-API-009b**：任一会话追加消息后，仅保留最近 **200** 条消息（按追加顺序淘汰最旧）。
 - **SPEC-CSP-API-009c**：写入任一消息 `content` 超 **20000** 字符时，保存前截断并追加 `...`。
+- **SPEC-CSP-API-009d**：create/append 单批最多 200 条，空批次、null 消息以及非法 `role/status` 在写盘前拒绝。
+- **SPEC-CSP-API-009e**：辅助字段和 opaque JSON 必须满足 DEC-013；所有 public mutation（含异步 summary）均不得绕过。
+- **SPEC-CSP-API-009f**：最终 shard 超 16 MiB 时按完整旧 user turn 继续淘汰，直至满足总预算；若最新唯一 turn 本身超过 200 条或 16 MiB，则整次 mutation 原子拒绝，不得删除其 user 锚点后保留 orphan assistant。
 
 ### SPEC-CSP-API-010：原子写、分片隔离与降级
 
@@ -264,6 +271,7 @@
   - 删除会话 → `DELETE /sessions/{id}`（`SPEC-CHAT-TAB-004`）。
   - 重命名 / 首条消息回填标题 / 绑定上下文 → `PUT /sessions/{id}`（`SPEC-CHAT-TAB-003`、`-007`）。
   - 发送：先 `POST /sessions/{id}/messages` 追加 `user` + pending `assistant` 并采用服务端返回的两个消息 ID；再以顶层 `sessionId + userMessageId` 调用 `POST /desktop/chat`；最后只更新原 `pendingId` 为 `sent`/`error`（`SPEC-CHAT-TAB-005`、`-011`）。
+  - append 成功前不得清空 composer；失败时保留未持久化文本。append/update 后采用服务端 canonical Message，并重新读取 authoritative session，使本地缓存同时镜像 200 条与 16 MiB 的完整-turn tail。
 - **SPEC-CSP-FE-005**：会话搜索（`SPEC-CHAT-TAB-004`）改为对 `state.chatSessions` 的索引字段过滤——匹配 `title` + `lastMessagePreview` + `summary`（SPEC-CSP-DEC-009），不依赖已加载的消息正文。
 - **SPEC-CSP-FE-006**：前端不再读取 `localStorage` key `selfAnalyst.chatSessions.v1`，并主动删除该旧 key（SPEC-CSP-DEC-004）。
 - **SPEC-CSP-FE-007**：写接口失败时按既有降级语义处理，不得因持久化失败丢弃用户已输入文本。`POST /desktop/chat` 的 409 按可重试错误处理，并把原 pending best-effort 更新为 error；不得把 409 body 渲染为成功 assistant。
@@ -271,6 +279,7 @@
 - **SPEC-CSP-FE-009**：模型历史以 AgentState 为权威；UI transcript 不得再次作为 `context.history` 注入。
 - **SPEC-CSP-FE-010**：失败重试必须复用原 `sessionId`、`userMessageId`、pending assistant ID 和 `contextSnapshot`，不得调用 API-006 追加新记录。若 AgentState 已有该 user turn 和完成回复，服务端返回既有回复，前端把原 pending 更新为 sent。
 - **SPEC-CSP-FE-011**：从服务端懒加载正文后，任何遗留 pending 都必须呈现恢复/重试入口，或先规范化为可重试 error。恢复按原 transcript 顺序查找它前面的 user，依次执行“PUT 原 pending→pending → `POST /desktop/chat` 同 IDs → PUT 原 pending→sent/error”，不得永久停留在加载态。
+- **SPEC-CSP-FE-013**：正文 GET 失败不得伪装成 loaded-empty；保持 `messagesLoaded=false` 和可重试错误状态，正文成功前禁用 composer。完整 session 返回的 `contextSnapshot` 必须恢复，并作为后续 user turn 的 `boundContext` 一部分。若 sent PUT 与用于确认其结果的 GET 都失败，会话进入 reconciliation-required 状态并冻结新发送，直至 canonical GET 成功。
 - **SPEC-CSP-FE-012**：前端不提供 history toggle；右侧只保留当前状态、未来任务等业务上下文开关。
 
 ---
@@ -320,6 +329,11 @@
 | SPEC-CSP-TST-027 | LLM 未配置、agent 为 null 时删除有遗留 AgentState 的会话 | 直接打开状态存储清除 AgentState，再删除 shard/index，不遗留隐藏模型上下文 |
 | SPEC-CSP-TST-028 | 低阈值触发压缩并重启 | AgentState 保存 rolling summary + recent context；重启后的模型输入恢复两者，旧 raw prefix 不再反序列化/重写 |
 | SPEC-CSP-TST-029 | compaction summary 调用失败 | 原 AgentState 文件字节不变；不得持久化 `(Summarization failed: ...)` 覆盖旧前缀 |
+| SPEC-CSP-TST-030 | 辅助字段、opaque JSON、建议任务取上限及超限 | 保存结果满足各字段/集合预算，超限 opaque 带 `_truncated`，分片不超过 16 MiB |
+| SPEC-CSP-TST-031 | emoji content 超限 | 按 code point 安全裁剪并追加 `...`，不切断 surrogate pair |
+| SPEC-CSP-TST-032 | mutation body 超 256 KiB、深度超 32、错误 shape/空 batch/null message | 返回 413/400，原 shard 字节不变 |
+| SPEC-CSP-TST-033 | sent assistant 收到晚到 error 更新，或尝试更新 user | 返回/抛出非法 lifecycle，已完成结果字节不变 |
+| SPEC-CSP-TST-034 | append 失败、lazy GET 失败、服务端 canonical 截断 | composer 文本不丢；GET 可重试；前端缓存采用服务端消息并镜像完整-turn retention |
 
 ---
 
@@ -328,7 +342,7 @@
 | 规格 ID | 对应文件/组件 | 验证方式 |
 |---------|--------------|---------|
 | SPEC-CSP-DEC-001 | 本 spec（取代说明）、`desktop-chat-tab.md` | 代码审查 |
-| SPEC-CSP-DEC-002..012 | 本 spec（设计决策） | 代码审查 |
+| SPEC-CSP-DEC-002..014 | 本 spec（设计决策） | 代码审查 |
 | SPEC-CSP-GOAL-001..008 | 全特性 | 验收测试 |
 | SPEC-CSP-MODEL-001..005 | `ChatSessionStore.java`（模型、id 安全、索引重建） | 单元测试 |
 | SPEC-CSP-API-001..002 | `DesktopChatSessionController.java`、`DesktopServer.java`、`ChatSessionStore.java` | 单元测试 |

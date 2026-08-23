@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -81,6 +82,52 @@ class DesktopMemoryControllerTest {
     }
 
     @Test
+    void chatControllerRejectsOversizedMalformedAndEmptyMessageBodies() throws Exception {
+        ChatSessionStore store = new ChatSessionStore(tempDir);
+        DesktopChatSessionController controller = new DesktopChatSessionController(
+                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), null);
+
+        FakeContext oversized = FakeContext.withBody(
+                "x".repeat(DesktopChatJson.MAX_BODY_BYTES + 1));
+        controller.createSession(oversized.ctx());
+        assertEquals(413, oversized.status);
+        assertTrue(store.listIndex().sessions.isEmpty());
+
+        FakeContext javalinLimit = FakeContext.withBodyFailure(
+                new io.javalin.http.ContentTooLargeResponse("connector limit"));
+        controller.createSession(javalinLimit.ctx());
+        assertEquals(413, javalinLimit.status);
+        assertTrue(store.listIndex().sessions.isEmpty());
+
+        FakeContext wrongRoot = FakeContext.withBody("[]");
+        controller.createSession(wrongRoot.ctx());
+        assertEquals(400, wrongRoot.status);
+        assertTrue(store.listIndex().sessions.isEmpty());
+
+        FakeContext emptyInitial = FakeContext.withBody("{\"initialMessages\":[]}");
+        controller.createSession(emptyInitial.ctx());
+        assertEquals(400, emptyInitial.status);
+        assertTrue(store.listIndex().sessions.isEmpty());
+
+        ChatSessionStore.Session session = store.create(req("validation"));
+        Path shard = tempDir.resolve("chat-sessions").resolve(session.id + ".json");
+        byte[] before = Files.readAllBytes(shard);
+        for (String body : List.of("{}", "[]", "[null]", "42", "{\"messages\":null}")) {
+            FakeContext invalid = FakeContext.withBody(body);
+            invalid.pathParams.put("id", session.id);
+            controller.appendMessages(invalid.ctx());
+            assertEquals(400, invalid.status, body);
+            assertEquals(new String(before), new String(Files.readAllBytes(shard)), body);
+        }
+
+        String deeplyNested = "{\"contextSnapshot\":" + "[".repeat(40)
+                + "0" + "]".repeat(40) + "}";
+        FakeContext deep = FakeContext.withBody(deeplyNested);
+        controller.createSession(deep.ctx());
+        assertEquals(400, deep.status);
+    }
+
+    @Test
     void memoryUpdateTreatsExplicitJsonNullAsUnspecified() throws Exception {
         LongTermMemoryService service = new LongTermMemoryService(MemoryStore.load(tempDir));
         GrowthProfile.MemoryItem item = service.createExtracted(
@@ -130,6 +177,19 @@ class DesktopMemoryControllerTest {
         Thread.sleep(200);
 
         assertEquals(1, extraction.count(), "sent->sent updates must not schedule duplicate extraction");
+
+        Path shard = tempDir.resolve("chat-sessions").resolve(session.id + ".json");
+        byte[] beforeLateError = Files.readAllBytes(shard);
+        FakeContext lateError = FakeContext.withBody(
+                "{\"content\":\"late error\",\"status\":\"error\",\"error\":\"network\"}");
+        lateError.pathParams.put("id", session.id);
+        lateError.pathParams.put("msgId", assistantId);
+        controller.updateMessage(lateError.ctx());
+        Thread.sleep(100);
+
+        assertEquals(400, lateError.status);
+        assertEquals(new String(beforeLateError), new String(Files.readAllBytes(shard)));
+        assertEquals(1, extraction.count(), "invalid late errors must not trigger extraction");
     }
 
     private static ChatSessionStore.CreateRequest req(String title) {
@@ -180,6 +240,7 @@ class DesktopMemoryControllerTest {
 
     private static final class FakeContext {
         String body = "";
+        RuntimeException bodyFailure;
         int status = 200;
         Object json;
         final Map<String, String> pathParams = new HashMap<>();
@@ -195,12 +256,21 @@ class DesktopMemoryControllerTest {
             return ctx;
         }
 
+        static FakeContext withBodyFailure(RuntimeException failure) {
+            FakeContext ctx = new FakeContext();
+            ctx.bodyFailure = failure;
+            return ctx;
+        }
+
         Context ctx() {
             return (Context) Proxy.newProxyInstance(
                     Context.class.getClassLoader(),
                     new Class<?>[]{Context.class},
                     (proxy, method, args) -> switch (method.getName()) {
-                        case "body" -> body;
+                        case "body" -> {
+                            if (bodyFailure != null) throw bodyFailure;
+                            yield body;
+                        }
                         case "status" -> {
                             if (args != null && args.length == 1 && args[0] instanceof Integer code) {
                                 status = code;

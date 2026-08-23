@@ -2,8 +2,12 @@ package com.selfanalyst.desktop.store;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.io.IOException;
@@ -13,7 +17,10 @@ import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -42,9 +49,27 @@ public class ChatSessionStore {
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     /** Single-session message cap (SPEC-CSP-API-009b). */
-    private static final int MAX_MESSAGES = 200;
+    static final int MAX_MESSAGES = 200;
+    /** Maximum messages accepted by one create/append mutation. */
+    static final int MAX_MESSAGE_BATCH = 200;
     /** Single-message content length cap (SPEC-CSP-API-009c). */
-    private static final int MAX_CONTENT = 20000;
+    static final int MAX_CONTENT = 20000;
+    static final int MAX_TITLE = 256;
+    static final int MAX_SOURCE = 32;
+    static final int MAX_CONTEXT_LABEL = 256;
+    static final int MAX_SUMMARY = 512;
+    static final int MAX_ERROR = 2048;
+    static final int MAX_CONTEXT_SNAPSHOT_BYTES = 64 * 1024;
+    static final int MAX_SUGGESTED_TASKS = 20;
+    static final int MAX_SUGGESTED_TASK_BYTES = 8 * 1024;
+    static final int MAX_SUGGESTED_TASKS_BYTES = 64 * 1024;
+    static final int MAX_OPAQUE_DEPTH = 16;
+    static final int MAX_OPAQUE_NODES = 2048;
+    static final int MAX_CONTAINER_ITEMS = 256;
+    static final int MAX_JSON_KEY = 128;
+    static final int MAX_JSON_STRING = 8192;
+    /** Hard UTF-8 bound for one persisted shard. */
+    static final int MAX_SHARD_BYTES = 16 * 1024 * 1024;
     /** Length of the derived {@code lastMessagePreview} (SPEC-CSP-DEC-008). */
     private static final int PREVIEW_LEN = 80;
     /** Server-generated IDs are the only valid shard names. */
@@ -168,12 +193,13 @@ public class ChatSessionStore {
                             String fileName = p.getFileName().toString();
                             String fileId = fileName.substring(0, fileName.length() - 5);
                             if (s != null && isGeneratedSessionId(s.id) && s.id.equals(fileId)) {
+                                normalizeSessionForRead(s);
                                 rebuilt.sessions.add(toMeta(s));
                             } else {
                                 log.warn("Skipping chat shard with mismatched/invalid id: {}",
                                         p.getFileName());
                             }
-                        } catch (IOException e) {
+                        } catch (IOException | RuntimeException e) {
                             log.warn("Skipping unreadable chat shard {}: {}", p.getFileName(), e.getMessage());
                         }
                     });
@@ -195,13 +221,13 @@ public class ChatSessionStore {
     private static SessionMeta toMeta(Session s) {
         SessionMeta m = new SessionMeta();
         m.id = s.id;
-        m.title = s.title;
+        m.title = truncateText(s.title, MAX_TITLE);
         m.createdAt = s.createdAt;
         m.updatedAt = s.updatedAt;
-        m.source = s.source;
-        m.contextLabel = s.contextLabel;
+        m.source = truncateText(s.source, MAX_SOURCE);
+        m.contextLabel = truncateText(s.contextLabel, MAX_CONTEXT_LABEL);
         m.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
-        m.summary = s.summary;
+        m.summary = truncateText(s.summary, MAX_SUMMARY);
         m.messageCount = s.messages != null ? s.messages.size() : 0;
         m.lastMessagePreview = lastPreview(s);
         return m;
@@ -212,7 +238,8 @@ public class ChatSessionStore {
         String content = s.messages.get(s.messages.size() - 1).content;
         if (content == null) return null;
         content = content.strip();
-        return content.length() > PREVIEW_LEN ? content.substring(0, PREVIEW_LEN) : content;
+        return codePoints(content) > PREVIEW_LEN
+                ? prefixCodePoints(content, PREVIEW_LEN) : content;
     }
 
     // ── Read paths ───────────────────────────────────────────────
@@ -236,9 +263,9 @@ public class ChatSessionStore {
                 log.warn("Skipping chat shard with mismatched/invalid id: {}", shard.getFileName());
                 return null;
             }
-            normalizeSessionMemoryPolicy(s);
+            normalizeSessionForRead(s);
             return s;
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             log.warn("Failed to read chat shard {}: {}", id, e.getMessage());
             return null;
         }
@@ -259,7 +286,7 @@ public class ChatSessionStore {
         s.createdAt = now;
         s.updatedAt = now;
         s.title = (req != null && req.title != null && !req.title.isBlank()) ? req.title : "新会话";
-        s.source = (req != null && req.source != null && !req.source.isBlank()) ? req.source : "manual";
+        s.source = normalizeSource(req != null ? req.source : null);
         s.memoryPolicy = normalizeMemoryPolicy(req != null ? req.memoryPolicy : null);
         if (req != null) {
             s.contextLabel = req.contextLabel;
@@ -267,13 +294,14 @@ public class ChatSessionStore {
         }
         s.messages = new ArrayList<>();
         if (req != null && req.initialMessages != null) {
+            requireValidBatch(req.initialMessages);
             for (Message m : req.initialMessages) {
-                stamp(m);
-                s.messages.add(m);
+                Message stored = copyIncomingMessage(m);
+                stamp(stored);
+                s.messages.add(stored);
             }
-            truncateMessages(s);
         }
-        writeJson(shardFile(s.id), s);
+        writeSession(s);
         Index idx = loadIndex();
         upsertMeta(idx, s);
         idx.activeSessionId = s.id;
@@ -293,7 +321,7 @@ public class ChatSessionStore {
         if (contextLabel != null) s.contextLabel = contextLabel;
         if (contextSnapshot != null) s.contextSnapshot = contextSnapshot;
         s.updatedAt = Instant.now();
-        writeJson(shardFile(id), s);
+        writeSession(s);
         Index idx = loadIndex();
         upsertMeta(idx, s);
         writeJson(indexFile, idx);
@@ -305,7 +333,7 @@ public class ChatSessionStore {
         if (s == null) return null;
         s.memoryPolicy = normalizeMemoryPolicy(memoryPolicy);
         s.updatedAt = Instant.now();
-        writeJson(shardFile(id), s);
+        writeSession(s);
         Index idx = loadIndex();
         upsertMeta(idx, s);
         writeJson(indexFile, idx);
@@ -349,17 +377,20 @@ public class ChatSessionStore {
         Session s = getSession(id);
         if (s == null) return null;
         if (s.messages == null) s.messages = new ArrayList<>();
+        requireValidBatch(incoming);
         List<Message> appended = new ArrayList<>();
-        if (incoming != null) {
-            for (Message m : incoming) {
-                stamp(m);
-                s.messages.add(m);
-                appended.add(m);
-            }
+        for (Message m : incoming) {
+            Message stored = copyIncomingMessage(m);
+            stamp(stored);
+            s.messages.add(stored);
+            appended.add(stored);
         }
-        truncateMessages(s);
         s.updatedAt = Instant.now();
-        writeJson(shardFile(id), s);
+        writeSession(s);
+        java.util.Set<String> retainedIds = s.messages.stream()
+                .map(message -> message.id)
+                .collect(java.util.stream.Collectors.toSet());
+        appended.removeIf(message -> !retainedIds.contains(message.id));
         Index idx = loadIndex();
         upsertMeta(idx, s);
         writeJson(indexFile, idx);
@@ -384,17 +415,38 @@ public class ChatSessionStore {
             }
         }
         if (target == null) return null;
+        if (!"assistant".equals(target.role)) {
+            throw new IllegalArgumentException("Only assistant messages can be updated");
+        }
         if (content != null) target.content = truncateContent(content);
         if (status != null) {
+            requireValidStatus(status);
+            if (!isAllowedStatusTransition(target.status, status)) {
+                throw new IllegalArgumentException(
+                        "Invalid assistant status transition: " + target.status + " -> " + status);
+            }
             target.status = status;
             if ("pending".equals(status) || "sent".equals(status)) {
                 target.error = null;
             }
+            if ("pending".equals(status) || "error".equals(status)) {
+                target.suggestedTasks = null;
+            }
         }
-        if (error != null) target.error = error;
-        if (suggestedTasks != null) target.suggestedTasks = suggestedTasks;
+        if (error != null) {
+            if (!"error".equals(target.status)) {
+                throw new IllegalArgumentException("error text requires assistant status=error");
+            }
+            target.error = error;
+        }
+        if (suggestedTasks != null) {
+            if (!"sent".equals(target.status) && !suggestedTasks.isEmpty()) {
+                throw new IllegalArgumentException("suggestedTasks require assistant status=sent");
+            }
+            target.suggestedTasks = new ArrayList<>(suggestedTasks);
+        }
         s.updatedAt = Instant.now();
-        writeJson(shardFile(id), s);
+        writeSession(s);
         Index idx = loadIndex();
         upsertMeta(idx, s);
         writeJson(indexFile, idx);
@@ -424,7 +476,7 @@ public class ChatSessionStore {
         Session s = getSession(id);
         if (s == null) return;
         s.summary = summary;
-        writeJson(shardFile(id), s);
+        writeSession(s);
         Index idx = loadIndex();
         upsertMeta(idx, s);
         writeJson(indexFile, idx);
@@ -445,10 +497,8 @@ public class ChatSessionStore {
     }
 
     private static String truncateContent(String content) {
-        if (content != null && content.length() > MAX_CONTENT) {
-            return content.substring(0, MAX_CONTENT) + "...";
-        }
-        return content;
+        if (content == null || codePoints(content) <= MAX_CONTENT) return content;
+        return prefixCodePoints(content, MAX_CONTENT) + "...";
     }
 
     private static String normalizeMemoryPolicy(String value) {
@@ -468,26 +518,316 @@ public class ChatSessionStore {
         }
     }
 
-    private static void normalizeSessionMemoryPolicy(Session s) {
-        if (s != null) {
-            s.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
-        }
-    }
-
     private static void normalizeIndexMemoryPolicy(Index idx) {
         for (SessionMeta m : idx.sessions) {
             if (m != null) {
                 m.memoryPolicy = coerceMemoryPolicy(m.memoryPolicy);
+                m.title = truncateText(m.title, MAX_TITLE);
+                m.source = truncateText(m.source, MAX_SOURCE);
+                m.contextLabel = truncateText(m.contextLabel, MAX_CONTEXT_LABEL);
+                m.summary = truncateText(m.summary, MAX_SUMMARY);
+                m.lastMessagePreview = truncateText(m.lastMessagePreview, PREVIEW_LEN);
             }
         }
     }
 
-    /** Keep only the newest {@link #MAX_MESSAGES} messages (SPEC-CSP-API-009b). */
+    /** Keep only the newest complete-turn tail within {@link #MAX_MESSAGES}. */
     private static void truncateMessages(Session s) {
         if (s.messages != null && s.messages.size() > MAX_MESSAGES) {
             int from = s.messages.size() - MAX_MESSAGES;
+            int nextUser = firstUserAtOrAfter(s.messages, from);
+            if (nextUser >= 0) {
+                s.messages = new ArrayList<>(s.messages.subList(nextUser, s.messages.size()));
+                return;
+            }
+            int lastUser = lastUserIndex(s.messages);
+            if (lastUser >= 0 && s.messages.size() - lastUser > MAX_MESSAGES) {
+                throw new IllegalArgumentException(
+                        "The newest chat turn exceeds the message retention limit");
+            }
             s.messages = new ArrayList<>(s.messages.subList(from, s.messages.size()));
         }
+    }
+
+    private void writeSession(Session s) {
+        normalizeSessionForWrite(s);
+        writeJson(shardFile(s.id), s);
+    }
+
+    private static void normalizeSessionForRead(Session s) {
+        if (s != null) s.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
+    }
+
+    private static void normalizeSessionForWrite(Session s) {
+        if (s == null) return;
+        s.title = truncateText(s.title, MAX_TITLE);
+        s.source = truncateText(s.source, MAX_SOURCE);
+        s.contextLabel = truncateText(s.contextLabel, MAX_CONTEXT_LABEL);
+        s.summary = truncateText(s.summary, MAX_SUMMARY);
+        s.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
+        s.contextSnapshot = normalizeOpaque(s.contextSnapshot, MAX_CONTEXT_SNAPSHOT_BYTES, false);
+        if (s.messages == null) s.messages = new ArrayList<>();
+        List<Message> normalized = new ArrayList<>(s.messages.size());
+        for (Message message : s.messages) {
+            if (message == null) continue;
+            normalizeMessage(message);
+            normalized.add(message);
+        }
+        s.messages = normalized;
+        truncateMessages(s);
+        while (serializedBytes(s) > MAX_SHARD_BYTES && !s.messages.isEmpty()) {
+            dropOldestTurn(s.messages);
+        }
+        if (serializedBytes(s) > MAX_SHARD_BYTES) {
+            throw new IllegalArgumentException("Chat session exceeds the shard size limit");
+        }
+    }
+
+    private static void normalizeMessage(Message message) {
+        message.content = truncateContent(message.content);
+        message.error = truncateText(message.error, MAX_ERROR);
+        message.contextSnapshot = normalizeOpaque(
+                message.contextSnapshot, MAX_CONTEXT_SNAPSHOT_BYTES, false);
+        message.suggestedTasks = normalizeSuggestedTasks(message.suggestedTasks);
+    }
+
+    private static Message copyIncomingMessage(Message incoming) {
+        if (incoming == null) throw new IllegalArgumentException("Chat message must not be null");
+        requireValidRole(incoming.role);
+        requireValidStatus(incoming.status);
+        Message copy = new Message();
+        copy.role = incoming.role;
+        copy.content = incoming.content;
+        copy.status = incoming.status;
+        copy.error = incoming.error;
+        copy.contextSnapshot = incoming.contextSnapshot;
+        copy.suggestedTasks = incoming.suggestedTasks == null
+                ? null : new ArrayList<>(incoming.suggestedTasks);
+        normalizeMessage(copy);
+        return copy;
+    }
+
+    private static void requireValidBatch(List<Message> messages) {
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("At least one chat message is required");
+        }
+        if (messages.size() > MAX_MESSAGE_BATCH) {
+            throw new IllegalArgumentException(
+                    "A chat message batch may contain at most " + MAX_MESSAGE_BATCH + " messages");
+        }
+        for (Message message : messages) {
+            if (message == null) throw new IllegalArgumentException("Chat message must not be null");
+            requireValidRole(message.role);
+            requireValidStatus(message.status);
+            requireValidIncomingLifecycle(message);
+        }
+    }
+
+    private static void requireValidRole(String role) {
+        if (!"user".equals(role) && !"assistant".equals(role) && !"system".equals(role)) {
+            throw new IllegalArgumentException("Invalid chat message role: " + role);
+        }
+    }
+
+    private static String normalizeSource(String source) {
+        if (source == null || source.isBlank()) return "manual";
+        return switch (source) {
+            case "manual", "agent_context", "task_context" -> source;
+            default -> throw new IllegalArgumentException("Invalid chat session source: " + source);
+        };
+    }
+
+    private static void requireValidIncomingLifecycle(Message message) {
+        if ("assistant".equals(message.role)) {
+            if (!"pending".equals(message.status)) {
+                throw new IllegalArgumentException(
+                        "New assistant messages must start with status=pending");
+            }
+            if (message.error != null || message.suggestedTasks != null) {
+                throw new IllegalArgumentException(
+                        "A pending assistant cannot contain error or suggestedTasks");
+            }
+        } else if ("user".equals(message.role)) {
+            if (message.status != null && !"sent".equals(message.status)) {
+                throw new IllegalArgumentException("User messages may only use status=sent");
+            }
+            if (message.error != null || message.suggestedTasks != null) {
+                throw new IllegalArgumentException(
+                        "User messages cannot contain error or suggestedTasks");
+            }
+        } else if (message.status != null || message.error != null
+                || message.suggestedTasks != null) {
+            throw new IllegalArgumentException(
+                    "System messages cannot contain lifecycle fields");
+        }
+    }
+
+    private static void requireValidStatus(String status) {
+        if (status != null && !"pending".equals(status)
+                && !"sent".equals(status) && !"error".equals(status)) {
+            throw new IllegalArgumentException("Invalid chat message status: " + status);
+        }
+    }
+
+    private static boolean isAllowedStatusTransition(String from, String to) {
+        if (from == null || from.equals(to)) return true;
+        if ("pending".equals(from)) return "sent".equals(to) || "error".equals(to);
+        if ("error".equals(from)) return "pending".equals(to) || "sent".equals(to);
+        return false;
+    }
+
+    private static List<Object> normalizeSuggestedTasks(List<Object> tasks) {
+        if (tasks == null) return null;
+        List<Object> normalized = new ArrayList<>();
+        for (Object task : tasks) {
+            if (task == null || normalized.size() >= MAX_SUGGESTED_TASKS) break;
+            Object bounded = normalizeOpaque(task, MAX_SUGGESTED_TASK_BYTES, true);
+            List<Object> candidate = new ArrayList<>(normalized);
+            candidate.add(bounded);
+            if (serializedBytes(candidate) > MAX_SUGGESTED_TASKS_BYTES) break;
+            normalized.add(bounded);
+        }
+        return normalized;
+    }
+
+    private static Object normalizeOpaque(Object value, int maxBytes, boolean task) {
+        if (value == null) return null;
+        JsonNode original;
+        try {
+            original = MAPPER.valueToTree(value);
+        } catch (IllegalArgumentException error) {
+            return truncatedMarker(null, task);
+        }
+        OpaqueBudget budget = new OpaqueBudget();
+        JsonNode bounded = boundNode(original, 0, budget);
+        if (!budget.truncated && bounded != null && serializedBytes(bounded) <= maxBytes) {
+            return MAPPER.convertValue(bounded, Object.class);
+        }
+        return truncatedMarker(original, task);
+    }
+
+    private static JsonNode boundNode(JsonNode node, int depth, OpaqueBudget budget) {
+        if (depth >= MAX_OPAQUE_DEPTH || !budget.takeNode()) {
+            budget.truncated = true;
+            return null;
+        }
+        if (node == null || node.isNull()) return com.fasterxml.jackson.databind.node.NullNode.instance;
+        if (node.isTextual()) {
+            if (codePoints(node.textValue()) > MAX_JSON_STRING) budget.truncated = true;
+            return TextNode.valueOf(truncateText(node.textValue(), MAX_JSON_STRING));
+        }
+        if (node.isObject()) {
+            ObjectNode out = MAPPER.createObjectNode();
+            Iterator<Map.Entry<String, JsonNode>> fields = node.properties().iterator();
+            int count = 0;
+            while (fields.hasNext()) {
+                if (count >= MAX_CONTAINER_ITEMS || budget.remainingNodes == 0) {
+                    budget.truncated = true;
+                    break;
+                }
+                Map.Entry<String, JsonNode> field = fields.next();
+                if (codePoints(field.getKey()) > MAX_JSON_KEY) budget.truncated = true;
+                JsonNode child = boundNode(field.getValue(), depth + 1, budget);
+                if (child == null) break;
+                out.set(truncateText(field.getKey(), MAX_JSON_KEY), child);
+                count++;
+            }
+            return out;
+        }
+        if (node.isArray()) {
+            ArrayNode out = MAPPER.createArrayNode();
+            for (int i = 0; i < node.size(); i++) {
+                if (i >= MAX_CONTAINER_ITEMS || budget.remainingNodes == 0) {
+                    budget.truncated = true;
+                    break;
+                }
+                JsonNode child = boundNode(node.get(i), depth + 1, budget);
+                if (child == null) break;
+                out.add(child);
+            }
+            return out;
+        }
+        return node.deepCopy();
+    }
+
+    private static final class OpaqueBudget {
+        private int remainingNodes = MAX_OPAQUE_NODES;
+        private boolean truncated;
+
+        private boolean takeNode() {
+            if (remainingNodes <= 0) return false;
+            remainingNodes--;
+            return true;
+        }
+    }
+
+    private static Map<String, Object> truncatedMarker(JsonNode original, boolean task) {
+        Map<String, Object> marker = new LinkedHashMap<>();
+        marker.put("_truncated", true);
+        if (original != null && original.isObject()) {
+            for (String key : List.of("type", "title", "label", "source", "priority", "dueAt")) {
+                JsonNode value = original.get(key);
+                if (value != null && value.isValueNode() && !value.isNull()) {
+                    marker.put(key, truncateText(value.asText(), MAX_TITLE));
+                }
+            }
+        } else if (task && original != null && original.isTextual()) {
+            marker.put("title", truncateText(original.asText(), MAX_TITLE));
+        }
+        if (task && !marker.containsKey("title")) marker.put("title", "...");
+        return marker;
+    }
+
+    private static void dropOldestTurn(List<Message> messages) {
+        if (messages.isEmpty()) return;
+        int nextUser = firstUserAtOrAfter(messages, 1);
+        if (nextUser >= 0) {
+            messages.subList(0, nextUser).clear();
+            return;
+        }
+        if (lastUserIndex(messages) >= 0) {
+            throw new IllegalArgumentException(
+                    "The newest chat turn exceeds the shard size limit");
+        }
+        messages.removeFirst();
+    }
+
+    private static int firstUserAtOrAfter(List<Message> messages, int start) {
+        for (int i = Math.max(0, start); i < messages.size(); i++) {
+            if ("user".equals(messages.get(i).role)) return i;
+        }
+        return -1;
+    }
+
+    private static int lastUserIndex(List<Message> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if ("user".equals(messages.get(i).role)) return i;
+        }
+        return -1;
+    }
+
+    private static int serializedBytes(Object value) {
+        try {
+            return MAPPER.writeValueAsBytes(value).length;
+        } catch (IOException | RuntimeException error) {
+            throw new IllegalArgumentException("Chat session payload is not serializable", error);
+        }
+    }
+
+    private static String truncateText(String value, int maxCodePoints) {
+        if (value == null || codePoints(value) <= maxCodePoints) return value;
+        int prefix = Math.max(0, maxCodePoints - 3);
+        return prefixCodePoints(value, prefix) + "...";
+    }
+
+    private static String prefixCodePoints(String value, int count) {
+        if (value == null || count <= 0) return "";
+        int end = value.offsetByCodePoints(0, Math.min(count, codePoints(value)));
+        return value.substring(0, end);
+    }
+
+    private static int codePoints(String value) {
+        return value == null ? 0 : value.codePointCount(0, value.length());
     }
 
     /** Replace or append the {@link SessionMeta} row for a session (single-row mutation). */

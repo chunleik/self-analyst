@@ -17,10 +17,18 @@ function loadChatSessions() {
       return meta;
     });
     state.activeChatSessionId = (index && index.activeSessionId) || null;
-  }).catch(function () {
+    state.chatSessionsLoaded = true;
+    state.chatSessionsLoadError = null;
+    if (!state.activeChatSessionId && state.chatSessions.length > 0) {
+      state.activeChatSessionId = state.chatSessions[0].id;
+      if (api.setActiveSession) api.setActiveSession(state.activeChatSessionId).catch(function () {});
+    }
+  }).catch(function (err) {
     // Keep an empty list rather than breaking init (SPEC-CSP-FE-007).
     state.chatSessions = [];
     state.activeChatSessionId = null;
+    state.chatSessionsLoaded = false;
+    state.chatSessionsLoadError = err && err.message ? err.message : t("common.unknownError");
   }).then(function () {
     return loadMemoryForChat();
   });
@@ -44,19 +52,28 @@ function loadMemoryForChat() {
 // Lazy-load a session's message bodies + summary (SPEC-CSP-FE-003).
 function ensureSessionMessagesLoaded(session) {
   if (!session) return Promise.resolve(null);
-  if (session.messagesLoaded) return Promise.resolve(session);
-  return api.getSession(session.id).then(function (full) {
-    session.messages = (full && full.messages) || [];
-    session.summary = full ? full.summary : session.summary;
-    session.memoryPolicy = full ? (full.memoryPolicy || "smart") : session.memoryPolicy;
-    session.messagesLoaded = true;
+  if (session.messagesLoaded && !session.reconciliationRequired) return Promise.resolve(session);
+  if (session.messagesLoadPromise) return session.messagesLoadPromise;
+  session.messagesLoading = true;
+  session.messagesLoadError = null;
+  session.messagesLoadPromise = api.getSession(session.id).then(function (full) {
+    applyFullSession(session, full);
     return session;
-  }).catch(function () {
-    // Treat as loaded-but-empty so the thread renders instead of spinning.
+  }).catch(function (err) {
     session.messages = session.messages || [];
-    session.messagesLoaded = true;
-    return session;
+    session.messagesLoaded = false;
+    session.messagesLoadError = err && err.message ? err.message : t("common.unknownError");
+    throw err;
+  }).then(function (loaded) {
+    session.messagesLoading = false;
+    session.messagesLoadPromise = null;
+    return loaded;
+  }, function (err) {
+    session.messagesLoading = false;
+    session.messagesLoadPromise = null;
+    throw err;
   });
+  return session.messagesLoadPromise;
 }
 
 // Re-sort the cached list by updatedAt desc (server owns ordering; this keeps
@@ -74,8 +91,149 @@ function mergeSessionFields(session, fresh) {
   if (fresh.updatedAt != null) session.updatedAt = fresh.updatedAt;
   if (fresh.summary != null) session.summary = fresh.summary;
   if (fresh.contextLabel != null) session.contextLabel = fresh.contextLabel;
-  if (fresh.contextSnapshot != null) session.contextSnapshot = fresh.contextSnapshot;
+  if (Object.prototype.hasOwnProperty.call(fresh, "contextSnapshot")) {
+    session.contextSnapshot = fresh.contextSnapshot;
+  }
   if (fresh.memoryPolicy != null) session.memoryPolicy = fresh.memoryPolicy;
+}
+
+function normalizeSuggestedTasks(tasks) {
+  if (!Array.isArray(tasks)) return [];
+  var normalized = [];
+  for (var i = 0; i < tasks.length && normalized.length < 20; i++) {
+    var item = tasks[i];
+    if (typeof item === "string") item = { title: item };
+    if (!item || typeof item !== "object") continue;
+    var title = item.title || item.task;
+    if (title == null || !String(title).trim()) continue;
+    var copy = {};
+    for (var key in item) {
+      if (Object.prototype.hasOwnProperty.call(item, key)) copy[key] = item[key];
+    }
+    copy.title = String(title).substring(0, 256);
+    if (copy.notes != null) copy.notes = String(copy.notes).substring(0, 2048);
+    normalized.push(copy);
+  }
+  return normalized;
+}
+
+function mergeMessageFields(message, fresh) {
+  if (!message || !fresh) return;
+  var fields = ["id", "role", "content", "status", "error", "createdAt", "contextSnapshot"];
+  for (var i = 0; i < fields.length; i++) {
+    var field = fields[i];
+    if (Object.prototype.hasOwnProperty.call(fresh, field)) message[field] = fresh[field];
+  }
+  if (Object.prototype.hasOwnProperty.call(fresh, "suggestedTasks")) {
+    message.suggestedTasks = normalizeSuggestedTasks(fresh.suggestedTasks);
+  }
+}
+
+function applyFullSession(session, full) {
+  if (!session || !full) return session;
+  mergeSessionFields(session, full);
+  session.messages = (full.messages || []).map(function (message) {
+    message.suggestedTasks = normalizeSuggestedTasks(message.suggestedTasks);
+    return message;
+  });
+  session.messagesLoaded = true;
+  session.messagesLoadError = null;
+  session.reconciliationRequired = false;
+  session.messageCount = session.messages.length;
+  var last = session.messages.length ? session.messages[session.messages.length - 1] : null;
+  session.lastMessagePreview = last && last.content
+    ? String(last.content).trim().substring(0, 80) : "";
+  return session;
+}
+
+function refreshCanonicalSession(session) {
+  if (!session || !api.getSession) return Promise.resolve(session);
+  return api.getSession(session.id).then(function (full) {
+    applyFullSession(session, full);
+    resortChatSessions();
+    return session;
+  });
+}
+
+function findSessionMessage(session, messageId) {
+  if (!session || !session.messages) return null;
+  for (var i = 0; i < session.messages.length; i++) {
+    if (session.messages[i].id === messageId) return session.messages[i];
+  }
+  return null;
+}
+
+function freezeSessionForReconciliation(session, message, error) {
+  message.persistenceError = error && error.message ? error.message : String(error);
+  session.reconciliationRequired = true;
+  session.messagesLoaded = false;
+  session.messagesLoadError = t("chat.reconciliationPending", {
+    msg: message.persistenceError,
+  });
+  renderChatTab();
+  return message;
+}
+
+function markAssistantPersistenceError(session, message, error) {
+  message.status = "error";
+  message.content = formatChatErrorMessage(error);
+  message.error = error && error.message ? error.message : String(error);
+  message.suggestedTasks = [];
+  renderChatTab();
+  return api.updateMessage(session.id, message.id, {
+    status: "error",
+    content: message.content,
+    error: message.error,
+  }).then(function (updated) {
+    mergeMessageFields(message, updated);
+    return refreshCanonicalSession(session).catch(function (refreshError) {
+      return freezeSessionForReconciliation(session, message, refreshError);
+    })
+      .then(function () {
+        resortChatSessions();
+        renderChatTab();
+        return message;
+      });
+  }).catch(function (updateError) {
+    return api.getSession
+      ? freezeSessionForReconciliation(session, message, updateError)
+      : message;
+  });
+}
+
+function reconcileAmbiguousAssistantUpdate(session, message, persistenceError) {
+  if (!api.getSession) {
+    return markAssistantPersistenceError(session, message, persistenceError);
+  }
+  return refreshCanonicalSession(session).then(function () {
+    var canonical = findSessionMessage(session, message.id);
+    if (canonical && canonical.status === "sent") {
+      renderChatTab();
+      return canonical;
+    }
+    return markAssistantPersistenceError(
+      session, canonical || message, persistenceError);
+  }).catch(function () {
+    // The model reply is known, but neither persistence nor a canonical reload can
+    // be confirmed. Freeze this session until a later GET reconciles the transcript.
+    return freezeSessionForReconciliation(session, message, persistenceError);
+  });
+}
+
+function syncSessionMessageCache(session, appended) {
+  var combined = (session.messages || []).concat(appended || []);
+  if (combined.length > 200) {
+    var from = combined.length - 200;
+    while (from < combined.length && combined[from].role !== "user") from++;
+    if (from >= combined.length) from = combined.length - 200;
+    combined = combined.slice(from);
+  }
+  session.messages = combined;
+  session.messageCount = session.messages.length;
+  var last = session.messages.length ? session.messages[session.messages.length - 1] : null;
+  var content = last && last.content ? String(last.content).trim() : "";
+  session.lastMessagePreview = content.substring(0, 80);
+  if (last) session.updatedAt = last.createdAt || new Date().toISOString();
 }
 
 function getActiveChatSession() {
@@ -90,6 +248,14 @@ function getActiveChatSession() {
 function ensureActiveChatSession() {
   var s = getActiveChatSession();
   if (s) return Promise.resolve(s);
+  if (state.chatSessions && state.chatSessions.length > 0) {
+    state.activeChatSessionId = state.chatSessions[0].id;
+    if (api.setActiveSession) api.setActiveSession(state.activeChatSessionId).catch(function () {});
+    return Promise.resolve(state.chatSessions[0]);
+  }
+  if (state.chatSessionsLoaded === false) {
+    return Promise.reject(new Error(state.chatSessionsLoadError || t("chat.loadSessionFailed")));
+  }
   return createChatSession({ title: t("chat.currentSession") });
 }
 
@@ -448,7 +614,8 @@ function renderChatSessionList() {
       state.activeChatSessionId = sid;
       api.setActiveSession(sid).catch(function () { /* best-effort pointer */ });
       var selected = getActiveChatSession();
-      ensureSessionMessagesLoaded(selected).then(renderChatTab);
+      renderChatTab();
+      ensureSessionMessagesLoaded(selected).then(renderChatTab).catch(renderChatTab);
     }
   };
 }
@@ -467,10 +634,17 @@ function renderChatThread() {
 
   // Bodies are lazy-loaded; show a transient state and fetch on demand.
   if (!session.messagesLoaded) {
-    thread.innerHTML = '<div class="chat-welcome"><p>' + escHtml(t("common.loadingEllipsis")) + '</p></div>';
-    ensureSessionMessagesLoaded(session).then(function () {
-      if (getActiveChatSession() === session) renderChatThread();
-    });
+    if (session.messagesLoadError) {
+      thread.innerHTML = '<div class="chat-welcome"><p>' +
+        escHtml(t("chat.loadSessionFailed", { msg: session.messagesLoadError })) + '</p></div>';
+    } else {
+      thread.innerHTML = '<div class="chat-welcome"><p>' + escHtml(t("common.loadingEllipsis")) + '</p></div>';
+      ensureSessionMessagesLoaded(session).then(function () {
+        if (getActiveChatSession() === session) renderChatTab();
+      }).catch(function () {
+        if (getActiveChatSession() === session) renderChatTab();
+      });
+    }
     return;
   }
 
@@ -487,13 +661,15 @@ function renderChatThread() {
     var m = session.messages[i];
     var cls = "chat-tab-message " + m.role + (m.status === "pending" ? " pending" : "") + (m.status === "error" ? " error" : "");
     html += '<div class="' + cls + '">';
-    html += '<div class="msg-content">' + formatChatMessageContent(m.content) + '</div>';
+    var visibleContent = m.content || (m.status === "error" ? m.error : "") || "";
+    html += '<div class="msg-content">' + formatChatMessageContent(visibleContent) + '</div>';
     if (i === retryableAssistantIdx &&
         (m.status === "error" || m.status === "pending")) {
       html += '<div class="msg-retry" data-mid="' + m.id + '">' + escHtml(t("chat.retry")) + '</div>';
     }
     // Suggested tasks
-    if (m.suggestedTasks && m.suggestedTasks.length > 0) {
+    m.suggestedTasks = normalizeSuggestedTasks(m.suggestedTasks);
+    if (m.suggestedTasks.length > 0) {
       html += '<div class="chat-suggested-tasks">';
       for (var taskIndex = 0; taskIndex < m.suggestedTasks.length; taskIndex++) {
         var st = m.suggestedTasks[taskIndex];
@@ -555,6 +731,7 @@ function renderChatContextPanel() {
 
   // Task suggestions -- from last assistant message with suggestedTasks
   var taskDiv = state.dom.chatTaskSuggestions.querySelector(".chat-context-content");
+  taskDiv.textContent = t("chat.noSuggestedTasks");
   if (session && session.messages.length > 0) {
     var lastAssistantTasks = null;
     for (var m = session.messages.length - 1; m >= 0; m--) {
@@ -569,8 +746,6 @@ function renderChatContextPanel() {
         tHtml += '<div class="chat-suggested-task-row"><span class="task-title">' + escHtml(lastAssistantTasks[taskIdx].title) + '</span></div>';
       }
       taskDiv.innerHTML = tHtml;
-    } else {
-      taskDiv.textContent = t("chat.noSuggestedTasks");
     }
   }
   renderChatMemoryPanel();
@@ -579,12 +754,13 @@ function renderChatContextPanel() {
 function updateChatInputState() {
   var llmOk = state.status && state.status.llm && state.status.llm.configured;
   var session = getActiveChatSession();
+  var sessionReady = session && session.messagesLoaded && !session.messagesLoading;
   if (state.dom.chatTabInput) {
-    state.dom.chatTabInput.disabled = !llmOk || !session;
+    state.dom.chatTabInput.disabled = !llmOk || !sessionReady || state.chatSending;
     if (!llmOk) state.dom.chatTabInput.placeholder = t("chat.llmNotConfiguredPlaceholder");
   }
   if (state.dom.chatTabSendBtn) {
-    state.dom.chatTabSendBtn.disabled = !llmOk || !session || state.chatSending;
+    state.dom.chatTabSendBtn.disabled = !llmOk || !sessionReady || state.chatSending;
   }
 }
 
@@ -597,10 +773,12 @@ function sendChatTabMessage() {
   if (!text) return;
 
   state.chatSending = true;
-  input.value = "";
   renderChatTab();
 
+  var inputPersisted = false;
   ensureActiveChatSession().then(function (session) {
+    return ensureSessionMessagesLoaded(session);
+  }).then(function (session) {
     var context = buildChatContext(session);
     var userMsg = { role: "user", content: text, status: "sent", contextSnapshot: context };
     var pendingMsg = { role: "assistant", content: t("chat.thinking"), status: "pending" };
@@ -610,15 +788,18 @@ function sendChatTabMessage() {
       .then(function (appended) {
         var savedUser = appended[0];
         var savedPending = appended[1];
-        session.messages.push(savedUser, savedPending);
-        session.updatedAt = savedPending.createdAt || new Date().toISOString();
+        if (!savedUser || !savedPending) throw new Error("Invalid append response");
+        input.value = "";
+        inputPersisted = true;
+        syncSessionMessageCache(session, [savedUser, savedPending]);
         resortChatSessions();
         renderChatTab();
         backfillSessionTitle(session, text);
 
         return api.postChat(text, context, session.id, savedUser.id).then(function (resp) {
           var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
-          var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
+          var tasks = normalizeSuggestedTasks(
+            resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []);
           savedPending.status = "sent";
           savedPending.content = content;
           savedPending.error = null;
@@ -626,20 +807,22 @@ function sendChatTabMessage() {
           renderChatTab();
           return api.updateMessage(session.id, savedPending.id,
             { status: "sent", content: content, suggestedTasks: tasks }).then(function (updated) {
+              mergeMessageFields(savedPending, updated);
+              syncSessionMessageCache(session, []);
+              renderChatTab();
               refreshMemoryPanelSoon();
-              return updated;
+              return refreshCanonicalSession(session).catch(function () { return session; });
+            }, function (persistenceError) {
+              return reconcileAmbiguousAssistantUpdate(
+                session, savedPending, persistenceError);
             });
-        }).catch(function (err) {
-          // Never lose the user's input: reflect error in-memory and persist best-effort.
-          savedPending.status = "error";
-          savedPending.content = formatChatErrorMessage(err);
-          savedPending.error = err.message || String(err);
-          renderChatTab();
-          return api.updateMessage(session.id, savedPending.id,
-            { status: "error", content: savedPending.content, error: savedPending.error }).catch(function () {});
+        }, function (executionError) {
+          // The model call failed, so pending -> error is unambiguous and retryable.
+          return markAssistantPersistenceError(session, savedPending, executionError);
         });
       });
   }).catch(function (err) {
+    if (!inputPersisted && !input.value) input.value = text;
     alert(t("chat.sendFailed", { msg: (err && err.message ? err.message : err) }));
   }).then(function () {
     state.chatSending = false;
@@ -685,26 +868,37 @@ function retryChatMessage(msgId) {
   renderChatTab();
 
   return api.updateMessage(session.id, pendingMsg.id,
-    { status: "pending", content: pendingMsg.content }).then(function () {
-    return api.postChat(userMsg.content, userMsg.contextSnapshot || buildChatContext(session), session.id, userMsg.id);
-  }).then(function (resp) {
-    var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
-    var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
-    pendingMsg.status = "sent";
-    pendingMsg.content = content;
-    pendingMsg.error = null;
-    pendingMsg.suggestedTasks = tasks;
-    return api.updateMessage(session.id, pendingMsg.id,
-      { status: "sent", content: content, suggestedTasks: tasks }).then(function (updated) {
-        refreshMemoryPanelSoon();
-        return updated;
-      });
+    { status: "pending", content: pendingMsg.content }).then(function (updated) {
+    mergeMessageFields(pendingMsg, updated);
+    return api.postChat(
+      userMsg.content,
+      userMsg.contextSnapshot || buildChatContext(session),
+      session.id,
+      userMsg.id
+    ).then(function (resp) {
+      var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
+      var tasks = normalizeSuggestedTasks(
+        resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []);
+      pendingMsg.status = "sent";
+      pendingMsg.content = content;
+      pendingMsg.error = null;
+      pendingMsg.suggestedTasks = tasks;
+      return api.updateMessage(session.id, pendingMsg.id,
+        { status: "sent", content: content, suggestedTasks: tasks }).then(function (sent) {
+          mergeMessageFields(pendingMsg, sent);
+          syncSessionMessageCache(session, []);
+          refreshMemoryPanelSoon();
+          return refreshCanonicalSession(session).catch(function () { return session; });
+        }, function (persistenceError) {
+          return reconcileAmbiguousAssistantUpdate(
+            session, pendingMsg, persistenceError);
+        });
+    }, function (executionError) {
+      return markAssistantPersistenceError(session, pendingMsg, executionError);
+    });
   }).catch(function (err) {
-    pendingMsg.status = "error";
-    pendingMsg.content = formatChatErrorMessage(err);
-    pendingMsg.error = err.message || String(err);
-    return api.updateMessage(session.id, pendingMsg.id,
-      { status: "error", content: pendingMsg.content, error: pendingMsg.error }).catch(function () {});
+    // This catch is for the initial pending PUT (or an unexpected local error).
+    return markAssistantPersistenceError(session, pendingMsg, err);
   }).then(function () {
     state.chatSending = false;
     renderChatTab();
@@ -713,6 +907,9 @@ function retryChatMessage(msgId) {
 
 function buildChatContext(session) {
   var ctx = { type: "global", title: session.title };
+  if (session && session.contextSnapshot != null) {
+    ctx.boundContext = session.contextSnapshot;
+  }
   if (state.chatContextToggles.currentStatus && state.summary && state.summary.current) {
     var currentEvidence = Array.isArray(state.summary.current.evidence)
       ? state.summary.current.evidence : [];
@@ -778,7 +975,6 @@ function openChatTabWithContext(context) {
     initialMessages: [{
       role: "system",
       content: t("chat.contextBrought", { title: context.title || context.label || t("chat.currentItem") }),
-      contextSnapshot: context,
     }],
   }).then(function () {
     switchTab("chat");

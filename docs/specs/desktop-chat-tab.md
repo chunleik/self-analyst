@@ -272,6 +272,8 @@ type ChatSession = {
   contextSnapshot?: ChatContextSnapshot;
   messages: ChatMessage[];   // 仅完整分片响应包含正文；索引缓存初始为空
   messagesLoaded?: boolean;  // 仅前端运行期标记，不持久化
+  messagesLoading?: boolean;
+  messagesLoadError?: string;
 };
 ```
 
@@ -342,7 +344,7 @@ type SuggestedTask = {
 - UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 为权威：`index.json` 保存 active 指针和列表投影，每个服务端生成的 lowercase hex32 `sessionId` 对应一个 `<sessionId>.json` 分片。
 - 前端初始化只加载索引；激活会话时再按需加载该分片正文。`state.chatSessions` 仅用于渲染缓存，不是持久化事实来源。
 - 创建、切换 active、重命名、删除、追加消息和更新 pending 状态全部通过细粒度 REST 接口完成。客户端不得生成或覆盖会话 ID、消息 ID、`createdAt` 或 `updatedAt`。
-- 会话数量不设上限。单会话最多 200 条消息、单条 `content` 最多 20000 字符，两项均由后端在写入时强制执行。
+- 会话数量不设上限。单会话最多 200 条消息且按完整 user turn 保留；单条输入 `content` 最多保留 20000 code point 后追加 `...`。opaque 快照、建议任务、请求体和最终 shard 同样受服务端资源预算约束。
 - 模型历史以 `{memoryDir}/agent-state/self-analyst-chat/desktop/<sessionId>/` 下的 AgentState 为权威。UI transcript 不得在每轮请求中重新注入模型上下文。
 - 旧 WebView key `selfAnalyst.chatSessions.v1` 不读取、不迁移，并在升级初始化时删除。
 - 对已经存在于服务端分片、但尚无 AgentState 的旧会话，后端在该会话下一次发送时执行一次懒迁移：只导入当前 user 消息之前的有效 user/sent assistant turn，排除 UI-only system、pending 和 error 消息；AgentState 已存在时不得重复导入。
@@ -632,6 +634,7 @@ Agent 回复如包含建议任务:
 
 聊天请求失败时:
 
+- user/pending 尚未成功追加时，composer 原文不得被清空。
 - 当前用户消息保留。
 - assistant pending 消息变为 error。
 - 显示错误文案: `发送失败: <原因>`。
@@ -854,8 +857,7 @@ function openChatTabWithContext(context) {
     contextSnapshot: context,
     initialMessages: [{
       role: "system",
-      content: "已带入上下文：" + (context.title || context.label || "当前条目"),
-      contextSnapshot: context
+      content: "已带入上下文：" + (context.title || context.label || "当前条目")
     }]
   }).then(function () {
     switchTab("chat");
@@ -966,8 +968,8 @@ function retryChatMessage(pendingId) {
 ### 16.3 会话与消息体量
 
 - 会话数量不设上限，前端不得按数量淘汰会话。
-- 每个会话只保留最近 200 条消息，由后端写入时裁剪。
-- 单条消息的 20000 字符上限同样由后端执行。
+- 每个会话只保留最近 200 条且从完整 user turn 起始的消息，由后端写入时裁剪；最终 mutation 后前端重新读取 authoritative session，同时镜像 200 条和 16 MiB 两项规则。
+- 单条输入消息最多保留 20000 code point 后追加 `...`；辅助字段、opaque JSON 和最终 UTF-8 shard 还须满足 `chat-session-store.md` 的 DEC-013/014。
 
 ### 16.4 数据缺失
 

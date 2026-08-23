@@ -5,6 +5,19 @@
 
 var API_BASE = window.location && window.location.origin ? window.location.origin : "http://localhost:5700";
 
+function chatJsonResponse(response, fallbackMessage) {
+  if (response.ok) return response.json();
+  return response.text().then(function (text) {
+    var body = null;
+    try { body = text ? JSON.parse(text) : null; } catch (ignored) {}
+    var error = new Error((body && (body.error || body.title)) ||
+      fallbackMessage + ": " + response.status);
+    error.status = response.status;
+    error.body = body || text;
+    throw error;
+  });
+}
+
 var api = {
   getStatus: function () {
     return fetch(API_BASE + "/desktop/status").then(function (r) {
@@ -98,28 +111,17 @@ var api = {
         userMessageId: userMessageId,
       }),
       headers: { "Content-Type": "application/json" },
-    }).then(function (r) {
-      if (!r.ok) {
-        return r.json().then(function (body) {
-          throw new Error(body.error || ("Chat failed: " + r.status));
-        }, function () {
-          throw new Error("Chat failed: " + r.status);
-        });
-      }
-      return r.json();
-    });
+    }).then(function (r) { return chatJsonResponse(r, "Chat failed"); });
   },
   // ---- Chat sessions (SPEC-CSP-FE-001) ----
   listSessions: function () {
     return fetch(API_BASE + "/desktop/chat/sessions").then(function (r) {
-      if (!r.ok) throw new Error("List sessions failed: " + r.status);
-      return r.json();
+      return chatJsonResponse(r, "List sessions failed");
     });
   },
   getSession: function (id) {
     return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(id)).then(function (r) {
-      if (!r.ok) throw new Error("Get session failed: " + r.status);
-      return r.json();
+      return chatJsonResponse(r, "Get session failed");
     });
   },
   createSession: function (body) {
@@ -127,38 +129,26 @@ var api = {
       method: "POST",
       body: JSON.stringify(body || {}),
       headers: { "Content-Type": "application/json" },
-    }).then(function (r) {
-      if (!r.ok) throw new Error("Create session failed: " + r.status);
-      return r.json();
-    });
+    }).then(function (r) { return chatJsonResponse(r, "Create session failed"); });
   },
   updateSession: function (id, patch) {
     return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(id), {
       method: "PUT",
       body: JSON.stringify(patch || {}),
       headers: { "Content-Type": "application/json" },
-    }).then(function (r) {
-      if (!r.ok) throw new Error("Update session failed: " + r.status);
-      return r.json();
-    });
+    }).then(function (r) { return chatJsonResponse(r, "Update session failed"); });
   },
   deleteSession: function (id) {
     return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(id), {
       method: "DELETE",
-    }).then(function (r) {
-      if (!r.ok) throw new Error("Delete session failed: " + r.status);
-      return r.json();
-    });
+    }).then(function (r) { return chatJsonResponse(r, "Delete session failed"); });
   },
   appendMessages: function (id, payload) {
     return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(id) + "/messages", {
       method: "POST",
       body: JSON.stringify(payload || {}),
       headers: { "Content-Type": "application/json" },
-    }).then(function (r) {
-      if (!r.ok) throw new Error("Append messages failed: " + r.status);
-      return r.json();
-    });
+    }).then(function (r) { return chatJsonResponse(r, "Append messages failed"); });
   },
   updateMessage: function (id, msgId, patch) {
     return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(id) +
@@ -166,20 +156,14 @@ var api = {
       method: "PUT",
       body: JSON.stringify(patch || {}),
       headers: { "Content-Type": "application/json" },
-    }).then(function (r) {
-      if (!r.ok) throw new Error("Update message failed: " + r.status);
-      return r.json();
-    });
+    }).then(function (r) { return chatJsonResponse(r, "Update message failed"); });
   },
   setActiveSession: function (id) {
     return fetch(API_BASE + "/desktop/chat/active-session", {
       method: "PUT",
       body: JSON.stringify({ activeSessionId: id }),
       headers: { "Content-Type": "application/json" },
-    }).then(function (r) {
-      if (!r.ok) throw new Error("Set active session failed: " + r.status);
-      return r.json();
-    });
+    }).then(function (r) { return chatJsonResponse(r, "Set active session failed"); });
   },
   listMemory: function (params) {
     var query = params ? new URLSearchParams(params).toString() : "";

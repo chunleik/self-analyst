@@ -8,10 +8,12 @@ import com.selfanalyst.desktop.service.SummaryService;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.headroom.HeadroomService;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.javalin.http.Context;
+import io.javalin.http.HttpResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -233,10 +235,29 @@ public class DesktopAgentController {
      */
     public void chat(Context ctx) {
         try {
-            Map<String, Object> body = MAPPER.readValue(ctx.body(), Map.class);
+            Map<String, Object> body = DesktopChatJson.MAPPER.readValue(
+                    DesktopChatJson.readBoundedBody(ctx), Map.class);
+            if (body == null) throw new IllegalArgumentException("Chat request body is required");
+            if (body.get("message") != null && !(body.get("message") instanceof String)) {
+                throw new IllegalArgumentException("message must be a string");
+            }
+            for (String idField : List.of("sessionId", "userMessageId")) {
+                if (body.get(idField) != null && !(body.get(idField) instanceof String)) {
+                    throw new IllegalArgumentException(idField + " must be a string");
+                }
+            }
+            Object requestContext = body.get("context");
+            if (requestContext != null && !(requestContext instanceof Map<?, ?>)
+                    && !(requestContext instanceof List<?>)) {
+                throw new IllegalArgumentException("context must be an object, array, or null");
+            }
             String message = stringOr(body.get("message"), "");
             String sessionId = stringOr(body.get("sessionId"), "").trim();
             String userMessageId = stringOr(body.get("userMessageId"), "").trim();
+            if (sessionId.isEmpty() != userMessageId.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "sessionId and userMessageId must be provided together");
+            }
 
             if (!sessionId.isEmpty()) {
                 if (!ChatSessionStore.isGeneratedSessionId(sessionId)) {
@@ -266,7 +287,7 @@ public class DesktopAgentController {
             }
 
             String response = (sessionId.isEmpty()
-                    ? agent.chat(buildChatAgentInput(message, body.get("context")))
+                    ? agent.chat(buildChatAgentInput(message, requestContext))
                     : agent.chat(sessionId,
                             userMessageId,
                             () -> persistedTurnFromSession(
@@ -288,7 +309,15 @@ public class DesktopAgentController {
                     "suggestedTasks", suggestedTasks
             ));
         } catch (Exception e) {
-            if (hasCause(e, SelfAnalystAgent.ChatSessionUnavailableException.class)) {
+            if (e instanceof DesktopChatJson.PayloadTooLargeException) {
+                ctx.status(413).json(Map.of("error", e.getMessage()));
+            } else if (e instanceof HttpResponseException responseException) {
+                ctx.status(responseException.getStatus()).json(Map.of(
+                        "error", responseException.getMessage() == null
+                                ? "Invalid request" : responseException.getMessage()));
+            } else if (e instanceof JsonProcessingException) {
+                ctx.status(400).json(Map.of("error", "Invalid chat JSON: " + e.getMessage()));
+            } else if (hasCause(e, SelfAnalystAgent.ChatSessionUnavailableException.class)) {
                 ctx.status(404).json(Map.of("error", "Chat session not found"));
             } else if (hasCause(e, InvalidChatTurnException.class)) {
                 ctx.status(400).json(Map.of("error", "User message does not belong to session"));
@@ -300,6 +329,9 @@ public class DesktopAgentController {
                 // frontend keeps the same userMessageId on its retry path.
                 ctx.status(409).json(Map.of(
                         "error", "上一条消息仍在处理中，请稍后再试..."));
+            } else if (e instanceof IllegalArgumentException) {
+                ctx.status(400).json(Map.of(
+                        "error", e.getMessage() == null ? "Invalid chat request" : e.getMessage()));
             } else {
                 log.error("Chat request failed", e);
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
@@ -355,7 +387,7 @@ public class DesktopAgentController {
         for (int i = currentIndex + 1; i < transcript.size(); i++) {
             ChatSessionStore.Message later = transcript.get(i);
             if (later != null && "user".equals(later.role)) {
-                throw new InvalidChatTurnException();
+                throw new SelfAnalystAgent.StaleChatTurnException(currentUserMessageId);
             }
         }
 
@@ -448,6 +480,7 @@ public class DesktopAgentController {
                 task.put("title", content);
                 task.put("source", "agent_suggestion");
                 tasks.add(task);
+                if (tasks.size() >= 20) break;
             }
         }
         return tasks;

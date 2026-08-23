@@ -138,6 +138,7 @@ PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
 - **KnownPattern（已知模式）**：发现的行为模式 + 置信度评分
 - **ImprovementLog（改进记录）**：行动 → 结果 → 日期，追踪闭环
 - **聊天正文**：以 `{memory.dir}/chat-sessions/index.json` + 每会话一个分片保存；会话与消息 ID 由本机后端生成
+- **分片资源边界**：请求体、opaque 上下文、建议任务和最终 UTF-8 shard 均由服务端限额；前端采用服务端 canonical 消息并镜像完整-turn retention
 - **Agent 会话状态**：模型历史按桌面聊天会话隔离，存于 `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/`，重启后自动恢复
 - **长会话压缩**：达到 message/token 阈值后把旧前缀滚动写入 `AgentState.summary`，仅保留近期原始消息；摘要失败不会覆盖旧历史
 

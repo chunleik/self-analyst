@@ -22,6 +22,8 @@ public class ChatSummaryService {
     private static final int MAX_PROMPT_MESSAGES = 20;
     /** Per-message trim length inside the prompt. */
     private static final int MSG_TRIM = 200;
+    /** Defensive title bound even when callers construct an in-memory Session directly. */
+    private static final int TITLE_TRIM = 256;
     /** Final summary length cap (~one line). */
     private static final int SUMMARY_LEN = 80;
     /** Number of user-message snippets used by the deterministic fallback. */
@@ -73,7 +75,7 @@ public class ChatSummaryService {
         StringBuilder body = new StringBuilder();
         if (session.title != null && !session.title.isBlank()) {
             body.append(isEn ? "Session title: " : "会话标题：")
-                    .append(session.title.strip()).append('\n');
+                    .append(trim(session.title, TITLE_TRIM)).append('\n');
         }
         List<ChatSessionStore.Message> messages =
                 session.messages != null ? session.messages : List.of();

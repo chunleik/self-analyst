@@ -31,6 +31,8 @@ var state = {
   configSaving: false,
   configOpen: false,
   chatSessions: [],
+  chatSessionsLoaded: false,
+  chatSessionsLoadError: null,
   activeChatSessionId: null,
   chatSessionSearch: "",
   chatSending: false,

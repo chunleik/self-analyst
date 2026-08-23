@@ -6,11 +6,12 @@ import com.selfanalyst.desktop.service.ChatSummaryService;
 import com.selfanalyst.desktop.service.MemoryExtractionService;
 import com.selfanalyst.desktop.service.SummaryPromptService;
 import com.selfanalyst.desktop.store.ChatSessionStore;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.javalin.http.Context;
+import io.javalin.http.HttpResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +47,7 @@ import java.util.concurrent.TimeUnit;
 public class DesktopChatSessionController {
 
     private static final Logger log = LoggerFactory.getLogger(DesktopChatSessionController.class);
-    private static final ObjectMapper MAPPER = new ObjectMapper().registerModule(new JavaTimeModule());
+    private static final ObjectMapper MAPPER = DesktopChatJson.MAPPER;
 
     /** Debounce window before a summary is (re)generated. */
     private static final long SUMMARY_DEBOUNCE_MS = 2500;
@@ -105,17 +106,31 @@ public class DesktopChatSessionController {
     /** POST /desktop/chat/sessions (SPEC-CSP-API-003). */
     public void createSession(Context ctx) {
         try {
-            ChatSessionStore.CreateRequest req = ctx.body().isBlank()
-                    ? new ChatSessionStore.CreateRequest()
-                    : MAPPER.readValue(ctx.body(), ChatSessionStore.CreateRequest.class);
+            String rawBody = DesktopChatJson.readBoundedBody(ctx);
+            ChatSessionStore.CreateRequest req;
+            if (rawBody.isBlank()) {
+                req = new ChatSessionStore.CreateRequest();
+            } else {
+                JsonNode body = requireObject(MAPPER.readTree(rawBody));
+                requireTextFields(body, "title", "source", "contextLabel", "memoryPolicy");
+                requireContainerOrNull(body, "contextSnapshot");
+                if (body.has("initialMessages") && !body.get("initialMessages").isNull()
+                        && !body.get("initialMessages").isArray()) {
+                    throw new IllegalArgumentException("initialMessages must be an array");
+                }
+                if (body.has("initialMessages") && body.get("initialMessages").isArray()
+                        && body.get("initialMessages").isEmpty()) {
+                    throw new IllegalArgumentException("initialMessages must not be empty");
+                }
+                req = MAPPER.treeToValue(body, ChatSessionStore.CreateRequest.class);
+            }
             ChatSessionStore.Session created = store.create(req);
             if (created.messages != null && !created.messages.isEmpty()) {
                 scheduleSummary(created.id);
             }
             ctx.status(201).json(created);
-        } catch (IllegalArgumentException e) {
-            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
+            if (writeClientError(ctx, e)) return;
             ctx.status(500).json(Map.of("error", "Failed to create session: " + e.getMessage()));
         }
     }
@@ -125,7 +140,9 @@ public class DesktopChatSessionController {
         try {
             String id = ctx.pathParam("id");
             if (!requireGeneratedSessionId(ctx, id)) return;
-            JsonNode body = MAPPER.readTree(ctx.body());
+            JsonNode body = requireObject(MAPPER.readTree(DesktopChatJson.readBoundedBody(ctx)));
+            requireTextFields(body, "title", "contextLabel");
+            requireContainerOrNull(body, "contextSnapshot");
             String title = textOrNull(body, "title");
             String contextLabel = textOrNull(body, "contextLabel");
             Object contextSnapshot = body.has("contextSnapshot") && !body.get("contextSnapshot").isNull()
@@ -137,6 +154,7 @@ public class DesktopChatSessionController {
             }
             ctx.json(updated);
         } catch (Exception e) {
+            if (writeClientError(ctx, e)) return;
             ctx.status(500).json(Map.of("error", "Failed to update session: " + e.getMessage()));
         }
     }
@@ -195,7 +213,8 @@ public class DesktopChatSessionController {
         try {
             String id = ctx.pathParam("id");
             if (!requireGeneratedSessionId(ctx, id)) return;
-            List<ChatSessionStore.Message> incoming = parseMessages(ctx.body());
+            List<ChatSessionStore.Message> incoming = parseMessages(
+                    DesktopChatJson.readBoundedBody(ctx));
             List<ChatSessionStore.Message> appended = store.appendMessages(id, incoming);
             if (appended == null) {
                 ctx.status(404).json(Map.of("error", "Session not found: " + id));
@@ -204,6 +223,7 @@ public class DesktopChatSessionController {
             scheduleSummary(id);
             ctx.status(201).json(appended);
         } catch (Exception e) {
+            if (writeClientError(ctx, e)) return;
             ctx.status(500).json(Map.of("error", "Failed to append messages: " + e.getMessage()));
         }
     }
@@ -214,13 +234,27 @@ public class DesktopChatSessionController {
             String id = ctx.pathParam("id");
             if (!requireGeneratedSessionId(ctx, id)) return;
             String msgId = ctx.pathParam("msgId");
-            JsonNode body = MAPPER.readTree(ctx.body());
+            if (!ChatSessionStore.isGeneratedMessageId(msgId)) {
+                ctx.status(400).json(Map.of("error", "Invalid chat message id"));
+                return;
+            }
+            JsonNode body = requireObject(MAPPER.readTree(DesktopChatJson.readBoundedBody(ctx)));
+            requireTextFields(body, "content", "status", "error");
             String content = textOrNull(body, "content");
             String status = textOrNull(body, "status");
             String error = textOrNull(body, "error");
             String previousStatus = messageStatus(id, msgId);
-            List<Object> suggestedTasks = body.has("suggestedTasks") && body.get("suggestedTasks").isArray()
-                    ? MAPPER.convertValue(body.get("suggestedTasks"), new TypeReference<List<Object>>() {}) : null;
+            List<Object> suggestedTasks = null;
+            if (body.has("suggestedTasks")) {
+                if (body.get("suggestedTasks").isNull()) {
+                    suggestedTasks = List.of();
+                } else if (body.get("suggestedTasks").isArray()) {
+                    suggestedTasks = MAPPER.convertValue(
+                            body.get("suggestedTasks"), new TypeReference<List<Object>>() {});
+                } else {
+                    throw new IllegalArgumentException("suggestedTasks must be an array or null");
+                }
+            }
             ChatSessionStore.Message updated =
                     store.updateMessage(id, msgId, content, status, error, suggestedTasks);
             if (updated == null) {
@@ -234,6 +268,7 @@ public class DesktopChatSessionController {
             }
             ctx.json(updated);
         } catch (Exception e) {
+            if (writeClientError(ctx, e)) return;
             ctx.status(500).json(Map.of("error", "Failed to update message: " + e.getMessage()));
         }
     }
@@ -243,7 +278,8 @@ public class DesktopChatSessionController {
         try {
             String id = ctx.pathParam("id");
             if (!requireGeneratedSessionId(ctx, id)) return;
-            JsonNode body = MAPPER.readTree(ctx.body());
+            JsonNode body = requireObject(MAPPER.readTree(DesktopChatJson.readBoundedBody(ctx)));
+            requireTextFields(body, "memoryPolicy");
             String policy = textOrNull(body, "memoryPolicy");
             ChatSessionStore.Session updated = store.updateMemoryPolicy(id, policy);
             if (updated == null) {
@@ -251,9 +287,8 @@ public class DesktopChatSessionController {
                 return;
             }
             ctx.json(updated);
-        } catch (IllegalArgumentException e) {
-            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
+            if (writeClientError(ctx, e)) return;
             ctx.status(500).json(Map.of("error", "Failed to set memory policy: " + e.getMessage()));
         }
     }
@@ -261,7 +296,8 @@ public class DesktopChatSessionController {
     /** PUT /desktop/chat/active-session (SPEC-CSP-API-008). */
     public void setActiveSession(Context ctx) {
         try {
-            JsonNode body = MAPPER.readTree(ctx.body());
+            JsonNode body = requireObject(MAPPER.readTree(DesktopChatJson.readBoundedBody(ctx)));
+            requireTextFields(body, "activeSessionId");
             String activeId = textOrNull(body, "activeSessionId");
             if (activeId != null && !requireGeneratedSessionId(ctx, activeId)) return;
             if (activeId != null && store.getSession(activeId) == null) {
@@ -272,9 +308,8 @@ public class DesktopChatSessionController {
             Map<String, Object> resp = new java.util.HashMap<>();
             resp.put("activeSessionId", persisted); // may be null
             ctx.json(resp);
-        } catch (IllegalArgumentException e) {
-            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
+            if (writeClientError(ctx, e)) return;
             ctx.status(500).json(Map.of("error", "Failed to set active session: " + e.getMessage()));
         }
     }
@@ -371,23 +406,78 @@ public class DesktopChatSessionController {
     /** Accept a single {@code Message} object or {@code {messages:[...]}} (SPEC-CSP-API-006). */
     private static List<ChatSessionStore.Message> parseMessages(String body) throws Exception {
         JsonNode node = MAPPER.readTree(body);
-        if (node != null && node.isObject() && node.has("messages") && node.get("messages").isArray()) {
-            return MAPPER.convertValue(node.get("messages"),
-                    new TypeReference<List<ChatSessionStore.Message>>() {});
+        if (node == null || node.isNull()) {
+            throw new IllegalArgumentException("A chat message body is required");
         }
-        if (node != null && node.isArray()) {
-            return MAPPER.convertValue(node, new TypeReference<List<ChatSessionStore.Message>>() {});
+        if (node.isObject() && node.has("messages")) {
+            if (!node.get("messages").isArray()) {
+                throw new IllegalArgumentException("messages must be an array");
+            }
+            List<ChatSessionStore.Message> messages = MAPPER.convertValue(node.get("messages"),
+                    new TypeReference<List<ChatSessionStore.Message>>() {});
+            if (messages.isEmpty()) throw new IllegalArgumentException("messages must not be empty");
+            return messages;
+        }
+        if (node.isArray()) {
+            List<ChatSessionStore.Message> messages = MAPPER.convertValue(
+                    node, new TypeReference<List<ChatSessionStore.Message>>() {});
+            if (messages.isEmpty()) throw new IllegalArgumentException("messages must not be empty");
+            return messages;
+        }
+        if (!node.isObject()) {
+            throw new IllegalArgumentException("Chat message body must be an object or array");
         }
         List<ChatSessionStore.Message> single = new ArrayList<>();
-        if (node != null && node.isObject()) {
-            single.add(MAPPER.convertValue(node, ChatSessionStore.Message.class));
-        }
+        single.add(MAPPER.convertValue(node, ChatSessionStore.Message.class));
         return single;
     }
 
     private static String textOrNull(JsonNode body, String field) {
         JsonNode n = body != null ? body.get(field) : null;
-        return n != null && !n.isNull() ? n.asText() : null;
+        if (n == null || n.isNull()) return null;
+        if (!n.isTextual()) throw new IllegalArgumentException(field + " must be a string or null");
+        return n.textValue();
+    }
+
+    private static JsonNode requireObject(JsonNode body) {
+        if (body == null || !body.isObject()) {
+            throw new IllegalArgumentException("Chat request body must be a JSON object");
+        }
+        return body;
+    }
+
+    private static void requireTextFields(JsonNode body, String... fields) {
+        for (String field : fields) {
+            JsonNode value = body.get(field);
+            if (value != null && !value.isNull() && !value.isTextual()) {
+                throw new IllegalArgumentException(field + " must be a string or null");
+            }
+        }
+    }
+
+    private static void requireContainerOrNull(JsonNode body, String field) {
+        JsonNode value = body.get(field);
+        if (value != null && !value.isNull() && !value.isContainerNode()) {
+            throw new IllegalArgumentException(field + " must be an object, array, or null");
+        }
+    }
+
+    private static boolean writeClientError(Context ctx, Exception error) {
+        if (error instanceof DesktopChatJson.PayloadTooLargeException) {
+            ctx.status(413).json(Map.of("error", error.getMessage()));
+            return true;
+        }
+        if (error instanceof HttpResponseException response) {
+            ctx.status(response.getStatus()).json(Map.of(
+                    "error", response.getMessage() == null ? "Invalid request" : response.getMessage()));
+            return true;
+        }
+        if (error instanceof JsonProcessingException || error instanceof IllegalArgumentException) {
+            ctx.status(400).json(Map.of(
+                    "error", error.getMessage() == null ? "Invalid chat request" : error.getMessage()));
+            return true;
+        }
+        return false;
     }
 
     private static boolean requireGeneratedSessionId(Context ctx, String id) {

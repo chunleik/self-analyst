@@ -158,6 +158,8 @@ var MESSAGES = {
   "chat.confirmDeleteSession": { zh: "确定删除该会话及其所有消息？", en: "Delete this chat and all its messages?" },
   "chat.deleteSessionFailed": { zh: "删除会话失败: {msg}", en: "Failed to delete chat: {msg}" },
   "chat.sendFailed": { zh: "发送失败: {msg}", en: "Send failed: {msg}" },
+  "chat.loadSessionFailed": { zh: "加载会话失败，可重新选择该会话重试：{msg}", en: "Failed to load chat. Select it again to retry: {msg}" },
+  "chat.reconciliationPending": { zh: "回复保存状态待确认，请重新选择该会话重试加载：{msg}", en: "Reply persistence needs reconciliation. Select this chat again to reload: {msg}" },
   "chat.llmNotConfiguredPlaceholder": {
     zh: "LLM 未配置，请先在配置页设置 API Key",
     en: "LLM not configured. Please set the API key in Settings first.",

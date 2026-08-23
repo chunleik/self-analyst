@@ -105,6 +105,67 @@ class DesktopChatSessionLifecycleControllerTest {
         assertFalse(Files.exists(stateDir));
     }
 
+    @Test
+    void chatRejectsOversizedOrWronglyTypedBodiesBeforeAgentExecution(@TempDir Path memoryDir) {
+        Config config = Config.testDefaults(memoryDir);
+        DesktopAgentController controller = new DesktopAgentController(
+                null, null, null, null, config, null, null);
+
+        CapturedContext oversized = new CapturedContext(
+                "x".repeat(DesktopChatJson.MAX_BODY_BYTES + 1), null);
+        controller.chat(oversized.context());
+        assertEquals(413, oversized.status);
+
+        CapturedContext wrongType = new CapturedContext(
+                "{\"message\":{\"nested\":true}}", null);
+        controller.chat(wrongType.context());
+        assertEquals(400, wrongType.status);
+
+        CapturedContext userIdOnly = new CapturedContext(
+                "{\"message\":\"q\",\"userMessageId\":\"%s\"}"
+                        .formatted("a".repeat(12)), null);
+        controller.chat(userIdOnly.context());
+        assertEquals(400, userIdOnly.status);
+
+        CapturedContext sessionIdOnly = new CapturedContext(
+                "{\"message\":\"q\",\"sessionId\":\"%s\"}"
+                        .formatted("b".repeat(32)), null);
+        controller.chat(sessionIdOnly.context());
+        assertEquals(400, sessionIdOnly.status);
+    }
+
+    @Test
+    void olderVisibleUserTurnIsAConflict(@TempDir Path memoryDir) {
+        Config config = Config.testDefaults(memoryDir);
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        ChatSessionStore.Session session = store.create(new ChatSessionStore.CreateRequest());
+        ChatSessionStore.Message firstUser = message("user", "first", "sent");
+        ChatSessionStore.Message firstPending = message("assistant", "thinking", "pending");
+        var first = store.appendMessages(session.id, java.util.List.of(firstUser, firstPending));
+        store.updateMessage(session.id, first.get(1).id, "first answer", "sent", null, null);
+        ChatSessionStore.Message secondUser = message("user", "second", "sent");
+        ChatSessionStore.Message secondPending = message("assistant", "thinking", "pending");
+        store.appendMessages(session.id, java.util.List.of(secondUser, secondPending));
+        DesktopAgentController controller = new DesktopAgentController(
+                null, null, null, null, config, null, store);
+        CapturedContext captured = new CapturedContext("""
+                {"message":"first","sessionId":"%s","userMessageId":"%s"}
+                """.formatted(session.id, first.get(0).id), null);
+
+        controller.chat(captured.context());
+
+        assertEquals(409, captured.status);
+        assertTrue(captured.json instanceof Map<?, ?>);
+    }
+
+    private static ChatSessionStore.Message message(String role, String content, String status) {
+        ChatSessionStore.Message message = new ChatSessionStore.Message();
+        message.role = role;
+        message.content = content;
+        message.status = status;
+        return message;
+    }
+
     private static final class CapturedContext {
         private final String body;
         private final String pathId;

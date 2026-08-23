@@ -29,6 +29,8 @@ SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集�
 聊天正文分片与 AgentState 是两份用途不同的本地数据。对升级前已经存在于服务端分片、但
 尚无 AgentState 的会话，下一次发送时会把当前问题之前的有效 user/assistant 历史**单次懒迁移**
 到对应 AgentState；UI-only system、pending 和 error 消息不会导入。旧 WebView 会话数据不会迁移。
+为防止异常请求造成本地文件无界增长，辅助上下文和建议任务受字节/深度/数量预算约束；
+超限 opaque 字段会保留识别信息并标记为 `_truncated`，旧完整 turn 仅在 shard 总预算超限时淘汰。
 
 ## 2. 本地服务
 

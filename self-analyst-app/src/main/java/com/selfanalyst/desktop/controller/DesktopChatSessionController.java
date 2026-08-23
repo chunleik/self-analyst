@@ -90,6 +90,7 @@ public class DesktopChatSessionController {
     public void getSession(Context ctx) {
         try {
             String id = ctx.pathParam("id");
+            if (!requireGeneratedSessionId(ctx, id)) return;
             ChatSessionStore.Session s = store.getSession(id);
             if (s == null) {
                 ctx.status(404).json(Map.of("error", "Session not found: " + id));
@@ -123,6 +124,7 @@ public class DesktopChatSessionController {
     public void updateSession(Context ctx) {
         try {
             String id = ctx.pathParam("id");
+            if (!requireGeneratedSessionId(ctx, id)) return;
             JsonNode body = MAPPER.readTree(ctx.body());
             String title = textOrNull(body, "title");
             String contextLabel = textOrNull(body, "contextLabel");
@@ -143,7 +145,36 @@ public class DesktopChatSessionController {
     public void deleteSession(Context ctx) {
         try {
             String id = ctx.pathParam("id");
-            ChatSessionStore.DeleteResult result = store.delete(id);
+            if (!requireGeneratedSessionId(ctx, id)) return;
+            if (store.getSession(id) == null) {
+                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                return;
+            }
+            ChatSessionStore.DeleteResult result;
+            if (agent != null) {
+                try {
+                    // Both mutations stay inside the same gate used by chat execution. A chat can
+                    // therefore run before deletion or be rejected after it, but cannot recreate
+                    // hidden state between the state and transcript deletes.
+                    result = agent.deleteChatSessionStateThen(id, () -> store.delete(id));
+                } catch (IllegalStateException busy) {
+                    if (DesktopAgentController.hasAgentStillRunning(busy)) {
+                        ctx.status(409).json(Map.of(
+                                "error", "Session is currently processing a chat request"));
+                        return;
+                    }
+                    throw busy;
+                }
+            } else {
+                if (config == null) {
+                    throw new IllegalStateException(
+                            "Cannot locate persisted AgentState without application config");
+                }
+                // Agent construction is optional. Privacy deletion is not: remove the same
+                // file-backed state directly and retain the transcript if that removal fails.
+                SelfAnalystAgent.deletePersistedChatSessionState(config.memoryDir(), id);
+                result = store.delete(id);
+            }
             if (result == null) {
                 ctx.status(404).json(Map.of("error", "Session not found: " + id));
                 return;
@@ -163,6 +194,7 @@ public class DesktopChatSessionController {
     public void appendMessages(Context ctx) {
         try {
             String id = ctx.pathParam("id");
+            if (!requireGeneratedSessionId(ctx, id)) return;
             List<ChatSessionStore.Message> incoming = parseMessages(ctx.body());
             List<ChatSessionStore.Message> appended = store.appendMessages(id, incoming);
             if (appended == null) {
@@ -180,6 +212,7 @@ public class DesktopChatSessionController {
     public void updateMessage(Context ctx) {
         try {
             String id = ctx.pathParam("id");
+            if (!requireGeneratedSessionId(ctx, id)) return;
             String msgId = ctx.pathParam("msgId");
             JsonNode body = MAPPER.readTree(ctx.body());
             String content = textOrNull(body, "content");
@@ -209,6 +242,7 @@ public class DesktopChatSessionController {
     public void setMemoryPolicy(Context ctx) {
         try {
             String id = ctx.pathParam("id");
+            if (!requireGeneratedSessionId(ctx, id)) return;
             JsonNode body = MAPPER.readTree(ctx.body());
             String policy = textOrNull(body, "memoryPolicy");
             ChatSessionStore.Session updated = store.updateMemoryPolicy(id, policy);
@@ -229,6 +263,7 @@ public class DesktopChatSessionController {
         try {
             JsonNode body = MAPPER.readTree(ctx.body());
             String activeId = textOrNull(body, "activeSessionId");
+            if (activeId != null && !requireGeneratedSessionId(ctx, activeId)) return;
             if (activeId != null && store.getSession(activeId) == null) {
                 ctx.status(400).json(Map.of("error", "Unknown session: " + activeId));
                 return;
@@ -353,5 +388,11 @@ public class DesktopChatSessionController {
     private static String textOrNull(JsonNode body, String field) {
         JsonNode n = body != null ? body.get(field) : null;
         return n != null && !n.isNull() ? n.asText() : null;
+    }
+
+    private static boolean requireGeneratedSessionId(Context ctx, String id) {
+        if (ChatSessionStore.isGeneratedSessionId(id)) return true;
+        ctx.status(400).json(Map.of("error", "Invalid chat session id"));
+        return false;
     }
 }

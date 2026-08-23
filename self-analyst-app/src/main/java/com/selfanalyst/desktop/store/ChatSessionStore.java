@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,12 +47,15 @@ public class ChatSessionStore {
     private static final int MAX_CONTENT = 20000;
     /** Length of the derived {@code lastMessagePreview} (SPEC-CSP-DEC-008). */
     private static final int PREVIEW_LEN = 80;
+    /** Server-generated IDs are the only valid shard names. */
+    private static final Pattern GENERATED_SESSION_ID = Pattern.compile("^[a-f0-9]{32}$");
+    private static final Pattern GENERATED_MESSAGE_ID = Pattern.compile("^[a-f0-9]{12}$");
 
     private final Path dir;
     private final Path indexFile;
 
     public ChatSessionStore(Path memoryDir) {
-        this.dir = memoryDir.resolve("chat-sessions");
+        this.dir = memoryDir.resolve("chat-sessions").toAbsolutePath().normalize();
         this.indexFile = dir.resolve("index.json");
     }
 
@@ -75,7 +79,30 @@ public class ChatSessionStore {
     }
 
     private Path shardFile(String id) {
-        return dir.resolve(id + ".json");
+        requireValidSessionId(id);
+        Path shard = dir.resolve(id + ".json").toAbsolutePath().normalize();
+        if (!shard.startsWith(dir) || !dir.equals(shard.getParent())) {
+            throw new IllegalArgumentException("Invalid chat session id");
+        }
+        return shard;
+    }
+
+    public static boolean isValidSessionId(String id) {
+        return isGeneratedSessionId(id);
+    }
+
+    public static boolean isGeneratedSessionId(String id) {
+        return id != null && GENERATED_SESSION_ID.matcher(id).matches();
+    }
+
+    public static boolean isGeneratedMessageId(String id) {
+        return id != null && GENERATED_MESSAGE_ID.matcher(id).matches();
+    }
+
+    private static void requireValidSessionId(String id) {
+        if (!isValidSessionId(id)) {
+            throw new IllegalArgumentException("Invalid chat session id");
+        }
     }
 
     // ── Index load / rebuild ─────────────────────────────────────
@@ -93,6 +120,12 @@ public class ChatSessionStore {
             Index idx = MAPPER.readValue(indexFile.toFile(), Index.class);
             if (idx == null) idx = new Index();
             if (idx.sessions == null) idx.sessions = new ArrayList<>();
+            // Public routes and storage share the same server-generated ID contract.
+            idx.sessions.removeIf(meta -> meta == null || !isGeneratedSessionId(meta.id));
+            if (!isGeneratedSessionId(idx.activeSessionId)
+                    || !resolves(idx.sessions, idx.activeSessionId)) {
+                idx.activeSessionId = null;
+            }
             normalizeIndexMemoryPolicy(idx);
             return idx;
         } catch (IOException e) {
@@ -117,7 +150,9 @@ public class ChatSessionStore {
         if (Files.exists(indexFile)) {
             try {
                 Index old = MAPPER.readValue(indexFile.toFile(), Index.class);
-                if (old != null) prevActive = old.activeSessionId;
+                if (old != null && isGeneratedSessionId(old.activeSessionId)) {
+                    prevActive = old.activeSessionId;
+                }
             } catch (IOException ignored) {
                 // corrupt index → no pointer to preserve
             }
@@ -130,8 +165,13 @@ public class ChatSessionStore {
                     .forEach(p -> {
                         try {
                             Session s = MAPPER.readValue(p.toFile(), Session.class);
-                            if (s != null && s.id != null) {
+                            String fileName = p.getFileName().toString();
+                            String fileId = fileName.substring(0, fileName.length() - 5);
+                            if (s != null && isGeneratedSessionId(s.id) && s.id.equals(fileId)) {
                                 rebuilt.sessions.add(toMeta(s));
+                            } else {
+                                log.warn("Skipping chat shard with mismatched/invalid id: {}",
+                                        p.getFileName());
                             }
                         } catch (IOException e) {
                             log.warn("Skipping unreadable chat shard {}: {}", p.getFileName(), e.getMessage());
@@ -187,10 +227,15 @@ public class ChatSessionStore {
 
     /** Read a session shard, or {@code null} if absent (SPEC-CSP-API-002). */
     public synchronized Session getSession(String id) {
+        if (id == null) return null;
         Path shard = shardFile(id);
-        if (id == null || !Files.exists(shard)) return null;
+        if (!Files.exists(shard)) return null;
         try {
             Session s = MAPPER.readValue(shard.toFile(), Session.class);
+            if (s == null || !id.equals(s.id) || !isGeneratedSessionId(s.id)) {
+                log.warn("Skipping chat shard with mismatched/invalid id: {}", shard.getFileName());
+                return null;
+            }
             normalizeSessionMemoryPolicy(s);
             return s;
         } catch (IOException e) {
@@ -274,8 +319,9 @@ public class ChatSessionStore {
      * (controller's 404 source).
      */
     public synchronized DeleteResult delete(String id) {
+        if (id == null) return null;
         Path shard = shardFile(id);
-        if (id == null || !Files.exists(shard)) return null;
+        if (!Files.exists(shard)) return null;
         try {
             Files.deleteIfExists(shard);
         } catch (IOException e) {
@@ -339,7 +385,12 @@ public class ChatSessionStore {
         }
         if (target == null) return null;
         if (content != null) target.content = truncateContent(content);
-        if (status != null) target.status = status;
+        if (status != null) {
+            target.status = status;
+            if ("pending".equals(status) || "sent".equals(status)) {
+                target.error = null;
+            }
+        }
         if (error != null) target.error = error;
         if (suggestedTasks != null) target.suggestedTasks = suggestedTasks;
         s.updatedAt = Instant.now();

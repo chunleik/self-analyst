@@ -29,7 +29,7 @@
 - 数据仅存于当前 WebView 数据目录，清缓存 / 换设备 / 换 WebView profile 即丢失，且不在用户可见的 `{memoryDir}` 数据目录内（与 `tasks.json`、`config.properties` 不一致）。
 - 后端无法访问会话历史，未来若要做会话级摘要、检索、跨入口联动都缺数据源。
 
-用户诉求：**把会话改为后端持久化**，落在与 `tasks.json` 同级的 `{memoryDir}` 数据目录；采用 REST CRUD 粒度的接口；**会话数量不设上限**；为避免"单文件随会话累积而整文件重写变慢"，存储采用**按会话分片 + 轻量索引**。本特性只改变**存储后端、读写通道与会话搜索的数据来源**，不改变 `会话` tab 的布局、上下文构建与发送语义（那些仍由 `desktop-chat-tab.md` 约束）。
+用户诉求：**把会话改为后端持久化**，落在与 `tasks.json` 同级的 `{memoryDir}` 数据目录；采用 REST CRUD 粒度的接口；**会话数量不设上限**；为避免"单文件随会话累积而整文件重写变慢"，存储采用**按会话分片 + 轻量索引**。Phase 2 同时把模型历史切换为按 session 持久化的 AgentState，并修订发送、重试与删除的生命周期语义；布局、视觉、键盘交互和业务上下文字段仍由 `desktop-chat-tab.md` 约束。
 
 后端持久化范式已在 `TaskStore`（`tasks.json`，临时文件 + 原子 rename）与 `UserConfigStore` / `ConfigHistoryStore` 中确立；会话摘要的"LLM 生成 + 确定性兜底 + 异步不阻断"范式已在配置版本历史（`SPEC-CFGUI-VER-DEC-002`）中确立。本特性沿用这两套范式。
 
@@ -37,24 +37,26 @@
 
 ## 3. 与既有 spec 的关系（取代说明）
 
-- **SPEC-CSP-DEC-001**：本特性**取代** `desktop-chat-tab.md` §9「本地持久化」与其非目标「不要求新增 Java 后端会话存储 API」「会话记录使用 WebView/localStorage 本地保存」。这些条款标注为**已被 `SPEC-CSP-*` 取代**；`desktop-chat-tab.md` 其余交互/UI/上下文/发送行为（`SPEC-CHAT-TAB-001..012`）**继续有效**，但下列两点被本 spec 修订：
-  - 仍然成立的行为约束（仅存储后端变化）：何时持久化（创建/切换 active/发送收发/删除/重命名后）、会话与消息的数据字段、单会话 200 消息上限、单条消息 20000 字符上限、不得把 API Key 或配置敏感值写入会话存储。
-  - **修订一**：`SPEC-CHAT-TAB` §9「最多保留 50 个会话」**被取消**——会话数量不再设上限（`SPEC-CSP-DEC-005`）。
-  - **修订二**：`SPEC-CHAT-TAB-004`「搜索框按 title 和**消息内容**过滤」的语义改为「按 title、最后一条消息预览、**会话摘要**过滤」（`SPEC-CSP-DEC-009`）——不再对全部历史消息正文做前端全文匹配。
-  - `SPEC-CHAT-TAB-004`/`-005` 等条文中「保存到 localStorage」一句的语义改为「通过本 spec 的 REST 接口持久化到后端」。
+- **SPEC-CSP-DEC-001**：本特性取代 `desktop-chat-tab.md` 中旧的 WebView 整块存储与客户端 ID 流程。两份 spec 当前共同约束 Phase 2，不得靠“旧条款另行解释”保留矛盾。具体修订为：
+  - 会话数量不再设上限；单会话 200 消息和单条 20000 字符上限由后端强制（`SPEC-CSP-DEC-005`）。
+  - 搜索匹配 `title + lastMessagePreview + summary`，不扫描全部历史正文（`SPEC-CSP-DEC-009`）。
+  - 会话与消息 ID、创建/更新时间由服务端生成；客户端创建时不生成 ID（`SPEC-CSP-MODEL-001/-002`）。
+  - 会话 tab 不提供 history toggle，也不得发送 `context.history`；模型历史由 AgentState 自动恢复。
+  - 发送采用“追加 user+pending → `POST /desktop/chat(sessionId,userMessageId)` → 更新同一 pending”的有序流程。
+  - 重试和重载后 pending 恢复复用原服务端 IDs；busy 为 HTTP 409；旧服务端 transcript 可单次懒迁移到尚不存在的 AgentState。
 
 ---
 
 ## 4. 设计结论（决策与取舍）
 
-- **SPEC-CSP-DEC-002**：会话与消息的**唯一事实来源**为后端 `{memoryDir}/chat-sessions/` 目录下的文件，前端不再以 `localStorage` 为主数据源。前端运行期在 `state.chatSessions` 内存缓存以驱动渲染，但所有写操作必须经 REST 接口落盘，刷新后从后端重新加载。
+- **SPEC-CSP-DEC-002**（双权威）：UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 分片为唯一事实来源；模型执行历史以 `{memoryDir}/agent-state/self-analyst-chat/desktop/<sessionId>/` 下的 AgentState 为唯一事实来源。前端 `state.chatSessions` 仅是渲染缓存，所有 transcript 写操作必须经 REST 落盘；UI transcript 不得在每轮请求中再次作为模型历史注入。
   - *取舍*：与 `tasks.json` 同目录范式，数据可被后端复用、随用户数据目录迁移；放弃纯前端零依赖（本就是 localhost 单机后端，前后端共生）。
 
 - **SPEC-CSP-DEC-003**：写操作采用 **REST CRUD 粒度**（按会话、按消息的细粒度增删改），**不**采用「前端提交整份文档、后端整块覆盖」的 blob PUT。
   - *取舍*：细粒度接口避免并发整块回写的丢更新，单次 payload 小，与 `TaskStore` CRUD 风格一致。
 
-- **SPEC-CSP-DEC-004**：**不迁移**既有 `localStorage`（`selfAnalyst.chatSessions.v1`）历史会话，直接切换。前端不再读取该 key，并**应**在切换后主动删除该旧 key。
-  - *取舍*：用户明确选择不迁移；会话历史价值低、易重建，省去一次性迁移代码。
+- **SPEC-CSP-DEC-004**：**不迁移**既有 WebView key `selfAnalyst.chatSessions.v1`，直接切换；前端不再读取并主动删除该旧 key。此决策只针对浏览器存储，不影响 `SPEC-CSP-DEC-011` 对已有服务端 shard 的 AgentState 懒迁移。
+  - *取舍*：旧浏览器数据不成为后端事实来源；已经写入服务端的正文则保留并可继续对话。
 
 - **SPEC-CSP-DEC-005**（裁剪上限 / 会话数不限）：**会话数量不设上限**——不再按数量淘汰旧会话。保留两项与单会话体量相关的不变量：单会话最多 **200** 条消息（超出淘汰最旧）、单条消息 `content` ≤ **20000** 字符（超出截断并追加 `...`）。两项均由**后端**在写入时强制执行。
   - *取舍*：取消会话数上限满足用户诉求；保留单会话两项上限以约束**单个分片文件**体量，使任一次写仍是有界成本。
@@ -72,7 +74,7 @@
   └── ...
   ```
 
-  - **分片文件**是单个会话的**事实来源**；**index.json** 是从各分片派生的**投影/缓存**（用于列表与搜索），可在损坏/缺失时由分片重建。
+  - **分片文件**是单个会话 UI 可见 transcript 的**事实来源**；**index.json** 是从各分片派生的**投影/缓存**（用于列表与搜索），可在损坏/缺失时由分片重建。模型历史的事实来源另为 AgentState（SPEC-CSP-DEC-002）。
   - 写一条消息只重写**该会话的分片**（≤200 条，有界）+ 更新 **index.json 中对应一行**。写成本与历史会话总数无关。
   - *取舍*：index.json 仍随会话数线性增长，但只含**元信息**（无消息正文），量级约为"会话数 × 数百字节"，远小于全量；其重写发生在会话元信息变化（新建/删除/标题或摘要/`updatedAt` 变更）时。这是为"会话数不限"换取的可接受成本。
 
@@ -82,16 +84,22 @@
 - **SPEC-CSP-DEC-010**（会话摘要生成）：每个会话维护一段**简短摘要**（约一句话），作为搜索的"正文代理"并可用于展示提示。摘要由 **LLM 基于会话内容生成**，**LLM 不可用 / 预算受限（`SPEC-BUDGET-*`）/ 失败**时回退到**确定性兜底摘要**（由会话内若干用户消息片段拼接得到）。生成是**异步、best-effort、不得阻断**消息收发；后端可对再生成做节流/合并。
   - *隐私*：摘要的 LLM 输入是**会话自身内容**——该内容在聊天时本就发送给同一 LLM 端点，故不引入新泄露面；但摘要输入**绝不**包含配置敏感值（与 `SPEC-CSP-DEC-007` 一致）。摘要生成计入 LLM 用量并受预算约束。
 
+- **SPEC-CSP-DEC-011**（旧服务端 transcript 单次懒迁移）：若服务端 shard 已有历史而 `(desktop, sessionId)` AgentState 尚不存在，后端在该会话下一次聊天请求取得 Agent 生命周期 gate 后、处理当前 user turn 前，使用当前 `userMessageId` 定位边界并 seed 一次。只导入边界之前有效的 user 与非 pending/error assistant，排除 system/UI notice；AgentState 已存在或已有内容时不得再次导入。
+
+- **SPEC-CSP-DEC-012**（有序、幂等与生命周期 gate）：发送和重试由服务端 ID 串联。相同 `userMessageId` 已有 terminal assistant 时直接返回既有回复，不再次调用模型；只有 user turn 尚未完成时才继续。聊天与删除共享同一 application-wide Agent 生命周期 gate；gate 忙返回 409，不排队，也不做部分状态变更。
+
 ---
 
 ## 5. 目标
 
 - **SPEC-CSP-GOAL-001**：会话与消息持久化到 `{memoryDir}/chat-sessions/`，刷新页面、重启后端后会话历史仍在。
 - **SPEC-CSP-GOAL-002**：提供按会话、按消息的 REST CRUD 接口，覆盖列表（索引）、单会话读取、创建会话、更新会话元信息、删除会话、追加消息、更新消息（pending→sent/error）、设置 active 会话。
-- **SPEC-CSP-GOAL-003**：`会话` tab 现有交互与外观（`desktop-chat-tab.md`）不变，仅存储通道、会话数上限与搜索数据来源按本 spec 调整。
+- **SPEC-CSP-GOAL-003**：`会话` tab 的布局与主要交互保持不变；存储通道、搜索、ID 所有权、模型历史、发送/重试顺序和 busy/delete 语义按本 spec 调整。
 - **SPEC-CSP-GOAL-004**：写入须原子落盘，任一接口失败须返回可读错误，且不破坏已落盘文件。
 - **SPEC-CSP-GOAL-005**：会话数不设上限；单会话消息数与单条消息长度上限由后端强制。
 - **SPEC-CSP-GOAL-006**：每个会话维护可搜索的摘要，支撑"按聊过的内容搜会话"，且其生成不阻断收发、可在无 LLM/预算时降级。
+- **SPEC-CSP-GOAL-007**：每个服务端会话对应独立、可重启恢复的 AgentState；旧服务端 transcript 在状态缺失时安全地单次懒迁移。
+- **SPEC-CSP-GOAL-008**：重载后遗留 pending 可用原 IDs 恢复；重复请求不会重复模型调用或 user turn，Agent 忙统一返回 409。
 
 ---
 
@@ -168,6 +176,7 @@
 
 - 返回该 `Session`（**含 `messages`**），用于会话被打开/激活时按需加载正文。
 - `id` 不存在返回 HTTP 404。
+- 路由 ID 必须是服务端生成的 lowercase hex32；非法/路径穿越 ID 返回 HTTP 400。
 
 ### SPEC-CSP-API-003：`POST /desktop/chat/sessions`（创建会话）
 
@@ -185,7 +194,10 @@
 
 ### SPEC-CSP-API-005：`DELETE /desktop/chat/sessions/{id}`（删除会话）
 
-- 删除该会话分片文件并从 index.json 移除。
+- 删除必须作为一个 Agent 生命周期 gate 内的有序操作完成：清除 ReActAgent cache → 删除 `(desktop, sessionId)` 的完整 AgentState → 删除会话分片并更新 index.json；中途不得释放 gate，使聊天请求无法在隐藏状态删除后、可见正文删除前插入。
+- gate 已被聊天占用时返回 HTTP 409 与 `{ "error": "Session is currently processing a chat request" }`，且 AgentState、分片和索引都保持不变。
+- 即使 LLM 未配置或 `SelfAnalystAgent` 未初始化，仍须直接打开 `{memoryDir}/agent-state/self-analyst-chat/` 对应的 `AgentStateStore` 清除持久化状态，再删除可见 transcript；不得因 `agent == null` 遗留隐藏状态。
+- 已经提取为独立长期记忆的条目保留，由用户在记忆面板单独审阅/删除；删除会话不隐式删除已确认的长期记忆。
 - 若删除的是当前 `activeSessionId`，服务端把 active 重选为剩余会话中 `updatedAt` 最新者；无剩余则置 `null`。
 - 返回 `{ "deleted": true, "id": <id>, "activeSessionId": <string|null> }`；`id` 不存在返回 404。
 - 「列表空则自动新建」（`SPEC-CHAT-TAB-004`）仍由前端决定（调用 API-003），后端只负责重选 active 指针。
@@ -201,6 +213,8 @@
 
 - 请求体部分字段：`{ "content"?, "status"?, "error"?, "suggestedTasks"? }`。
 - 用于把 pending assistant 更新为 `sent`（写回回复与建议任务）或 `error`（写错误文案），以及「重试」时把 error 改回 pending。
+- `status` 切换为 `pending` 或 `sent` 时必须清除旧 `error`；失败写入 `error` 时同时持久化格式化后的错误 `content`，避免重载后继续显示陈旧的“思考中”。
+- 重试或重载恢复只能更新原 assistant 记录，不得追加新的 user/pending。允许对从 shard 重新加载到的遗留 pending 执行同一恢复流程；其前一条有效 user 消息的服务端 ID 是下一次 `/desktop/chat` 的 `userMessageId`。
 - 更新会话 `updatedAt` 与 index.json 投影；触发摘要异步再生成（SPEC-CSP-API-011）；返回更新后的 `Message`；会话或 `msgId` 不存在返回 404。
 
 ### SPEC-CSP-API-008：`PUT /desktop/chat/active-session`（设置 active 指针）
@@ -228,6 +242,14 @@
 - **SPEC-CSP-API-011c**：摘要生成**不得阻断** API-006/007 的响应；GET 返回**当前已有**摘要，允许滞后于最新消息。
 - **SPEC-CSP-API-011d**：摘要的 LLM 输入仅为会话自身内容，**绝不**包含配置敏感值（SPEC-CSP-DEC-007/-010）；摘要调用计入 LLM 用量并受预算约束。
 
+### SPEC-CSP-API-012：`POST /desktop/chat` 的会话路由、迁移与冲突
+
+- 会话 tab 请求体必须包含顶层 `{ "message", "context", "sessionId", "userMessageId" }`。`sessionId` 必须为服务端生成的 lowercase hex32；`userMessageId` 必须为服务端生成的 lowercase hex12，并且在该 shard 中对应一条 user 消息。只有 legacy drawer/client 可同时省略两个 ID。
+- ID 格式或 user turn 归属非法返回 HTTP 400；session 不存在或在取得 gate 后已被删除返回 404。
+- 后端取得 application-wide Agent 生命周期 gate 后重新读取 shard。在 AgentState 不存在时，按 `SPEC-CSP-DEC-011` 导入当前 user 之前的旧服务端 transcript；之后以 `(userId=desktop, sessionId)` 调用 Agent。`context` 只携带本轮业务上下文，不含 UI transcript/history。
+- 若同一 `userMessageId` 已存在于 AgentState 且已有 terminal assistant，直接返回该回复，LLM 调用次数不增加；若 user turn 已存在但尚未完成，则从该 turn 继续，不追加重复 user。
+- gate 已被其它聊天或删除占用时返回 HTTP 409 与 `{ "error": "..." }`。冲突请求不得追加 AgentState turn，也不得返回 HTTP 200 的占位 assistant 文案。
+
 ---
 
 ## 8. 前端集成契约
@@ -240,21 +262,25 @@
   - 切换 active → `PUT /active-session`（`SPEC-CHAT-TAB-004`）。
   - 删除会话 → `DELETE /sessions/{id}`（`SPEC-CHAT-TAB-004`）。
   - 重命名 / 首条消息回填标题 / 绑定上下文 → `PUT /sessions/{id}`（`SPEC-CHAT-TAB-003`、`-007`）。
-  - 发送：先 `POST /sessions/{id}/messages` 追加 `user` + pending `assistant`，调用既有 `POST /desktop/chat` 取回复，再 `PUT .../messages/{pendingId}` 更新为 `sent`/`error`（`SPEC-CHAT-TAB-005`、`-011`）。
+  - 发送：先 `POST /sessions/{id}/messages` 追加 `user` + pending `assistant` 并采用服务端返回的两个消息 ID；再以顶层 `sessionId + userMessageId` 调用 `POST /desktop/chat`；最后只更新原 `pendingId` 为 `sent`/`error`（`SPEC-CHAT-TAB-005`、`-011`）。
 - **SPEC-CSP-FE-005**：会话搜索（`SPEC-CHAT-TAB-004`）改为对 `state.chatSessions` 的索引字段过滤——匹配 `title` + `lastMessagePreview` + `summary`（SPEC-CSP-DEC-009），不依赖已加载的消息正文。
 - **SPEC-CSP-FE-006**：前端不再读取 `localStorage` key `selfAnalyst.chatSessions.v1`，并主动删除该旧 key（SPEC-CSP-DEC-004）。
-- **SPEC-CSP-FE-007**：写接口失败时按既有降级语义处理（如发送失败把 pending 标为 error 并提供重试），不得因持久化失败丢弃用户已输入文本。
-- **SPEC-CSP-FE-008**：`POST /desktop/chat`（LLM 调用）契约不变（`desktop-chat-tab.md` §10.1），与会话存储接口相互独立。
+- **SPEC-CSP-FE-007**：写接口失败时按既有降级语义处理，不得因持久化失败丢弃用户已输入文本。`POST /desktop/chat` 的 409 按可重试错误处理，并把原 pending best-effort 更新为 error；不得把 409 body 渲染为成功 assistant。
+- **SPEC-CSP-FE-008**：`POST /desktop/chat` 增加顶层 `sessionId + userMessageId`；会话 tab 两者必传，且均使用本轮消息追加响应中的服务端 ID。旧抽屉同时省略二者时保持 legacy fallback（`desktop-chat-tab.md` §10.1）。
+- **SPEC-CSP-FE-009**：模型历史以 AgentState 为权威；UI transcript 不得再次作为 `context.history` 注入。
+- **SPEC-CSP-FE-010**：失败重试必须复用原 `sessionId`、`userMessageId`、pending assistant ID 和 `contextSnapshot`，不得调用 API-006 追加新记录。若 AgentState 已有该 user turn 和完成回复，服务端返回既有回复，前端把原 pending 更新为 sent。
+- **SPEC-CSP-FE-011**：从服务端懒加载正文后，任何遗留 pending 都必须呈现恢复/重试入口，或先规范化为可重试 error。恢复按原 transcript 顺序查找它前面的 user，依次执行“PUT 原 pending→pending → `POST /desktop/chat` 同 IDs → PUT 原 pending→sent/error”，不得永久停留在加载态。
+- **SPEC-CSP-FE-012**：前端不提供 history toggle；右侧只保留当前状态、未来任务等业务上下文开关。
 
 ---
 
 ## 9. 非目标
 
-- **SPEC-CSP-NON-001**：不改变 `会话` tab 的布局、视觉、上下文构建、键盘交互与发送语义（仍由 `desktop-chat-tab.md` 约束）。
+- **SPEC-CSP-NON-001**：不改变 `会话` tab 的布局、视觉和键盘交互；业务上下文字段仍由 `desktop-chat-tab.md` 约束，但 history、ID、发送/重试顺序和 busy/delete 语义以本 spec 为准。
 - **SPEC-CSP-NON-002**：不迁移既有 `localStorage` 历史会话（SPEC-CSP-DEC-004）。
 - **SPEC-CSP-NON-003**：不实现云同步、跨设备同步、多端实时协同或账号体系。
 - **SPEC-CSP-NON-004**：不提供消息级删除、会话归档；不建立倒排/全文检索索引——搜索为前端对会话**摘要**的本地过滤（SPEC-CSP-DEC-009），非逐字全文。
-- **SPEC-CSP-NON-005**：不改变 `POST /desktop/chat`、`/desktop/tasks`、`/desktop/config*` 等既有接口契约。
+- **SPEC-CSP-NON-005**：除 `POST /desktop/chat` 的向后兼容 `sessionId + userMessageId` 扩展外，不改变 `/desktop/tasks`、`/desktop/config*` 等既有接口契约。
 - **SPEC-CSP-NON-006**：不引入流式输出（与 `desktop-chat-tab.md` 一致）。
 - **SPEC-CSP-NON-007**：摘要不保证逐字精确或实时一致；允许滞后于最新消息、允许在无 LLM/预算时为确定性兜底（SPEC-CSP-API-011）。
 
@@ -280,8 +306,17 @@
 | SPEC-CSP-TST-014 | 删除/损坏 index.json 后 `GET /sessions` | 从分片重建索引、会话正文不丢（SPEC-CSP-MODEL-005 / API-010c） |
 | SPEC-CSP-TST-015 | 追加消息后摘要再生成（LLM 不可用） | 会话 `summary` 为确定性兜底文本（非空），收发未被阻断（SPEC-CSP-API-011b/c） |
 | SPEC-CSP-TST-016 | 前端按摘要搜索（手动/UI） | 输入命中某会话 `summary` 的词，列表过滤出该会话（SPEC-CSP-FE-005） |
-| SPEC-CSP-TST-017 | 前端发送消息（手动/UI） | Network 出现 `POST .../messages` → `POST /desktop/chat` → `PUT .../messages/{id}`，刷新后消息仍在 |
+| SPEC-CSP-TST-017 | 前端发送消息（手动/UI） | Network 出现 `POST .../messages` → 带服务端 `sessionId + userMessageId` 的 `POST /desktop/chat` → `PUT .../messages/{pendingId}`，刷新后消息仍在 |
 | SPEC-CSP-TST-018 | 升级后首次加载（手动/UI） | 不读取旧 `localStorage` key，且该旧 key 被删除（SPEC-CSP-FE-006） |
+| SPEC-CSP-TST-019 | A/B 两个 session 交替对话并重启 Agent | B 请求不含 A 历史；重启后 A 从自身 AgentState 恢复历史；请求不含 `context.history` |
+| SPEC-CSP-TST-020 | 删除会话后以原 ID 调用读取/聊天 | 返回 404；该 ID 的 shard、AgentState 与 cache 均已清除 |
+| SPEC-CSP-TST-021 | `.`, `..`, 正反斜杠、超长或 Unicode session ID | 返回/抛出非法 ID，且 chat-sessions 目录外文件不变 |
+| SPEC-CSP-TST-022 | 已有 server shard、无 AgentState，追加当前 user 后首次聊天 | 只把当前 user 之前的有效 user/sent assistant seed 到 AgentState；system/pending/error 被排除；后续请求不重复迁移 |
+| SPEC-CSP-TST-023 | Agent 已完成回复但原 pending 尚未更新，刷新后恢复 | UI 复用原 session/user/pending IDs；模型调用次数不增加；原 pending 更新为 sent，无重复 turn |
+| SPEC-CSP-TST-024 | 刷新加载到未完成 pending | pending 显示恢复/重试入口；按 PUT pending → POST chat → PUT sent/error 有序执行，不追加消息 |
+| SPEC-CSP-TST-025 | 另一聊天占用 Agent gate 时发送 | 返回 HTTP 409 `error`；AgentState 不追加被拒绝 turn，UI 将原 pending 置为可重试 error |
+| SPEC-CSP-TST-026 | Agent gate 忙时删除会话 | 返回 409，shard/index/AgentState/cache 全部保持；稍后重试成功时在同一 gate 内全部清除 |
+| SPEC-CSP-TST-027 | LLM 未配置、agent 为 null 时删除有遗留 AgentState 的会话 | 直接打开状态存储清除 AgentState，再删除 shard/index，不遗留隐藏模型上下文 |
 
 ---
 
@@ -290,8 +325,8 @@
 | 规格 ID | 对应文件/组件 | 验证方式 |
 |---------|--------------|---------|
 | SPEC-CSP-DEC-001 | 本 spec（取代说明）、`desktop-chat-tab.md` | 代码审查 |
-| SPEC-CSP-DEC-002..010 | 本 spec（设计决策） | 代码审查 |
-| SPEC-CSP-GOAL-001..006 | 全特性 | 验收测试 |
+| SPEC-CSP-DEC-002..012 | 本 spec（设计决策） | 代码审查 |
+| SPEC-CSP-GOAL-001..008 | 全特性 | 验收测试 |
 | SPEC-CSP-MODEL-001..005 | `ChatSessionStore.java`（模型、id 安全、索引重建） | 单元测试 |
 | SPEC-CSP-API-001..002 | `DesktopChatSessionController.java`、`DesktopServer.java`、`ChatSessionStore.java` | 单元测试 |
 | SPEC-CSP-API-003..005 | `DesktopChatSessionController.java`、`ChatSessionStore.java` | 单元测试 |
@@ -300,7 +335,9 @@
 | SPEC-CSP-API-009 | `ChatSessionStore.java`（裁剪不变量） | 单元测试 |
 | SPEC-CSP-API-010 | `ChatSessionStore.java`（原子写/分片隔离/降级） | 单元测试、代码审查 |
 | SPEC-CSP-API-011 | `ChatSummaryService.java`、`DesktopChatSessionController.java`（异步再生成）、`ChatSessionStore.java`（writeSummary） | 单元测试（`ChatSummaryServiceTest`）、代码审查 |
-| SPEC-CSP-FE-001..008 | `desktop-ui/api.js`、`chat.js`、`state.js`、`init.js`、`events.js` | 手动/验收测试、`scripts/check-desktop-chat-session-store.ps1`、代码审查 |
+| SPEC-CSP-API-012 | `DesktopAgentController.java`、`SelfAnalystAgent.java`、`ChatSessionStore.java` | 单元/集成测试、代码审查 |
+| SPEC-CSP-FE-001..012 | `desktop-ui/api.js`、`chat.js`、`state.js`、`init.js`、`events.js` | 手动/验收测试、`scripts/check-desktop-chat-session-store.ps1`、JS 测试、代码审查 |
 | SPEC-CSP-NON-001..007 | 全特性 | 代码审查 |
 | SPEC-CSP-TST-001..015 | `ChatSessionStoreTest.java`、`ChatSummaryServiceTest.java` | 单元测试 |
 | SPEC-CSP-TST-016..018 | `scripts/check-desktop-chat-session-store.ps1` + 运行桌面端 | 手动/验收测试 |
+| SPEC-CSP-TST-019..027 | Agent session-state 测试、controller 测试、JS routing/recovery 测试 | 单元/集成/手动测试 |

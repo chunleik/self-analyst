@@ -34,7 +34,7 @@ var state = {
   activeChatSessionId: null,
   chatSessionSearch: "",
   chatSending: false,
-  chatContextToggles: { currentStatus: true, futureTasks: true, history: false },
+  chatContextToggles: { currentStatus: true, futureTasks: true },
   memoryItems: [],
   memoryFilter: "",
   memoryLoading: false,

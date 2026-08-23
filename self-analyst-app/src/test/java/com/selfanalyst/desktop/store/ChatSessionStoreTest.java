@@ -101,6 +101,7 @@ class ChatSessionStoreTest {
         Session s = store.create(req("会话A"));
         Message pending = msg("assistant", "");
         pending.status = "pending";
+        pending.error = "old failure";
         store.appendMessages(s.id, List.of(pending));
         String msgId = store.getSession(s.id).messages.get(0).id;
         var before = store.getSession(s.id).updatedAt;
@@ -110,6 +111,7 @@ class ChatSessionStoreTest {
                 List.of(java.util.Map.of("title", "做点事")));
         assertEquals("sent", updated.status);
         assertEquals("最终回复", updated.content);
+        assertNull(updated.error);
         assertNotNull(updated.suggestedTasks);
         assertTrue(store.getSession(s.id).updatedAt.isAfter(before));
     }
@@ -221,19 +223,38 @@ class ChatSessionStoreTest {
     @Test
     void unknownIdReturnsNullSignals(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
-        assertNull(store.getSession("nope"));
-        assertNull(store.updateMeta("nope", "x", null, null));
-        assertNull(store.updateMessage("nope", "m", "c", null, null, null));
-        assertNull(store.delete("nope"));
-        assertNull(store.appendMessages("nope", List.of(msg("user", "x"))));
-        assertNull(store.updateMemoryPolicy("nope", "off"));
+        String missing = "f".repeat(32);
+        assertNull(store.getSession(missing));
+        assertNull(store.updateMeta(missing, "x", null, null));
+        assertNull(store.updateMessage(missing, "m", "c", null, null, null));
+        assertNull(store.delete(missing));
+        assertNull(store.appendMessages(missing, List.of(msg("user", "x"))));
+        assertNull(store.updateMemoryPolicy(missing, "off"));
+    }
+
+    @Test
+    void rejectsTraversalAndUnsafeSessionIdsWithoutTouchingOutsideFiles(
+            @TempDir Path memoryDir) throws Exception {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        Path sentinel = Files.writeString(memoryDir.resolve("outside.json"), "keep");
+
+        for (String id : List.of(
+                ".", "..", "../outside", "..\\outside", "a/b", "a\\b",
+                "session.json", "legacy_session", "nope", "x".repeat(65), "会话")) {
+            assertThrows(IllegalArgumentException.class, () -> store.getSession(id), id);
+            assertThrows(IllegalArgumentException.class, () -> store.delete(id), id);
+        }
+
+        assertEquals("keep", Files.readString(sentinel));
+        assertTrue(ChatSessionStore.isGeneratedSessionId("a".repeat(32)));
+        assertFalse(ChatSessionStore.isGeneratedSessionId("legacy_session"));
     }
 
     @Test
     void setActiveSessionRejectsUnknownId(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> store.setActiveSession("ghost"));
+                () -> store.setActiveSession("e".repeat(32)));
     }
 
     @Test
@@ -307,23 +328,23 @@ class ChatSessionStoreTest {
     void legacyShardAndIndexDefaultMemoryPolicyOnRead(@TempDir Path memoryDir) throws Exception {
         Path chatDir = memoryDir.resolve("chat-sessions");
         Files.createDirectories(chatDir);
-        String id = "legacy-session";
+        String id = "a".repeat(32);
         Files.writeString(chatDir.resolve(id + ".json"), """
                 {
-                  "id": "legacy-session",
+                  "id": "%s",
                   "title": "Legacy",
                   "createdAt": "2026-01-01T00:00:00Z",
                   "updatedAt": "2026-01-01T00:00:00Z",
                   "source": "manual",
                   "messages": []
                 }
-                """);
+                """.formatted(id));
         Files.writeString(chatDir.resolve("index.json"), """
                 {
-                  "activeSessionId": "legacy-session",
+                  "activeSessionId": "%s",
                   "sessions": [
                     {
-                      "id": "legacy-session",
+                      "id": "%s",
                       "title": "Legacy",
                       "createdAt": "2026-01-01T00:00:00Z",
                       "updatedAt": "2026-01-01T00:00:00Z",
@@ -332,7 +353,7 @@ class ChatSessionStoreTest {
                     }
                   ]
                 }
-                """);
+                """.formatted(id, id));
 
         ChatSessionStore store = new ChatSessionStore(memoryDir);
 
@@ -344,10 +365,10 @@ class ChatSessionStoreTest {
     void invalidMemoryPolicyInShardDefaultsToSmartOnRead(@TempDir Path memoryDir) throws Exception {
         Path chatDir = memoryDir.resolve("chat-sessions");
         Files.createDirectories(chatDir);
-        String id = "future-session";
+        String id = "b".repeat(32);
         Files.writeString(chatDir.resolve(id + ".json"), """
                 {
-                  "id": "future-session",
+                  "id": "%s",
                   "title": "Future",
                   "createdAt": "2026-01-01T00:00:00Z",
                   "updatedAt": "2026-01-01T00:00:00Z",
@@ -355,7 +376,7 @@ class ChatSessionStoreTest {
                   "memoryPolicy": "future_policy",
                   "messages": []
                 }
-                """);
+                """.formatted(id));
 
         ChatSessionStore store = new ChatSessionStore(memoryDir);
 
@@ -366,12 +387,13 @@ class ChatSessionStoreTest {
     void invalidMemoryPolicyInIndexDefaultsToSmartOnRead(@TempDir Path memoryDir) throws Exception {
         Path chatDir = memoryDir.resolve("chat-sessions");
         Files.createDirectories(chatDir);
+        String id = "c".repeat(32);
         Files.writeString(chatDir.resolve("index.json"), """
                 {
-                  "activeSessionId": "future-session",
+                  "activeSessionId": "%s",
                   "sessions": [
                     {
-                      "id": "future-session",
+                      "id": "%s",
                       "title": "Future",
                       "createdAt": "2026-01-01T00:00:00Z",
                       "updatedAt": "2026-01-01T00:00:00Z",
@@ -381,7 +403,7 @@ class ChatSessionStoreTest {
                     }
                   ]
                 }
-                """);
+                """.formatted(id, id));
 
         ChatSessionStore store = new ChatSessionStore(memoryDir);
 

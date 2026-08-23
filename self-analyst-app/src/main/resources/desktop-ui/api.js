@@ -88,10 +88,15 @@ var api = {
       if (!r.ok) throw new Error("Delete task failed: " + r.status);
     });
   },
-  postChat: function (msg, ctx) {
+  postChat: function (msg, ctx, sessionId, userMessageId) {
     return fetch(API_BASE + "/desktop/chat", {
       method: "POST",
-      body: JSON.stringify({ message: msg, context: ctx }),
+      body: JSON.stringify({
+        message: msg,
+        context: ctx,
+        sessionId: sessionId,
+        userMessageId: userMessageId,
+      }),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
       if (!r.ok) {

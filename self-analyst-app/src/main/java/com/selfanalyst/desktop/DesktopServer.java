@@ -110,6 +110,7 @@ public class DesktopServer {
         Path memoryDir = config.memoryDir();
         TaskStore taskStore = new TaskStore(memoryDir);
         UserConfigStore userConfigStore = new UserConfigStore(memoryDir);
+        ChatSessionStore chatSessionStore = new ChatSessionStore(memoryDir);
         SummaryService summaryService = new SummaryService(eventStore, memoryStore);
         BehaviorAdviceService adviceService = new BehaviorAdviceService();
         LongTermMemoryService longTermMemoryService = memoryStore != null
@@ -120,7 +121,7 @@ public class DesktopServer {
                 : null;
 
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
-                config, headroomService);
+                config, headroomService, chatSessionStore);
         this.configCtrl = new DesktopConfigController(config, userConfigStore, headroomService);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.statusCtrl = new DesktopStatusController(
@@ -132,7 +133,6 @@ public class DesktopServer {
                 ? new DesktopMemoryController(longTermMemoryService)
                 : null;
 
-        ChatSessionStore chatSessionStore = new ChatSessionStore(memoryDir);
         ChatSummaryService chatSummaryService = new ChatSummaryService(config.effectiveLanguage());
         this.chatSessionCtrl = new DesktopChatSessionController(
                 chatSessionStore, chatSummaryService, agent, config, memoryExtractionService);

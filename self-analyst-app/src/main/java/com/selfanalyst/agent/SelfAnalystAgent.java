@@ -12,13 +12,19 @@ import com.selfanalyst.wiki.WikiStore;
 import com.selfanalyst.wiki.WikiTools;
 import com.selfanalyst.file.FileTools;
 import io.agentscope.core.ReActAgent;
+import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.message.GenerateReason;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.model.ExecutionConfig;
 import io.agentscope.core.model.GenerateOptions;
+import io.agentscope.core.state.AgentState;
+import io.agentscope.core.state.AgentStateStore;
+import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.agentscope.core.tool.Toolkit;
 import io.agentscope.core.tool.ToolkitConfig;
 import io.agentscope.core.tool.mcp.McpClientBuilder;
@@ -29,18 +35,26 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 public class SelfAnalystAgent implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(SelfAnalystAgent.class);
+    private static final String DESKTOP_USER_ID = "desktop";
+    private static final String LEGACY_SESSION_ID = "legacy_default";
+    private static final Pattern DESKTOP_SESSION_ID = Pattern.compile("^[a-f0-9]{32}$");
+    private static final Pattern DESKTOP_MESSAGE_ID = Pattern.compile("^[a-f0-9]{12}$");
 
     private final ReActAgent agent;
     private final OpenAIChatModel plainModel;
@@ -53,6 +67,7 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final UsageMeter usageMeter;
     private final HeadroomService headroomService;
     private final McpClientWrapper webSearchMcpClient;
+    private final AgentStateStore agentStateStore;
     private final Lang lang;
     private final AtomicBoolean chatRunning = new AtomicBoolean();
     private volatile boolean usageMissingLogged;
@@ -119,6 +134,8 @@ public class SelfAnalystAgent implements AutoCloseable {
             toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier,
                     headroomService != null ? headroomService::runtimeStatusLine : null));
         }
+        Path stateRoot = chatStateRoot(config.memoryDir());
+        AgentStateStore builtStateStore = new JsonFileAgentStateStore(stateRoot);
         McpClientWrapper registeredWebSearchMcpClient = registerWebSearchMcp(toolkit, config);
 
         OpenAIChatModel builtPlainModel;
@@ -158,6 +175,8 @@ public class SelfAnalystAgent implements AutoCloseable {
                             new DynamicMemoryContextMiddleware(
                                     lang, () -> memory.profile().buildContextSummary()),
                             new PlanMiddleware(usageMeter)))
+                    .stateStore(builtStateStore)
+                    .defaultSessionId(LEGACY_SESSION_ID)
                     .maxIters(config.agentMaxIters())
                     .modelExecutionConfig(ExecutionConfig.builder()
                             .timeout(Duration.ofSeconds(45))
@@ -172,11 +191,17 @@ public class SelfAnalystAgent implements AutoCloseable {
                     failure.addSuppressed(closeFailure);
                 }
             }
+            try {
+                builtStateStore.close();
+            } catch (RuntimeException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
             throw failure;
         }
         this.plainModel = builtPlainModel;
         this.agent = builtAgent;
         this.webSearchMcpClient = registeredWebSearchMcpClient;
+        this.agentStateStore = builtStateStore;
     }
 
     static String effectiveLlmBaseUrl(Config config, HeadroomService headroomService) {
@@ -229,7 +254,47 @@ public class SelfAnalystAgent implements AutoCloseable {
     }
 
     public Mono<String> chat(String userInput) {
+        return chatInternal(LEGACY_SESSION_ID, null, userInput, null);
+    }
+
+    public Mono<String> chat(String sessionId, String userInput) {
+        return chat(sessionId, null, userInput);
+    }
+
+    public Mono<String> chat(String sessionId, String userMessageId, String userInput) {
+        return chat(sessionId, userMessageId, userInput, null);
+    }
+
+    /**
+     * Calls one persisted desktop session. The history supplier is evaluated only after the
+     * application-wide chat gate has been acquired. Returning {@code null} means that the visible
+     * session was deleted before execution; a non-null list is also used to lazily seed chats that
+     * predate AgentState persistence.
+     */
+    public Mono<String> chat(
+            String sessionId,
+            String userMessageId,
+            String userInput,
+            Supplier<List<Msg>> existingSessionHistorySupplier) {
+        String validatedSessionId = requireDesktopSessionId(sessionId);
+        String validatedMessageId = requireDesktopMessageId(userMessageId);
+        return chatInternal(validatedSessionId, validatedMessageId, userInput,
+                existingSessionHistorySupplier);
+    }
+
+    private Mono<String> chatInternal(
+            String sessionId,
+            String userMessageId,
+            String userInput,
+            Supplier<List<Msg>> existingSessionHistorySupplier) {
         return runExclusiveChat(() -> {
+            List<Msg> existingHistory = null;
+            if (existingSessionHistorySupplier != null) {
+                existingHistory = existingSessionHistorySupplier.get();
+                if (existingHistory == null) {
+                    throw new ChatSessionUnavailableException(sessionId);
+                }
+            }
             if (usageMeter != null && usageMeter.isBlocked()) {
                 return Mono.just(lang == Lang.EN
                         ? "The daily token budget has been reached; the conversation is paused to control cost. "
@@ -238,16 +303,168 @@ public class SelfAnalystAgent implements AutoCloseable {
                         : "已达到今日 token 使用上限，已暂停对话以控制成本。"
                           + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。");
             }
-            return agent.call(Msg.builder()
-                            .name("user")
-                            .role(MsgRole.USER)
-                            .textContent(userInput)
-                    .build())
+            seedSessionHistoryIfAbsent(sessionId, existingHistory);
+            RuntimeContext context = RuntimeContext.builder()
+                    .userId(DESKTOP_USER_ID)
+                    .sessionId(sessionId)
+                    .build();
+            // With a persistent store every call reloads its slot. Eagerly evict the local
+            // cache after completion/error/cancel so long-running desktop sessions stay bounded.
+            return Mono.using(
+                            () -> context,
+                            activeContext -> {
+                                CallPreparation prepared = prepareCall(
+                                        sessionId, userMessageId, userInput);
+                                return prepared.completedReply() != null
+                                        ? Mono.just(Msg.builder()
+                                                .name("assistant")
+                                                .role(MsgRole.ASSISTANT)
+                                                .textContent(prepared.completedReply())
+                                                .build())
+                                        : agent.call(prepared.messages(), activeContext);
+                            },
+                            ignored -> agent.clearStateCache(DESKTOP_USER_ID, sessionId),
+                            true)
                     .map(Msg::getTextContent);
         });
     }
 
+    private void seedSessionHistoryIfAbsent(String sessionId, List<Msg> existingHistory) {
+        if (existingHistory == null) return;
+        // Check the actual authoritative key, not just the directory. A corrupt state read is
+        // deliberately allowed to fail the call instead of being silently overwritten by a fresh
+        // transcript migration.
+        AgentState persisted = agentStateStore.get(
+                DESKTOP_USER_ID, sessionId, "agent_state", AgentState.class).orElse(null);
+        if (persisted != null) {
+            if (!Objects.equals(DESKTOP_USER_ID, persisted.getUserId())
+                    || !Objects.equals(sessionId, persisted.getSessionId())) {
+                throw new IllegalStateException(
+                        "Persisted AgentState identity does not match its desktop session slot");
+            }
+            return;
+        }
+        if (existingHistory.isEmpty()) return;
+        AgentState state = agent.getAgentState(DESKTOP_USER_ID, sessionId);
+        try {
+            if (state.getContext().isEmpty()) {
+                state.contextMutable().addAll(List.copyOf(existingHistory));
+                agent.saveAgentState(DESKTOP_USER_ID, sessionId);
+                log.info("Migrated {} transcript messages into AgentState for session {}",
+                        existingHistory.size(), sessionId);
+            }
+        } finally {
+            agent.clearStateCache(DESKTOP_USER_ID, sessionId);
+        }
+    }
+
+    private CallPreparation prepareCall(
+            String sessionId, String userMessageId, String userInput) {
+        if (userMessageId != null) {
+            List<Msg> context = agent.getAgentState(DESKTOP_USER_ID, sessionId).getContext();
+            for (int i = context.size() - 1; i >= 0; i--) {
+                Msg existingUser = context.get(i);
+                if (existingUser.getRole() != MsgRole.USER
+                        || !userMessageId.equals(existingUser.getId())) {
+                    continue;
+                }
+                String completedReply = null;
+                boolean hasLaterUserTurn = false;
+                for (int j = i + 1; j < context.size(); j++) {
+                    Msg candidate = context.get(j);
+                    if (candidate.getRole() == MsgRole.USER) {
+                        hasLaterUserTurn = true;
+                        break;
+                    }
+                    if (candidate.getRole() == MsgRole.ASSISTANT
+                            && candidate.getGenerateReason() != GenerateReason.TOOL_CALLS
+                            && candidate.getContent().stream()
+                                    .noneMatch(ToolUseBlock.class::isInstance)
+                            && candidate.getTextContent() != null
+                            && !candidate.getTextContent().isBlank()) {
+                        // AgentScope records every reasoning assistant turn before tool execution.
+                        // Keep walking so retries return the terminal assistant for this user turn.
+                        completedReply = candidate.getTextContent();
+                    }
+                }
+                if (completedReply == null && hasLaterUserTurn) {
+                    throw new StaleChatTurnException(userMessageId);
+                }
+                return new CallPreparation(List.of(), completedReply);
+            }
+        }
+        Msg.Builder builder = Msg.builder()
+                .name("user")
+                .role(MsgRole.USER)
+                .textContent(userInput);
+        if (userMessageId != null) builder.id(userMessageId);
+        return new CallPreparation(List.of(builder.build()), null);
+    }
+
+    private record CallPreparation(List<Msg> messages, String completedReply) {
+    }
+
+    public void deleteChatSessionState(String sessionId) {
+        deleteChatSessionStateThen(sessionId, () -> null);
+    }
+
+    /**
+     * Deletes hidden AgentState and then performs the visible transcript mutation without releasing
+     * the application chat gate between those operations.
+     */
+    public <T> T deleteChatSessionStateThen(String sessionId, Supplier<T> transcriptDeletion) {
+        String validated = requireDesktopSessionId(sessionId);
+        return runExclusive(() -> Mono.fromCallable(() -> {
+            agent.clearStateCache(DESKTOP_USER_ID, validated);
+            agentStateStore.delete(DESKTOP_USER_ID, validated);
+            return transcriptDeletion.get();
+        })).block();
+    }
+
+    boolean hasChatSessionState(String sessionId) {
+        return agentStateStore.exists(DESKTOP_USER_ID, requireDesktopSessionId(sessionId));
+    }
+
+    private static String requireDesktopSessionId(String sessionId) {
+        if (sessionId == null || !DESKTOP_SESSION_ID.matcher(sessionId).matches()) {
+            throw new IllegalArgumentException("Invalid desktop chat session id");
+        }
+        return sessionId;
+    }
+
+    private static String requireDesktopMessageId(String messageId) {
+        if (messageId == null || messageId.isBlank()) return null;
+        if (!DESKTOP_MESSAGE_ID.matcher(messageId).matches()) {
+            throw new IllegalArgumentException("Invalid desktop chat message id");
+        }
+        return messageId;
+    }
+
+    /** Delete persisted desktop AgentState even when the model/agent failed to initialize. */
+    public static void deletePersistedChatSessionState(Path memoryDir, String sessionId) {
+        String validated = requireDesktopSessionId(sessionId);
+        Path root = chatStateRoot(memoryDir);
+        if (!Files.exists(root)) return;
+        AgentStateStore store = new JsonFileAgentStateStore(root);
+        try {
+            store.delete(DESKTOP_USER_ID, validated);
+        } finally {
+            store.close();
+        }
+    }
+
+    private static Path chatStateRoot(Path memoryDir) {
+        return memoryDir.resolve("agent-state")
+                .resolve("self-analyst-chat")
+                .toAbsolutePath()
+                .normalize();
+    }
+
     Mono<String> runExclusiveChat(Supplier<Mono<String>> action) {
+        return runExclusive(action);
+    }
+
+    private <T> Mono<T> runExclusive(Supplier<Mono<T>> action) {
         return Mono.using(
                 () -> {
                     if (!chatRunning.compareAndSet(false, true)) {
@@ -258,6 +475,19 @@ public class SelfAnalystAgent implements AutoCloseable {
                 ignored -> Mono.defer(action),
                 ignored -> chatRunning.set(false),
                 true);
+    }
+
+    public static final class ChatSessionUnavailableException extends IllegalStateException {
+        public ChatSessionUnavailableException(String sessionId) {
+            super("Desktop chat session no longer exists: " + sessionId);
+        }
+    }
+
+    public static final class StaleChatTurnException extends IllegalStateException {
+        public StaleChatTurnException(String userMessageId) {
+            super("Cannot resume a non-terminal turn after a newer user message: "
+                    + userMessageId);
+        }
     }
 
     public boolean isBudgetBlocked() {
@@ -359,12 +589,16 @@ public class SelfAnalystAgent implements AutoCloseable {
         try {
             agent.close();
         } finally {
-            if (webSearchMcpClient != null) {
-                try {
-                    webSearchMcpClient.close();
-                } catch (RuntimeException closeFailure) {
-                    log.warn("关闭联网搜索 MCP 客户端时出错: {}", closeFailure.getMessage());
+            try {
+                if (webSearchMcpClient != null) {
+                    try {
+                        webSearchMcpClient.close();
+                    } catch (RuntimeException closeFailure) {
+                        log.warn("关闭联网搜索 MCP 客户端时出错: {}", closeFailure.getMessage());
+                    }
                 }
+            } finally {
+                agentStateStore.close();
             }
         }
     }

@@ -9,6 +9,7 @@ import reactor.core.publisher.Sinks;
 
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -51,6 +52,28 @@ class SelfAnalystAgentConcurrencyTest {
             Mono<String> reusable = agent.runExclusiveChat(() -> Mono.just("reused"));
             assertEquals("reused", reusable.block());
             assertEquals("reused", reusable.block());
+
+            CountDownLatch transcriptDeleteEntered = new CountDownLatch(1);
+            CountDownLatch finishTranscriptDelete = new CountDownLatch(1);
+            CompletableFuture<String> deletion = CompletableFuture.supplyAsync(
+                    () -> agent.deleteChatSessionStateThen("a".repeat(32), () -> {
+                        transcriptDeleteEntered.countDown();
+                        try {
+                            assertTrue(finishTranscriptDelete.await(2, TimeUnit.SECONDS));
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new RuntimeException(e);
+                        }
+                        return "transcript-deleted";
+                    }));
+            assertTrue(transcriptDeleteEntered.await(2, TimeUnit.SECONDS));
+            RuntimeException deleteOverlap = assertThrows(RuntimeException.class,
+                    () -> agent.runExclusiveChat(() -> Mono.just("must-not-run")).block());
+            assertTrue(hasMessage(deleteOverlap, "still running"));
+            finishTranscriptDelete.countDown();
+            assertEquals("transcript-deleted", deletion.get(2, TimeUnit.SECONDS));
+            assertEquals("after-delete",
+                    agent.runExclusiveChat(() -> Mono.just("after-delete")).block());
         }
     }
 

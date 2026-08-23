@@ -5,9 +5,12 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.desktop.service.BehaviorAdviceService;
 import com.selfanalyst.desktop.service.SummaryPromptService;
 import com.selfanalyst.desktop.service.SummaryService;
+import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.headroom.HeadroomService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.MsgRole;
 import io.javalin.http.Context;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,13 +43,23 @@ public class DesktopAgentController {
     private final TaskStore taskStore;
     private final Config config;
     private final HeadroomService headroomService;
+    private final ChatSessionStore chatSessionStore;
+
+    public DesktopAgentController(SummaryService summaryService,
+                                  BehaviorAdviceService adviceService,
+                                   SelfAnalystAgent agent,
+                                   TaskStore taskStore,
+                                   Config config) {
+        this(summaryService, adviceService, agent, taskStore, config, null, null);
+    }
 
     public DesktopAgentController(SummaryService summaryService,
                                   BehaviorAdviceService adviceService,
                                   SelfAnalystAgent agent,
-                                  TaskStore taskStore,
-                                  Config config) {
-        this(summaryService, adviceService, agent, taskStore, config, null);
+                                   TaskStore taskStore,
+                                   Config config,
+                                   HeadroomService headroomService) {
+        this(summaryService, adviceService, agent, taskStore, config, headroomService, null);
     }
 
     public DesktopAgentController(SummaryService summaryService,
@@ -54,7 +67,8 @@ public class DesktopAgentController {
                                   SelfAnalystAgent agent,
                                   TaskStore taskStore,
                                   Config config,
-                                  HeadroomService headroomService) {
+                                  HeadroomService headroomService,
+                                  ChatSessionStore chatSessionStore) {
         this.summaryService = summaryService;
         this.adviceService = adviceService;
         this.promptService = new SummaryPromptService();
@@ -62,6 +76,7 @@ public class DesktopAgentController {
         this.taskStore = taskStore;
         this.config = config;
         this.headroomService = headroomService;
+        this.chatSessionStore = chatSessionStore;
     }
 
     /**
@@ -212,12 +227,35 @@ public class DesktopAgentController {
 
     /**
      * POST /desktop/chat
-     * Body: { "message": "...", "context": "..." }
+     * Body: { "message": "...", "context": {...}, "sessionId": "<hex32>",
+     *         "userMessageId": "<hex12>" }
+     * sessionId is optional only for the legacy drawer/client path.
      */
     public void chat(Context ctx) {
         try {
             Map<String, Object> body = MAPPER.readValue(ctx.body(), Map.class);
             String message = stringOr(body.get("message"), "");
+            String sessionId = stringOr(body.get("sessionId"), "").trim();
+            String userMessageId = stringOr(body.get("userMessageId"), "").trim();
+
+            if (!sessionId.isEmpty()) {
+                if (!ChatSessionStore.isGeneratedSessionId(sessionId)) {
+                    ctx.status(400).json(Map.of("error", "Invalid chat session id"));
+                    return;
+                }
+                if (chatSessionStore == null || chatSessionStore.getSession(sessionId) == null) {
+                    ctx.status(404).json(Map.of("error", "Chat session not found"));
+                    return;
+                }
+                if (!ChatSessionStore.isGeneratedMessageId(userMessageId)) {
+                    ctx.status(400).json(Map.of("error", "Invalid user message id"));
+                    return;
+                }
+                // Reject a valid-looking id that is not the server-owned user message for this
+                // visible transcript. The same validation is repeated under the agent gate below.
+                agentHistoryBeforeCurrentUser(
+                        chatSessionStore.getSession(sessionId), userMessageId);
+            }
 
             if (agent == null) {
                 ctx.json(Map.of(
@@ -227,7 +265,14 @@ public class DesktopAgentController {
                 return;
             }
 
-            String response = agent.chat(buildChatAgentInput(message, body.get("context")))
+            String agentInput = buildChatAgentInput(message, body.get("context"));
+            String response = (sessionId.isEmpty()
+                    ? agent.chat(agentInput)
+                    : agent.chat(sessionId,
+                            userMessageId,
+                            agentInput,
+                            () -> agentHistoryBeforeCurrentUser(
+                                    chatSessionStore.getSession(sessionId), userMessageId)))
                     .block(Duration.ofSeconds(180));
             if (response == null || response.isBlank()) {
                 ctx.json(Map.of(
@@ -245,11 +290,18 @@ public class DesktopAgentController {
                     "suggestedTasks", suggestedTasks
             ));
         } catch (Exception e) {
-            if (hasAgentStillRunning(e)) {
-                ctx.json(Map.of(
-                        "message", "上一条消息仍在处理中，请稍后再试...",
-                        "suggestedTasks", List.of()
-                ));
+            if (hasCause(e, SelfAnalystAgent.ChatSessionUnavailableException.class)) {
+                ctx.status(404).json(Map.of("error", "Chat session not found"));
+            } else if (hasCause(e, InvalidChatTurnException.class)) {
+                ctx.status(400).json(Map.of("error", "User message does not belong to session"));
+            } else if (hasCause(e, SelfAnalystAgent.StaleChatTurnException.class)) {
+                ctx.status(409).json(Map.of(
+                        "error", "Only the latest incomplete user turn can be resumed"));
+            } else if (hasAgentStillRunning(e)) {
+                // A rejected turn was never added to AgentState. Report a conflict so the
+                // frontend keeps the same userMessageId on its retry path.
+                ctx.status(409).json(Map.of(
+                        "error", "上一条消息仍在处理中，请稍后再试..."));
             } else {
                 log.error("Chat request failed", e);
                 String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
@@ -268,6 +320,71 @@ public class DesktopAgentController {
             cur = cur.getCause();
         }
         return false;
+    }
+
+    private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (type.isInstance(current)) return true;
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * Converts the visible transcript before the current server-owned user message into a one-time
+     * AgentState bootstrap. Pending/error assistant projections and UI-only system notices are not
+     * model history. A null session is the under-gate deletion signal.
+     */
+    static List<Msg> agentHistoryBeforeCurrentUser(
+            ChatSessionStore.Session session, String currentUserMessageId) {
+        if (session == null) return null;
+        if (!ChatSessionStore.isGeneratedMessageId(currentUserMessageId)) {
+            throw new InvalidChatTurnException();
+        }
+        List<ChatSessionStore.Message> transcript = session.messages != null
+                ? session.messages : List.of();
+        int currentIndex = -1;
+        for (int i = 0; i < transcript.size(); i++) {
+            ChatSessionStore.Message message = transcript.get(i);
+            if (message != null && currentUserMessageId.equals(message.id)
+                    && "user".equals(message.role)) {
+                currentIndex = i;
+                break;
+            }
+        }
+        if (currentIndex < 0) throw new InvalidChatTurnException();
+        for (int i = currentIndex + 1; i < transcript.size(); i++) {
+            ChatSessionStore.Message later = transcript.get(i);
+            if (later != null && "user".equals(later.role)) {
+                throw new InvalidChatTurnException();
+            }
+        }
+
+        List<Msg> history = new ArrayList<>();
+        for (int i = 0; i < currentIndex; i++) {
+            ChatSessionStore.Message visible = transcript.get(i);
+            if (visible == null || visible.content == null || visible.content.isBlank()) continue;
+            MsgRole role;
+            if ("user".equals(visible.role)) {
+                role = MsgRole.USER;
+            } else if ("assistant".equals(visible.role)) {
+                if ("pending".equals(visible.status) || "error".equals(visible.status)) continue;
+                role = MsgRole.ASSISTANT;
+            } else {
+                continue;
+            }
+            Msg.Builder builder = Msg.builder()
+                    .name(visible.role)
+                    .role(role)
+                    .textContent(visible.content);
+            if (ChatSessionStore.isGeneratedMessageId(visible.id)) builder.id(visible.id);
+            history.add(builder.build());
+        }
+        return List.copyOf(history);
+    }
+
+    private static final class InvalidChatTurnException extends IllegalArgumentException {
     }
 
     static String buildChatAgentInput(String message, Object context) {

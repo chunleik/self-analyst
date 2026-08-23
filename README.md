@@ -132,6 +132,10 @@ PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
 - **Goal（目标）**：描述、衡量指标、基线值、目标值、设置日期
 - **KnownPattern（已知模式）**：发现的行为模式 + 置信度评分
 - **ImprovementLog（改进记录）**：行动 → 结果 → 日期，追踪闭环
+- **聊天正文**：以 `{memory.dir}/chat-sessions/index.json` + 每会话一个分片保存；会话与消息 ID 由本机后端生成
+- **Agent 会话状态**：模型历史按桌面聊天会话隔离，存于 `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/`，重启后自动恢复
+
+聊天正文分片是 UI transcript 的权威，AgentState 是模型执行历史的权威，前端不会把 transcript 每轮重复塞回 prompt。升级前已经存在于服务端分片、但尚无 AgentState 的会话，会在下一次发送时把当前 user 之前的有效 user/assistant 历史单次懒迁移到 AgentState；旧 WebView 会话数据不参与该迁移。
 
 Agent 每次对话前自动加载记忆，对话后自动保存新的发现。
 
@@ -211,6 +215,7 @@ SDD (Specification-Driven Development) 规格文档:
 - [docs/specs/file.md](docs/specs/file.md) — 目录文件监控模块 spec
 - [docs/specs/desktop.md](docs/specs/desktop.md) — Tauri 桌面壳 spec
 - [docs/specs/desktop-chat-tab.md](docs/specs/desktop-chat-tab.md) — 会话 tab spec
+- [docs/specs/chat-session-store.md](docs/specs/chat-session-store.md) — 会话后端分片、AgentState 与发送/重试契约
 - [docs/README.md](docs/README.md) — 文档导航索引
 
 ## 安装脚本

@@ -364,6 +364,21 @@ function formatChatErrorMessage(err) {
   return t("chat.sendFailed", { msg: reason });
 }
 
+function getLatestAssistantTurnIndex(messages) {
+  var latestUserIdx = -1;
+  for (var i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      latestUserIdx = i;
+      break;
+    }
+  }
+  if (latestUserIdx < 0) return -1;
+  for (var j = messages.length - 1; j > latestUserIdx; j--) {
+    if (messages[j].role === "assistant") return j;
+  }
+  return -1;
+}
+
 // ---- Render ----
 
 function renderChatTab() {
@@ -465,12 +480,16 @@ function renderChatThread() {
   }
 
   var html = "";
+  var retryableAssistantIdx = state.chatSending
+    ? -1
+    : getLatestAssistantTurnIndex(session.messages);
   for (var i = 0; i < session.messages.length; i++) {
     var m = session.messages[i];
     var cls = "chat-tab-message " + m.role + (m.status === "pending" ? " pending" : "") + (m.status === "error" ? " error" : "");
     html += '<div class="' + cls + '">';
     html += '<div class="msg-content">' + formatChatMessageContent(m.content) + '</div>';
-    if (m.status === "error") {
+    if (i === retryableAssistantIdx &&
+        (m.status === "error" || m.status === "pending")) {
       html += '<div class="msg-retry" data-mid="' + m.id + '">' + escHtml(t("chat.retry")) + '</div>';
     }
     // Suggested tasks
@@ -579,6 +598,7 @@ function sendChatTabMessage() {
 
   state.chatSending = true;
   input.value = "";
+  renderChatTab();
 
   ensureActiveChatSession().then(function (session) {
     var context = buildChatContext(session);
@@ -596,11 +616,12 @@ function sendChatTabMessage() {
         renderChatTab();
         backfillSessionTitle(session, text);
 
-        return api.postChat(text, context).then(function (resp) {
+        return api.postChat(text, context, session.id, savedUser.id).then(function (resp) {
           var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
           var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
           savedPending.status = "sent";
           savedPending.content = content;
+          savedPending.error = null;
           savedPending.suggestedTasks = tasks;
           renderChatTab();
           return api.updateMessage(session.id, savedPending.id,
@@ -615,7 +636,7 @@ function sendChatTabMessage() {
           savedPending.error = err.message || String(err);
           renderChatTab();
           return api.updateMessage(session.id, savedPending.id,
-            { status: "error", error: savedPending.error }).catch(function () {});
+            { status: "error", content: savedPending.content, error: savedPending.error }).catch(function () {});
         });
       });
   }).catch(function (err) {
@@ -641,16 +662,18 @@ function retryChatMessage(msgId) {
   if (state.chatSending) return;
   var session = getActiveChatSession();
   if (!session) return;
-  // Find the error message and the preceding user message
-  var errIdx = -1;
+  // Only the assistant for the latest user turn can be replayed safely.
+  var retryIdx = -1;
   for (var i = 0; i < session.messages.length; i++) {
-    if (session.messages[i].id === msgId) { errIdx = i; break; }
+    if (session.messages[i].id === msgId) { retryIdx = i; break; }
   }
-  if (errIdx < 0) return;
-  var pendingMsg = session.messages[errIdx];
+  if (retryIdx < 0 || retryIdx !== getLatestAssistantTurnIndex(session.messages)) return;
+  var pendingMsg = session.messages[retryIdx];
+  if (pendingMsg.role !== "assistant" ||
+      (pendingMsg.status !== "pending" && pendingMsg.status !== "error")) return;
   // Find preceding user message
   var userMsg = null;
-  for (var j = errIdx - 1; j >= 0; j--) {
+  for (var j = retryIdx - 1; j >= 0; j--) {
     if (session.messages[j].role === "user") { userMsg = session.messages[j]; break; }
   }
   if (!userMsg) return;
@@ -658,15 +681,18 @@ function retryChatMessage(msgId) {
   state.chatSending = true;
   pendingMsg.status = "pending";
   pendingMsg.content = t("chat.thinking");
+  pendingMsg.error = null;
   renderChatTab();
 
-  api.updateMessage(session.id, pendingMsg.id, { status: "pending" }).catch(function () {});
-
-  api.postChat(userMsg.content, userMsg.contextSnapshot || buildChatContext(session)).then(function (resp) {
+  return api.updateMessage(session.id, pendingMsg.id,
+    { status: "pending", content: pendingMsg.content }).then(function () {
+    return api.postChat(userMsg.content, userMsg.contextSnapshot || buildChatContext(session), session.id, userMsg.id);
+  }).then(function (resp) {
     var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
     var tasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
     pendingMsg.status = "sent";
     pendingMsg.content = content;
+    pendingMsg.error = null;
     pendingMsg.suggestedTasks = tasks;
     return api.updateMessage(session.id, pendingMsg.id,
       { status: "sent", content: content, suggestedTasks: tasks }).then(function (updated) {
@@ -678,7 +704,7 @@ function retryChatMessage(msgId) {
     pendingMsg.content = formatChatErrorMessage(err);
     pendingMsg.error = err.message || String(err);
     return api.updateMessage(session.id, pendingMsg.id,
-      { status: "error", error: pendingMsg.error }).catch(function () {});
+      { status: "error", content: pendingMsg.content, error: pendingMsg.error }).catch(function () {});
   }).then(function () {
     state.chatSending = false;
     renderChatTab();
@@ -699,9 +725,6 @@ function buildChatContext(session) {
   }
   if (state.summary && state.summary.timeline) {
     ctx.recentActivity = state.summary.timeline.slice(0, 4);
-  }
-  if (state.chatContextToggles.history && session) {
-    ctx.history = session.messages.filter(function (m) { return m.status !== "pending" && m.status !== "error"; }).slice(-10).map(function (m) { return { role: m.role, content: m.content }; });
   }
   return ctx;
 }

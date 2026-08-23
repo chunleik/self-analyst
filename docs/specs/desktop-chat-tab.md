@@ -67,8 +67,8 @@ docs/mockups/desktop-chat-tab-v1.png
 ## 4. 目标
 
 - 用户可以在桌面端通过独立 `会话` tab 与 SelfAnalyst 进行持续对话。
-- 用户可以创建、切换、继续本地会话。
-- 会话可引用当前状态、今日活动、未来任务和可选历史会话上下文。
+- 用户可以创建、切换、继续由本机后端持久化的会话。
+- 会话可按开关引用当前状态、今日活动和未来任务；同一会话的模型历史由 AgentState 自动恢复，不提供历史消息开关，也不把 UI transcript 放入 `context.history`。
 - Agent 回复中的建议可以转成待办任务，必须由用户点击确认后创建。
 - `Agent` tab 中已有的 `追问` 行为应能进入 `会话` tab，并自动带入被追问对象的上下文。
 - 在 LLM 不可用、请求失败、网络超时、没有历史会话等情况下，界面应有清晰降级状态。
@@ -81,7 +81,7 @@ docs/mockups/desktop-chat-tab-v1.png
 - 不在第一版实现云同步、跨设备同步或账号系统。
 - 不在第一版实现多人协作、文件附件、图片上传、语音输入。
 - 不新增复杂项目管理功能，例如任务依赖、甘特图、循环任务。
-- 不要求新增 Java 后端会话存储 API。第一版会话记录使用 WebView/localStorage 本地保存。
+- 不实现远程或云端会话服务；会话正文必须使用 localhost Java 后端提供的分片存储与 REST CRUD。
 - 不改动 ActivityWatch 完整 Web 仪表盘。
 - 不改变 `Agent` tab 的默认首页定位。
 - 不让 Agent 未经确认静默创建任务。
@@ -252,26 +252,26 @@ var state = {
   chatError: null,
   chatContextToggles: {
     currentStatus: true,
-    futureTasks: true,
-    history: false
+    futureTasks: true
   }
 };
 ```
 
-现有 `chatOpen`, `chatContext`, `chatMessages` 可保留用于兼容旧抽屉，但新增 `会话` tab 必须以 `chatSessions` 作为主数据源。实现者可以在后续重构中删除抽屉，第一版不强制删除。
+现有 `chatOpen`, `chatContext`, `chatMessages` 可保留用于兼容旧抽屉。新增 `会话` tab 中，`state.chatSessions` 只是后端索引和已懒加载分片的运行期缓存：UI 可见 transcript 的权威数据位于 `{memoryDir}/chat-sessions/`，模型执行历史的权威数据位于 AgentState。实现者可以在后续重构中删除抽屉，第一版不强制删除。
 
 ### 8.2 会话数据结构
 
 ```ts
 type ChatSession = {
-  id: string;
+  id: string;              // 服务端生成的 lowercase hex32
   title: string;
-  createdAt: string;       // ISO timestamp
-  updatedAt: string;       // ISO timestamp
+  createdAt: string;       // 服务端生成的 ISO timestamp
+  updatedAt: string;       // 服务端维护的 ISO timestamp
   source: "manual" | "agent_context" | "task_context";
   contextLabel?: string;
   contextSnapshot?: ChatContextSnapshot;
-  messages: ChatMessage[];
+  messages: ChatMessage[];   // 仅完整分片响应包含正文；索引缓存初始为空
+  messagesLoaded?: boolean;  // 仅前端运行期标记，不持久化
 };
 ```
 
@@ -279,10 +279,10 @@ type ChatSession = {
 
 ```ts
 type ChatMessage = {
-  id: string;
+  id: string;              // 服务端生成的 lowercase hex12
   role: "user" | "assistant" | "system";
   content: string;
-  createdAt: string;       // ISO timestamp
+  createdAt: string;       // 服务端生成的 ISO timestamp
   status?: "pending" | "sent" | "error";
   error?: string;
   contextSnapshot?: ChatContextSnapshot;
@@ -335,39 +335,18 @@ type SuggestedTask = {
 
 ---
 
-## 9. 本地持久化
+## 9. 服务端分片持久化与模型状态
 
-第一版使用 WebView/localStorage。
+完整 REST 与落盘契约由 [`chat-session-store.md`](chat-session-store.md) 定义。本文件只保留会话 tab 必须遵守的集成约束。
 
-Storage key:
-
-```text
-selfAnalyst.chatSessions.v1
-```
-
-存储格式:
-
-```json
-{
-  "version": 1,
-  "activeChatSessionId": "chat_...",
-  "sessions": []
-}
-```
-
-约束:
-
-- 最多保留 50 个会话。
-- 单个会话最多保留 200 条消息。
-- 单条消息 `content` 最多保留 20000 个字符。超过时保存前截断，并在末尾追加 `...`。
-- localStorage 读取失败、JSON 解析失败或 schema 不匹配时，不阻断页面加载，应重置为空会话列表并在控制台记录 warning。
-- 每次创建会话、切换 active session、发送/接收消息、删除会话、重命名会话后都要保存。
-- 不得把 API Key 或配置敏感字段写入该 storage key。
-
-迁移策略:
-
-- 第一版只支持 `version: 1`。
-- 如果发现更高版本，忽略旧数据并重置，避免错误解析。
+- UI 可见的会话正文以 `{memoryDir}/chat-sessions/` 为权威：`index.json` 保存 active 指针和列表投影，每个服务端生成的 lowercase hex32 `sessionId` 对应一个 `<sessionId>.json` 分片。
+- 前端初始化只加载索引；激活会话时再按需加载该分片正文。`state.chatSessions` 仅用于渲染缓存，不是持久化事实来源。
+- 创建、切换 active、重命名、删除、追加消息和更新 pending 状态全部通过细粒度 REST 接口完成。客户端不得生成或覆盖会话 ID、消息 ID、`createdAt` 或 `updatedAt`。
+- 会话数量不设上限。单会话最多 200 条消息、单条 `content` 最多 20000 字符，两项均由后端在写入时强制执行。
+- 模型历史以 `{memoryDir}/agent-state/self-analyst-chat/desktop/<sessionId>/` 下的 AgentState 为权威。UI transcript 不得在每轮请求中重新注入模型上下文。
+- 旧 WebView key `selfAnalyst.chatSessions.v1` 不读取、不迁移，并在升级初始化时删除。
+- 对已经存在于服务端分片、但尚无 AgentState 的旧会话，后端在该会话下一次发送时执行一次懒迁移：只导入当前 user 消息之前的有效 user/sent assistant turn，排除 UI-only system、pending 和 error 消息；AgentState 已存在时不得重复导入。
+- 不得把 API Key、完整配置或其它配置敏感值写入会话分片、AgentState、上下文快照或日志。
 
 ---
 
@@ -375,7 +354,7 @@ selfAnalyst.chatSessions.v1
 
 ### 10.1 复用现有聊天接口
 
-不新增后端接口。使用已有:
+LLM 调用继续复用既有 `POST /desktop/chat`；会话 CRUD 路由由 [`chat-session-store.md`](chat-session-store.md) 定义。会话 tab 在已有聊天请求体顶层增加必传的 `sessionId` 与 `userMessageId`：
 
 ```http
 POST /desktop/chat
@@ -383,6 +362,8 @@ Content-Type: application/json
 
 {
   "message": "帮我看一下今天下午应该优先处理什么？",
+  "sessionId": "0123456789abcdef0123456789abcdef",
+  "userMessageId": "0123456789ab",
   "context": {
     "type": "global",
     "title": "会话 tab",
@@ -391,6 +372,12 @@ Content-Type: application/json
   }
 }
 ```
+
+- 会话 tab 必须同时传服务端生成的 lowercase hex32 `sessionId`，以及消息追加接口返回、确实属于该分片 user 消息的 lowercase hex12 `userMessageId`；后端据此选择 AgentScope `RuntimeContext` / `AgentState` 槽位并校验 turn 归属。
+- 只有旧聊天抽屉与旧客户端可同时省略这两个字段，落入固定的 legacy 会话槽。
+- `sessionId` 是路由元数据，不得放进发送给模型的语义 `context`。
+- `userMessageId` 使用消息追加接口返回的 hex12 ID；重试沿用同一 ID，后端据此返回已完成回复或从未完成 turn 继续，避免重复 user turn。
+- ID 格式或 turn 归属非法返回 HTTP 400；会话不存在返回 404；Agent 正在处理另一请求时返回 HTTP 409 与 `{ "error": "..." }`。409 是可重试失败，不得作为 assistant 成功回复写入 transcript。
 
 成功响应:
 
@@ -437,15 +424,23 @@ Content-Type: application/json
 - 右侧建议任务行显示已创建状态。
 - 不重复创建同一条建议。至少在当前消息内禁用已创建建议按钮。
 
-### 10.3 上下文数据来源
+### 10.3 数据来源
 
-使用现有接口:
+状态、任务和 LLM 调用继续使用现有接口:
 
 - `GET /desktop/status`
 - `GET /desktop/summary`
 - `GET /desktop/tasks`
 - `POST /desktop/chat`
 - `POST /desktop/tasks`
+
+会话列表、正文与写操作使用:
+
+- `GET/POST /desktop/chat/sessions`
+- `GET/PUT/DELETE /desktop/chat/sessions/{id}`
+- `POST /desktop/chat/sessions/{id}/messages`
+- `PUT /desktop/chat/sessions/{id}/messages/{msgId}`
+- `PUT /desktop/chat/active-session`
 
 切换到 `会话` tab 时:
 
@@ -481,18 +476,18 @@ Content-Type: application/json
 
 点击 `+ 新建`:
 
-- 创建一个新的 `ChatSession`。
+- 调用 `POST /desktop/chat/sessions` 创建一个新的 `ChatSession`，采用响应中的服务端 ID 和时间戳。
 - `title` 初始为 `新会话`。
 - `source` 为 `manual`。
 - 切换为 active session。
 - 输入框获得焦点。
-- 保存到 localStorage。
 
 首次用户发送消息后，如果 title 仍为 `新会话`，用用户首条消息生成标题:
 
 - 取首条用户消息前 18 个中文字符或 36 个 ASCII 字符。
 - 去掉换行。
 - 为空则保持 `新会话`。
+- 通过 `PUT /desktop/chat/sessions/{id}` 回填标题，不在前端整块覆盖会话。
 
 ### SPEC-CHAT-TAB-004: 会话列表
 
@@ -501,19 +496,20 @@ Content-Type: application/json
 - 按 `updatedAt` 降序排列。
 - active session 有明显高亮和左侧强调条。
 - 每项展示 title、最后一条消息摘要、更新时间。
-- 搜索框按 title 和消息内容过滤。
+- 搜索框按索引中的 `title`、`lastMessagePreview` 和 `summary` 过滤，不加载或扫描全部消息正文。
 - 没有匹配结果时显示 `没有匹配的会话`。
 
 会话列表 item 点击后:
 
 - 切换 `activeChatSessionId`。
-- 渲染对应消息。
-- 保存 active id。
+- 若正文未加载，调用 `GET /desktop/chat/sessions/{id}` 后渲染对应消息。
+- 调用 `PUT /desktop/chat/active-session` 持久化 active id。
 
 会话列表 item 悬停时显示删除按钮:
 - 点击 X 按钮弹出确认对话框。
-- 确认后删除会话及其所有消息，从 localStorage 移除。
-- 若删除的是当前活跃会话，自动切换到列表第一个会话；若列表为空则自动创建新会话。
+- 确认后调用 `DELETE /desktop/chat/sessions/{id}`；成功时同一 Agent 生命周期 gate 内已删除可见分片、AgentState 和 ReActAgent cache，再从前端缓存移除。
+- 若 Agent 正在处理聊天，后端返回 409 且不做部分删除；前端保留会话并提示稍后重试。
+- 删除成功后使用响应中的 `activeSessionId`；若为空，前端可调用创建接口建立新会话。
 
 ### SPEC-CHAT-TAB-005: 发送消息
 
@@ -523,18 +519,17 @@ Content-Type: application/json
 - `Shift+Enter` 插入换行。
 - 空白消息不发送。
 - 发送中禁用发送按钮，防止重复提交。
-- 发送前将用户消息追加到 active session。
-- 创建一个 pending assistant 消息，显示 `思考中...` 或加载态。
-- 调用 `POST /desktop/chat`。
-- 成功后用 Agent 回复替换 pending 消息。
-- 失败后 pending 消息变成 error 状态，并展示错误信息和 `重试` 操作。
+- 先通过 `POST /desktop/chat/sessions/{id}/messages` 一次追加 user + pending assistant，并采用响应中的两个服务端消息 ID。
+- 将已持久化的 pending assistant 显示为 `思考中...` 或加载态。
+- 调用 `POST /desktop/chat`，顶层携带 active session 的 `sessionId` 和刚保存 user 消息的 `userMessageId`。
+- 成功后通过 `PUT /desktop/chat/sessions/{id}/messages/{pendingId}` 把原 pending 更新为 `sent`，写回 Agent 回复和建议任务。
+- 失败（包括 HTTP 409）后把同一 pending 更新为 `error`，展示错误信息和 `重试`；不得追加第二组 user/pending。
 
 发送成功后:
 
 - 清空输入框。
 - 滚动到最新消息。
-- 更新 session `updatedAt`。
-- 保存到 localStorage。
+- 采用后端返回的消息与 session 投影更新时间更新运行期缓存。
 
 ### SPEC-CHAT-TAB-006: 上下文构建
 
@@ -546,8 +541,7 @@ Content-Type: application/json
   title: activeSession.title,
   currentStatus: state.chatContextToggles.currentStatus ? buildCurrentStatusContext() : null,
   futureTasks: state.chatContextToggles.futureTasks ? buildFutureTasksContext() : null,
-  recentActivity: buildRecentActivityContext(),
-  history: state.chatContextToggles.history ? buildShortChatHistory(activeSession) : null
+  recentActivity: buildRecentActivityContext()
 }
 ```
 
@@ -556,7 +550,7 @@ Content-Type: application/json
 - `currentStatus` 从 `state.summary.current` 或当前状态卡片数据提取。
 - `futureTasks` 从 `state.tasks` 中提取未完成任务，最多 10 条。
 - `recentActivity` 从 `state.summary.timeline` 中提取最近 4 条。
-- `history` 只包含最近 10 条消息的 role/content，不包含 pending/error 消息。
+- 历史消息由 AgentScope `AgentStateStore` 按 `sessionId` 自动恢复，不得再嵌入 `context`，避免重复上下文。
 - 每个字段都可为 `null`，后端必须能处理。
 
 ### SPEC-CHAT-TAB-007: 从 Agent tab 追问进入
@@ -619,7 +613,7 @@ Agent 回复如包含建议任务:
 4. `上下文开关`
    - 当前窗口与活动摘要: 默认开。
    - 未来任务与待办: 默认开。
-   - 完整历史会话: 默认关。
+   - 不提供历史消息开关；同会话模型历史始终由 AgentState 管理。
 
 ### SPEC-CHAT-TAB-010: LLM 未配置降级
 
@@ -639,9 +633,12 @@ Agent 回复如包含建议任务:
 - 当前用户消息保留。
 - assistant pending 消息变为 error。
 - 显示错误文案: `发送失败: <原因>`。
-- 提供 `重试` 操作。重试时使用同一条用户消息和同一份 contextSnapshot。
+- 提供 `重试` 操作。重试时复用原 `sessionId`、`userMessageId`、pending assistant ID 和同一份 `contextSnapshot`，不得创建新消息记录。
+- 会话正文重新加载后若发现遗留 `pending`，必须显示恢复/重试操作或将其规范化为可重试 error，不得永久停留在“思考中”。恢复仍使用上述原 IDs，并按原 user→pending 顺序处理。
+- 若上次请求已在 AgentState 中完成但回复尚未写回分片，重试直接取回该 user turn 的 terminal assistant 回复，不再次调用模型或追加 turn。
+- Agent 忙返回 HTTP 409；前端按可重试错误处理，不把错误 body 当作 assistant 回复。
 - 不创建空 assistant 消息。
-- 不清空 localStorage 中已有历史。
+- 不删除或覆盖后端分片中已有历史。
 
 ### SPEC-CHAT-TAB-012: 键盘和焦点
 
@@ -704,7 +701,8 @@ Agent 回复如包含建议任务:
    - `state.js` — 扩展 state（chatSessions, activeChatSessionId 等）
    - `init.js` — cacheDom() 增加 chat tab DOM 元素
    - `ui.js` — switchTab() 支持 `chat`
-   - `chat.js` — chat session 持久化、渲染、消息发送、上下文构建
+   - `api.js` — 会话 REST CRUD 与 `postChat(msg, ctx, sessionId, userMessageId)`
+   - `chat.js` — 后端索引/分片缓存、渲染、消息发送、pending 恢复、上下文构建
    - `events.js` — 新增消息发送、会话管理、上下文开关等事件处理
    - `agent.js` — 修改追问入口导向 `会话` tab
 
@@ -712,16 +710,19 @@ Agent 回复如包含建议任务:
    - 新增会话 tab 三栏布局和响应式样式。
    - 不破坏已有 Agent/Config 样式。
 
-### 13.2 不应修改的文件
+4. Java 后端
+   - `ChatSessionStore` — `index.json` + 每会话分片、服务端 ID、原子写和裁剪不变量。
+   - `DesktopChatSessionController` / `DesktopServer` — 注册并实现会话 REST CRUD。
+   - `DesktopAgentController` — 校验 `sessionId + userMessageId`、执行旧 server transcript 懒迁移，并把 busy 映射为 409。
+   - `SelfAnalystAgent` — 按 `(desktop, sessionId)` 持久化 AgentState、幂等重试和生命周期 gate。
 
-第一版不需要修改:
+### 13.2 不应修改的范围
 
-- `self-analyst-app/src/main/java/...`
 - `self-analyst-aw/...`
 - `self-analyst-desktop/src-tauri/...`
 - `scripts/build-dist.ps1`
 
-除非实现者发现现有 `POST /desktop/chat` 返回契约完全无法满足本 spec。若确需后端修改，必须先补充说明并保持向后兼容。
+旧聊天抽屉须保持向后兼容：它可省略 session/message ID 并使用固定 legacy AgentState 槽，但不得削弱会话 tab 的严格校验。
 
 ---
 
@@ -736,33 +737,38 @@ Agent 回复如包含建议任务:
    - `switchTab(tab)` 支持 `chat`。
    - 点击 `会话` 后不触发配置加载。
 
-3. 状态和持久化
-   - 增加 `state.chatSessions`, `activeChatSessionId`, `chatSending`, `chatContextToggles`。
-   - 实现 `loadChatSessions()`, `saveChatSessions()`, `createChatSession()`, `getActiveChatSession()`。
+3. 后端存储与 AgentState
+   - 实现分片 store、索引重建、服务端 ID 和会话 CRUD。
+   - 以 `(desktop, sessionId)` 隔离并持久化 AgentState；实现旧 server transcript 单次懒迁移、同 `userMessageId` 幂等重试和全局生命周期 gate。
+   - 删除会话时在同一 gate 中依次清 cache、删 AgentState、删 shard/索引；即使当前 `agent` 未初始化，也必须直接打开状态存储清除持久化 AgentState。busy 时返回 409 且不做部分删除。
 
-4. 渲染
+4. 前端状态和持久化通道
+   - 增加 `state.chatSessions`, `activeChatSessionId`, `chatSending`, `chatContextToggles`。
+   - 实现异步 `loadChatSessions()`, `ensureSessionMessagesLoaded()`, `createChatSession()`, `getActiveChatSession()`；不保留整块保存函数。
+
+5. 渲染
    - 实现 `renderChatTab()`。
    - 实现左侧列表、中间消息、右侧上下文三个渲染函数。
-   - 处理空状态和错误状态。
+   - 处理空状态、错误状态和重载后遗留 pending 的恢复操作。
 
-5. 发送消息
+6. 发送消息
    - 实现 `sendChatTabMessage()`。
-   - 使用 `api.postChat()`。
-   - 处理 pending/success/error。
+   - 使用 append messages → `api.postChat(msg, ctx, sessionId, userMessageId)` → update pending 的有序流程。
+   - 处理 pending/success/error、409 和同 ID retry/recovery。
 
-6. 建议任务
+7. 建议任务
    - 复用 `api.createTask()`。
    - 创建成功后调用现有 `loadTasks()` 或直接刷新 `state.tasks` 后 `renderChatTab()`。
 
-7. Agent tab 入口联动
+8. Agent tab 入口联动
    - 修改当前状态、时间轴、任务讨论按钮。
    - 调用 `openChatTabWithContext(context)`。
 
-8. CSS 和响应式
+9. CSS 和响应式
    - 先实现 1200x800 可用。
    - 再处理 800x600 不重叠。
 
-9. 验证和打包
+10. 验证和打包
    - 浏览器打开 `http://localhost:5700/desktop-ui/` 手动验证。
    - Maven package 确认静态资源进入 jar。
 
@@ -775,11 +781,14 @@ Agent 回复如包含建议任务:
 ```js
 function init() {
   cacheDom();
-  loadChatSessions();
   bindEvents();
-  loadInitialData();
+  return Promise.all([loadChatSessions(), loadInitialData()]).then(function () {
+    if (state.tab === "chat") renderChatTab();
+  });
 }
 ```
+
+`loadChatSessions()` 必须先完成索引请求再允许会话列表渲染；不得从 WebView storage 恢复正文。
 
 ### 15.2 切换 tab
 
@@ -795,9 +804,13 @@ function switchTab(tab) {
   state.dom.tabConfig.classList.toggle("active", tab === "config");
 
   if (tab === "chat") {
-    ensureActiveChatSession();
-    renderChatTab();
-    focusChatInputSoon();
+    ensureActiveChatSession()
+      .then(ensureSessionMessagesLoaded)
+      .then(function () {
+        renderChatTab();
+        focusChatInputSoon();
+      })
+      .catch(showChatLoadError);
   }
 
   if (tab === "config" && !state.config) {
@@ -810,22 +823,21 @@ function switchTab(tab) {
 
 ```js
 function createChatSession(opts) {
-  var now = new Date().toISOString();
-  var session = {
-    id: "chat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+  return api.createSession({
     title: opts && opts.title ? opts.title : "新会话",
-    createdAt: now,
-    updatedAt: now,
     source: opts && opts.source ? opts.source : "manual",
     contextLabel: opts && opts.contextLabel,
     contextSnapshot: opts && opts.contextSnapshot,
-    messages: []
-  };
-  state.chatSessions.unshift(session);
-  state.activeChatSessionId = session.id;
-  saveChatSessions();
-  renderChatTab();
-  return session;
+    initialMessages: opts && opts.initialMessages
+  }).then(function (session) {
+    // id/createdAt/updatedAt/message ids 均采用服务端响应。
+    session.messages = session.messages || [];
+    session.messagesLoaded = true;
+    state.chatSessions.unshift(session);
+    state.activeChatSessionId = session.id;
+    renderChatTab();
+    return session;
+  });
 }
 ```
 
@@ -833,111 +845,127 @@ function createChatSession(opts) {
 
 ```js
 function openChatTabWithContext(context) {
-  var session = createChatSession({
+  return createChatSession({
     title: context.title || "上下文追问",
     source: context.type === "task" ? "task_context" : "agent_context",
     contextLabel: context.label || context.title,
-    contextSnapshot: context
+    contextSnapshot: context,
+    initialMessages: [{
+      role: "system",
+      content: "已带入上下文：" + (context.title || context.label || "当前条目"),
+      contextSnapshot: context
+    }]
+  }).then(function () {
+    switchTab("chat");
   });
-
-  session.messages.push({
-    id: createId("msg"),
-    role: "system",
-    content: "已带入上下文：" + (context.title || context.label || "当前条目"),
-    createdAt: new Date().toISOString(),
-    contextSnapshot: context
-  });
-
-  saveChatSessions();
-  switchTab("chat");
 }
 ```
+
+`initialMessages` 的 ID 与时间戳也由服务端分配。UI-only system 消息保存在可见 transcript，但不会在旧会话懒迁移时导入 AgentState。
 
 ### 15.5 发送消息
 
 ```js
 function sendChatTabMessage() {
   if (state.chatSending) return;
-
   var input = state.dom.chatTabInput;
   var text = input.value.trim();
   if (!text) return;
-
-  var session = ensureActiveChatSession();
-  var context = buildChatContext(session);
-  var now = new Date().toISOString();
-
-  var userMsg = {
-    id: createId("msg"),
-    role: "user",
-    content: text,
-    createdAt: now,
-    status: "sent",
-    contextSnapshot: context
-  };
-
-  var pendingMsg = {
-    id: createId("msg"),
-    role: "assistant",
-    content: "思考中...",
-    createdAt: now,
-    status: "pending"
-  };
-
-  session.messages.push(userMsg, pendingMsg);
-  updateSessionTitleFromFirstMessage(session);
-  touchSession(session);
-  input.value = "";
   state.chatSending = true;
-  saveChatSessions();
-  renderChatTab();
+  input.value = "";
 
-  api.postChat(text, context)
-    .then(function (resp) {
-      pendingMsg.status = "sent";
-      pendingMsg.content = resp.message || resp.reply || resp.content || "Agent 未返回可显示内容";
-      pendingMsg.suggestedTasks = resp.suggestedTasks || resp.suggested_tasks || resp.tasks || [];
-      touchSession(session);
-      state.chatSending = false;
-      saveChatSessions();
+  ensureActiveChatSession().then(ensureSessionMessagesLoaded).then(function (session) {
+    var context = buildChatContext(session); // 不包含 history
+    return api.appendMessages(session.id, { messages: [
+      { role: "user", content: text, status: "sent", contextSnapshot: context },
+      { role: "assistant", content: "思考中...", status: "pending" }
+    ] }).then(function (saved) {
+      var savedUser = saved[0];
+      var savedPending = saved[1];
+      session.messages.push(savedUser, savedPending);
       renderChatTab();
-    })
-    .catch(function (err) {
-      pendingMsg.status = "error";
-      pendingMsg.content = "发送失败: " + (err.message || "未知错误");
-      pendingMsg.error = err.message || String(err);
-      state.chatSending = false;
-      saveChatSessions();
-      renderChatTab();
+
+      return api.postChat(text, context, session.id, savedUser.id).then(function (resp) {
+        return api.updateMessage(session.id, savedPending.id, {
+          status: "sent",
+          content: resp.message || resp.reply || resp.content,
+          suggestedTasks: resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []
+        });
+      }).catch(function (err) {
+        return api.updateMessage(session.id, savedPending.id, {
+          status: "error",
+          error: err.message || String(err)
+        });
+      });
     });
+  }).then(finishChatSend, finishChatSend);
 }
 ```
+
+### 15.6 pending 恢复与重试
+
+```js
+function retryChatMessage(pendingId) {
+  var session = getActiveChatSession();
+  var pending = findMessage(session, pendingId);       // status 为 error 或遗留 pending
+  var user = findPrecedingUser(session, pendingId);
+  if (!session || !pending || !user || state.chatSending) return;
+
+  state.chatSending = true;
+  api.updateMessage(session.id, pending.id, { status: "pending", error: null })
+    .then(function () {
+      // 不 append 新记录；复用服务端生成的 session/user/pending IDs。
+      return api.postChat(
+        user.content,
+        user.contextSnapshot || buildChatContext(session),
+        session.id,
+        user.id
+      );
+    })
+    .then(function (resp) {
+      return api.updateMessage(session.id, pending.id, {
+        status: "sent",
+        content: resp.message || resp.reply || resp.content,
+        suggestedTasks: resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []
+      });
+    })
+    .catch(function (err) {
+      return api.updateMessage(session.id, pending.id, {
+        status: "error",
+        error: err.message || String(err)
+      });
+    })
+    .then(finishChatSend, finishChatSend);
+}
+```
+
+渲染从服务端加载的 transcript 时，`error` 和遗留 `pending` 都必须绑定上述恢复入口。相同 `userMessageId` 已在 AgentState 中完成时，`POST /desktop/chat` 返回既有 terminal assistant，而不会再次调用模型。
 
 ---
 
 ## 16. 边界条件
 
-### 16.1 无 localStorage
+### 16.1 会话后端不可用
 
-如果 localStorage 不可用:
+如果会话 REST 接口不可用:
 
-- 页面仍可会话，但只保存在内存。
-- 控制台 warning。
-- 右侧或会话偏好区域可显示 `当前环境无法持久保存会话`。
+- 显示明确的加载或保存失败提示，不把仅存在于内存的内容伪装为已持久化。
+- 保留尚未成功追加的输入文本，允许用户在后端恢复后再次提交。
+- 已从服务端加载到运行期缓存的内容可继续只读展示，但不得用整块前端缓存覆盖服务端分片。
 
 ### 16.2 LLM 调用慢
 
 如果请求超过 20 秒:
 
-- UI 仍保持 pending，不允许重复提交同一消息。
-- 可提供 `停止等待` 或 `重试`。第一版可不实现取消请求，但必须能继续使用其他 tab。
+- 当前请求仍显示 pending，并禁止为该 user turn 追加第二组消息。
+- 可以继续使用其他 tab；重载后遗留 pending 必须提供恢复/重试操作，并复用原服务端 IDs。
+- 后端若仍在处理其它调用返回 409；前端将其持久化为可重试 error。
 
-### 16.3 会话过多
+### 16.3 会话与消息体量
 
-保存前裁剪:
-
-- 按 `updatedAt` 降序保留前 50 个。
-- 每个会话保留最近 200 条消息。
+- 会话数量不设上限，前端不得按数量淘汰会话。
+- 每个会话只保留最近 200 条消息，由后端写入时裁剪。
+- 单条消息的 20000 字符上限同样由后端执行。
 
 ### 16.4 数据缺失
 
@@ -965,8 +993,10 @@ function sendChatTabMessage() {
 
 - `index.html` 包含 `data-tab="chat"`。
 - `index.html` 包含 `id="tab-chat"`。
-- `app.js` 的 `switchTab` 支持 `chat`。
-- `app.js` 包含 `selfAnalyst.chatSessions.v1`。
+- `ui.js` 的 `switchTab` 支持 `chat`。
+- 前端不读取旧 key `selfAnalyst.chatSessions.v1`，且初始化仅执行删除兼容清理。
+- `state.js` / `index.html` 不包含 history 上下文开关；`chat.js` 不构造 `context.history`。
+- `chat.js` 不生成 session/message ID；`api.postChat` 接受 `sessionId, userMessageId`。
 - `styles.css` 包含 `.chat-tab-layout`。
 - `self-analyst-desktop/src/*` 副本与 `self-analyst-app/src/main/resources/desktop-ui/*` 保持功能一致。
 
@@ -983,13 +1013,17 @@ http://localhost:5700/desktop-ui/
 1. 默认显示 Agent。
 2. 点击 `会话`，三栏布局出现。
 3. 点击 `+ 新建`，列表出现新会话。
-4. 输入消息，`Enter` 发送，Network 出现 `POST /desktop/chat`。
+4. 输入消息，`Enter` 发送，Network 依次出现 `POST .../messages`、`POST /desktop/chat`、`PUT .../messages/{pendingId}`；聊天请求携带服务端 `sessionId + userMessageId`。
 5. 发送中按钮禁用。
 6. 成功后消息出现在会话中。
 7. 刷新页面后，会话仍存在。
 8. 搜索会话能过滤列表。
 9. 建议任务点击后调用 `POST /desktop/tasks`。
 10. 点击配置 tab 再回会话 tab，active session 保持。
+11. 模拟回复已写入 AgentState、pending 尚未落定后刷新；恢复同一 pending 时不再次调用模型，并将原 pending 更新为 sent。
+12. 模拟持久化遗留 pending；刷新后可见恢复/重试操作，且不追加第二条 user 或 assistant。
+13. 并发发送或删除正在处理的会话返回 409，UI 保留原记录并允许稍后重试。
+14. 给已有 server shard 删除对应 AgentState 后发送下一条消息；仅一次迁移当前 user 之前的有效 user/sent assistant，排除 system/pending/error。
 
 ### 17.3 Agent tab 联动测试
 
@@ -1031,15 +1065,18 @@ mvn -f D:\aicode\self-analyst\pom.xml -pl self-analyst-app -am package
 功能完成必须同时满足:
 
 - `会话` tab 出现在顶部导航中，默认不抢占 `Agent` 首页。
-- `会话` tab 能创建、切换、搜索本地会话。
+- `会话` tab 能创建、切换、搜索后端本地分片会话。
 - 消息发送使用现有 `POST /desktop/chat`。
 - 会话历史刷新页面后仍存在。
+- 会话 tab 的聊天请求使用服务端 `sessionId + userMessageId`，模型历史以 AgentState 为权威且不重复注入 UI transcript。
+- 重载后遗留 pending 可用原 IDs 恢复；重复请求不会重复调用模型或追加 user turn。
+- Agent 忙时返回 409；删除会话在同一生命周期 gate 中清理 shard、cache 和 AgentState，agent 未初始化时也不遗留持久化状态。
 - Agent 回复中的建议任务可由用户点击创建为待办。
 - Agent tab 的追问入口能跳转到 `会话` tab 并带入上下文。
 - LLM 不可用时界面清晰提示，不出现永久加载。
 - 800x600 到宽屏范围内无关键内容重叠。
 - Maven package 通过。
-- 不新增无必要后端接口。
+- 后端接口仅限本 spec 与 `chat-session-store.md` 定义的会话 CRUD 和向后兼容聊天扩展。
 - 不破坏现有 Agent tab、配置 tab、Web 仪表盘按钮。
 
 ---
@@ -1050,15 +1087,15 @@ mvn -f D:\aicode\self-analyst\pom.xml -pl self-analyst-app -am package
 |---------|-----------|----------|
 | SPEC-CHAT-TAB-001 | `index.html`, `switchTab` | 点击 tab 手动测试 |
 | SPEC-CHAT-TAB-002 | `renderChatTab` | 首次进入会话页 |
-| SPEC-CHAT-TAB-003 | `createChatSession` | 新建会话测试 |
-| SPEC-CHAT-TAB-004 | `renderChatSessionList` | 切换和搜索测试 |
-| SPEC-CHAT-TAB-005 | `sendChatTabMessage` | Network + UI 状态 |
+| SPEC-CHAT-TAB-003 | `createChatSession`, `api.createSession` | 服务端 ID 新建会话测试 |
+| SPEC-CHAT-TAB-004 | `renderChatSessionList`, session REST CRUD | 切换、懒加载、搜索、删除测试 |
+| SPEC-CHAT-TAB-005 | `sendChatTabMessage`, `api.postChat` | 三段式 Network 顺序 + 服务端 IDs + UI 状态 |
 | SPEC-CHAT-TAB-006 | `buildChatContext` | 请求 payload 检查 |
 | SPEC-CHAT-TAB-007 | `openChatTabWithContext` | Agent tab 追问测试 |
 | SPEC-CHAT-TAB-008 | `renderSuggestedTasks`, `api.createTask` | 建议转任务测试 |
 | SPEC-CHAT-TAB-009 | `renderChatContextPanel` | 右侧上下文检查 |
 | SPEC-CHAT-TAB-010 | LLM 状态判断 | LLM 未配置测试 |
-| SPEC-CHAT-TAB-011 | error handling | 模拟 500/断网 |
+| SPEC-CHAT-TAB-011 | `retryChatMessage`, Agent lifecycle gate | 模拟 500/409/断网、pending 重载恢复、同 ID 幂等测试 |
 | SPEC-CHAT-TAB-012 | event binding | 键盘交互测试 |
 
 ---
@@ -1069,8 +1106,7 @@ mvn -f D:\aicode\self-analyst\pom.xml -pl self-analyst-app -am package
 - 继续使用 ES5/兼容性较好的写法，保持现有 `app.js` 风格。
 - 手写 HTML 字符串时必须使用现有 `escHtml()` 处理用户/Agent 文本。
 - 不要把 LLM 返回内容直接赋给 `innerHTML`。
-- 不要把 API Key、配置敏感值、完整用户配置写入 chat localStorage。
+- 不要把 API Key、配置敏感值、完整用户配置写入 chat shards、AgentState、上下文快照或日志。
 - 不要修改用户已有任务数据结构，建议任务转待办时只使用后端已支持字段。
 - 新增 CSS 不得影响 `.chat-drawer` 除非明确迁移旧抽屉。
 - 如果实现者决定删除旧 chat drawer，必须同时删除 HTML、CSS、JS 引用并完成回归测试；第一版不要求删除。
-

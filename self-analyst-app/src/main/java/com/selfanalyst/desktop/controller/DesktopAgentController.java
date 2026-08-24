@@ -17,11 +17,16 @@ import io.javalin.http.HttpResponseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Agent tab endpoints: current summary + chat.
@@ -235,48 +240,10 @@ public class DesktopAgentController {
      */
     public void chat(Context ctx) {
         try {
-            Map<String, Object> body = DesktopChatJson.MAPPER.readValue(
-                    DesktopChatJson.readBoundedBody(ctx), Map.class);
-            if (body == null) throw new IllegalArgumentException("Chat request body is required");
-            if (body.get("message") != null && !(body.get("message") instanceof String)) {
-                throw new IllegalArgumentException("message must be a string");
-            }
-            for (String idField : List.of("sessionId", "userMessageId")) {
-                if (body.get(idField) != null && !(body.get(idField) instanceof String)) {
-                    throw new IllegalArgumentException(idField + " must be a string");
-                }
-            }
-            Object requestContext = body.get("context");
-            if (requestContext != null && !(requestContext instanceof Map<?, ?>)
-                    && !(requestContext instanceof List<?>)) {
-                throw new IllegalArgumentException("context must be an object, array, or null");
-            }
-            String message = stringOr(body.get("message"), "");
-            String sessionId = stringOr(body.get("sessionId"), "").trim();
-            String userMessageId = stringOr(body.get("userMessageId"), "").trim();
-            if (sessionId.isEmpty() != userMessageId.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "sessionId and userMessageId must be provided together");
-            }
-
-            if (!sessionId.isEmpty()) {
-                if (!ChatSessionStore.isGeneratedSessionId(sessionId)) {
-                    ctx.status(400).json(Map.of("error", "Invalid chat session id"));
-                    return;
-                }
-                if (chatSessionStore == null || chatSessionStore.getSession(sessionId) == null) {
-                    ctx.status(404).json(Map.of("error", "Chat session not found"));
-                    return;
-                }
-                if (!ChatSessionStore.isGeneratedMessageId(userMessageId)) {
-                    ctx.status(400).json(Map.of("error", "Invalid user message id"));
-                    return;
-                }
-                // Reject a valid-looking id that is not the server-owned user message for this
-                // visible transcript. The same validation is repeated under the agent gate below.
-                persistedTurnFromSession(
-                        chatSessionStore.getSession(sessionId), userMessageId);
-            }
+            ChatRequest request = parseChatRequest(ctx);
+            if (!validateSessionRouting(ctx, request)) return;
+            String sessionId = request.sessionId();
+            String userMessageId = request.userMessageId();
 
             if (agent == null) {
                 ctx.json(Map.of(
@@ -287,7 +254,7 @@ public class DesktopAgentController {
             }
 
             String response = (sessionId.isEmpty()
-                    ? agent.chat(buildChatAgentInput(message, requestContext))
+                    ? agent.chat(buildChatAgentInput(request.message(), request.context()))
                     : agent.chat(sessionId,
                             userMessageId,
                             () -> persistedTurnFromSession(
@@ -309,34 +276,225 @@ public class DesktopAgentController {
                     "suggestedTasks", suggestedTasks
             ));
         } catch (Exception e) {
-            if (e instanceof DesktopChatJson.PayloadTooLargeException) {
-                ctx.status(413).json(Map.of("error", e.getMessage()));
-            } else if (e instanceof HttpResponseException responseException) {
-                ctx.status(responseException.getStatus()).json(Map.of(
-                        "error", responseException.getMessage() == null
-                                ? "Invalid request" : responseException.getMessage()));
-            } else if (e instanceof JsonProcessingException) {
-                ctx.status(400).json(Map.of("error", "Invalid chat JSON: " + e.getMessage()));
-            } else if (hasCause(e, SelfAnalystAgent.ChatSessionUnavailableException.class)) {
-                ctx.status(404).json(Map.of("error", "Chat session not found"));
-            } else if (hasCause(e, InvalidChatTurnException.class)) {
-                ctx.status(400).json(Map.of("error", "User message does not belong to session"));
-            } else if (hasCause(e, SelfAnalystAgent.StaleChatTurnException.class)) {
-                ctx.status(409).json(Map.of(
-                        "error", "Only the latest incomplete user turn can be resumed"));
-            } else if (hasAgentStillRunning(e)) {
-                // A rejected turn was never added to AgentState. Report a conflict so the
-                // frontend keeps the same userMessageId on its retry path.
-                ctx.status(409).json(Map.of(
-                        "error", "上一条消息仍在处理中，请稍后再试..."));
-            } else if (e instanceof IllegalArgumentException) {
-                ctx.status(400).json(Map.of(
-                        "error", e.getMessage() == null ? "Invalid chat request" : e.getMessage()));
-            } else {
-                log.error("Chat request failed", e);
-                String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                ctx.status(500).json(Map.of("error", "Chat failed: " + msg));
+            writeChatErrorResponse(ctx, e);
+        }
+    }
+
+    /** POST /desktop/chat/stream — SSE deltas followed by one canonical result event. */
+    public void chatStream(Context ctx) {
+        OutputStream output = null;
+        try {
+            ChatRequest request = parseChatRequest(ctx);
+            if (request.sessionId().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "sessionId and userMessageId are required for streaming chat");
             }
+            if (!validateSessionRouting(ctx, request)) return;
+            if (agent == null) {
+                ctx.status(503).json(Map.of(
+                        "error", "LLM 未配置，无法进行对话。请在配置页面设置 API Key。"));
+                return;
+            }
+
+            ctx.contentType("text/event-stream; charset=utf-8");
+            ctx.header("Cache-Control", "no-cache, no-store, must-revalidate");
+            ctx.header("X-Accel-Buffering", "no");
+            ctx.header("X-Content-Type-Options", "nosniff");
+            output = ctx.res().getOutputStream();
+            OutputStream streamOutput = output;
+            AtomicBoolean resultSent = new AtomicBoolean();
+
+            agent.chatStream(request.sessionId(), request.userMessageId(),
+                            () -> persistedTurnFromSession(
+                                    chatSessionStore.getSession(request.sessionId()),
+                                    request.userMessageId()))
+                    .doOnNext(event -> {
+                        try {
+                            if (event.type() == SelfAnalystAgent.ChatStreamEventType.DELTA) {
+                                writeSseEvent(streamOutput, "delta", Map.of("text", event.text()));
+                            } else if (event.type()
+                                    == SelfAnalystAgent.ChatStreamEventType.RESULT) {
+                                String response = event.text() == null || event.text().isBlank()
+                                        ? "Agent 暂时无响应" : event.text();
+                                Map<String, Object> result = new LinkedHashMap<>();
+                                result.put("message", response);
+                                result.put("suggestedTasks", extractSuggestedTasks(response));
+                                writeSseEvent(streamOutput, "result", result);
+                                resultSent.set(true);
+                            }
+                        } catch (IOException disconnected) {
+                            throw new SseWriteException(disconnected);
+                        }
+                    })
+                    .blockLast(Duration.ofSeconds(180));
+
+            if (!resultSent.get()) {
+                writeSseEvent(output, "result", Map.of(
+                        "message", "Agent 暂时无响应", "suggestedTasks", List.of()));
+            }
+        } catch (Exception e) {
+            if (hasCause(e, SseWriteException.class)) {
+                log.debug("Chat stream client disconnected");
+                return;
+            }
+            ChatError error = describeChatError(e);
+            if (output != null && ctx.res().isCommitted()) {
+                try {
+                    writeSseEvent(output, "error", Map.of(
+                            "status", error.status(), "error", error.message()));
+                } catch (IOException disconnected) {
+                    log.debug("Chat stream client disconnected while reporting an error");
+                }
+            } else {
+                writeChatErrorResponse(ctx, error);
+            }
+        }
+    }
+
+    /** POST /desktop/chat/sessions/{id}/cancel — best-effort interruption for a live stream. */
+    public void cancelChat(Context ctx) {
+        try {
+            String sessionId = ctx.pathParam("id");
+            if (!ChatSessionStore.isGeneratedSessionId(sessionId)) {
+                ctx.status(400).json(Map.of("error", "Invalid chat session id"));
+                return;
+            }
+            if (chatSessionStore == null || chatSessionStore.getSession(sessionId) == null) {
+                ctx.status(404).json(Map.of("error", "Chat session not found"));
+                return;
+            }
+            if (agent == null) {
+                ctx.status(503).json(Map.of("error", "LLM is not configured"));
+                return;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> body = DesktopChatJson.MAPPER.readValue(
+                    DesktopChatJson.readBoundedBody(ctx), Map.class);
+            Object rawMessageId = body == null ? null : body.get("userMessageId");
+            if (!(rawMessageId instanceof String userMessageId)
+                    || !ChatSessionStore.isGeneratedMessageId(userMessageId)) {
+                ctx.status(400).json(Map.of("error", "Invalid user message id"));
+                return;
+            }
+            boolean requested = agent.cancelChat(sessionId, userMessageId);
+            ctx.status(requested ? 202 : 200).json(Map.of(
+                    "cancelRequested", requested,
+                    "sessionId", sessionId,
+                    "userMessageId", userMessageId));
+        } catch (Exception e) {
+            writeChatErrorResponse(ctx, e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ChatRequest parseChatRequest(Context ctx) throws IOException {
+        Map<String, Object> body = DesktopChatJson.MAPPER.readValue(
+                DesktopChatJson.readBoundedBody(ctx), Map.class);
+        if (body == null) throw new IllegalArgumentException("Chat request body is required");
+        if (body.get("message") != null && !(body.get("message") instanceof String)) {
+            throw new IllegalArgumentException("message must be a string");
+        }
+        for (String idField : List.of("sessionId", "userMessageId")) {
+            if (body.get(idField) != null && !(body.get(idField) instanceof String)) {
+                throw new IllegalArgumentException(idField + " must be a string");
+            }
+        }
+        Object requestContext = body.get("context");
+        if (requestContext != null && !(requestContext instanceof Map<?, ?>)
+                && !(requestContext instanceof List<?>)) {
+            throw new IllegalArgumentException("context must be an object, array, or null");
+        }
+        String sessionId = stringOr(body.get("sessionId"), "").trim();
+        String userMessageId = stringOr(body.get("userMessageId"), "").trim();
+        if (sessionId.isEmpty() != userMessageId.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "sessionId and userMessageId must be provided together");
+        }
+        return new ChatRequest(
+                stringOr(body.get("message"), ""), requestContext, sessionId, userMessageId);
+    }
+
+    private boolean validateSessionRouting(Context ctx, ChatRequest request) {
+        if (request.sessionId().isEmpty()) return true;
+        if (!ChatSessionStore.isGeneratedSessionId(request.sessionId())) {
+            ctx.status(400).json(Map.of("error", "Invalid chat session id"));
+            return false;
+        }
+        if (chatSessionStore == null || chatSessionStore.getSession(request.sessionId()) == null) {
+            ctx.status(404).json(Map.of("error", "Chat session not found"));
+            return false;
+        }
+        if (!ChatSessionStore.isGeneratedMessageId(request.userMessageId())) {
+            ctx.status(400).json(Map.of("error", "Invalid user message id"));
+            return false;
+        }
+        // Validate once before committing response headers. The same check is repeated under the
+        // application-wide agent gate so a concurrent deletion cannot race the stream.
+        persistedTurnFromSession(
+                chatSessionStore.getSession(request.sessionId()), request.userMessageId());
+        return true;
+    }
+
+    static void writeSseEvent(OutputStream output, String event, Object payload)
+            throws IOException {
+        String frame = "event: " + event + "\n"
+                + "data: " + MAPPER.writeValueAsString(payload) + "\n\n";
+        output.write(frame.getBytes(StandardCharsets.UTF_8));
+        output.flush();
+    }
+
+    private static void writeChatErrorResponse(Context ctx, Exception failure) {
+        writeChatErrorResponse(ctx, describeChatError(failure));
+    }
+
+    private static void writeChatErrorResponse(Context ctx, ChatError error) {
+        ctx.status(error.status()).json(Map.of("error", error.message()));
+    }
+
+    private static ChatError describeChatError(Exception e) {
+        if (e instanceof DesktopChatJson.PayloadTooLargeException) {
+            return new ChatError(413, e.getMessage());
+        }
+        if (e instanceof HttpResponseException responseException) {
+            return new ChatError(responseException.getStatus(),
+                    responseException.getMessage() == null
+                            ? "Invalid request" : responseException.getMessage());
+        }
+        if (e instanceof JsonProcessingException) {
+            return new ChatError(400, "Invalid chat JSON: " + e.getMessage());
+        }
+        if (hasCause(e, SelfAnalystAgent.ChatSessionUnavailableException.class)) {
+            return new ChatError(404, "Chat session not found");
+        }
+        if (hasCause(e, InvalidChatTurnException.class)) {
+            return new ChatError(400, "User message does not belong to session");
+        }
+        if (hasCause(e, SelfAnalystAgent.StaleChatTurnException.class)) {
+            return new ChatError(409, "Only the latest incomplete user turn can be resumed");
+        }
+        if (hasCause(e, SelfAnalystAgent.ChatCancelledException.class)) {
+            return new ChatError(409, "Chat request was cancelled");
+        }
+        if (hasAgentStillRunning(e)) {
+            return new ChatError(409, "上一条消息仍在处理中，请稍后再试...");
+        }
+        if (e instanceof IllegalArgumentException) {
+            return new ChatError(400,
+                    e.getMessage() == null ? "Invalid chat request" : e.getMessage());
+        }
+        log.error("Chat request failed", e);
+        String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        return new ChatError(500, "Chat failed: " + message);
+    }
+
+    private record ChatRequest(
+            String message, Object context, String sessionId, String userMessageId) {}
+
+    private record ChatError(int status, String message) {}
+
+    private static final class SseWriteException extends UncheckedIOException {
+        private SseWriteException(IOException cause) {
+            super(cause);
         }
     }
 

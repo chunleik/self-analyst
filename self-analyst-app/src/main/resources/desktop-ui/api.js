@@ -18,6 +18,82 @@ function chatJsonResponse(response, fallbackMessage) {
   });
 }
 
+function parseChatSseFrame(frame) {
+  var eventName = "message";
+  var data = [];
+  String(frame || "").split("\n").forEach(function (line) {
+    if (line.indexOf("event:") === 0) eventName = line.substring(6).trim();
+    else if (line.indexOf("data:") === 0) data.push(line.substring(5).trimStart());
+  });
+  if (data.length === 0) return null;
+  return { event: eventName, payload: JSON.parse(data.join("\n")) };
+}
+
+function consumeChatSseResponse(response, onEvent) {
+  if (!response.ok) return chatJsonResponse(response, "Chat stream failed");
+  if (!response.body || typeof response.body.getReader !== "function") {
+    return Promise.reject(new Error("Chat stream response body is unavailable"));
+  }
+  var reader = response.body.getReader();
+  var decoder = new TextDecoder();
+  var buffer = "";
+  var finalResult = null;
+
+  function handleFrame(frame) {
+    var parsed = parseChatSseFrame(frame);
+    if (!parsed) return;
+    if (onEvent) onEvent(parsed.event, parsed.payload);
+    if (parsed.event === "error") {
+      var error = new Error(parsed.payload && parsed.payload.error
+        ? parsed.payload.error : "Chat stream failed");
+      error.status = parsed.payload && parsed.payload.status;
+      error.body = parsed.payload;
+      throw error;
+    }
+    if (parsed.event === "result") finalResult = parsed.payload;
+  }
+
+  function drain(final) {
+    var retainedCarriageReturn = !final && buffer.endsWith("\r");
+    var parseable = retainedCarriageReturn ? buffer.slice(0, -1) : buffer;
+    buffer = parseable.replace(/\r\n/g, "\n").replace(/\r/g, "\n") +
+      (retainedCarriageReturn ? "\r" : "");
+    var boundary;
+    while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+      var frame = buffer.substring(0, boundary);
+      buffer = buffer.substring(boundary + 2);
+      if (frame.trim()) handleFrame(frame);
+    }
+    if (final && buffer.trim()) {
+      handleFrame(buffer);
+      buffer = "";
+    }
+  }
+
+  function readNext() {
+    return reader.read().then(function (part) {
+      if (part.done) {
+        buffer += decoder.decode();
+        drain(true);
+        if (!finalResult) throw new Error("Chat stream ended without a final result");
+        return finalResult;
+      }
+      buffer += decoder.decode(part.value, { stream: true });
+      drain(false);
+      return readNext();
+    });
+  }
+  return readNext().catch(function (error) {
+    var cancellation;
+    try {
+      cancellation = typeof reader.cancel === "function" ? reader.cancel() : null;
+    } catch (ignored) {}
+    return Promise.resolve(cancellation).catch(function () {}).then(function () {
+      throw error;
+    });
+  });
+}
+
 var api = {
   getStatus: function () {
     return fetch(API_BASE + "/desktop/status").then(function (r) {
@@ -112,6 +188,29 @@ var api = {
       }),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) { return chatJsonResponse(r, "Chat failed"); });
+  },
+  postChatStream: function (msg, ctx, sessionId, userMessageId, options) {
+    var init = {
+      method: "POST",
+      body: JSON.stringify({
+        message: msg,
+        context: ctx,
+        sessionId: sessionId,
+        userMessageId: userMessageId,
+      }),
+      headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+    };
+    if (options && options.signal) init.signal = options.signal;
+    return fetch(API_BASE + "/desktop/chat/stream", init).then(function (response) {
+      return consumeChatSseResponse(response, options && options.onEvent);
+    });
+  },
+  cancelChat: function (sessionId, userMessageId) {
+    return fetch(API_BASE + "/desktop/chat/sessions/" + encodeURIComponent(sessionId) + "/cancel", {
+      method: "POST",
+      body: JSON.stringify({ userMessageId: userMessageId }),
+      headers: { "Content-Type": "application/json" },
+    }).then(function (r) { return chatJsonResponse(r, "Cancel chat failed"); });
   },
   // ---- Chat sessions (SPEC-CSP-FE-001) ----
   listSessions: function (options) {

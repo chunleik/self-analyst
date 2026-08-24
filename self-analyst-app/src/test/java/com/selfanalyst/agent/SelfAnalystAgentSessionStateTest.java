@@ -11,6 +11,8 @@ import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.JsonFileAgentStateStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 
 import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Field;
@@ -37,6 +39,56 @@ class SelfAnalystAgentSessionStateTest {
     private static final String SESSION_E = "e".repeat(32);
     private static final String SESSION_F = "f".repeat(32);
     private static final String MESSAGE_A1 = "1".repeat(12);
+
+    @Test
+    void streamsIncrementalTextAndCanonicalResult(@TempDir Path tempDir) throws Exception {
+        AtomicInteger modelCalls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            modelCalls.incrementAndGet();
+            exchange.getRequestBody().readAllBytes();
+            byte[] response = sseResponseChunks(List.of("Hello", " streaming"))
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        Config config = withLlm(Config.testDefaults(tempDir),
+                "test-key",
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                "test-model");
+        try (SelfAnalystAgent agent = new SelfAnalystAgent(config)) {
+            List<SelfAnalystAgent.ChatStreamEvent> events = agent.chatStream(
+                            SESSION_A,
+                            MESSAGE_A1,
+                            () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                                    "stream this", null, List.of()))
+                    .collectList()
+                    .block();
+
+            assertEquals(List.of(
+                            SelfAnalystAgent.ChatStreamEventType.DELTA,
+                            SelfAnalystAgent.ChatStreamEventType.DELTA,
+                            SelfAnalystAgent.ChatStreamEventType.RESULT),
+                    events.stream().map(SelfAnalystAgent.ChatStreamEvent::type).toList());
+            assertEquals(List.of("Hello", " streaming", "Hello streaming"),
+                    events.stream().map(SelfAnalystAgent.ChatStreamEvent::text).toList());
+
+            Disposable replayWindow = agent.runExclusiveDesktopChatStream(
+                    SESSION_A, MESSAGE_A1, Flux::never).subscribe();
+            assertTrue(agent.cancelChat(SESSION_A, MESSAGE_A1));
+            replayWindow.dispose();
+            assertEquals("Hello streaming",
+                    agent.chat(SESSION_A, MESSAGE_A1, "stream this again").block());
+            assertEquals(1, modelCalls.get(),
+                    "cancelling a canonical replay must not roll back its completed turn");
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void isolatesPersistsRestoresAndDeletesDesktopSessionState(@TempDir Path tempDir)
@@ -96,6 +148,17 @@ class SelfAnalystAgentSessionStateTest {
                 assertEquals("terminal answer",
                         first.chat(SESSION_C, toolUserId, "retry tool turn").block());
                 assertEquals(requestsBeforeRetry, requests.size());
+
+                AgentState cancelledTurn = reactAgent.getAgentState("desktop", SESSION_E);
+                String cancelledUserId = "b".repeat(12);
+                cancelledTurn.contextMutable().addAll(List.of(
+                        message(cancelledUserId, MsgRole.USER, "cancel this"),
+                        message("c".repeat(12), MsgRole.ASSISTANT, "cancelled recovery")
+                                .withGenerateReason(GenerateReason.INTERRUPTED)));
+                reactAgent.saveAgentState("desktop", SESSION_E);
+                first.rollbackCancelledTurn(SESSION_E, cancelledUserId);
+                assertTrue(reactAgent.getAgentState("desktop", SESSION_E).getContext().isEmpty(),
+                        "a cancelled turn must remain retryable instead of looking completed");
             }
 
             assertTrue(requests.get(0).contains("legacy question"));
@@ -341,18 +404,27 @@ class SelfAnalystAgentSessionStateTest {
     }
 
     private static String sseResponse(String text) {
-        return "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\","
-                + "\"created\":1,\"model\":\"test-model\",\"choices\":[{\"index\":0,"
-                + "\"delta\":{\"role\":\"assistant\",\"content\":\"" + text
-                + "\"},\"finish_reason\":null}]}\n\n"
-                + "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\","
-                + "\"created\":1,\"model\":\"test-model\",\"choices\":[{\"index\":0,"
-                + "\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
-                + "data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\","
-                + "\"created\":1,\"model\":\"test-model\",\"choices\":[],"
-                + "\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,"
-                + "\"total_tokens\":7}}\n\n"
-                + "data: [DONE]\n\n";
+        return sseResponseChunks(List.of(text));
+    }
+
+    private static String sseResponseChunks(List<String> chunks) {
+        StringBuilder response = new StringBuilder();
+        for (String text : chunks) {
+            response.append("data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",")
+                    .append("\"created\":1,\"model\":\"test-model\",\"choices\":[{\"index\":0,")
+                    .append("\"delta\":{\"role\":\"assistant\",\"content\":\"")
+                    .append(text)
+                    .append("\"},\"finish_reason\":null}]}\n\n");
+        }
+        response.append("data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",")
+                .append("\"created\":1,\"model\":\"test-model\",\"choices\":[{\"index\":0,")
+                .append("\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+                .append("data: {\"id\":\"chatcmpl-test\",\"object\":\"chat.completion.chunk\",")
+                .append("\"created\":1,\"model\":\"test-model\",\"choices\":[],")
+                .append("\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,")
+                .append("\"total_tokens\":7}}\n\n")
+                .append("data: [DONE]\n\n");
+        return response.toString();
     }
 
     private static String jsonResponse(String text) {

@@ -11,6 +11,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,6 +43,19 @@ class DesktopAgentControllerTest {
 
         assertTrue(DesktopAgentController.hasAgentStillRunning(wrapped));
         assertFalse(DesktopAgentController.hasAgentStillRunning(new RuntimeException("other")));
+    }
+
+    @Test
+    void sseFramesPreserveEventBoundariesAndEscapePayloadText() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        DesktopAgentController.writeSseEvent(
+                output, "delta", Map.of("text", "line one\nline two"));
+
+        String frame = output.toString(StandardCharsets.UTF_8);
+        assertTrue(frame.startsWith("event: delta\n"));
+        assertTrue(frame.contains("data: {\"text\":\"line one\\nline two\"}"));
+        assertTrue(frame.endsWith("\n\n"));
     }
 
     @Test

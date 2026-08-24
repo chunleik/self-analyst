@@ -104,6 +104,7 @@ test("Deep Chat is configured for a local custom handler with raw model HTML dis
   box.configureDeepChat(element);
 
   assert.equal(typeof element.connect.handler, "function");
+  assert.equal(element.connect.stream, true);
   assert.equal(element.requestBodyLimits.maxMessages, 1);
   assert.equal(element.requestBodyLimits.totalMessagesMaxCharLength, 20000);
   assert.equal(element.remarkable.html, false);
@@ -223,6 +224,9 @@ test("rendering mirrors canonical messages once and pauses resync during its own
 test("custom handler delegates to the existing send transaction and restores an unpersisted draft", async () => {
   const calls = [];
   const responses = [];
+  let opened = 0;
+  let closed = 0;
+  const stopClicked = {};
   const { box, element } = sandbox({
     globals: {
       sendChatTabMessage(request) {
@@ -239,13 +243,101 @@ test("custom handler delegates to the existing send transaction and restores an 
 
   await box.handleDeepChatRequest(
     { messages: [{ role: "user", text: " keep me " }] },
-    { onResponse(response) { responses.push(response); } }
+    {
+      stopClicked,
+      onOpen() { opened += 1; },
+      onClose() { closed += 1; },
+      onResponse(response) { responses.push(response); },
+    }
   );
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].source, "deep-chat");
   assert.equal(calls[0].text, "keep me");
+  assert.equal(calls[0].streaming, true);
+  assert.equal(typeof calls[0].onDelta, "function");
+  assert.equal(typeof stopClicked.listener, "function");
+  assert.equal(opened, 1);
+  assert.equal(closed, 1);
   assert.match(responses[0].error, /append failed/);
   assert.equal(element.defaultInput.text, "keep me");
   assert.equal(element.focused, true);
+});
+
+test("custom handler forwards real deltas then overwrites with the canonical result", async () => {
+  const responses = [];
+  const lifecycle = [];
+  const { box } = sandbox({
+    globals: {
+      sendChatTabMessage(request) {
+        request.onDelta("Hello");
+        request.onDelta(" world");
+        return Promise.resolve({
+          message: { id: "assistant-1", status: "sent", content: "Hello world" },
+          error: null,
+          inputPersisted: true,
+          sessionId: "session-1",
+        });
+      },
+    },
+  });
+  box.renderChatTab = () => lifecycle.push("render");
+
+  await box.handleDeepChatRequest(
+    { messages: [{ role: "user", text: "stream" }] },
+    {
+      stopClicked: {},
+      onOpen() {},
+      onClose() { lifecycle.push("close"); },
+      onResponse(response) { responses.push(response); },
+    }
+  );
+
+  assert.equal(responses[0].text, "Hello");
+  assert.equal(responses[1].text, " world");
+  assert.equal(responses[2].text, "Hello world");
+  assert.equal(responses[2].overwrite, true);
+  assert.equal(responses[2].custom.id, "assistant-1");
+  assert.deepEqual(lifecycle, ["close", "render"]);
+});
+
+test("stream stop requests backend cancellation and aborts the fetch signal", async () => {
+  let resolveSend;
+  let request;
+  const cancelledTurns = [];
+  const stopClicked = {};
+  const { box } = sandbox({
+    globals: {
+      AbortController,
+      setTimeout,
+      clearTimeout,
+      api: {
+        cancelChat(sessionId, userMessageId) {
+          cancelledTurns.push([sessionId, userMessageId]);
+          return Promise.resolve({ cancelRequested: true });
+        },
+      },
+      sendChatTabMessage(value) {
+        request = value;
+        value.onExecutionStart("session-1", "1".repeat(12));
+        return new Promise((resolve) => { resolveSend = resolve; });
+      },
+    },
+  });
+
+  const handling = box.handleDeepChatRequest(
+    { messages: [{ role: "user", text: "stop me" }] },
+    { stopClicked, onOpen() {}, onClose() {}, onResponse() {} }
+  );
+  await stopClicked.listener();
+
+  assert.deepEqual(cancelledTurns, [["session-1", "1".repeat(12)]]);
+  assert.equal(request.signal.aborted, true);
+  resolveSend({
+    message: { id: "assistant-1", status: "error", content: "cancelled" },
+    error: new Error("cancelled"),
+    inputPersisted: true,
+    sessionId: "session-1",
+  });
+  await handling;
 });

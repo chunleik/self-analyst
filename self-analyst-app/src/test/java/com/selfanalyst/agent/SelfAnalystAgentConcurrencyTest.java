@@ -4,6 +4,7 @@ import com.selfanalyst.config.Config;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
@@ -58,6 +59,32 @@ class SelfAnalystAgentConcurrencyTest {
             cancelled.dispose();
             assertEquals("after-cancel",
                     agent.runExclusiveChat(() -> Mono.just("after-cancel")).block());
+
+            Disposable cancelledStream = agent.runExclusiveChatStream(Flux::never).subscribe();
+            RuntimeException busyDuringStream = assertThrows(RuntimeException.class,
+                    () -> agent.runExclusiveChat(() -> Mono.just("must-not-run")).block());
+            assertTrue(hasMessage(busyDuringStream, "still running"));
+            cancelledStream.dispose();
+            assertEquals("after-stream-cancel",
+                    agent.runExclusiveChat(() -> Mono.just("after-stream-cancel")).block());
+
+            String activeSession = "a".repeat(32);
+            String activeMessage = "1".repeat(12);
+            Disposable desktopStream = agent.runExclusiveDesktopChatStream(
+                    activeSession, activeMessage, Flux::never).subscribe();
+            assertFalse(agent.cancelChat(activeSession, "2".repeat(12)),
+                    "a stop from another turn must not arm interruption");
+            assertTrue(agent.cancelChat(activeSession, activeMessage));
+            assertFalse(agent.cancelChat(activeSession, activeMessage),
+                    "cancellation must be idempotent");
+            desktopStream.dispose();
+            assertFalse(agent.cancelChat(activeSession, activeMessage),
+                    "a late stop must not affect the next turn");
+            Disposable nextDesktopStream = agent.runExclusiveDesktopChatStream(
+                    activeSession, "3".repeat(12), Flux::never).subscribe();
+            assertFalse(agent.cancelChat(activeSession, activeMessage),
+                    "the previous message id must not cancel the next turn");
+            nextDesktopStream.dispose();
 
             Mono<String> reusable = agent.runExclusiveChat(() -> Mono.just("reused"));
             assertEquals("reused", reusable.block());

@@ -178,6 +178,7 @@ public class DesktopServer {
         // ── Agent tab ────────────────────────────────────────
         app.get("/desktop/summary", agentCtrl::getSummary);
         app.post("/desktop/chat", agentCtrl::chat);
+        app.post("/desktop/chat/stream", agentCtrl::chatStream);
         app.get("/desktop/usage", agentCtrl::getUsage);
 
         // ── Config tab ───────────────────────────────────────
@@ -208,6 +209,7 @@ public class DesktopServer {
         app.put   ("/desktop/chat/sessions/{id}/messages/{msgId}", chatSessionCtrl::updateMessage);
         app.put   ("/desktop/chat/active-session",                chatSessionCtrl::setActiveSession);
         app.put   ("/desktop/chat/sessions/{id}/memory-policy",   chatSessionCtrl::setMemoryPolicy);
+        app.post  ("/desktop/chat/sessions/{id}/cancel",          agentCtrl::cancelChat);
 
         // ── Long-term memory ────────────────────────────────────
         if (memoryCtrl != null) {

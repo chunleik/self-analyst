@@ -188,7 +188,9 @@ function configureDeepChat(element) {
       events: {
         click: function (event) {
           var target = event.currentTarget || event.target;
-          retryChatMessage(target && target.getAttribute("data-message-id"));
+          retryChatMessage(
+            target && target.getAttribute("data-message-id"),
+            { streaming: true });
         },
       },
     },
@@ -201,7 +203,7 @@ function configureDeepChat(element) {
       },
     },
   };
-  element.connect = { handler: handleDeepChatRequest };
+  element.connect = { stream: true, handler: handleDeepChatRequest };
 }
 
 function scheduleDeepChatUpgradeFallback(element) {
@@ -265,15 +267,67 @@ function handleDeepChatRequest(body, signals) {
   }
 
   deepChatAdapterState.requestSessionId = state.activeChatSessionId;
+  var requestSessionId = deepChatAdapterState.requestSessionId;
+  var executionSessionId = null;
+  var executionUserMessageId = null;
+  var stopped = false;
   setDeepChatTransientError(deepChatAdapterState.requestSessionId, null);
-  return sendChatTabMessage({ source: "deep-chat", text: text }).then(function (outcome) {
+  var abortController = typeof AbortController === "function" ? new AbortController() : null;
+  if (signals.stopClicked) {
+    signals.stopClicked.listener = function () {
+      stopped = true;
+      function abortStream() {
+        if (abortController) abortController.abort();
+      }
+      if (executionSessionId && executionUserMessageId && api.cancelChat) {
+        var timeoutId;
+        var timeout = new Promise(function (resolve) {
+          timeoutId = setTimeout(resolve, 750);
+        });
+        var cancellation;
+        try {
+          cancellation = api.cancelChat(executionSessionId, executionUserMessageId);
+        } catch (error) {
+          cancellation = Promise.reject(error);
+        }
+        return Promise.race([Promise.resolve(cancellation).catch(function () {}), timeout])
+          .then(function () {
+            clearTimeout(timeoutId);
+            abortStream();
+          });
+      }
+      abortStream();
+      return Promise.resolve();
+    };
+  }
+  if (signals.onOpen) signals.onOpen();
+  return sendChatTabMessage({
+    source: "deep-chat",
+    text: text,
+    streaming: true,
+    signal: abortController && abortController.signal,
+    onExecutionStart: function (sessionId, userMessageId) {
+      executionSessionId = sessionId;
+      executionUserMessageId = userMessageId;
+    },
+    onDelta: function (delta) {
+      if (!stopped && state.activeChatSessionId === requestSessionId && signals.onResponse) {
+        signals.onResponse({ text: delta });
+      }
+    },
+  }).then(function (outcome) {
+    if (stopped) return null;
     var message = outcome && outcome.message;
     if (message && message.status === "sent") {
-      return signals.onResponse({
-        text: message.content || t("chat.agentNoContent"),
-        role: "ai",
-        custom: { id: message.id, status: message.status },
-      });
+      if (state.activeChatSessionId === requestSessionId) {
+        return signals.onResponse({
+          text: message.content || t("chat.agentNoContent"),
+          role: "ai",
+          overwrite: true,
+          custom: { id: message.id, status: message.status },
+        });
+      }
+      return null;
     }
     var reason = outcome && outcome.error;
     var errorText = formatChatErrorMessage(reason || (message && (message.error || message.content)));
@@ -284,17 +338,20 @@ function handleDeepChatRequest(body, signals) {
         draft: text,
       });
     }
-    return signals.onResponse({ error: errorText });
+    return state.activeChatSessionId === requestSessionId
+      ? signals.onResponse({ error: errorText }) : null;
   }).catch(function (error) {
     setDeepChatTransientError(deepChatAdapterState.requestSessionId, {
       text: formatChatErrorMessage(error),
       draft: text,
     });
-    return signals.onResponse({ error: formatChatErrorMessage(error) });
+    return state.activeChatSessionId === requestSessionId
+      ? signals.onResponse({ error: formatChatErrorMessage(error) }) : null;
   }).then(function () {
     var activeRequestSession = deepChatAdapterState.requestSessionId;
     deepChatAdapterState.requestSessionId = null;
     deepChatAdapterState.signature = null;
+    if (signals.onClose) signals.onClose();
     renderChatTab();
     if (deepChatTransientError(activeRequestSession) &&
         state.activeChatSessionId === activeRequestSession) {

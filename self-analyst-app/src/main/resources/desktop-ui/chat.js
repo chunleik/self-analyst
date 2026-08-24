@@ -1103,7 +1103,21 @@ function sendChatTabMessage(request) {
         renderChatTab();
         backfillSessionTitle(session, text);
 
-        return api.postChat(text, context, session.id, savedUser.id).then(function (resp) {
+        if (deepChatRequest && request.onExecutionStart) {
+          request.onExecutionStart(session.id, savedUser.id);
+        }
+
+        var executionRequest = deepChatRequest && request.streaming && api.postChatStream
+          ? api.postChatStream(text, context, session.id, savedUser.id, {
+              signal: request.signal,
+              onEvent: function (eventName, payload) {
+                if (eventName === "delta" && request.onDelta && payload && payload.text) {
+                  request.onDelta(String(payload.text));
+                }
+              },
+            })
+          : api.postChat(text, context, session.id, savedUser.id);
+        return executionRequest.then(function (resp) {
           var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
           var tasks = normalizeSuggestedTasks(
             resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []);
@@ -1166,7 +1180,7 @@ function backfillSessionTitle(session, text) {
   }).catch(function () { /* non-fatal */ });
 }
 
-function retryChatMessage(msgId) {
+function retryChatMessage(msgId, options) {
   if (state.chatSending) return;
   var session = getActiveChatSession();
   if (!session) return;
@@ -1197,12 +1211,28 @@ function retryChatMessage(msgId) {
     { status: "pending", content: pendingMsg.content }).then(function (updated) {
     noteChatSessionMutation();
     mergeMessageFields(pendingMsg, updated);
-    return api.postChat(
-      userMsg.content,
-      userMsg.contextSnapshot || buildChatContext(session),
-      session.id,
-      userMsg.id
-    ).then(function (resp) {
+    var streamedContent = "";
+    var retryRequest = options && options.streaming && api.postChatStream
+      ? api.postChatStream(
+          userMsg.content,
+          userMsg.contextSnapshot || buildChatContext(session),
+          session.id,
+          userMsg.id,
+          {
+            signal: options.signal,
+            onEvent: function (eventName, payload) {
+              if (eventName !== "delta" || !payload || !payload.text) return;
+              streamedContent += String(payload.text);
+              pendingMsg.content = streamedContent;
+              renderChatTab();
+            },
+          })
+      : api.postChat(
+          userMsg.content,
+          userMsg.contextSnapshot || buildChatContext(session),
+          session.id,
+          userMsg.id);
+    return retryRequest.then(function (resp) {
       var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
       var tasks = normalizeSuggestedTasks(
         resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []);

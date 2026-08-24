@@ -13,6 +13,9 @@ import com.selfanalyst.wiki.WikiTools;
 import com.selfanalyst.file.FileTools;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.AgentResultEvent;
+import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.message.GenerateReason;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -33,6 +36,7 @@ import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import io.agentscope.harness.agent.memory.compaction.CompactionConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.io.IOException;
@@ -46,6 +50,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -72,6 +77,7 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final TransactionalAgentStateCompactor stateCompactor;
     private final Lang lang;
     private final AtomicBoolean chatRunning = new AtomicBoolean();
+    private final AtomicReference<ActiveDesktopChat> activeDesktopChat = new AtomicReference<>();
     private volatile boolean usageMissingLogged;
 
     public SelfAnalystAgent(Config config) throws IOException {
@@ -334,15 +340,57 @@ public class SelfAnalystAgent implements AutoCloseable {
         return chatInternal(validatedSessionId, validatedMessageId, persistedTurnSupplier);
     }
 
+    /** Streams one persisted desktop turn as model deltas followed by its canonical result. */
+    public Flux<ChatStreamEvent> chatStream(
+            String sessionId,
+            String userMessageId,
+            Supplier<PersistedDesktopTurn> persistedTurnSupplier) {
+        String validatedSessionId = requireDesktopSessionId(sessionId);
+        String validatedMessageId = requireDesktopMessageId(userMessageId);
+        if (persistedTurnSupplier == null) {
+            throw new IllegalArgumentException("Persisted desktop turn supplier is required");
+        }
+        return chatStreamInternal(validatedSessionId, validatedMessageId, persistedTurnSupplier);
+    }
+
+    public enum ChatStreamEventType { DELTA, RESULT }
+
+    public record ChatStreamEvent(ChatStreamEventType type, String text) {
+        public ChatStreamEvent {
+            Objects.requireNonNull(type, "type");
+            text = text != null ? text : "";
+        }
+
+        static ChatStreamEvent delta(String text) {
+            return new ChatStreamEvent(ChatStreamEventType.DELTA, text);
+        }
+
+        static ChatStreamEvent result(String text) {
+            return new ChatStreamEvent(ChatStreamEventType.RESULT, text);
+        }
+    }
+
     private Mono<String> chatInternal(
             String sessionId,
             String userMessageId,
             Supplier<PersistedDesktopTurn> persistedTurnSupplier) {
-        return runExclusiveChat(() -> {
+        return chatStreamInternal(sessionId, userMessageId, persistedTurnSupplier)
+                .filter(event -> event.type() == ChatStreamEventType.RESULT)
+                .map(ChatStreamEvent::text)
+                .takeLast(1)
+                .single();
+    }
+
+    private Flux<ChatStreamEvent> chatStreamInternal(
+            String sessionId,
+            String userMessageId,
+            Supplier<PersistedDesktopTurn> persistedTurnSupplier) {
+        ActiveDesktopChat activeChat = new ActiveDesktopChat(sessionId, userMessageId);
+        return runExclusiveStream(activeChat, () -> Flux.defer(() -> {
             PersistedDesktopTurn turn = persistedTurnSupplier.get();
             if (turn == null) throw new ChatSessionUnavailableException(sessionId);
             if (usageMeter != null && usageMeter.isBlocked()) {
-                return Mono.just(budgetBlockedMessage());
+                return Flux.just(ChatStreamEvent.result(budgetBlockedMessage()));
             }
             seedSessionHistoryIfAbsent(sessionId, turn.existingHistory());
             CallPreparation prepared;
@@ -354,15 +402,15 @@ public class SelfAnalystAgent implements AutoCloseable {
             }
             if (prepared.completedReply() != null) {
                 agent.clearStateCache(DESKTOP_USER_ID, sessionId);
-                return Mono.just(prepared.completedReply());
+                return Flux.just(ChatStreamEvent.result(prepared.completedReply()));
             }
             Mono<Boolean> compact = stateCompactor != null
                     ? stateCompactor.compactIfNeeded(DESKTOP_USER_ID, sessionId)
                     : Mono.just(false);
-            return compact.then(Mono.defer(() -> {
+            return compact.thenMany(Flux.defer(() -> {
                 if (usageMeter != null && usageMeter.isBlocked()) {
                     agent.clearStateCache(DESKTOP_USER_ID, sessionId);
-                    return Mono.just(budgetBlockedMessage());
+                    return Flux.just(ChatStreamEvent.result(budgetBlockedMessage()));
                 }
                 RuntimeContext.Builder contextBuilder = RuntimeContext.builder()
                         .userId(DESKTOP_USER_ID)
@@ -375,14 +423,40 @@ public class SelfAnalystAgent implements AutoCloseable {
                 RuntimeContext context = contextBuilder.build();
                 // With a persistent store every call reloads its slot. Eagerly evict the local
                 // cache after completion/error/cancel so long-running desktop sessions stay bounded.
-                return Mono.using(
+                return Flux.defer(() -> {
+                    if (!activeChat.beginModelCall()) {
+                        return Flux.error(new ChatCancelledException(userMessageId));
+                    }
+                    return Flux.using(
                                 () -> context,
-                                activeContext -> agent.call(prepared.messages(), activeContext),
+                                activeContext -> agent.streamEvents(
+                                                prepared.messages(), activeContext)
+                                        .handle((event, sink) -> {
+                                            if (event instanceof AgentResultEvent) {
+                                                if (activeChat.completeModelCall()) {
+                                                    mapStreamEvent(event, sink);
+                                                }
+                                            } else if (!activeChat.cancelled()) {
+                                                mapStreamEvent(event, sink);
+                                            }
+                                        }),
                                 ignored -> agent.clearStateCache(DESKTOP_USER_ID, sessionId),
-                                true)
-                        .map(Msg::getTextContent);
+                                true);
+                });
             }));
-        });
+        }));
+    }
+
+    private static void mapStreamEvent(
+            AgentEvent event,
+            reactor.core.publisher.SynchronousSink<ChatStreamEvent> sink) {
+        if (event instanceof TextBlockDeltaEvent delta) {
+            if (delta.getDelta() != null && !delta.getDelta().isEmpty()) {
+                sink.next(ChatStreamEvent.delta(delta.getDelta()));
+            }
+        } else if (event instanceof AgentResultEvent result && result.getResult() != null) {
+            sink.next(ChatStreamEvent.result(result.getResult().getTextContent()));
+        }
     }
 
     private String budgetBlockedMessage() {
@@ -542,6 +616,15 @@ public class SelfAnalystAgent implements AutoCloseable {
         return runExclusive(action);
     }
 
+    <T> Flux<T> runExclusiveChatStream(Supplier<Flux<T>> action) {
+        return runExclusiveStream(action);
+    }
+
+    <T> Flux<T> runExclusiveDesktopChatStream(
+            String sessionId, String userMessageId, Supplier<Flux<T>> action) {
+        return runExclusiveStream(new ActiveDesktopChat(sessionId, userMessageId), action);
+    }
+
     private <T> Mono<T> runExclusive(Supplier<Mono<T>> action) {
         return Mono.using(
                 () -> {
@@ -552,6 +635,42 @@ public class SelfAnalystAgent implements AutoCloseable {
                 },
                 ignored -> Mono.defer(action),
                 ignored -> chatRunning.set(false),
+                true);
+    }
+
+    private <T> Flux<T> runExclusiveStream(Supplier<Flux<T>> action) {
+        return runExclusiveStream(null, action);
+    }
+
+    private <T> Flux<T> runExclusiveStream(
+            ActiveDesktopChat desktopChat, Supplier<Flux<T>> action) {
+        return Flux.using(
+                () -> {
+                    if (!chatRunning.compareAndSet(false, true)) {
+                        throw new IllegalStateException("Agent is still running");
+                    }
+                    if (desktopChat != null && !activeDesktopChat.compareAndSet(null, desktopChat)) {
+                        chatRunning.set(false);
+                        throw new IllegalStateException("Agent is still running");
+                    }
+                    return Boolean.TRUE;
+                },
+                ignored -> Flux.defer(action),
+                ignored -> {
+                    boolean cancelled = desktopChat != null && desktopChat.close();
+                    try {
+                        if (cancelled) {
+                            rollbackCancelledTurn(
+                                    desktopChat.sessionId, desktopChat.userMessageId);
+                        }
+                    } finally {
+                        if (desktopChat != null) {
+                            agent.clearStateCache(DESKTOP_USER_ID, desktopChat.sessionId);
+                            activeDesktopChat.compareAndSet(desktopChat, null);
+                        }
+                        chatRunning.set(false);
+                    }
+                },
                 true);
     }
 
@@ -568,8 +687,94 @@ public class SelfAnalystAgent implements AutoCloseable {
         }
     }
 
+    public static final class ChatCancelledException extends IllegalStateException {
+        public ChatCancelledException(String userMessageId) {
+            super("Desktop chat turn was cancelled: " + userMessageId);
+        }
+    }
+
     public boolean isBudgetBlocked() {
         return usageMeter != null && usageMeter.isBlocked();
+    }
+
+    /** Requests cancellation only when the ids still identify the live desktop call. */
+    public boolean cancelChat(String sessionId, String userMessageId) {
+        String validated = requireDesktopSessionId(sessionId);
+        String validatedMessage = requireDesktopMessageId(userMessageId);
+        ActiveDesktopChat active = activeDesktopChat.get();
+        if (active == null || !active.matches(validated, validatedMessage)) {
+            return false;
+        }
+        Msg cancellation = Msg.builder()
+                .name("user")
+                .role(MsgRole.USER)
+                .textContent("用户取消了当前回复")
+                .build();
+        return active.cancel(
+                () -> agent.interrupt(DESKTOP_USER_ID, validated, cancellation));
+    }
+
+    void rollbackCancelledTurn(String sessionId, String userMessageId) {
+        AgentState state = agent.getAgentState(DESKTOP_USER_ID, sessionId);
+        List<Msg> context = state.contextMutable();
+        for (int i = context.size() - 1; i >= 0; i--) {
+            Msg message = context.get(i);
+            if (message.getRole() == MsgRole.USER && userMessageId.equals(message.getId())) {
+                context.subList(i, context.size()).clear();
+                break;
+            }
+        }
+        state.interruptControl().reset();
+        state.setShutdownInterrupted(false);
+        state.setCurIter(0);
+        state.setReplyId(null);
+        agent.saveAgentState(DESKTOP_USER_ID, sessionId);
+    }
+
+    private static final class ActiveDesktopChat {
+        private final String sessionId;
+        private final String userMessageId;
+        private volatile int lifecycle;
+        private boolean modelCallStarted;
+
+        private ActiveDesktopChat(String sessionId, String userMessageId) {
+            this.sessionId = sessionId;
+            this.userMessageId = userMessageId;
+        }
+
+        private boolean matches(String sessionId, String userMessageId) {
+            return Objects.equals(this.sessionId, sessionId)
+                    && Objects.equals(this.userMessageId, userMessageId);
+        }
+
+        private synchronized boolean cancel(Runnable interrupt) {
+            if (lifecycle != 0) return false;
+            lifecycle = 1;
+            if (modelCallStarted) interrupt.run();
+            return true;
+        }
+
+        private synchronized boolean beginModelCall() {
+            if (lifecycle != 0) return false;
+            modelCallStarted = true;
+            return true;
+        }
+
+        private synchronized boolean completeModelCall() {
+            if (lifecycle != 0 || !modelCallStarted) return false;
+            lifecycle = 3;
+            return true;
+        }
+
+        private boolean cancelled() {
+            return lifecycle == 1;
+        }
+
+        private synchronized boolean close() {
+            boolean rollbackRequired = lifecycle == 1 && modelCallStarted;
+            lifecycle = 2;
+            return rollbackRequired;
+        }
     }
 
     public java.util.Map<String, Object> usageSnapshot() {

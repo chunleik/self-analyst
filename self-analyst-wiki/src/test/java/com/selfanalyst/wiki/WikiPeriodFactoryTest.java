@@ -97,4 +97,15 @@ class WikiPeriodFactoryTest {
                 Instant.now(), Instant.now(), WikiLevel.HOUR, tz);
         assertTrue(periods.isEmpty());
     }
+
+    @Test
+    void shouldNotIncludeBlockEndingAfterRangeEnd() {
+        Instant start = LocalDateTime.of(2026, 8, 20, 10, 15).atZone(tz).toInstant();
+        Instant end = LocalDateTime.of(2026, 8, 20, 10, 30).atZone(tz).toInstant();
+
+        List<WikiPeriod> periods = WikiPeriodFactory.generate(start, end, WikiLevel.HOUR, tz);
+
+        assertTrue(periods.isEmpty(),
+                "a period is complete only when its end is at or before the requested cutoff");
+    }
 }

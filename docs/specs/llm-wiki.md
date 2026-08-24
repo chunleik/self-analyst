@@ -17,7 +17,7 @@
 | 向量索引 | `{memory.dir}/wiki-semantic-index/` |
 | 语义索引元数据表 | `wiki_semantic_documents` |
 | 默认 embedding model | `text-embedding-3-small` |
-| 默认 embedding 维度 | `1536` |
+| 默认 embedding 维度 | `1024` |
 | Agent 入口 | `SelfAnalystAgent` 注册 `WikiTools` |
 | 主要用户入口 | Agent 对话中的时间段复盘、任务回顾、趋势分析、模糊主题检索 |
 
@@ -462,14 +462,14 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 ### 11.1 启动与关闭
 
 - **SPEC-WIKI-WKR-001**: `AppSession` 启动时，如果 `wiki.enabled=true`，必须创建 `WikiWorker`。
-- **SPEC-WIKI-WKR-002**: `WikiWorker` 启动后必须先 enqueue 已有历史缺失时间块。
+- **SPEC-WIKI-WKR-002**: `wiki.backfill.enabled=true` 时，`WikiWorker` 启动后必须先 enqueue 最近 7 天的历史缺失时间块。
 - **SPEC-WIKI-WKR-003**: `WikiWorker` 必须使用单线程后台执行，不阻塞主服务启动。
 - **SPEC-WIKI-WKR-004**: `AppSession.close()` 必须调用 `WikiWorker.shutdown()`。
 - **SPEC-WIKI-WKR-005**: `shutdown()` 不得中断正在提交的数据库事务。
 
 ### 11.2 全量历史补算
 
-- **SPEC-WIKI-WKR-006**: 历史范围起点必须从已有 AW 事件最早时间推导。
+- **SPEC-WIKI-WKR-006**: 第一版历史范围起点默认为启动时刻前 7 天，避免首次启用产生无界 LLM 调用。
 - **SPEC-WIKI-WKR-007**: 历史范围终点必须为当前已结束的最大时间块。
 - **SPEC-WIKI-WKR-008**: 缺失时间块必须以 `PENDING` 形式写入 `wiki_entries`。
 - **SPEC-WIKI-WKR-009**: 已存在 `SUMMARIZED` 条目不得被补算任务覆盖。
@@ -497,7 +497,16 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 - **SPEC-WIKI-WKR-016**: `next_retry_at` 使用递增退避，第一版可采用 `min(24h, 2^retry_count minutes)`。
 - **SPEC-WIKI-WKR-017**: LLM 未配置或 Agent 不可用时，不得把条目标记为 `SKIPPED`，应保持可重试状态。
 
-### 11.5 语义索引 Worker
+### 11.5 持续时间块发现
+
+- **SPEC-WIKI-WKR-018**: 每轮处理 `PENDING` 前必须先对账上次成功游标至当前时刻之间所有已结束时间块。
+- **SPEC-WIKI-WKR-019**: 时间块发现必须幂等，已存在的相同 `level + period + timezone` 不得重复创建或覆盖。
+- **SPEC-WIKI-WKR-020**: `wiki.backfill.enabled=false` 时，首次轮次仍须对账最近一个小时，之后持续发现新结束时间块。
+- **SPEC-WIKI-WKR-021**: 对账失败时不得推进游标，下一轮必须重试同一时间窗口。
+- **SPEC-WIKI-WKR-022**: 父级时间块必须在每个预期子时间块都存在且为 `SUMMARIZED` 或 `SKIPPED` 后才能处理。
+- **SPEC-WIKI-WKR-023**: 重试队列必须按层级扫描所有到期条目，不完整父级不得阻塞其子级或其他可处理条目。
+
+### 11.6 语义索引 Worker
 
 - **SPEC-WIKI-SEM-WKR-001**: `AppSession` 启动时，如果 `wiki.semantic.enabled=true` 且 `embedding.enabled=true`，必须创建 `WikiEmbeddingWorker`。
 - **SPEC-WIKI-SEM-WKR-002**: `WikiEmbeddingWorker` 必须使用单线程后台执行，不阻塞主服务启动或 Wiki 摘要 worker。
@@ -613,19 +622,19 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 
 | 属性 | 环境变量 | 默认值 | 类型 | 说明 |
 |------|----------|--------|------|------|
-| `wiki.enabled` | `WIKI_ENABLED` | `true` | boolean | 是否启用 Wiki |
-| `wiki.backfill.enabled` | `WIKI_BACKFILL_ENABLED` | `true` | boolean | 是否启动历史补算 |
+| `wiki.enabled` | `WIKI_ENABLED` | `false` | boolean | 是否启用 Wiki |
+| `wiki.backfill.enabled` | `WIKI_BACKFILL_ENABLED` | `false` | boolean | 是否启动最近 7 天历史补算 |
 | `wiki.worker.intervalSeconds` | `WIKI_WORKER_INTERVAL_SECONDS` | `60` | int | worker 轮询间隔 |
 | `wiki.prompt.maxContentChars` | `WIKI_PROMPT_MAX_CONTENT_CHARS` | `12000` | int | prompt 内容上限 |
 | `wiki.topApps.limit` | `WIKI_TOP_APPS_LIMIT` | `10` | int | top app 最大数量 |
 | `wiki.semantic.enabled` | `WIKI_SEMANTIC_ENABLED` | `true` | boolean | 是否启用 Wiki 语义索引 |
 | `wiki.semantic.index-dir` | `WIKI_SEMANTIC_INDEX_DIR` | `{memory.dir}/wiki-semantic-index` | Path | Lucene 向量索引目录 |
 | `wiki.semantic.topK` | `WIKI_SEMANTIC_TOP_K` | `8` | int | 默认语义检索返回数量 |
-| `embedding.enabled` | `EMBEDDING_ENABLED` | `true` | boolean | 是否启用 embedding 请求 |
+| `embedding.enabled` | `EMBEDDING_ENABLED` | `false` | boolean | 是否启用 embedding 请求 |
 | `embedding.base-url` | `EMBEDDING_BASE_URL` | `https://api.openai.com/v1` | String (URL) | OpenAI-compatible embedding base URL |
 | `embedding.api-key` | `EMBEDDING_API_KEY` | fallback to `OPENAI_API_KEY` | String | embedding API key |
 | `embedding.model` | `EMBEDDING_MODEL` | `text-embedding-3-small` | String | embedding model |
-| `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1536` | int | embedding 向量维度 |
+| `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1024` | int | embedding 向量维度 |
 
 - **SPEC-WIKI-CFG-001**: 配置加载优先级必须遵循现有 `Config` 规则。
 - **SPEC-WIKI-CFG-002**: `wiki.enabled=false` 时不得启动 worker，也不得注册写入任务；已存在的 `WikiTools` 可只读查询。
@@ -635,7 +644,7 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 - **SPEC-WIKI-CFG-006**: `wiki.semantic.topK` 小于 1 或大于 50 时必须回退到默认值 `8`。
 - **SPEC-WIKI-CFG-007**: `embedding.enabled=false` 时不得发起 embedding HTTP 请求。
 - **SPEC-WIKI-CFG-008**: `embedding.api-key` 未配置时，必须尝试读取 `OPENAI_API_KEY`；仍未配置时语义索引保持不可用但 Wiki 摘要功能继续可用。
-- **SPEC-WIKI-CFG-009**: `embedding.dimensions` 必须为正整数，非法值必须回退到默认值 `1536`。
+- **SPEC-WIKI-CFG-009**: `embedding.dimensions` 必须为正整数，非法值必须回退到默认值 `1024`。
 
 ---
 
@@ -730,9 +739,15 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 
 - **SPEC-WIKI-TST-006**: `WikiWorkerTest.shouldNotProcessOpenPeriods` 验证当前未结束时间块不处理。
 - **SPEC-WIKI-TST-007**: `WikiWorkerTest.shouldEnqueueHistoricalPeriods` 验证历史全量补算入队。
-- **SPEC-WIKI-TST-008**: `WikiWorkerTest.shouldWaitForParentDependencies` 验证父级等待子级完成。
+- **SPEC-WIKI-TST-008**: `WikiWorkerTest.parentWaitsUntilEveryExpectedChildPeriodExists` 验证父级等待全部预期子级完成。
 - **SPEC-WIKI-TST-009**: `WikiWorkerTest.shouldRetryFailedEntries` 验证失败退避和重试。
 - **SPEC-WIKI-TST-010**: `WikiWorkerTest.shouldContinueAfterSingleEntryFailure` 验证单条失败不终止 worker。
+- **SPEC-WIKI-TST-020**: `WikiWorkerTest.runningWorkerEnqueuesRecentlyCompletedPeriodsWithoutBackfill` 验证关闭历史补算后仍持续发现时间块。
+- **SPEC-WIKI-TST-021**: `WikiWorkerTest.delayedRoundCatchesUpEveryCompletedHourExactlyOnce` 验证延迟轮次完整补齐且幂等。
+- **SPEC-WIKI-TST-022**: `WikiWorkerTest.failedStartupBackfillIsRetriedFromTheOriginalCursor` 验证启动补算失败不会丢失游标。
+- **SPEC-WIKI-TST-023**: `WikiWorkerTest.parentSummaryUsesOnlyChildrenFromItsOwnTimezone` 验证父级只聚合边界与时区精确匹配的子级。
+- **SPEC-WIKI-TST-024**: `WikiPeriodFactoryTest.shouldNotIncludeBlockEndingAfterRangeEnd` 验证 range end 之后才结束的时间块不会提前入队。
+- **SPEC-WIKI-TST-025**: `WikiWorkerTest.incompleteFailedParentDoesNotBlockRetryableChild` 验证不完整失败父级不会造成重试队列活锁。
 
 ### 18.3 Summarizer 测试
 

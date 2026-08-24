@@ -15,6 +15,7 @@ public final class WikiPeriodFactory {
                                              WikiLevel level, ZoneId timezone) {
         List<WikiPeriod> periods = new ArrayList<>();
         Instant now = Instant.now();
+        Instant completionCutoff = rangeEnd.isBefore(now) ? rangeEnd : now;
 
         ZonedDateTime cursor = rangeStart.atZone(timezone);
         ZonedDateTime endZ = rangeEnd.atZone(timezone);
@@ -23,7 +24,7 @@ public final class WikiPeriodFactory {
             ZonedDateTime blockStart = alignStart(cursor, level);
             ZonedDateTime blockEnd = blockEnd(blockStart, level);
 
-            if (blockEnd.toInstant().isAfter(now)) {
+            if (blockEnd.toInstant().isAfter(completionCutoff)) {
                 break;
             }
             if (!blockEnd.toInstant().isAfter(rangeStart)) {

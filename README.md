@@ -97,6 +97,10 @@ java -jar dist/self-analyst-app.jar
 | `memory.dir` | `MEMORY_DIR` | `./data/memory` | 目标/模式/记忆存储目录（相对启动目录；可改为 `${user.home}/.self-analyst`） |
 | `aw.ocr.engine` | `AW_OCR_ENGINE` | `auto` | OCR 引擎：`auto`、`paddle`、`tesseract` |
 | `aw.audio.enabled` | `AW_AUDIO_ENABLED` | `false` | 音频采集（需麦克风） |
+| `wiki.enabled` | `WIKI_ENABLED` | `false` | 对话式历史复盘；开启后生成多级时间摘要，相关文本会发送给 LLM |
+| `wiki.backfill.enabled` | `WIKI_BACKFILL_ENABLED` | `false` | 启动时补算最近 7 天；关闭后仍持续生成新结束的时间块 |
+| `wiki.semantic.enabled` | `WIKI_SEMANTIC_ENABLED` | `true` | 允许 Wiki 语义检索；还需同时开启 Embedding |
+| `embedding.enabled` | `EMBEDDING_ENABLED` | `false` | 生成本地 Lucene 语义索引所需的远程 Embedding 请求 |
 | `file.watch.enabled` | `FILE_WATCH_ENABLED` | `false` | 目录文件监控 + LLM 摘要（内容会发送给 LLM，注意隐私） |
 | `file.watch.paths` | `FILE_WATCH_PATHS` | - | 监控目录，逗号分隔绝对路径 |
 
@@ -109,6 +113,21 @@ java -jar dist/self-analyst-app.jar
 aw.mode=external
 aw.base-url=http://localhost:5600/api/0
 ```
+
+### 对话式历史复盘
+
+在桌面配置页的 `config.toml` 中显式开启 Wiki；个人首次启用建议补算最近 7 天：
+
+```toml
+[wiki]
+enabled = true
+backfill.enabled = true
+semantic.enabled = false
+```
+
+重启后，后台会低速生成 `HOUR → MONTH` 多级摘要，Agent 可直接回答“昨天做了什么”或“本周和上周有什么变化”。历史补算完成后无需依赖重启：Worker 每轮都会发现新结束的时间块；即使某轮延迟，也会从上次成功游标继续补齐。`semantic.enabled=false` 不影响按时间复盘，只关闭模糊主题检索。
+
+如需“最近什么时候处理过配置问题”这类语义检索，再配置并开启 `[embedding] enabled = true`。启用 Wiki 会把裁剪后的窗口标题和可选屏幕内容发送给自行配置的 LLM，请先确认供应商与隐私策略。
 
 ### 内容采集
 

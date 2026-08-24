@@ -8,12 +8,14 @@ import com.selfanalyst.wiki.semantic.WikiEmbeddingWorker;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 public class WikiWorker {
 
@@ -22,6 +24,7 @@ public class WikiWorker {
             WikiLevel.HOUR, WikiLevel.HALF_DAY, WikiLevel.DAY,
             WikiLevel.WEEK, WikiLevel.BIWEEK, WikiLevel.MONTH
     };
+    private static final Duration BACKFILL_LOOKBACK = Duration.ofDays(7);
     private static final String PROMPT_VERSION = "wiki-v1";
 
     private final WikiStore store;
@@ -32,13 +35,22 @@ public class WikiWorker {
     private final int intervalSeconds;
     private final boolean backfillEnabled;
     private final WikiEmbeddingWorker embeddingWorker;
+    private final Supplier<Instant> nowSupplier;
 
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private volatile Instant enqueueCursor;
 
     public WikiWorker(WikiStore store, WikiFactBuilder factBuilder, WikiSummarizer summarizer,
                        ZoneId timezone, Duration timeout, int intervalSeconds, boolean backfillEnabled,
                        WikiEmbeddingWorker embeddingWorker) {
+        this(store, factBuilder, summarizer, timezone, timeout, intervalSeconds,
+                backfillEnabled, embeddingWorker, Instant::now);
+    }
+
+    WikiWorker(WikiStore store, WikiFactBuilder factBuilder, WikiSummarizer summarizer,
+               ZoneId timezone, Duration timeout, int intervalSeconds, boolean backfillEnabled,
+               WikiEmbeddingWorker embeddingWorker, Supplier<Instant> nowSupplier) {
         this.store = store;
         this.factBuilder = factBuilder;
         this.summarizer = summarizer;
@@ -47,6 +59,7 @@ public class WikiWorker {
         this.intervalSeconds = intervalSeconds;
         this.backfillEnabled = backfillEnabled;
         this.embeddingWorker = embeddingWorker;
+        this.nowSupplier = nowSupplier;
         this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "wiki-worker");
             t.setDaemon(true);
@@ -57,8 +70,16 @@ public class WikiWorker {
     public void start() {
         if (!running.compareAndSet(false, true)) return;
 
+        Instant startedAt = nowSupplier.get();
         if (backfillEnabled) {
-            enqueueHistoricalPeriods();
+            enqueueCursor = startedAt.minus(BACKFILL_LOOKBACK);
+            if (enqueueHistoricalPeriods(enqueueCursor, startedAt)) {
+                enqueueCursor = startedAt;
+            }
+        } else {
+            // Reconcile one recent hour on the first round so an opt-out from historical
+            // backfill still produces live Wiki entries immediately.
+            enqueueCursor = startedAt.minus(Duration.ofHours(1));
         }
 
         executor.scheduleWithFixedDelay(
@@ -84,45 +105,21 @@ public class WikiWorker {
         log.info("WikiWorker shut down");
     }
 
-    private void enqueueHistoricalPeriods() {
+    private boolean enqueueHistoricalPeriods(Instant oldest, Instant now) {
         try {
-            Instant oldest = findOldestEventTime();
-            if (oldest == null) {
-                log.info("No AW events found, generating from last 7 days");
-                oldest = Instant.now().minus(Duration.ofDays(7));
-            }
-            Instant now = Instant.now();
-
-            for (WikiLevel level : PROCESS_ORDER) {
-                List<WikiPeriod> periods = WikiPeriodFactory.generate(oldest, now, level, timezone);
-                for (WikiPeriod p : periods) {
-                    String id = periodId(level, p);
-                    try {
-                        var existing = store.query(p.start(), p.end(), level);
-                        if (existing.isEmpty()) {
-                            store.upsert(new WikiEntry(id, level, p.start(), p.end(),
-                                    p.timezone(), WikiStatus.PENDING, null, null, List.of(),
-                                    new WikiEntry.WikiMetrics(0, 0, 0, List.of(), java.util.Map.of()),
-                                    List.of(), null, null, 0, null, null,
-                                    Instant.now(), Instant.now(), null));
-                        }
-                    } catch (Exception e) {
-                        log.warn("Failed to enqueue period {}: {}", id, e.getMessage());
-                    }
-                }
-            }
+            enqueueMissingPeriods(oldest, now);
             log.info("Historical period enqueue complete");
+            return true;
         } catch (Exception e) {
             log.warn("Historical backfill enqueue failed: {}", e.getMessage());
+            return false;
         }
-    }
-
-    private Instant findOldestEventTime() {
-        return null; // WikiWorker doesn't have direct AW DB access; use fallback
     }
 
     void processOneRound() {
         if (!running.get()) return;
+
+        reconcileNewPeriods();
 
         try {
             // Process in priority order: lower levels first
@@ -137,29 +134,94 @@ public class WikiWorker {
             }
 
             // Retry failed entries
-            List<WikiEntry> retryable = store.findRetryable(1);
-            for (WikiEntry entry : retryable) {
-                processEntry(entry);
-                return;
+            List<WikiEntry> retryable = store.findRetryable(Integer.MAX_VALUE);
+            for (WikiLevel level : PROCESS_ORDER) {
+                for (WikiEntry entry : retryable) {
+                    if (entry.level() == level && canProcess(entry)) {
+                        processEntry(entry);
+                        return;
+                    }
+                }
             }
         } catch (Exception e) {
             log.warn("WikiWorker round failed: {}", e.getMessage());
         }
     }
 
+    private void reconcileNewPeriods() {
+        Instant now = nowSupplier.get();
+        Instant from = enqueueCursor != null
+                ? enqueueCursor : now.minus(Duration.ofHours(1));
+        try {
+            enqueueMissingPeriods(from, now);
+            enqueueCursor = now;
+        } catch (Exception e) {
+            // Keep the old cursor so the next round retries the same discovery window.
+            log.warn("Wiki period reconciliation failed: {}", e.getMessage());
+        }
+    }
+
+    int enqueueMissingPeriods(Instant rangeStart, Instant rangeEnd) {
+        if (rangeStart == null || rangeEnd == null || !rangeStart.isBefore(rangeEnd)) {
+            return 0;
+        }
+
+        int created = 0;
+        Instant timestamp = nowSupplier.get();
+        for (WikiLevel level : PROCESS_ORDER) {
+            List<WikiPeriod> periods = WikiPeriodFactory.generate(
+                    rangeStart, rangeEnd, level, timezone);
+            for (WikiPeriod period : periods) {
+                boolean exists = store.query(period.start(), period.end(), level).stream()
+                        .anyMatch(entry -> entry.periodStart().equals(period.start())
+                                && entry.periodEnd().equals(period.end())
+                                && entry.timezone().equals(period.timezone()));
+                if (exists) continue;
+
+                store.upsert(new WikiEntry(periodId(level, period), level,
+                        period.start(), period.end(), period.timezone(), WikiStatus.PENDING,
+                        null, null, List.of(),
+                        new WikiEntry.WikiMetrics(0, 0, 0, List.of(), java.util.Map.of()),
+                        List.of(), null, null, 0, null, null,
+                        timestamp, timestamp, null));
+                created++;
+            }
+        }
+        if (created > 0) {
+            log.debug("Enqueued {} newly completed Wiki periods", created);
+        }
+        return created;
+    }
+
     private boolean canProcess(WikiEntry entry) {
         WikiLevel childLevel = childLevel(entry.level());
         if (childLevel == null) return true;
 
-        List<WikiEntry> children = store.query(entry.periodStart(), entry.periodEnd(), childLevel);
-        if (children.isEmpty()) return false;
+        return completedExpectedChildren(entry, childLevel) != null;
+    }
 
-        for (WikiEntry child : children) {
-            if (child.status() != WikiStatus.SUMMARIZED && child.status() != WikiStatus.SKIPPED) {
-                return false;
+    private List<WikiEntry> completedExpectedChildren(WikiEntry entry, WikiLevel childLevel) {
+        List<WikiEntry> children = store.query(entry.periodStart(), entry.periodEnd(), childLevel);
+        List<WikiPeriod> expectedChildren = WikiPeriodFactory.generate(
+                entry.periodStart(), entry.periodEnd(), childLevel,
+                ZoneId.of(entry.timezone()));
+        if (expectedChildren.isEmpty()) return null;
+
+        List<WikiEntry> exactChildren = new ArrayList<>(expectedChildren.size());
+        for (WikiPeriod expected : expectedChildren) {
+            WikiEntry child = children.stream()
+                    .filter(candidate -> candidate.periodStart().equals(expected.start())
+                            && candidate.periodEnd().equals(expected.end())
+                            && candidate.timezone().equals(expected.timezone()))
+                    .findFirst()
+                    .orElse(null);
+            if (child == null || (child.status() != WikiStatus.SUMMARIZED
+                    && child.status() != WikiStatus.SKIPPED)) {
+                return null;
             }
+            exactChildren.add(child);
         }
-        return true;
+        return exactChildren;
     }
 
     private void processEntry(WikiEntry entry) {
@@ -175,7 +237,10 @@ public class WikiWorker {
                 facts = factBuilder.buildFacts(period);
             } else {
                 WikiLevel childLevel = childLevel(entry.level());
-                List<WikiEntry> children = store.query(entry.periodStart(), entry.periodEnd(), childLevel);
+                List<WikiEntry> children = completedExpectedChildren(entry, childLevel);
+                if (children == null) {
+                    throw new IllegalStateException("Parent dependencies are incomplete for " + id);
+                }
                 facts = factBuilder.buildFactsFromChildren(children, period);
             }
 

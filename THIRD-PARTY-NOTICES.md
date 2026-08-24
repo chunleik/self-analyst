@@ -49,6 +49,19 @@ Rust crate dependencies of the Tauri shell are declared in
 `self-analyst-desktop/src-tauri/Cargo.toml`; their licenses (predominantly
 MIT / Apache-2.0) are resolved by Cargo and recorded in `Cargo.lock`.
 
+## Desktop frontend
+
+| Component | Purpose | License |
+|-----------|---------|---------|
+| [Deep Chat 2.5.0](https://github.com/OvidijusParsiunas/deep-chat) | Vendored web component for the chat message surface and composer | MIT |
+
+The Deep Chat distribution bundle is stored at
+`self-analyst-app/src/main/resources/desktop-ui/deep-chat.bundle.js`. Its
+license text is bundled in the application resources at
+`self-analyst-app/src/main/resources/third-party/deep-chat-LICENSE.txt`. The
+bundle was extracted from the official `deep-chat@2.5.0` npm package and has
+SHA-256 `12E0B5352E26E257C4D80BCA9FCFB75DC382608EE9B15CF920A469D51C3496EA`.
+
 ## Note on ActivityWatch compatibility
 
 SelfAnalyst's embedded AW server is an independent Java implementation that is

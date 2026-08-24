@@ -1743,6 +1743,29 @@ input:checked + .toggle-switch::after {
   gap: 12px;
 }
 
+.chat-thread.deep-chat-host {
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  display: block;
+}
+
+.deep-chat-host deep-chat {
+  width: 100%;
+  height: 100%;
+}
+
+.chat-fallback {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-fallback .chat-thread {
+  min-height: 0;
+}
+
 .chat-welcome {
   text-align: center;
   padding: 60px 20px;

@@ -85,7 +85,7 @@ function switchTab(tab) {
     ensureActiveChatSession().then(renderChatTab).catch(function () {});
     renderChatTab();
     setTimeout(function () {
-      if (state.dom.chatTabInput) state.dom.chatTabInput.focus();
+      focusChatComposer();
     }, 100);
   } else if (tab === "audio") {
     renderAudioTab();

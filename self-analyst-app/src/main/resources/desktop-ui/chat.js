@@ -890,6 +890,24 @@ function renderChatSessionList() {
 }
 
 function renderChatThread() {
+  var session = getActiveChatSession();
+  state.dom.chatSessionTitle.textContent = session
+    ? session.title : t("chat.selectOrCreate");
+  if (typeof renderDeepChatThread === "function" && renderDeepChatThread()) {
+    if (session && !session.messagesLoaded && !session.messagesLoadError &&
+        !session.messagesLoadPromise) {
+      ensureSessionMessagesLoaded(session).then(function () {
+        if (getActiveChatSession() === session) renderChatTab();
+      }).catch(function () {
+        if (getActiveChatSession() === session) renderChatTab();
+      });
+    }
+    return;
+  }
+  renderLegacyChatThread();
+}
+
+function renderLegacyChatThread() {
   var thread = state.dom.chatThread;
   var session = getActiveChatSession();
 
@@ -1024,22 +1042,38 @@ function updateChatInputState() {
   var llmOk = state.status && state.status.llm && state.status.llm.configured;
   var session = getActiveChatSession();
   var sessionReady = session && session.messagesLoaded && !session.messagesLoading;
+  var enabled = !!llmOk && !!sessionReady && !state.chatSending;
+  var placeholder = llmOk
+    ? t("chat.composerPlaceholder") : t("chat.llmNotConfiguredPlaceholder");
+  if (typeof updateDeepChatInputState === "function") {
+    updateDeepChatInputState(enabled, placeholder);
+  }
   if (state.dom.chatTabInput) {
-    state.dom.chatTabInput.disabled = !llmOk || !sessionReady || state.chatSending;
-    if (!llmOk) state.dom.chatTabInput.placeholder = t("chat.llmNotConfiguredPlaceholder");
+    state.dom.chatTabInput.disabled = !enabled;
+    state.dom.chatTabInput.placeholder = placeholder;
   }
   if (state.dom.chatTabSendBtn) {
-    state.dom.chatTabSendBtn.disabled = !llmOk || !sessionReady || state.chatSending;
+    state.dom.chatTabSendBtn.disabled = !enabled;
   }
 }
 
 // ---- Send Message ----
 
-function sendChatTabMessage() {
-  if (state.chatSending) return;
+function sendChatTabMessage(request) {
+  if (state.chatSending) return Promise.resolve({ skipped: true });
+  var deepChatRequest = request && request.source === "deep-chat";
   var input = state.dom.chatTabInput;
-  var text = input.value.trim();
-  if (!text) return;
+  var text = deepChatRequest
+    ? String(request.text || "").trim()
+    : String(input && input.value || "").trim();
+  if (!text) return Promise.resolve({ skipped: true });
+
+  var outcome = {
+    message: null,
+    error: null,
+    inputPersisted: false,
+    sessionId: null,
+  };
 
   invalidateChatSessionLoads();
   state.chatSending = true;
@@ -1047,6 +1081,7 @@ function sendChatTabMessage() {
 
   var inputPersisted = false;
   return ensureActiveChatSession().then(function (session) {
+    outcome.sessionId = session.id;
     return ensureSessionMessagesLoaded(session);
   }).then(function (session) {
     var context = buildChatContext(session);
@@ -1060,8 +1095,9 @@ function sendChatTabMessage() {
         var savedPending = appended[1];
         if (!savedUser || !savedPending) throw new Error("Invalid append response");
         noteChatSessionMutation();
-        input.value = "";
+        if (input) input.value = "";
         inputPersisted = true;
+        outcome.inputPersisted = true;
         syncSessionMessageCache(session, [savedUser, savedPending]);
         resortChatSessions();
         renderChatTab();
@@ -1085,22 +1121,35 @@ function sendChatTabMessage() {
               refreshMemoryPanelSoon();
               return refreshCanonicalSession(session).catch(function () { return session; });
             }, function (persistenceError) {
+              outcome.error = persistenceError;
               return reconcileAmbiguousAssistantUpdate(
                 session, savedPending, persistenceError);
+            }).then(function () {
+              outcome.message = findSessionMessage(session, savedPending.id) || savedPending;
+              return outcome.message;
             });
         }, function (executionError) {
           // The model call failed, so pending -> error is unambiguous and retryable.
-          return markAssistantPersistenceError(session, savedPending, executionError);
+          outcome.error = executionError;
+          return markAssistantPersistenceError(session, savedPending, executionError)
+            .then(function (message) {
+              outcome.message = message || findSessionMessage(session, savedPending.id) || savedPending;
+              return outcome.message;
+            });
         });
       });
   }).catch(function (err) {
-    if (!inputPersisted && !input.value) input.value = text;
-    alert(t("chat.sendFailed", { msg: (err && err.message ? err.message : err) }));
+    if (!outcome.error) outcome.error = err;
+    if (!inputPersisted && input && !input.value) input.value = text;
+    if (!deepChatRequest) {
+      alert(t("chat.sendFailed", { msg: (err && err.message ? err.message : err) }));
+    }
   }).then(function () {
     state.chatSending = false;
     renderChatTab();
     return refreshChatSessionListIfNeeded().then(function () {
       renderChatTab();
+      return outcome;
     });
   });
 }
@@ -1238,10 +1287,12 @@ function refreshMemoryPanelSoon() {
 }
 
 function createSuggestedTask(title, notes, priority, btn) {
-  api.createTask({ title: title, notes: notes, priority: priority, source: "chat" }).then(function () {
+  if (btn) btn.disabled = true;
+  return api.createTask({ title: title, notes: notes, priority: priority, source: "chat" }).then(function () {
     if (btn) { btn.textContent = t("task.created"); btn.disabled = true; }
     loadTasks();
   }).catch(function (err) {
+    if (btn) btn.disabled = false;
     alert(t("task.createFailed", { msg: err.message }));
   });
 }

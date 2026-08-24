@@ -98,15 +98,20 @@
         <div class="chat-workspace-header">
           <span id="chat-session-title" class="chat-session-title" data-i18n="chat.selectOrCreate">选择或创建会话</span>
         </div>
-        <div id="chat-thread" class="chat-thread">
-          <div class="chat-welcome">
-            <p data-i18n="chat.welcomeTitle">欢迎使用会话模式</p>
-            <p class="chat-welcome-hint" data-i18n="chat.welcomeHint">可以追问当前状态、记录想法、生成待办</p>
-          </div>
+        <div id="chat-thread" class="chat-thread deep-chat-host">
+          <deep-chat id="deep-chat" aria-label="SelfAnalyst chat"></deep-chat>
         </div>
-        <div class="chat-composer">
-          <textarea id="chat-tab-input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" data-i18n-placeholder="chat.composerPlaceholder" rows="2" disabled></textarea>
-          <button id="chat-tab-send-btn" class="btn btn-primary" disabled data-i18n="chat.send">发送</button>
+        <div id="chat-fallback" class="chat-fallback hidden">
+          <div id="chat-fallback-thread" class="chat-thread">
+            <div class="chat-welcome">
+              <p data-i18n="chat.welcomeTitle">欢迎使用会话模式</p>
+              <p class="chat-welcome-hint" data-i18n="chat.welcomeHint">可以追问当前状态、记录想法、生成待办</p>
+            </div>
+          </div>
+          <div class="chat-composer">
+            <textarea id="chat-tab-input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" data-i18n-placeholder="chat.composerPlaceholder" rows="2" disabled></textarea>
+            <button id="chat-tab-send-btn" class="btn btn-primary" disabled data-i18n="chat.send">发送</button>
+          </div>
         </div>
       </section>
 
@@ -208,11 +213,13 @@
   </div>
 </div>
 
+<script type="module" src="deep-chat.bundle.js"></script>
 <script src="utils.js"></script>
 <script src="i18n.js"></script>
 <script src="state.js"></script>
 <script src="api.js"></script>
 <script src="agent.js"></script>
+<script src="deep-chat-adapter.js"></script>
 <script src="chat.js"></script>
 <script src="chat-drawer.js"></script>
 <script src="config.js"></script>

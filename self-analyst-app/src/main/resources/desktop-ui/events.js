@@ -329,7 +329,7 @@ function setupEvents() {
     createChatSession({ title: t("chat.newSessionDefault") }).then(function () {
       switchTab("chat");
       renderChatTab();
-      if (state.dom.chatTabInput) state.dom.chatTabInput.focus();
+      focusChatComposer();
     }).catch(function (err) {
       alert(t("chat.newSessionFailed", { msg: (err && err.message ? err.message : err) }));
     });
@@ -340,16 +340,19 @@ function setupEvents() {
     scheduleChatSessionSearch(this.value);
   });
 
-  // Chat tab - send button
-  state.dom.chatTabSendBtn.addEventListener("click", sendChatTabMessage);
-
-  // Chat tab - enter key to send
-  state.dom.chatTabInput.addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendChatTabMessage();
-    }
-  });
+  // Legacy composer fallback used by unit tests and deployments where the
+  // vendored web component cannot be upgraded.
+  if (state.dom.chatTabSendBtn) {
+    state.dom.chatTabSendBtn.addEventListener("click", sendChatTabMessage);
+  }
+  if (state.dom.chatTabInput) {
+    state.dom.chatTabInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        sendChatTabMessage();
+      }
+    });
+  }
 
   // Context toggles
   var toggles = state.dom.chatContextToggles.querySelectorAll("input[type=checkbox]");

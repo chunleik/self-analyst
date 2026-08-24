@@ -86,6 +86,7 @@ function createChatSandbox({ status = "pending", chatSending = false, api = {} }
       if (key === "chat.sendFailed") return `Send failed: ${params?.msg ?? ""}`;
       if (key === "chat.agentNoContent") return "No content";
       if (key === "chat.reconciliationPending") return `Reconcile: ${params?.msg ?? ""}`;
+      if (key === "task.createFailed") return `Task failed: ${params?.msg ?? ""}`;
       return key;
     },
     escHtml(value) {
@@ -137,6 +138,24 @@ test("chat requests route by server-issued session id", () => {
 
   // Legacy drawer remains backward-compatible and intentionally omits a session id.
   assert.match(drawer, /api\s*\.postChat\(msg,\s*context\)/);
+});
+
+test("suggested task action is re-enabled after create failure", async () => {
+  const alerts = [];
+  const { sandbox } = createChatSandbox({
+    api: {
+      createTask() { return Promise.reject(new Error("task API unavailable")); },
+    },
+  });
+  sandbox.alert = (message) => alerts.push(message);
+  const button = { disabled: false, textContent: "Create" };
+
+  await sandbox.createSuggestedTask("Verify", "notes", "medium", button);
+
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Create");
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /task API unavailable/);
 });
 
 test("desktop turn context uses bounded projections instead of whole task and timeline objects", () => {

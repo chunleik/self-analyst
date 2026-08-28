@@ -49,6 +49,12 @@ Rust crate dependencies of the Tauri shell are declared in
 `self-analyst-desktop/src-tauri/Cargo.toml`; their licenses (predominantly
 MIT / Apache-2.0) are resolved by Cargo and recorded in `Cargo.lock`.
 
+## Accessibility sidecar (Rust)
+
+| Component | Purpose | License |
+|-----------|---------|---------|
+| [uiautomation](https://github.com/leexgone/uiautomation-rs) | Windows UI Automation client for the accessibility-tree sidecar (`self-analyst-axsidecar`) | Apache-2.0 |
+
 ## Desktop frontend
 
 | Component | Purpose | License |

@@ -119,33 +119,24 @@ fn main() {
 #[cfg(windows)]
 mod platform {
     use super::{AxNode, Response};
-    use windows::core::Interface;
-    use windows::Win32::Foundation::{HWND, RECT};
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
-    };
-    use windows::Win32::UI::Accessibility::{
-        CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTreeWalker,
-        IUIAutomationValuePattern, UIA_ValuePatternId,
-    };
+    use uiautomation::patterns::UIValuePattern;
+    use uiautomation::types::{ControlType, Handle};
+    use uiautomation::{UIAutomation, UIElement, UITreeWalker};
 
     const MAX_DEPTH: i32 = 60;
 
     pub struct Backend {
-        automation: Option<IUIAutomation>,
-        walker: Option<IUIAutomationTreeWalker>,
+        automation: Option<UIAutomation>,
+        walker: Option<UITreeWalker>,
     }
 
     impl Backend {
         pub fn new() -> Self {
-            unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            }
-            let automation: Option<IUIAutomation> =
-                unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.ok();
+            // UIAutomation::new() initializes COM with COINIT_MULTITHREADED.
+            let automation = UIAutomation::new().ok();
             let walker = automation
                 .as_ref()
-                .and_then(|a| unsafe { a.ControlViewWalker() }.ok());
+                .and_then(|a| a.get_control_view_walker().ok());
             Backend { automation, walker }
         }
 
@@ -154,112 +145,99 @@ mod platform {
                 (Some(a), Some(w)) => (a, w),
                 _ => return Response::error(id, "UIAutomation unavailable".into()),
             };
-            let hwnd = HWND(handle as *mut core::ffi::c_void);
-            let element = match unsafe { automation.ElementFromHandle(hwnd) } {
+            let element = match automation.element_from_handle(Handle::from(handle)) {
                 Ok(e) => e,
                 Err(_) => return Response::null(id),
             };
-            let root = unsafe { walk(walker, &element, 0) };
+            let root = walk(walker, &element, 0);
             Response::ok(id, root)
         }
     }
 
-    unsafe fn walk(
-        walker: &IUIAutomationTreeWalker,
-        el: &IUIAutomationElement,
-        depth: i32,
-    ) -> AxNode {
-        let control_type = el.CurrentControlType().map(|c| c.0).unwrap_or(0);
-        let role = control_type_to_role(control_type).to_string();
-        let name = bstr(el.CurrentName());
-        let secure = el.CurrentIsPassword().map(|b| b.as_bool()).unwrap_or(false);
+    fn walk(walker: &UITreeWalker, el: &UIElement, depth: i32) -> AxNode {
+        let role = el
+            .get_control_type()
+            .map(control_type_to_role)
+            .unwrap_or("Unknown")
+            .to_string();
+        let name = el.get_name().unwrap_or_default();
+        let secure = el.is_password().unwrap_or(false);
         // SPEC-AXS-014b: never emit a real secret value.
         let value = if secure { "***".to_string() } else { value_of(el) };
         let bounds = el
-            .CurrentBoundingRectangle()
-            .map(rect_to_bounds)
+            .get_bounding_rectangle()
+            .map(|r| {
+                [
+                    r.get_left() as f64,
+                    r.get_top() as f64,
+                    r.get_width() as f64,
+                    r.get_height() as f64,
+                ]
+            })
             .unwrap_or([0.0; 4]);
 
         let mut children = Vec::new();
         if depth < MAX_DEPTH {
-            let mut child = walker.GetFirstChildElement(el).ok();
+            let mut child = walker.get_first_child(el).ok();
             while let Some(c) = child {
                 children.push(walk(walker, &c, depth + 1));
-                child = walker.GetNextSiblingElement(&c).ok();
+                child = walker.get_next_sibling(&c).ok();
             }
         }
 
         AxNode { role, name, value, secure, bounds, children }
     }
 
-    unsafe fn value_of(el: &IUIAutomationElement) -> String {
-        match el.GetCurrentPattern(UIA_ValuePatternId) {
-            Ok(unk) => match unk.cast::<IUIAutomationValuePattern>() {
-                Ok(vp) => bstr(vp.CurrentValue()),
-                Err(_) => String::new(),
-            },
-            Err(_) => String::new(),
-        }
+    fn value_of(el: &UIElement) -> String {
+        el.get_pattern::<UIValuePattern>()
+            .and_then(|p| p.get_value())
+            .unwrap_or_default()
     }
 
-    fn bstr(r: windows::core::Result<windows::core::BSTR>) -> String {
-        r.map(|b| b.to_string()).unwrap_or_default()
-    }
-
-    fn rect_to_bounds(r: RECT) -> [f64; 4] {
-        [
-            r.left as f64,
-            r.top as f64,
-            (r.right - r.left) as f64,
-            (r.bottom - r.top) as f64,
-        ]
-    }
-
-    /// Map UIA control-type id -> neutral role (SPEC-AXS-016).
-    fn control_type_to_role(id: i32) -> &'static str {
-        match id {
-            50000 => "Button",
-            50001 => "Calendar",
-            50002 => "CheckBox",
-            50003 => "ComboBox",
-            50004 => "Edit",
-            50005 => "Hyperlink",
-            50006 => "Image",
-            50007 => "ListItem",
-            50008 => "List",
-            50009 => "Menu",
-            50010 => "MenuBar",
-            50011 => "MenuItem",
-            50012 => "ProgressBar",
-            50013 => "RadioButton",
-            50014 => "ScrollBar",
-            50015 => "Slider",
-            50016 => "Spinner",
-            50017 => "StatusBar",
-            50018 => "Tab",
-            50019 => "TabItem",
-            50020 => "Text",
-            50021 => "ToolBar",
-            50022 => "ToolTip",
-            50023 => "Tree",
-            50024 => "TreeItem",
-            50025 => "Custom",
-            50026 => "Group",
-            50027 => "Thumb",
-            50028 => "DataGrid",
-            50029 => "DataItem",
-            50030 => "Document",
-            50031 => "SplitButton",
-            50032 => "Window",
-            50033 => "Pane",
-            50034 => "Header",
-            50035 => "HeaderItem",
-            50036 => "Table",
-            50037 => "TitleBar",
-            50038 => "Separator",
-            50039 => "SemanticZoom",
-            50040 => "AppBar",
-            _ => "Unknown",
+    /// Map UIA control type -> neutral role (SPEC-AXS-016).
+    fn control_type_to_role(ct: ControlType) -> &'static str {
+        match ct {
+            ControlType::Button => "Button",
+            ControlType::Calendar => "Calendar",
+            ControlType::CheckBox => "CheckBox",
+            ControlType::ComboBox => "ComboBox",
+            ControlType::Edit => "Edit",
+            ControlType::Hyperlink => "Hyperlink",
+            ControlType::Image => "Image",
+            ControlType::ListItem => "ListItem",
+            ControlType::List => "List",
+            ControlType::Menu => "Menu",
+            ControlType::MenuBar => "MenuBar",
+            ControlType::MenuItem => "MenuItem",
+            ControlType::ProgressBar => "ProgressBar",
+            ControlType::RadioButton => "RadioButton",
+            ControlType::ScrollBar => "ScrollBar",
+            ControlType::Slider => "Slider",
+            ControlType::Spinner => "Spinner",
+            ControlType::StatusBar => "StatusBar",
+            ControlType::Tab => "Tab",
+            ControlType::TabItem => "TabItem",
+            ControlType::Text => "Text",
+            ControlType::ToolBar => "ToolBar",
+            ControlType::ToolTip => "ToolTip",
+            ControlType::Tree => "Tree",
+            ControlType::TreeItem => "TreeItem",
+            ControlType::Custom => "Custom",
+            ControlType::Group => "Group",
+            ControlType::Thumb => "Thumb",
+            ControlType::DataGrid => "DataGrid",
+            ControlType::DataItem => "DataItem",
+            ControlType::Document => "Document",
+            ControlType::SplitButton => "SplitButton",
+            ControlType::Window => "Window",
+            ControlType::Pane => "Pane",
+            ControlType::Header => "Header",
+            ControlType::HeaderItem => "HeaderItem",
+            ControlType::Table => "Table",
+            ControlType::TitleBar => "TitleBar",
+            ControlType::Separator => "Separator",
+            ControlType::SemanticZoom => "SemanticZoom",
+            ControlType::AppBar => "AppBar",
         }
     }
 }

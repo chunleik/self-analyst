@@ -79,10 +79,8 @@ class DesktopChatSessionLifecycleControllerTest {
                     store, null, agent, config, null);
             sessionController.deleteSession(deleteCaptured.context());
             assertEquals(409, deleteCaptured.status);
-            assertTrue(Files.exists(config.memoryDir().resolve("chat-sessions")
-                    .resolve(session.id + ".json")));
-            assertFalse(Files.exists(config.memoryDir().resolve("chat-sessions")
-                    .resolve("delete-" + session.id + ".state")));
+            assertNotNull(store.getSession(session.id));
+            assertFalse(store.pendingDeletionIds().contains(session.id));
 
             releaseGate.countDown();
             assertNotNull(running.get(2, TimeUnit.SECONDS));
@@ -142,8 +140,7 @@ class DesktopChatSessionLifecycleControllerTest {
 
         assertEquals(200, captured.status);
         assertFalse(Files.exists(stateRoot.resolve("desktop").resolve(session.id)));
-        assertFalse(Files.exists(config.memoryDir().resolve("chat-sessions")
-                .resolve("delete-" + session.id + ".state")));
+        assertFalse(store.pendingDeletionIds().contains(session.id));
     }
 
     @Test

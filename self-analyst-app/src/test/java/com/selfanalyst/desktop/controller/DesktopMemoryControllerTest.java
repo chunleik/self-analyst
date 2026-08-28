@@ -150,14 +150,13 @@ class DesktopMemoryControllerTest {
         assertTrue(store.listIndex().sessions.isEmpty());
 
         ChatSessionStore.Session session = store.create(req("validation"));
-        Path shard = tempDir.resolve("chat-sessions").resolve(session.id + ".json");
-        byte[] before = Files.readAllBytes(shard);
+        int messagesBefore = store.getSession(session.id).messages.size();
         for (String body : List.of("{}", "[]", "[null]", "42", "{\"messages\":null}")) {
             FakeContext invalid = FakeContext.withBody(body);
             invalid.pathParams.put("id", session.id);
             controller.appendMessages(invalid.ctx());
             assertEquals(400, invalid.status, body);
-            assertEquals(new String(before), new String(Files.readAllBytes(shard)), body);
+            assertEquals(messagesBefore, store.getSession(session.id).messages.size(), body);
         }
 
         String deeplyNested = "{\"contextSnapshot\":" + "[".repeat(40)
@@ -218,8 +217,7 @@ class DesktopMemoryControllerTest {
 
         assertEquals(1, extraction.count(), "sent->sent updates must not schedule duplicate extraction");
 
-        Path shard = tempDir.resolve("chat-sessions").resolve(session.id + ".json");
-        byte[] beforeLateError = Files.readAllBytes(shard);
+        ChatSessionStore.Message beforeLateError = store.getSession(session.id).messages.get(1);
         FakeContext lateError = FakeContext.withBody(
                 "{\"content\":\"late error\",\"status\":\"error\",\"error\":\"network\"}");
         lateError.pathParams.put("id", session.id);
@@ -228,7 +226,9 @@ class DesktopMemoryControllerTest {
         Thread.sleep(100);
 
         assertEquals(400, lateError.status);
-        assertEquals(new String(beforeLateError), new String(Files.readAllBytes(shard)));
+        ChatSessionStore.Message afterLateError = store.getSession(session.id).messages.get(1);
+        assertEquals(beforeLateError.status, afterLateError.status);
+        assertEquals(beforeLateError.content, afterLateError.content);
         assertEquals(1, extraction.count(), "invalid late errors must not trigger extraction");
     }
 

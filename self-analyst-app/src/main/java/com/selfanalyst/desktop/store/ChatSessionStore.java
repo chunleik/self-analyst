@@ -17,7 +17,14 @@ import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -35,17 +42,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Sharded persistent store for desktop chat sessions, backed by
- * {@code {memoryDir}/chat-sessions/}: one {@code <sessionId>.json} shard per
- * session (the authoritative copy, including {@code messages}) plus an
- * rebuildable SQLite {@code index.db} projection ({@code activeSessionId} + one
- * {@link SessionMeta} row per session, for the list view + search).
+ * SQLite-backed persistent store for desktop chat sessions
+ * (SPEC-CSS-*): a single {@code {memoryDir}/chat-sessions/chat.db} (WAL,
+ * synchronous=FULL, foreign keys on) is the one authoritative copy of both
+ * session bodies and list/search metadata. Every mutation commits in one
+ * SQLite transaction (SPEC-CSS-API-001), so the application-level
+ * shard/projection/DIRTY-state machinery of the previous implementation is
+ * gone; crash recovery is SQLite's WAL. Search uses an FTS5 trigram index
+ * over title/summary/lastMessagePreview with a LIKE fallback
+ * (SPEC-CSS-DEC-005). The public API is unchanged from the sharded
+ * implementation (SPEC-CSS-DEC-003).
  * <p>
- * Each write touches only the affected shard + one SQLite projection row (per-shard
- * isolation, SPEC-CSP-API-010b) and is persisted atomically via temp-file +
- * {@code ATOMIC_MOVE} (SPEC-CSP-API-010a, mirroring {@link TaskStore#save}).
- * The index is a derived projection: when missing/corrupt it is rebuilt from
- * the shards (SPEC-CSP-MODEL-005 / API-010c).
+ * Connections are opened per operation (try-with-resources), so a store
+ * instance holds no database resources between calls; {@link #close()} only
+ * releases the optional writer lease.
  */
 public class ChatSessionStore implements AutoCloseable {
 
@@ -75,21 +85,19 @@ public class ChatSessionStore implements AutoCloseable {
     static final int MAX_CONTAINER_ITEMS = 256;
     static final int MAX_JSON_KEY = 128;
     static final int MAX_JSON_STRING = 8192;
-    /** Hard UTF-8 bound for one persisted shard. */
+    /** Hard UTF-8 bound for one persisted session (formerly one shard). */
     static final int MAX_SHARD_BYTES = 16 * 1024 * 1024;
-    /** Length of the derived {@code lastMessagePreview} (SPEC-CSP-DEC-008). */
+    /** Length of the derived {@code lastMessagePreview}. */
     private static final int PREVIEW_LEN = 80;
-    /** Server-generated IDs are the only valid shard names. */
+    /** Server-generated IDs are the only valid session/message ids. */
     private static final Pattern GENERATED_SESSION_ID = Pattern.compile("^[a-f0-9]{32}$");
     private static final Pattern GENERATED_MESSAGE_ID = Pattern.compile("^[a-f0-9]{12}$");
-    private static final Pattern DELETION_INTENT_FILE = Pattern.compile(
-            "^delete-([a-f0-9]{32})\\.state$");
-    private static final Pattern STORE_TEMP_FILE = Pattern.compile(
-            "^\\.(?:index\\.json|index\\.state|index\\.db\\.ready|[a-f0-9]{32}\\.json|"
-                    + "delete-[a-f0-9]{32}\\.state)\\..+\\.chat-tmp$");
-    private static final int RECOVERY_PROTOCOL_VERSION = 1;
-    private static final int DELETION_PROTOCOL_VERSION = 1;
-    private static final String TEMP_SUFFIX = ".chat-tmp";
+    private static final Pattern LEGACY_SHARD_NAME = Pattern.compile("^[a-f0-9]{32}\\.json$");
+    private static final Pattern LEGACY_DELETION_NAME = Pattern.compile(
+            "^delete-[a-f0-9]{32}\\.state$");
+    private static final int SCHEMA_VERSION = 2;
+    /** Queries shorter than this use the LIKE fallback instead of FTS5 trigram. */
+    private static final int FTS_MIN_QUERY_CODEPOINTS = 3;
     private static final Comparator<SessionMeta> META_ORDER = Comparator
             .comparing((SessionMeta meta) -> meta.updatedAt != null
                     ? meta.updatedAt : Instant.EPOCH)
@@ -97,50 +105,30 @@ public class ChatSessionStore implements AutoCloseable {
             .thenComparing(meta -> meta.id != null ? meta.id : "", Comparator.reverseOrder());
 
     private final Path dir;
-    private final Path indexFile;
-    private final Path sqliteIndexFile;
-    private final Path sqliteReadyFile;
-    private final Path stateFile;
-    private final ChatSessionStoreIo io;
-    private final ChatSessionIndex projectionIndex;
+    private final Path dbFile;
     private final FileChannel writerLockChannel;
     private final FileLock writerLock;
-    private final Set<String> pendingDeletionIds = new TreeSet<>();
-    private boolean recovered;
-    private boolean recovering;
-    private boolean recoveringLegacyIndex;
-    private boolean deletionIntentsLoaded;
+    private final boolean ftsEnabled;
+    private boolean pendingTranscriptsRecovered;
     private boolean recoveringDeletions;
     private boolean closed;
 
     public ChatSessionStore(Path memoryDir) {
-        this(memoryDir, ChatSessionStoreIo.nio(), null, null, null);
+        this(memoryDir, null, null);
     }
 
-    ChatSessionStore(Path memoryDir, ChatSessionStoreIo io) {
-        this(memoryDir, io, null, null, null);
-    }
-
-    ChatSessionStore(Path memoryDir, ChatSessionStoreIo io, ChatSessionIndex projectionIndex) {
-        this(memoryDir, io, projectionIndex, null, null);
-    }
-
-    private ChatSessionStore(
-            Path memoryDir,
-            ChatSessionStoreIo io,
-            ChatSessionIndex projectionIndex,
-            FileChannel writerLockChannel,
-            FileLock writerLock) {
+    private ChatSessionStore(Path memoryDir, FileChannel writerLockChannel, FileLock writerLock) {
         this.dir = memoryDir.resolve("chat-sessions").toAbsolutePath().normalize();
-        this.indexFile = dir.resolve("index.json");
-        this.sqliteIndexFile = dir.resolve("index.db");
-        this.sqliteReadyFile = dir.resolve("index.db.ready");
-        this.stateFile = dir.resolve("index.state");
-        this.io = java.util.Objects.requireNonNull(io, "io");
-        this.projectionIndex = projectionIndex != null
-                ? projectionIndex : new SqliteChatSessionIndex(sqliteIndexFile);
+        this.dbFile = dir.resolve("chat.db");
         this.writerLockChannel = writerLockChannel;
         this.writerLock = writerLock;
+        try {
+            Files.createDirectories(dir);
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot create chat-sessions directory", error);
+        }
+        migrateLegacyIfNeeded();
+        this.ftsEnabled = openWithCorruptionRecovery();
     }
 
     /** Open the production store with a process-wide exclusive writer lease. */
@@ -157,65 +145,24 @@ public class ChatSessionStore implements AutoCloseable {
                 throw new IllegalStateException(
                         "Another SelfAnalyst process is already writing " + storeDir);
             }
-            return new ChatSessionStore(
-                    memoryDir, ChatSessionStoreIo.nio(), null, channel, lock);
+            return new ChatSessionStore(memoryDir, channel, lock);
         } catch (IOException | OverlappingFileLockException error) {
-            if (lock != null) {
-                try { lock.release(); } catch (IOException ignored) { }
-            }
-            if (channel != null) {
-                try { channel.close(); } catch (IOException ignored) { }
-            }
+            releaseQuietly(lock, channel);
             throw new IllegalStateException(
                     "Cannot acquire the chat-session writer lock for " + storeDir, error);
         } catch (RuntimeException error) {
-            if (lock != null) {
-                try { lock.release(); } catch (IOException ignored) { }
-            }
-            if (channel != null) {
-                try { channel.close(); } catch (IOException ignored) { }
-            }
+            releaseQuietly(lock, channel);
             throw error;
         }
     }
 
-    // ── Atomic persistence ───────────────────────────────────────
-
-    /**
-     * Write {@code value} to {@code target} atomically: temp-file then
-     * {@code ATOMIC_MOVE} (SPEC-CSP-API-010a). On {@link IOException} the
-     * on-disk original is left untouched and a {@link RuntimeException} is
-     * thrown so the controller maps it to HTTP 500.
-     */
-    private void writeJson(Path target, Object value) {
-        Path tmp = null;
-        try {
-            io.createDirectories(dir);
-            tmp = io.createTempFile(dir, "." + target.getFileName() + ".", TEMP_SUFFIX);
-            io.writeJson(MAPPER, tmp, value);
-            io.atomicReplace(tmp, target);
-            tmp = null;
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to write " + target.getFileName(), e);
-        } finally {
-            if (tmp != null) {
-                try {
-                    io.deleteIfExists(tmp);
-                } catch (IOException cleanupFailure) {
-                    log.debug("Failed to clean chat temp {}: {}", tmp.getFileName(),
-                            cleanupFailure.getMessage());
-                }
-            }
+    private static void releaseQuietly(FileLock lock, FileChannel channel) {
+        if (lock != null) {
+            try { lock.release(); } catch (IOException ignored) { }
         }
-    }
-
-    private Path shardFile(String id) {
-        requireValidSessionId(id);
-        Path shard = dir.resolve(id + ".json").toAbsolutePath().normalize();
-        if (!shard.startsWith(dir) || !dir.equals(shard.getParent())) {
-            throw new IllegalArgumentException("Invalid chat session id");
+        if (channel != null) {
+            try { channel.close(); } catch (IOException ignored) { }
         }
-        return shard;
     }
 
     public static boolean isValidSessionId(String id) {
@@ -236,283 +183,399 @@ public class ChatSessionStore implements AutoCloseable {
         }
     }
 
-    // ── Index load / rebuild ─────────────────────────────────────
+    // ── Database bootstrap ───────────────────────────────────────
 
-    /** Load the SQLite projection after migration/recovery has made it canonical. */
-    private Index loadIndex() {
-        ensureRecovered();
+    /** Initialize the schema and return whether FTS5 trigram is available. */
+    private boolean openWithCorruptionRecovery() {
         try {
-            Index idx = projectionIndex.load();
-            normalizeIndexMemoryPolicy(idx);
-            return idx;
-        } catch (RuntimeException error) {
-            log.warn("chat-sessions index.db unreadable ({}), rebuilding from shards",
-                    error.getMessage());
-            projectionIndex.resetCorrupt();
-            recovered = false;
-            ensureRecovered();
-            return projectionIndex.load();
+            return initializeDatabase(dbFile);
+        } catch (IllegalStateException corrupt) {
+            log.warn("chat.db is unreadable ({}); preserving a backup", corrupt.getMessage());
+            preserveCorruptDatabase();
+            Path legacyDir = dir.resolve("legacy");
+            if (Files.isDirectory(legacyDir) && containsLegacyShards(legacyDir)) {
+                log.warn("Rebuilding chat.db from legacy shard backup");
+                Path migrating = dir.resolve("chat.db.migrating");
+                importLegacyDirectory(legacyDir, migrating);
+                movePreserving(migrating, dbFile);
+            } else {
+                log.error("No legacy backup available; starting with an empty chat.db");
+            }
+            return initializeDatabase(dbFile);
         }
     }
 
-    private void ensureRecovered() {
-        ensureOpen();
-        // Validate deletion evidence before index recovery performs any write.
-        ensureDeletionIntentsLoaded();
-        ensureIndexRecovered();
-        if (!recoveringDeletions) recoverPendingTranscriptDeletions();
+    private static boolean initializeDatabase(Path database) {
+        try (Connection conn = openConnection(database)) {
+            return initializeSchema(conn);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Cannot initialize chat database " + database, error);
+        }
     }
 
-    private void ensureIndexRecovered() {
-        if (recovering) return;
-        if (recovered) return;
-        boolean migrateLegacyIndex = legacyIndexMigrationRequired();
-        recoveringLegacyIndex = migrateLegacyIndex;
-        if (Files.notExists(dir)) {
-            Index empty = new Index();
-            empty.generation = freshProjectionGeneration(0);
-            projectionIndex.replaceAll(empty);
-            writeRecoveryState(RecoveryState.clean());
-            ensureProjectionMarker();
-            recoveringLegacyIndex = false;
-            recovered = true;
+    private void preserveCorruptDatabase() {
+        if (!Files.exists(dbFile)) return;
+        Path backup = dbFile.resolveSibling(dbFile.getFileName()
+                + ".corrupt-" + UUID.randomUUID());
+        movePreserving(dbFile, backup);
+        for (String suffix : new String[]{"-journal", "-wal", "-shm"}) {
+            Path sidecar = dbFile.resolveSibling(dbFile.getFileName() + suffix);
+            if (Files.exists(sidecar)) {
+                movePreserving(sidecar,
+                        backup.resolveSibling(backup.getFileName() + suffix));
+            }
+        }
+    }
+
+    private static void movePreserving(Path source, Path target) {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException atomicFailure) {
+            try {
+                Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException moveFailure) {
+                moveFailure.addSuppressed(atomicFailure);
+                throw new IllegalStateException("Cannot preserve " + source.getFileName(), moveFailure);
+            }
+        }
+    }
+
+    private static Connection openConnection(Path database) throws SQLException {
+        Connection conn = DriverManager.getConnection("jdbc:sqlite:" + database);
+        try (Statement statement = conn.createStatement()) {
+            statement.execute("PRAGMA busy_timeout=5000");
+            statement.execute("PRAGMA journal_mode=WAL");
+            statement.execute("PRAGMA synchronous=FULL");
+            statement.execute("PRAGMA foreign_keys=ON");
+        } catch (SQLException error) {
+            try {
+                conn.close();
+            } catch (SQLException closeFailure) {
+                error.addSuppressed(closeFailure);
+            }
+            throw error;
+        }
+        return conn;
+    }
+
+    private Connection connect() {
+        try {
+            return openConnection(dbFile);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Cannot open chat database " + dbFile, error);
+        }
+    }
+
+    /**
+     * Create tables/FTS/triggers and validate the schema version. Returns
+     * whether the FTS5 trigram index is available (SPEC-CSS-DEC-005).
+     */
+    private static boolean initializeSchema(Connection conn) throws SQLException {
+        try (Statement statement = conn.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS metadata(
+                      key TEXT PRIMARY KEY,
+                      value TEXT NOT NULL
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS sessions(
+                      id TEXT PRIMARY KEY NOT NULL CHECK(length(id) = 32),
+                      title TEXT,
+                      created_at TEXT,
+                      updated_at TEXT,
+                      source TEXT,
+                      context_label TEXT,
+                      context_snapshot TEXT,
+                      memory_policy TEXT,
+                      summary TEXT,
+                      last_message_preview TEXT,
+                      message_count INTEGER NOT NULL DEFAULT 0 CHECK(message_count >= 0)
+                    )
+                    """);
+            statement.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_order "
+                    + "ON sessions(updated_at DESC, id DESC)");
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS messages(
+                      id TEXT PRIMARY KEY NOT NULL,
+                      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                      seq INTEGER NOT NULL,
+                      role TEXT NOT NULL,
+                      content TEXT,
+                      created_at TEXT,
+                      status TEXT,
+                      error TEXT,
+                      context_snapshot TEXT,
+                      suggested_tasks TEXT,
+                      UNIQUE(session_id, seq)
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS pending_deletions(
+                      session_id TEXT PRIMARY KEY NOT NULL,
+                      requested_at TEXT NOT NULL
+                    )
+                    """);
+            String version = metadata(conn, "schema_version");
+            if (version == null) {
+                setMetadata(conn, "schema_version", Integer.toString(SCHEMA_VERSION));
+                if (metadata(conn, "generation") == null) {
+                    setMetadata(conn, "generation", "0");
+                }
+            } else if (!Integer.toString(SCHEMA_VERSION).equals(version)) {
+                throw new IllegalStateException(
+                        "Unsupported chat database schema version: " + version);
+            }
+        }
+        return initializeFts(conn);
+    }
+
+    private static boolean initializeFts(Connection conn) {
+        try (Statement statement = conn.createStatement()) {
+            statement.execute("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
+                      title, summary, last_message_preview,
+                      content='sessions', content_rowid='rowid',
+                      tokenize='trigram case_sensitive 0'
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TRIGGER IF NOT EXISTS sessions_ai AFTER INSERT ON sessions BEGIN
+                      INSERT INTO sessions_fts(rowid, title, summary, last_message_preview)
+                      VALUES (new.rowid, new.title, new.summary, new.last_message_preview);
+                    END
+                    """);
+            statement.execute("""
+                    CREATE TRIGGER IF NOT EXISTS sessions_ad AFTER DELETE ON sessions BEGIN
+                      INSERT INTO sessions_fts(sessions_fts, rowid, title, summary,
+                                             last_message_preview)
+                      VALUES('delete', old.rowid, old.title, old.summary,
+                             old.last_message_preview);
+                    END
+                    """);
+            statement.execute("""
+                    CREATE TRIGGER IF NOT EXISTS sessions_au AFTER UPDATE ON sessions BEGIN
+                      INSERT INTO sessions_fts(sessions_fts, rowid, title, summary,
+                                             last_message_preview)
+                      VALUES('delete', old.rowid, old.title, old.summary,
+                             old.last_message_preview);
+                      INSERT INTO sessions_fts(rowid, title, summary, last_message_preview)
+                      VALUES (new.rowid, new.title, new.summary, new.last_message_preview);
+                    END
+                    """);
+            // Sync any rows inserted before the triggers existed (e.g. imports).
+            statement.execute("INSERT INTO sessions_fts(sessions_fts) VALUES('rebuild')");
+            return true;
+        } catch (SQLException error) {
+            log.warn("FTS5 trigram unavailable ({}); falling back to LIKE search",
+                    error.getMessage());
+            return false;
+        }
+    }
+
+    // ── Legacy migration (SPEC-CSS-DEC-006 / SPEC-CSS-API-003) ───
+
+    private void migrateLegacyIfNeeded() {
+        Path migrating = dir.resolve("chat.db.migrating");
+        try {
+            Files.deleteIfExists(migrating);
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot remove stale chat.db.migrating", error);
+        }
+        if (Files.exists(dbFile)) {
+            // A crash between the atomic rename and the archival step leaves
+            // legacy files behind; finish that cleanup idempotently.
+            if (containsLegacyShards(dir) || Files.exists(dir.resolve("index.db"))
+                    || Files.exists(dir.resolve("index.json"))) {
+                moveLegacyArtifacts(dir.resolve("legacy"));
+            }
             return;
         }
-        if (!Files.isDirectory(dir)) {
-            throw new IllegalStateException(
-                    "chat-sessions path exists but is not an accessible directory: " + dir);
+        if (!containsLegacyShards(dir) && !Files.exists(dir.resolve("index.db"))
+                && !Files.exists(dir.resolve("index.json"))) {
+            return; // fresh install
         }
-        RecoveryStateRead stateRead = readRecoveryState();
-        if (stateRead.kind == RecoveryStateKind.INVALID) {
-            throw new IllegalStateException(
-                    "chat-sessions index.state is invalid; refusing to overwrite recovery evidence",
-                    stateRead.error);
-        }
-        RecoveryState state = stateRead.state;
-        if (state != null && RecoveryStatus.CLEAN.name().equals(state.state)) {
-            if (migrateLegacyIndex) {
-                Index bootstrap = readLegacyRawIndex();
-                if (bootstrap == null) bootstrap = scanCanonicalIndex();
-                normalizeProjectionIndex(bootstrap);
-                bootstrap.generation = freshProjectionGeneration(bootstrap.generation);
-                projectionIndex.replaceAll(bootstrap);
-                ensureProjectionMarker();
-                recoveringLegacyIndex = false;
-                cleanupTempFiles();
-                recovered = true;
-                return;
-            }
-            if (projectionIndex.exists()) {
-                try {
-                    projectionIndex.validate();
-                    ensureProjectionMarker();
-                    cleanupTempFiles();
-                    recovered = true;
-                    return;
-                } catch (RuntimeException corruptIndex) {
-                    log.warn("chat-sessions index.db is corrupt; preserving and rebuilding: {}",
-                            corruptIndex.getMessage());
-                    projectionIndex.resetCorrupt();
-                }
-            }
-        }
-        recovering = true;
-        recovered = false;
-        try {
-            cleanupTempFiles();
-            Index raw = readRawIndex();
-            Index canonical = scanCanonicalIndex();
-            canonical.generation = raw != null ? raw.generation : 0;
-            String activeHint = raw != null ? raw.activeSessionId : null;
-            if (state != null && RecoveryStatus.DIRTY.name().equals(state.state)) {
-                MutationOperation operation = parseOperation(state.operation);
-                boolean targetIsCanonical = resolves(canonical.sessions, state.sessionId);
-                ChatSessionStoreIo.PathStatus targetStatus;
-                try {
-                    targetStatus = io.status(shardFile(state.sessionId));
-                } catch (IOException error) {
-                    throw new IllegalStateException(
-                            "Cannot determine recovery target status", error);
-                }
-                activeHint = switch (operation) {
-                    case CREATE -> targetIsCanonical ? state.activeAfter : state.activeBefore;
-                    case DELETE -> targetStatus == ChatSessionStoreIo.PathStatus.MISSING
-                            ? state.activeAfter : state.activeBefore;
-                    case UPSERT -> state.activeBefore;
-                };
-            }
-            applyActiveHint(canonical, activeHint);
-            writeIndex(canonical);
-            writeRecoveryState(RecoveryState.clean());
-            if (migrateLegacyIndex) {
-                Index migrated = readLegacyRawIndex();
-                if (migrated == null) migrated = canonical;
-                normalizeProjectionIndex(migrated);
-                migrated.generation = freshProjectionGeneration(migrated.generation);
-                projectionIndex.replaceAll(migrated);
-            }
-            ensureProjectionMarker();
-            cleanupTempFiles();
-            recovered = true;
-        } finally {
-            recoveringLegacyIndex = false;
-            recovering = false;
-        }
+        log.info("Migrating legacy chat-sessions storage into chat.db");
+        importLegacyDirectory(dir, migrating);
+        movePreserving(migrating, dbFile);
+        moveLegacyArtifacts(dir.resolve("legacy"));
     }
 
-    private RecoveryStateRead readRecoveryState() {
-        if (Files.notExists(stateFile)) return RecoveryStateRead.missing();
-        try {
-            RecoveryState state = MAPPER.readValue(stateFile.toFile(), RecoveryState.class);
-            validateRecoveryState(state);
-            return RecoveryStateRead.valid(state);
-        } catch (IOException | RuntimeException error) {
-            return RecoveryStateRead.invalid(error);
-        }
-    }
-
-    private static void validateRecoveryState(RecoveryState state) {
-        if (state == null) throw new IllegalArgumentException("index.state is empty");
-        if (state.protocolVersion != RECOVERY_PROTOCOL_VERSION) {
-            throw new IllegalArgumentException(
-                    "Unsupported recovery protocol version: " + state.protocolVersion);
-        }
-        if (RecoveryStatus.CLEAN.name().equals(state.state)) return;
-        if (!RecoveryStatus.DIRTY.name().equals(state.state)) {
-            throw new IllegalArgumentException("Invalid recovery state: " + state.state);
-        }
-        MutationOperation operation = MutationOperation.valueOf(state.operation);
-        if (!isGeneratedSessionId(state.sessionId)) {
-            throw new IllegalArgumentException("Invalid recovery session id");
-        }
-        if (state.activeBefore != null && !isGeneratedSessionId(state.activeBefore)) {
-            throw new IllegalArgumentException("Invalid recovery activeBefore");
-        }
-        if (state.activeAfter != null && !isGeneratedSessionId(state.activeAfter)) {
-            throw new IllegalArgumentException("Invalid recovery activeAfter");
-        }
-        switch (operation) {
-            case CREATE -> {
-                if (!state.sessionId.equals(state.activeAfter)
-                        || state.sessionId.equals(state.activeBefore)) {
-                    throw new IllegalArgumentException("Invalid CREATE recovery intent");
-                }
-            }
-            case UPSERT -> {
-                if (!java.util.Objects.equals(state.activeBefore, state.activeAfter)) {
-                    throw new IllegalArgumentException("Invalid UPSERT recovery intent");
-                }
-            }
-            case DELETE -> {
-                boolean deletingActive = state.sessionId.equals(state.activeBefore);
-                if (deletingActive) {
-                    if (state.sessionId.equals(state.activeAfter)) {
-                        throw new IllegalArgumentException("Invalid active DELETE recovery intent");
-                    }
-                } else if (!java.util.Objects.equals(state.activeBefore, state.activeAfter)) {
-                    throw new IllegalArgumentException("Invalid inactive DELETE recovery intent");
-                }
-            }
-        }
-    }
-
-    private void writeRecoveryState(RecoveryState state) {
-        writeJson(stateFile, state);
-    }
-
-    private Index readRawIndex() {
-        if (!recoveringLegacyIndex) {
-            if (!projectionIndex.exists()) return null;
-            try {
-                return projectionIndex.load();
-            } catch (RuntimeException error) {
-                return null;
-            }
-        }
-        return readLegacyRawIndex();
-    }
-
-    private Index readLegacyRawIndex() {
-        if (!Files.exists(indexFile)) return null;
-        try {
-            Index index = MAPPER.readValue(indexFile.toFile(), Index.class);
-            if (index != null && index.sessions == null) index.sessions = new ArrayList<>();
-            return index;
-        } catch (IOException | RuntimeException error) {
-            return null;
-        }
-    }
-
-    private Index scanCanonicalIndex() {
-        Index rebuilt = new Index();
-        if (Files.notExists(dir)) return rebuilt;
-        if (!Files.isDirectory(dir)) {
-            throw new IllegalStateException(
-                    "chat-sessions path is not an accessible directory: " + dir);
-        }
-
-        List<Path> shards;
-        try {
-            shards = io.list(dir).stream()
-                    .filter(ChatSessionStore::isShardPath).sorted().toList();
+    private static boolean containsLegacyShards(Path directory) {
+        if (!Files.isDirectory(directory)) return false;
+        try (var paths = Files.list(directory)) {
+            return paths.anyMatch(path -> LEGACY_SHARD_NAME.matcher(
+                    path.getFileName().toString()).matches());
         } catch (IOException error) {
-            throw new RuntimeException("Failed to scan chat-sessions directory", error);
+            throw new IllegalStateException("Cannot scan " + directory, error);
         }
-        for (Path shard : shards) {
-            try {
-                Session session = MAPPER.readValue(shard.toFile(), Session.class);
-                String fileName = shard.getFileName().toString();
-                String fileId = fileName.substring(0, fileName.length() - 5);
-                if (session != null && fileId.equals(session.id)) {
-                    normalizeSessionForRead(session);
-                    rebuilt.sessions.add(toMeta(session));
-                } else {
-                    log.warn("Skipping chat shard with mismatched/invalid id: {}",
-                            shard.getFileName());
+    }
+
+    /**
+     * Build a complete chat database at {@code target} from the legacy shard
+     * layout in {@code sourceDir}: every valid shard is imported in one
+     * transaction together with the active pointer (old index.db, then
+     * index.json, then newest session) and any deletion tombstones.
+     */
+    private void importLegacyDirectory(Path sourceDir, Path target) {
+        List<Session> sessions = new ArrayList<>();
+        if (Files.isDirectory(sourceDir)) {
+            List<Path> shards;
+            try (var paths = Files.list(sourceDir)) {
+                shards = paths.filter(path -> LEGACY_SHARD_NAME.matcher(
+                        path.getFileName().toString()).matches()).sorted().toList();
+            } catch (IOException error) {
+                throw new IllegalStateException("Cannot scan legacy shards in " + sourceDir, error);
+            }
+            for (Path shard : shards) {
+                try {
+                    Session session = MAPPER.readValue(shard.toFile(), Session.class);
+                    String fileName = shard.getFileName().toString();
+                    String fileId = fileName.substring(0, fileName.length() - 5);
+                    if (session != null && fileId.equals(session.id)
+                            && isGeneratedSessionId(session.id)) {
+                        normalizeSessionForRead(session);
+                        // The messages table requires non-null unique ids;
+                        // tolerate legacy/malformed shards that lack them.
+                        if (session.messages != null) {
+                            session.messages.removeIf(java.util.Objects::isNull);
+                            for (Message message : session.messages) {
+                                if (!isGeneratedMessageId(message.id)) {
+                                    message.id = UUID.randomUUID().toString()
+                                            .replace("-", "").substring(0, 12);
+                                }
+                                if (message.createdAt == null) {
+                                    message.createdAt = Instant.now();
+                                }
+                            }
+                        }
+                        sessions.add(session);
+                    } else {
+                        log.warn("Skipping legacy shard with mismatched/invalid id: {}", fileName);
+                    }
+                } catch (IOException | RuntimeException error) {
+                    log.warn("Skipping unreadable legacy shard {}: {}",
+                            shard.getFileName(), error.getMessage());
                 }
-            } catch (IOException | RuntimeException error) {
-                log.warn("Skipping unreadable chat shard {}: {}",
-                        shard.getFileName(), error.getMessage());
             }
         }
-        rebuilt.sessions.sort(META_ORDER);
-        return rebuilt;
-    }
-
-    private static boolean isShardPath(Path path) {
-        String name = path.getFileName().toString();
-        return name.length() == 37 && name.endsWith(".json")
-                && isGeneratedSessionId(name.substring(0, 32));
-    }
-
-    private static void applyActiveHint(Index index, String activeHint) {
-        index.activeSessionId = isGeneratedSessionId(activeHint)
-                && resolves(index.sessions, activeHint) ? activeHint : null;
-    }
-
-    private void writeIndex(Index index) {
-        writeIndex(index, true);
-    }
-
-    private void writeIndex(Index index, boolean metadataChanged) {
-        if (index.sessions == null) index.sessions = new ArrayList<>();
-        index.sessions.sort(META_ORDER);
-        if (metadataChanged) {
-            index.generation = index.generation == Long.MAX_VALUE ? 1 : index.generation + 1;
+        String active = readLegacyActivePointer(sourceDir, sessions);
+        Set<String> tombstones = new TreeSet<>();
+        if (Files.isDirectory(sourceDir)) {
+            try (var paths = Files.list(sourceDir)) {
+                paths.filter(path -> LEGACY_DELETION_NAME.matcher(
+                        path.getFileName().toString()).matches())
+                        .forEach(path -> tombstones.add(path.getFileName().toString()
+                                .substring("delete-".length(), "delete-".length() + 32)));
+            } catch (IOException error) {
+                throw new IllegalStateException("Cannot scan legacy tombstones", error);
+            }
         }
-        if (recoveringLegacyIndex) writeJson(indexFile, index);
-        else projectionIndex.replaceAll(index);
+        try (Connection conn = openConnection(target)) {
+            initializeSchema(conn);
+            conn.setAutoCommit(false);
+            try {
+                for (Session session : sessions) {
+                    writeSessionRows(conn, session);
+                }
+                setMetadata(conn, "active_session_id", active);
+                setMetadata(conn, "generation",
+                        Long.toString(freshProjectionGeneration(0)));
+                try (PreparedStatement statement = conn.prepareStatement(
+                        "INSERT OR IGNORE INTO pending_deletions(session_id, requested_at)"
+                                + " VALUES(?,?)")) {
+                    for (String tombstone : tombstones) {
+                        statement.setString(1, tombstone);
+                        statement.setString(2, Instant.now().toString());
+                        statement.addBatch();
+                    }
+                    statement.executeBatch();
+                }
+                conn.commit();
+            } catch (Exception error) {
+                rollbackQuietly(conn, error);
+                throw error;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+            // Fold the WAL back so the target is one self-contained file.
+            try (Statement statement = conn.createStatement()) {
+                statement.execute("PRAGMA journal_mode=DELETE");
+            }
+        } catch (Exception error) {
+            try {
+                Files.deleteIfExists(target);
+            } catch (IOException deleteFailure) {
+                error.addSuppressed(deleteFailure);
+            }
+            if (error instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("Failed to import legacy chat sessions", error);
+        }
     }
 
-    private static void normalizeProjectionIndex(Index index) {
-        if (index.sessions == null) index.sessions = new ArrayList<>();
-        index.sessions.removeIf(meta -> meta == null || !isGeneratedSessionId(meta.id));
-        if (!isGeneratedSessionId(index.activeSessionId)
-                || !resolves(index.sessions, index.activeSessionId)) {
-            index.activeSessionId = null;
+    private String readLegacyActivePointer(Path sourceDir, List<Session> sessions) {
+        String active = null;
+        Path legacyDb = sourceDir.resolve("index.db");
+        if (Files.isRegularFile(legacyDb)) {
+            try (Connection legacy = DriverManager.getConnection("jdbc:sqlite:" + legacyDb);
+                 PreparedStatement statement = legacy.prepareStatement(
+                         "SELECT value FROM metadata WHERE key = 'active_session_id'");
+                 ResultSet row = statement.executeQuery()) {
+                if (row.next()) active = row.getString(1);
+            } catch (SQLException | RuntimeException error) {
+                log.warn("Legacy index.db unreadable for active pointer: {}", error.getMessage());
+            }
         }
-        normalizeIndexMemoryPolicy(index);
-        index.sessions.sort(META_ORDER);
+        if (!isGeneratedSessionId(active)) {
+            Path legacyJson = sourceDir.resolve("index.json");
+            if (Files.isRegularFile(legacyJson)) {
+                try {
+                    JsonNode root = MAPPER.readTree(legacyJson.toFile());
+                    String candidate = root != null ? root.path("activeSessionId").asText(null) : null;
+                    if (isGeneratedSessionId(candidate)) active = candidate;
+                } catch (IOException | RuntimeException error) {
+                    log.warn("Legacy index.json unreadable for active pointer: {}",
+                            error.getMessage());
+                }
+            }
+        }
+        String finalActive = isGeneratedSessionId(active) ? active : null;
+        boolean resolves = sessions.stream().anyMatch(s -> s.id.equals(finalActive));
+        if (resolves) return finalActive;
+        return sessions.stream()
+                .max(Comparator.comparing(s -> s.updatedAt != null
+                        ? s.updatedAt : Instant.EPOCH))
+                .map(s -> s.id)
+                .orElse(null);
+    }
+
+    /** Move all legacy storage files into {@code legacyDir} (created if needed). */
+    private void moveLegacyArtifacts(Path legacyDir) {
+        List<Path> artifacts = new ArrayList<>();
+        try (var paths = Files.list(dir)) {
+            paths.forEach(path -> {
+                String name = path.getFileName().toString();
+                if (LEGACY_SHARD_NAME.matcher(name).matches()
+                        || LEGACY_DELETION_NAME.matcher(name).matches()
+                        || name.equals("index.db") || name.equals("index.json")
+                        || name.equals("index.state") || name.equals("index.db.ready")
+                        || name.startsWith("index.db-")) {
+                    artifacts.add(path);
+                }
+            });
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot list legacy chat artifacts", error);
+        }
+        if (artifacts.isEmpty()) return;
+        try {
+            Files.createDirectories(legacyDir);
+            for (Path artifact : artifacts) {
+                Files.move(artifact, legacyDir.resolve(artifact.getFileName().toString()),
+                        StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot archive legacy chat artifacts", error);
+        }
     }
 
     private static long freshProjectionGeneration(long previous) {
@@ -521,246 +584,440 @@ public class ChatSessionStore implements AutoCloseable {
         return Math.max(previous + 1L, wallClock);
     }
 
-    private boolean legacyIndexMigrationRequired() {
-        if (projectionIndex.exists()) {
-            projectionMarkerPresent();
-            return false;
-        }
-        return !projectionMarkerPresent();
-    }
-
-    private void ensureProjectionMarker() {
-        if (projectionMarkerPresent()) return;
-        writeJson(sqliteReadyFile, Map.of(
-                "protocolVersion", 1,
-                "projection", "sqlite"));
-    }
-
-    private boolean projectionMarkerPresent() {
-        if (Files.notExists(sqliteReadyFile)) return false;
-        if (!Files.isRegularFile(sqliteReadyFile)) {
-            throw new IllegalStateException("SQLite chat-index migration marker is not a file");
-        }
-        try {
-            JsonNode marker = MAPPER.readTree(sqliteReadyFile.toFile());
-            if (marker == null || !marker.isObject()
-                    || marker.path("protocolVersion").asInt(-1) != 1
-                    || !"sqlite".equals(marker.path("projection").asText())) {
-                throw new IllegalStateException("Invalid SQLite chat-index migration marker");
-            }
-            return true;
-        } catch (IOException error) {
-            throw new IllegalStateException("Cannot read SQLite chat-index migration marker", error);
-        }
-    }
-
-    private void cleanupTempFiles() {
-        if (!Files.isDirectory(dir)) return;
-        try {
-            io.list(dir).stream()
-                    .filter(path -> STORE_TEMP_FILE.matcher(
-                            path.getFileName().toString()).matches())
-                    .forEach(path -> {
-                        try {
-                            io.deleteIfExists(path);
-                        } catch (IOException error) {
-                            log.debug("Failed to clean chat temp {}: {}", path.getFileName(),
-                                    error.getMessage());
-                        }
-                    });
-        } catch (IOException error) {
-            log.debug("Failed to scan chat temp files: {}", error.getMessage());
-        }
-    }
-
-    private Path deletionIntentFile(String id) {
-        requireValidSessionId(id);
-        return dir.resolve("delete-" + id + ".state");
-    }
-
-    private void ensureDeletionIntentsLoaded() {
-        if (deletionIntentsLoaded) return;
-        if (Files.notExists(dir)) {
-            deletionIntentsLoaded = true;
-            return;
-        }
-        List<Path> paths;
-        try {
-            paths = io.list(dir);
-        } catch (IOException error) {
-            throw new IllegalStateException("Cannot scan chat deletion intents", error);
-        }
-        Set<String> discovered = new TreeSet<>();
-        for (Path path : paths) {
-            String name = path.getFileName().toString();
-            var matcher = DELETION_INTENT_FILE.matcher(name);
-            if (!matcher.matches()) continue;
-            String fileId = matcher.group(1);
-            try {
-                DeletionIntent intent = MAPPER.readValue(path.toFile(), DeletionIntent.class);
-                validateDeletionIntent(intent, fileId);
-                discovered.add(fileId);
-            } catch (IOException | RuntimeException error) {
-                throw new IllegalStateException(
-                        "Invalid chat deletion intent; refusing to overwrite evidence: " + name,
-                        error);
-            }
-        }
-        pendingDeletionIds.addAll(discovered);
-        deletionIntentsLoaded = true;
-    }
-
-    private static void validateDeletionIntent(DeletionIntent intent, String fileId) {
-        if (intent == null || intent.protocolVersion != DELETION_PROTOCOL_VERSION
-                || !"PENDING".equals(intent.state)
-                || !fileId.equals(intent.sessionId)
-                || !isGeneratedSessionId(intent.sessionId)
-                || intent.requestedAt == null) {
-            throw new IllegalArgumentException("Invalid chat deletion intent");
-        }
-    }
-
-    /** Durably commits a monotonic delete request before either backing store is changed. */
-    public synchronized void beginDeletion(String id) {
-        ensureRecovered();
-        requireValidSessionId(id);
-        ensureDeletionIntentsLoaded();
-        if (pendingDeletionIds.contains(id)) return;
-        writeJson(deletionIntentFile(id), DeletionIntent.pending(id));
-        pendingDeletionIds.add(id);
-    }
-
-    /** Pending intents are retained until AgentState and transcript deletion both complete. */
-    public synchronized Set<String> pendingDeletionIds() {
-        ensureRecovered();
-        ensureDeletionIntentsLoaded();
-        return java.util.Collections.unmodifiableSet(new TreeSet<>(pendingDeletionIds));
-    }
-
-    synchronized Set<String> deletionIntentIdsForRecovery() {
-        ensureOpen();
-        ensureDeletionIntentsLoaded();
-        ensureIndexRecovered();
-        return java.util.Collections.unmodifiableSet(new TreeSet<>(pendingDeletionIds));
-    }
-
-    /**
-     * Completes the transcript half of a durable deletion intent. The operation is idempotent:
-     * a missing shard still scrubs stale index metadata and returns a successful delete result.
-     */
-    public synchronized DeleteResult deletePendingTranscript(String id) {
-        ensureOpen();
-        requireValidSessionId(id);
-        ensureIndexRecovered();
-        ensureDeletionIntentsLoaded();
-        if (!pendingDeletionIds.contains(id)) {
-            throw new IllegalStateException("No pending deletion intent for session " + id);
-        }
-        boolean previousRecovery = recoveringDeletions;
-        recoveringDeletions = true;
-        try {
-            String activeBefore = projectionIndex.activeSessionId();
-            String activeAfter = id.equals(activeBefore)
-                    ? projectionIndex.newestSessionIdExcluding(id) : activeBefore;
-            boolean indexed = projectionIndex.contains(id);
-            ChatSessionStoreIo.PathStatus shardStatus;
-            try {
-                shardStatus = io.status(shardFile(id));
-            } catch (IOException error) {
-                throw new IllegalStateException(
-                        "Cannot determine pending-delete shard status", error);
-            }
-            if (shardStatus == ChatSessionStoreIo.PathStatus.EXISTS
-                    || indexed || id.equals(activeBefore)) {
-                commitDeleteMutation(shardFile(id), id, activeBefore, activeAfter);
-            }
-            return new DeleteResult(true, id, activeAfter);
-        } finally {
-            recoveringDeletions = previousRecovery;
-        }
-    }
-
-    /** Best-effort tombstone cleanup after both authoritative stores confirm deletion. */
-    public synchronized boolean finishDeletion(String id) {
-        ensureOpen();
-        requireValidSessionId(id);
-        ensureDeletionIntentsLoaded();
-        try {
-            io.deleteIfExists(deletionIntentFile(id));
-            pendingDeletionIds.remove(id);
-            return true;
-        } catch (IOException error) {
-            log.warn("Chat session {} is fully deleted, but its tombstone cleanup failed: {}",
-                    id, error.getMessage());
-            return false;
-        }
-    }
-
-    private void recoverPendingTranscriptDeletions() {
-        ensureDeletionIntentsLoaded();
-        if (pendingDeletionIds.isEmpty() || recoveringDeletions) return;
-        RuntimeException firstFailure = null;
-        for (String id : List.copyOf(pendingDeletionIds)) {
-            try {
-                deletePendingTranscript(id);
-            } catch (RuntimeException error) {
-                if (firstFailure == null) firstFailure = error;
-                log.warn("Failed to recover pending transcript deletion {}: {}",
-                        id, error.getMessage());
-            }
-        }
-        if (firstFailure != null) throw firstFailure;
-    }
-
-    private static MutationOperation parseOperation(String value) {
-        return MutationOperation.valueOf(value);
-    }
+    // ── SQL helpers ──────────────────────────────────────────────
 
     private void ensureOpen() {
         if (closed) throw new IllegalStateException("ChatSessionStore is closed");
     }
 
-    private static boolean resolves(List<SessionMeta> metas, String id) {
-        return metas.stream().anyMatch(m -> id.equals(m.id));
+    private void ensureReady() {
+        ensureOpen();
+        if (pendingTranscriptsRecovered || recoveringDeletions) return;
+        pendingTranscriptsRecovered = true;
+        // The transcript half of durable deletion intents is idempotently
+        // completed on first access; the intent row itself is kept until the
+        // coordinator confirms the AgentState half (SPEC-CSS-DEC-004).
+        for (String id : pendingDeletionIds()) {
+            try {
+                deletePendingTranscript(id);
+            } catch (RuntimeException error) {
+                pendingTranscriptsRecovered = false;
+                throw error;
+            }
+        }
     }
 
-    /** Derive the index projection ({@code lastMessagePreview}/{@code messageCount}/{@code summary}) from a session. */
-    private static SessionMeta toMeta(Session s) {
-        SessionMeta m = new SessionMeta();
-        m.id = s.id;
-        m.title = truncateText(s.title, MAX_TITLE);
-        m.createdAt = s.createdAt;
-        m.updatedAt = s.updatedAt;
-        m.source = truncateText(s.source, MAX_SOURCE);
-        m.contextLabel = truncateText(s.contextLabel, MAX_CONTEXT_LABEL);
-        m.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
-        m.summary = truncateText(s.summary, MAX_SUMMARY);
-        m.messageCount = s.messages != null ? s.messages.size() : 0;
-        m.lastMessagePreview = lastPreview(s);
-        return m;
+    @FunctionalInterface
+    private interface SqlWork {
+        void run(Connection conn) throws Exception;
     }
 
-    private static String lastPreview(Session s) {
-        if (s.messages == null || s.messages.isEmpty()) return null;
-        String content = s.messages.get(s.messages.size() - 1).content;
-        if (content == null) return null;
-        content = content.strip();
-        return codePoints(content) > PREVIEW_LEN
-                ? prefixCodePoints(content, PREVIEW_LEN) : content;
+    /** Run {@code work} inside one SQLite transaction (SPEC-CSS-API-001). */
+    private void transaction(String operation, SqlWork work) {
+        ensureOpen();
+        try (Connection conn = connect()) {
+            conn.setAutoCommit(false);
+            try {
+                work.run(conn);
+                conn.commit();
+            } catch (Exception error) {
+                rollbackQuietly(conn, error);
+                throw error;
+            }
+        } catch (Exception error) {
+            if (error instanceof IllegalArgumentException illegal) throw illegal;
+            throw new IllegalStateException("Failed to " + operation, error);
+        }
+    }
+
+    private static void rollbackQuietly(Connection conn, Throwable original) {
+        try {
+            conn.rollback();
+        } catch (SQLException rollbackFailure) {
+            original.addSuppressed(rollbackFailure);
+        }
+    }
+
+    private static String metadata(Connection conn, String key) throws SQLException {
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT value FROM metadata WHERE key = ?")) {
+            statement.setString(1, key);
+            try (ResultSet row = statement.executeQuery()) {
+                return row.next() ? row.getString(1) : null;
+            }
+        }
+    }
+
+    private static void setMetadata(Connection conn, String key, String value)
+            throws SQLException {
+        if (value == null) {
+            try (PreparedStatement statement = conn.prepareStatement(
+                    "DELETE FROM metadata WHERE key = ?")) {
+                statement.setString(1, key);
+                statement.executeUpdate();
+            }
+            return;
+        }
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO metadata(key,value) VALUES(?,?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value
+                """)) {
+            statement.setString(1, key);
+            statement.setString(2, value);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void incrementGeneration(Connection conn) throws SQLException {
+        String raw = metadata(conn, "generation");
+        long current = raw != null ? Long.parseLong(raw) : 0L;
+        long next = current == Long.MAX_VALUE ? 1L : current + 1L;
+        setMetadata(conn, "generation", Long.toString(next));
+    }
+
+    private static String text(Instant instant) {
+        return instant != null ? instant.toString() : null;
+    }
+
+    private static Instant instant(String text) {
+        return text == null || text.isEmpty() ? null : Instant.parse(text);
+    }
+
+    private static String jsonOf(Object value) {
+        if (value == null) return null;
+        try {
+            return MAPPER.writeValueAsString(value);
+        } catch (IOException error) {
+            throw new IllegalArgumentException("Chat payload is not serializable", error);
+        }
+    }
+
+    private static Object parseJson(String json) {
+        if (json == null) return null;
+        try {
+            return MAPPER.readValue(json, Object.class);
+        } catch (IOException error) {
+            throw new IllegalStateException("Stored chat payload is not parseable", error);
+        }
+    }
+
+    private static List<Object> parseJsonList(String json) {
+        if (json == null) return null;
+        try {
+            @SuppressWarnings("unchecked")
+            List<Object> parsed = MAPPER.readValue(json, List.class);
+            return parsed;
+        } catch (IOException error) {
+            throw new IllegalStateException("Stored chat payload is not parseable", error);
+        }
+    }
+
+    private static SessionMeta readMeta(ResultSet row) throws SQLException {
+        SessionMeta meta = new SessionMeta();
+        meta.id = row.getString("id");
+        meta.title = row.getString("title");
+        meta.createdAt = instant(row.getString("created_at"));
+        meta.updatedAt = instant(row.getString("updated_at"));
+        meta.source = row.getString("source");
+        meta.contextLabel = row.getString("context_label");
+        meta.memoryPolicy = row.getString("memory_policy");
+        meta.summary = row.getString("summary");
+        meta.lastMessagePreview = row.getString("last_message_preview");
+        meta.messageCount = row.getInt("message_count");
+        return meta;
+    }
+
+    private static final String META_COLUMNS = """
+            id,title,created_at,updated_at,source,context_label,memory_policy,
+            summary,last_message_preview,message_count
+            """;
+
+    /** Write the session metadata row + all message rows (caller holds tx). */
+    private static void writeSessionRows(Connection conn, Session session) throws SQLException {
+        SessionMeta meta = toMeta(session);
+        try (PreparedStatement statement = conn.prepareStatement("""
+                INSERT INTO sessions(id,title,created_at,updated_at,source,context_label,
+                                     context_snapshot,memory_policy,summary,
+                                     last_message_preview,message_count)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET
+                  title=excluded.title, created_at=excluded.created_at,
+                  updated_at=excluded.updated_at, source=excluded.source,
+                  context_label=excluded.context_label,
+                  context_snapshot=excluded.context_snapshot,
+                  memory_policy=excluded.memory_policy, summary=excluded.summary,
+                  last_message_preview=excluded.last_message_preview,
+                  message_count=excluded.message_count
+                """)) {
+            statement.setString(1, session.id);
+            statement.setString(2, session.title);
+            statement.setString(3, text(session.createdAt));
+            statement.setString(4, text(session.updatedAt));
+            statement.setString(5, session.source);
+            statement.setString(6, session.contextLabel);
+            statement.setString(7, jsonOf(session.contextSnapshot));
+            statement.setString(8, session.memoryPolicy);
+            statement.setString(9, session.summary);
+            statement.setString(10, meta.lastMessagePreview);
+            statement.setInt(11, meta.messageCount);
+            statement.executeUpdate();
+        }
+        try (PreparedStatement delete = conn.prepareStatement(
+                "DELETE FROM messages WHERE session_id = ?")) {
+            delete.setString(1, session.id);
+            delete.executeUpdate();
+        }
+        try (PreparedStatement insert = conn.prepareStatement("""
+                INSERT INTO messages(id,session_id,seq,role,content,created_at,status,error,
+                                     context_snapshot,suggested_tasks)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                """)) {
+            List<Message> messages = session.messages != null ? session.messages : List.of();
+            for (int i = 0; i < messages.size(); i++) {
+                Message message = messages.get(i);
+                insert.setString(1, message.id);
+                insert.setString(2, session.id);
+                insert.setInt(3, i);
+                insert.setString(4, message.role);
+                insert.setString(5, message.content);
+                insert.setString(6, text(message.createdAt));
+                insert.setString(7, message.status);
+                insert.setString(8, message.error);
+                insert.setString(9, jsonOf(message.contextSnapshot));
+                insert.setString(10, jsonOf(message.suggestedTasks));
+                insert.addBatch();
+            }
+            insert.executeBatch();
+        }
+    }
+
+    private static Session readSessionRow(Connection conn, String id) throws SQLException {
+        try (PreparedStatement statement = conn.prepareStatement("""
+                SELECT id,title,created_at,updated_at,source,context_label,context_snapshot,
+                       memory_policy,summary
+                FROM sessions WHERE id = ?
+                """)) {
+            statement.setString(1, id);
+            Session session;
+            try (ResultSet row = statement.executeQuery()) {
+                if (!row.next()) return null;
+                session = new Session();
+                session.id = row.getString("id");
+                session.title = row.getString("title");
+                session.createdAt = instant(row.getString("created_at"));
+                session.updatedAt = instant(row.getString("updated_at"));
+                session.source = row.getString("source");
+                session.contextLabel = row.getString("context_label");
+                session.contextSnapshot = parseJson(row.getString("context_snapshot"));
+                session.memoryPolicy = row.getString("memory_policy");
+                session.summary = row.getString("summary");
+            }
+            session.messages = new ArrayList<>();
+            try (PreparedStatement messages = conn.prepareStatement("""
+                    SELECT id,role,content,created_at,status,error,context_snapshot,
+                           suggested_tasks
+                    FROM messages WHERE session_id = ? ORDER BY seq ASC
+                    """)) {
+                messages.setString(1, id);
+                try (ResultSet rows = messages.executeQuery()) {
+                    while (rows.next()) {
+                        Message message = new Message();
+                        message.id = rows.getString("id");
+                        message.role = rows.getString("role");
+                        message.content = rows.getString("content");
+                        message.createdAt = instant(rows.getString("created_at"));
+                        message.status = rows.getString("status");
+                        message.error = rows.getString("error");
+                        message.contextSnapshot = parseJson(rows.getString("context_snapshot"));
+                        message.suggestedTasks = parseJsonList(rows.getString("suggested_tasks"));
+                        session.messages.add(message);
+                    }
+                }
+            }
+            return session;
+        }
+    }
+
+    /** Persist a normalized session + generation/active updates in one tx. */
+    private void commitSessionMutation(Session session, boolean makeActive) {
+        normalizeSessionForWrite(session);
+        transaction("write chat session " + session.id, conn -> {
+            writeSessionRows(conn, session);
+            incrementGeneration(conn);
+            setMetadata(conn, "active_session_id",
+                    makeActive ? session.id : metadata(conn, "active_session_id"));
+        });
+    }
+
+    private void commitDeleteMutation(String id, String activeAfter) {
+        transaction("delete chat session " + id, conn -> {
+            try (PreparedStatement statement = conn.prepareStatement(
+                    "DELETE FROM sessions WHERE id = ?")) {
+                statement.setString(1, id);
+                statement.executeUpdate();
+            }
+            incrementGeneration(conn);
+            setMetadata(conn, "active_session_id", activeAfter);
+        });
+    }
+
+    // ── Deletion saga (SPEC-CSS-DEC-004) ─────────────────────────
+
+    /** Durably commits a monotonic delete request before either backing store is changed. */
+    public synchronized void beginDeletion(String id) {
+        ensureReady();
+        requireValidSessionId(id);
+        transaction("record chat deletion intent", conn -> {
+            try (PreparedStatement statement = conn.prepareStatement(
+                    "INSERT OR IGNORE INTO pending_deletions(session_id, requested_at)"
+                            + " VALUES(?,?)")) {
+                statement.setString(1, id);
+                statement.setString(2, Instant.now().toString());
+                statement.executeUpdate();
+            }
+        });
+    }
+
+    /** Pending intents are retained until AgentState and transcript deletion both complete. */
+    public synchronized Set<String> pendingDeletionIds() {
+        ensureOpen();
+        try (Connection conn = connect();
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT session_id FROM pending_deletions ORDER BY session_id");
+             ResultSet rows = statement.executeQuery()) {
+            Set<String> ids = new TreeSet<>();
+            while (rows.next()) ids.add(rows.getString(1));
+            return java.util.Collections.unmodifiableSet(ids);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to read chat deletion intents", error);
+        }
+    }
+
+    synchronized Set<String> deletionIntentIdsForRecovery() {
+        ensureOpen();
+        return pendingDeletionIds();
+    }
+
+    /**
+     * Completes the transcript half of a durable deletion intent. The operation is idempotent:
+     * a missing session still scrubs stale metadata and returns a successful delete result.
+     */
+    public synchronized DeleteResult deletePendingTranscript(String id) {
+        ensureOpen();
+        requireValidSessionId(id);
+        if (!pendingDeletionIds().contains(id)) {
+            throw new IllegalStateException("No pending deletion intent for session " + id);
+        }
+        boolean previousRecovery = recoveringDeletions;
+        recoveringDeletions = true;
+        try (Connection conn = connect()) {
+            String activeBefore = metadata(conn, "active_session_id");
+            boolean present;
+            try (PreparedStatement statement = conn.prepareStatement(
+                    "SELECT 1 FROM sessions WHERE id = ?")) {
+                statement.setString(1, id);
+                try (ResultSet row = statement.executeQuery()) {
+                    present = row.next();
+                }
+            }
+            String activeAfter = activeBefore;
+            if (id.equals(activeBefore)) {
+                try (PreparedStatement statement = conn.prepareStatement("""
+                        SELECT id FROM sessions WHERE id <> ?
+                        ORDER BY updated_at DESC, id DESC LIMIT 1
+                        """)) {
+                    statement.setString(1, id);
+                    try (ResultSet row = statement.executeQuery()) {
+                        activeAfter = row.next() ? row.getString(1) : null;
+                    }
+                }
+            }
+            if (present || id.equals(activeBefore)) {
+                conn.setAutoCommit(false);
+                try {
+                    try (PreparedStatement statement = conn.prepareStatement(
+                            "DELETE FROM sessions WHERE id = ?")) {
+                        statement.setString(1, id);
+                        statement.executeUpdate();
+                    }
+                    incrementGeneration(conn);
+                    setMetadata(conn, "active_session_id", activeAfter);
+                    conn.commit();
+                } catch (Exception error) {
+                    rollbackQuietly(conn, error);
+                    throw error;
+                }
+            }
+            return new DeleteResult(true, id, activeAfter);
+        } catch (SQLException error) {
+            throw new IllegalStateException(
+                    "Failed to complete pending transcript deletion " + id, error);
+        } finally {
+            recoveringDeletions = previousRecovery;
+        }
+    }
+
+    /** Best-effort intent cleanup after both authoritative stores confirm deletion. */
+    public synchronized boolean finishDeletion(String id) {
+        ensureOpen();
+        requireValidSessionId(id);
+        try {
+            transaction("clear chat deletion intent", conn -> {
+                try (PreparedStatement statement = conn.prepareStatement(
+                        "DELETE FROM pending_deletions WHERE session_id = ?")) {
+                    statement.setString(1, id);
+                    statement.executeUpdate();
+                }
+            });
+            return true;
+        } catch (RuntimeException error) {
+            log.warn("Chat session {} is fully deleted, but its intent cleanup failed: {}",
+                    id, error.getMessage());
+            return false;
+        }
     }
 
     // ── Read paths ───────────────────────────────────────────────
 
     /** Index with {@code sessions} sorted by {@code updatedAt} descending (SPEC-CSP-API-001). */
     public synchronized Index listIndex() {
-        Index idx = loadIndex();
-        idx.sessions.sort(META_ORDER);
-        return idx;
+        ensureReady();
+        try (Connection conn = connect()) {
+            Index index = new Index();
+            index.activeSessionId = metadata(conn, "active_session_id");
+            String generation = metadata(conn, "generation");
+            index.generation = generation != null ? Long.parseLong(generation) : 0L;
+            try (PreparedStatement statement = conn.prepareStatement(
+                         "SELECT " + META_COLUMNS + "FROM sessions "
+                                 + "ORDER BY updated_at DESC, id DESC");
+                 ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) index.sessions.add(readMeta(rows));
+            }
+            if (index.activeSessionId != null && !containsSession(conn, index.activeSessionId)) {
+                index.activeSessionId = null;
+            }
+            normalizeIndexMemoryPolicy(index);
+            index.sessions.sort(META_ORDER);
+            return index;
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to list chat sessions", error);
+        }
+    }
+
+    private static boolean containsSession(Connection conn, String sessionId)
+            throws SQLException {
+        try (PreparedStatement statement = conn.prepareStatement(
+                "SELECT 1 FROM sessions WHERE id = ?")) {
+            statement.setString(1, sessionId);
+            try (ResultSet row = statement.executeQuery()) {
+                return row.next();
+            }
+        }
     }
 
     /** Optional cursor-paged metadata view; the legacy no-parameter list remains unchanged. */
     public synchronized IndexPage listIndexPage(int limit, String cursor, String query) {
-        ensureRecovered();
+        ensureReady();
         if (limit < 1 || limit > 200) {
             throw new IllegalArgumentException("limit must be between 1 and 200");
         }
@@ -768,27 +1025,137 @@ public class ChatSessionStore implements AutoCloseable {
         if (normalizedQuery.length() > 200) {
             throw new IllegalArgumentException("q must be at most 200 characters");
         }
-        long generation = projectionIndex.generation();
-        PageCursor decoded = null;
-        if (cursor != null) {
-            decoded = decodeCursor(cursor);
-            if (!normalizedQuery.equals(decoded.query)) {
-                throw new IllegalArgumentException("Cursor does not belong to this query");
+        try (Connection conn = connect()) {
+            String rawGeneration = metadata(conn, "generation");
+            long generation = rawGeneration != null ? Long.parseLong(rawGeneration) : 0L;
+            PageCursor decoded = null;
+            if (cursor != null) {
+                decoded = decodeCursor(cursor);
+                if (!normalizedQuery.equals(decoded.query)) {
+                    throw new IllegalArgumentException("Cursor does not belong to this query");
+                }
+                if (decoded.generation.longValue() != generation) {
+                    throw new IllegalArgumentException("Cursor is stale; reload the first page");
+                }
             }
-            if (decoded.generation.longValue() != generation) {
-                throw new IllegalArgumentException("Cursor is stale; reload the first page");
+            List<SessionMeta> page = new ArrayList<>(page(conn,
+                    limit + 1, normalizedQuery,
+                    decoded != null ? decoded.updatedAt : null,
+                    decoded != null ? decoded.id : null));
+            boolean hasMore = page.size() > limit;
+            if (hasMore) page.removeLast();
+            String nextCursor = hasMore && !page.isEmpty()
+                    ? encodeCursor(page.getLast(), normalizedQuery, generation) : null;
+            for (SessionMeta meta : page) normalizeMeta(meta);
+            return new IndexPage(metadata(conn, "active_session_id"), page, nextCursor, hasMore);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to page chat sessions", error);
+        }
+    }
+
+    private List<SessionMeta> page(
+            Connection conn, int limit, String normalizedQuery,
+            String cursorUpdatedAt, String cursorId) throws SQLException {
+        boolean useFts = ftsEnabled && !normalizedQuery.isEmpty()
+                && normalizedQuery.codePointCount(0, normalizedQuery.length())
+                >= FTS_MIN_QUERY_CODEPOINTS;
+        String match;
+        int matchParams;
+        if (normalizedQuery.isEmpty()) {
+            match = "";
+            matchParams = 0;
+        } else if (useFts) {
+            match = """
+                     AND rowid IN (SELECT rowid FROM sessions_fts WHERE sessions_fts MATCH ?)
+                    """;
+            matchParams = 1;
+        } else {
+            match = likeMatch();
+            matchParams = 3;
+        }
+        try {
+            return pageWithMatch(conn, limit, normalizedQuery, cursorUpdatedAt, cursorId,
+                    match, matchParams, useFts);
+        } catch (SQLException ftsFailure) {
+            if (!useFts) throw ftsFailure;
+            log.warn("FTS search failed ({}); falling back to LIKE", ftsFailure.getMessage());
+            return pageWithMatch(conn, limit, normalizedQuery, cursorUpdatedAt, cursorId,
+                    likeMatch(), 3, false);
+        }
+    }
+
+    private static String likeMatch() {
+        return """
+                 AND (LOWER(COALESCE(title,'')) LIKE ? ESCAPE '\\'
+                   OR LOWER(COALESCE(last_message_preview,'')) LIKE ? ESCAPE '\\'
+                   OR LOWER(COALESCE(summary,'')) LIKE ? ESCAPE '\\')
+                """;
+    }
+
+    private static List<SessionMeta> pageWithMatch(
+            Connection conn, int limit, String normalizedQuery,
+            String cursorUpdatedAt, String cursorId,
+            String match, int matchParams, boolean fts) throws SQLException {
+        if (cursorId != null) {
+            String anchorSql = "SELECT 1 FROM sessions WHERE id = ? AND updated_at = ?" + match;
+            try (PreparedStatement anchor = conn.prepareStatement(anchorSql)) {
+                int parameter = 1;
+                anchor.setString(parameter++, cursorId);
+                anchor.setString(parameter++, cursorUpdatedAt);
+                bindMatch(anchor, parameter, normalizedQuery, matchParams, fts);
+                try (ResultSet row = anchor.executeQuery()) {
+                    if (!row.next()) {
+                        throw new IllegalArgumentException("Cursor is stale or invalid");
+                    }
+                }
             }
         }
-        List<SessionMeta> page = new ArrayList<>(projectionIndex.page(
-                limit + 1,
-                normalizedQuery,
-                decoded != null ? decoded.updatedAt : null,
-                decoded != null ? decoded.id : null));
-        boolean hasMore = page.size() > limit;
-        if (hasMore) page.removeLast();
-        String nextCursor = hasMore && !page.isEmpty()
-                ? encodeCursor(page.getLast(), normalizedQuery, generation) : null;
-        return new IndexPage(projectionIndex.activeSessionId(), page, nextCursor, hasMore);
+        String cursorClause = cursorId == null ? "" : """
+                 AND (updated_at < ? OR (updated_at = ? AND id < ?))
+                """;
+        String sql = "SELECT " + META_COLUMNS + "FROM sessions WHERE 1=1"
+                + match + cursorClause + " ORDER BY updated_at DESC, id DESC LIMIT ?";
+        try (PreparedStatement statement = conn.prepareStatement(sql)) {
+            int parameter = 1;
+            parameter = bindMatch(statement, parameter, normalizedQuery, matchParams, fts);
+            if (cursorId != null) {
+                statement.setString(parameter++, cursorUpdatedAt);
+                statement.setString(parameter++, cursorUpdatedAt);
+                statement.setString(parameter++, cursorId);
+            }
+            statement.setInt(parameter, limit);
+            ArrayList<SessionMeta> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) result.add(readMeta(rows));
+            }
+            return result;
+        }
+    }
+
+    private static int bindMatch(PreparedStatement statement, int parameter,
+                                 String normalizedQuery, int matchParams, boolean fts)
+            throws SQLException {
+        if (matchParams == 0) return parameter;
+        if (fts) {
+            statement.setString(parameter++, ftsPhrase(normalizedQuery));
+            return parameter;
+        }
+        String pattern = "%" + escapeLike(normalizedQuery) + "%";
+        for (int i = 0; i < matchParams; i++) {
+            statement.setString(parameter++, pattern);
+        }
+        return parameter;
+    }
+
+    /** Quote a raw query as one FTS5 phrase (substring match under trigram). */
+    private static String ftsPhrase(String query) {
+        return "\"" + query.replace("\"", "\"\"") + "\"";
+    }
+
+    private static String escapeLike(String value) {
+        return value.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
     }
 
     private static String encodeCursor(SessionMeta meta, String query, long generation) {
@@ -821,86 +1188,27 @@ public class ChatSessionStore implements AutoCloseable {
         }
     }
 
-    /** Read a session shard, or {@code null} if absent (SPEC-CSP-API-002). */
+    /** Read a session with all messages, or {@code null} if absent (SPEC-CSP-API-002). */
     public synchronized Session getSession(String id) {
-        ensureRecovered();
+        ensureReady();
         if (id == null) return null;
-        Path shard = shardFile(id);
-        if (!Files.exists(shard)) return null;
-        try {
-            Session s = MAPPER.readValue(shard.toFile(), Session.class);
-            if (s == null || !id.equals(s.id) || !isGeneratedSessionId(s.id)) {
-                log.warn("Skipping chat shard with mismatched/invalid id: {}", shard.getFileName());
-                return null;
-            }
-            normalizeSessionForRead(s);
-            return s;
-        } catch (IOException | RuntimeException e) {
-            log.warn("Failed to read chat shard {}: {}", id, e.getMessage());
-            return null;
-        }
-    }
-
-    private void commitSessionMutation(
-            Session session, MutationOperation operation, boolean makeActive) {
-        normalizeSessionForWrite(session);
-        String activeBefore = projectionIndex.activeSessionId();
-        String activeAfter = makeActive ? session.id : activeBefore;
-        SessionMeta meta = toMeta(session);
-        RecoveryState dirty = RecoveryState.dirty(
-                operation, session.id, activeBefore, activeAfter);
-        writeRecoveryState(dirty);
-        recovered = false;
-        writeJson(shardFile(session.id), session);
-        finishCommittedProjection(dirty,
-                () -> projectionIndex.upsert(meta, activeAfter));
-    }
-
-    private void commitDeleteMutation(
-            Path shard, String id, String activeBefore, String activeAfter) {
-        RecoveryState dirty = RecoveryState.dirty(
-                MutationOperation.DELETE, id, activeBefore, activeAfter);
-        writeRecoveryState(dirty);
-        recovered = false;
-        try {
-            io.deleteIfExists(shard);
-        } catch (IOException error) {
-            throw new RuntimeException("Failed to delete chat shard " + id, error);
-        }
-        finishCommittedProjection(dirty,
-                () -> projectionIndex.delete(id, activeAfter));
-    }
-
-    /**
-     * The authoritative shard operation has committed. Projection/state failures are therefore
-     * recoverable and must not be reported as an uncommitted mutation to callers.
-     */
-    private void finishCommittedProjection(RecoveryState dirty, Runnable projectionMutation) {
-        try {
-            projectionMutation.run();
-        } catch (RuntimeException indexFailure) {
-            log.warn("Chat mutation {} for session {} committed, but index refresh failed; "
-                            + "DIRTY recovery will run on the next access: {}",
-                    dirty.operation, dirty.sessionId, indexFailure.getMessage());
-            return;
-        }
-        try {
-            writeRecoveryState(RecoveryState.clean());
-            recovered = true;
-        } catch (RuntimeException cleanFailure) {
-            log.warn("Chat mutation {} for session {} committed, but CLEAN marker failed; "
-                            + "recovery will run on the next access: {}",
-                    dirty.operation, dirty.sessionId, cleanFailure.getMessage());
+        requireValidSessionId(id);
+        try (Connection conn = connect()) {
+            Session session = readSessionRow(conn, id);
+            if (session != null) normalizeSessionForRead(session);
+            return session;
+        } catch (SQLException error) {
+            throw new IllegalStateException("Failed to read chat session " + id, error);
         }
     }
 
     // ── Mutations ────────────────────────────────────────────────
 
     /**
-     * Create a new session (SPEC-CSP-API-003). Assigns an FS-safe id +
-     * timestamps, defaults {@code title}/{@code source}, applies message
-     * invariants to {@code initialMessages}, writes the shard, sets it active,
-     * upserts the index row. No session-count pruning (SPEC-CSP-DEC-005).
+     * Create a new session (SPEC-CSP-API-003). Assigns an id + timestamps,
+     * defaults {@code title}/{@code source}, applies message invariants to
+     * {@code initialMessages}, writes the rows, sets it active.
+     * No session-count pruning (SPEC-CSP-DEC-005).
      */
     public synchronized Session create(CreateRequest req) {
         Session s = new Session();
@@ -924,15 +1232,15 @@ public class ChatSessionStore implements AutoCloseable {
                 s.messages.add(stored);
             }
         }
-        ensureRecovered();
-        commitSessionMutation(s, MutationOperation.CREATE, true);
+        ensureReady();
+        commitSessionMutation(s, true);
         return s;
     }
 
     /**
      * Patch non-null meta fields (SPEC-CSP-API-004). Never touches
-     * {@code messages}. Bumps {@code updatedAt}; rewrites shard + index row.
-     * Returns the updated session, or {@code null} if absent.
+     * {@code messages}. Bumps {@code updatedAt}. Returns the updated
+     * session, or {@code null} if absent.
      */
     public synchronized Session updateMeta(String id, String title, String contextLabel, Object contextSnapshot) {
         Session s = getSession(id);
@@ -941,7 +1249,7 @@ public class ChatSessionStore implements AutoCloseable {
         if (contextLabel != null) s.contextLabel = contextLabel;
         if (contextSnapshot != null) s.contextSnapshot = contextSnapshot;
         s.updatedAt = Instant.now();
-        commitSessionMutation(s, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, false);
         return s;
     }
 
@@ -950,33 +1258,61 @@ public class ChatSessionStore implements AutoCloseable {
         if (s == null) return null;
         s.memoryPolicy = normalizeMemoryPolicy(memoryPolicy);
         s.updatedAt = Instant.now();
-        commitSessionMutation(s, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, false);
         return s;
     }
 
     /**
-     * Delete a session (SPEC-CSP-API-005): removes shard + index row. If it was
-     * the active pointer, reselects the newest-by-{@code updatedAt} remaining
-     * session (else null). Returns {@code null} if the session did not exist
-     * (controller's 404 source).
+     * Delete a session (SPEC-CSP-API-005): removes the row (messages cascade).
+     * If it was the active pointer, reselects the newest-by-{@code updatedAt}
+     * remaining session (else null). Returns {@code null} if absent.
      */
     public synchronized DeleteResult delete(String id) {
-        ensureRecovered();
+        ensureReady();
         if (id == null) return null;
-        Path shard = shardFile(id);
-        if (!Files.exists(shard)) return null;
-        String activeBefore = projectionIndex.activeSessionId();
-        String activeAfter = id.equals(activeBefore)
-                ? projectionIndex.newestSessionIdExcluding(id) : activeBefore;
-        commitDeleteMutation(shard, id, activeBefore, activeAfter);
-        return new DeleteResult(true, id, activeAfter);
+        requireValidSessionId(id);
+        try (Connection conn = connect()) {
+            if (!containsSession(conn, id)) return null;
+            String activeBefore = metadata(conn, "active_session_id");
+            String activeAfter = activeBefore;
+            if (id.equals(activeBefore)) {
+                try (PreparedStatement statement = conn.prepareStatement("""
+                        SELECT id FROM sessions WHERE id <> ?
+                        ORDER BY updated_at DESC, id DESC LIMIT 1
+                        """)) {
+                    statement.setString(1, id);
+                    try (ResultSet row = statement.executeQuery()) {
+                        activeAfter = row.next() ? row.getString(1) : null;
+                    }
+                }
+            }
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement statement = conn.prepareStatement(
+                        "DELETE FROM sessions WHERE id = ?")) {
+                    statement.setString(1, id);
+                    statement.executeUpdate();
+                }
+                incrementGeneration(conn);
+                setMetadata(conn, "active_session_id", activeAfter);
+                conn.commit();
+            } catch (Exception error) {
+                rollbackQuietly(conn, error);
+                throw error;
+            }
+            return new DeleteResult(true, id, activeAfter);
+        } catch (Exception error) {
+            if (error instanceof IllegalArgumentException illegal) throw illegal;
+            if (error instanceof RuntimeException runtime) throw runtime;
+            throw new IllegalStateException("Failed to delete chat session " + id, error);
+        }
     }
 
     /**
      * Append messages (SPEC-CSP-API-006): assigns ids/timestamps, truncates
      * over-long content (009c), keeps newest 200 (009b), bumps
-     * {@code updatedAt}, rewrites shard + refreshes index row. Returns the
-     * appended messages, or {@code null} if the session is absent.
+     * {@code updatedAt}. Returns the appended messages, or {@code null} if
+     * the session is absent.
      */
     public synchronized List<Message> appendMessages(String id, List<Message> incoming) {
         Session s = getSession(id);
@@ -991,7 +1327,7 @@ public class ChatSessionStore implements AutoCloseable {
             appended.add(stored);
         }
         s.updatedAt = Instant.now();
-        commitSessionMutation(s, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, false);
         java.util.Set<String> retainedIds = s.messages.stream()
                 .map(message -> message.id)
                 .collect(java.util.stream.Collectors.toSet());
@@ -1001,9 +1337,8 @@ public class ChatSessionStore implements AutoCloseable {
 
     /**
      * Patch non-null fields of a single message (SPEC-CSP-API-007); applies
-     * content truncation (009c). Bumps session {@code updatedAt}; rewrites shard
-     * + index row. Returns the updated message, or {@code null} if the session
-     * or message is absent.
+     * content truncation (009c). Bumps session {@code updatedAt}. Returns the
+     * updated message, or {@code null} if the session or message is absent.
      */
     public synchronized Message updateMessage(String id, String msgId, String content,
                                               String status, String error, List<Object> suggestedTasks) {
@@ -1048,38 +1383,45 @@ public class ChatSessionStore implements AutoCloseable {
             target.suggestedTasks = new ArrayList<>(suggestedTasks);
         }
         s.updatedAt = Instant.now();
-        commitSessionMutation(s, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, false);
         return target;
     }
 
     /**
      * Persist the active-session pointer (SPEC-CSP-API-008). A non-null id that
-     * does not resolve to an existing shard signals invalid (caller's 400) and
-     * leaves the on-disk pointer unchanged. Returns the persisted pointer.
+     * does not resolve to an existing session signals invalid (caller's 400) and
+     * leaves the persisted pointer unchanged. Returns the persisted pointer.
      */
     public synchronized String setActiveSession(String idOrNull) {
-        ensureRecovered();
-        if (idOrNull != null && !Files.exists(shardFile(idOrNull))) {
-            throw new IllegalArgumentException("Unknown session: " + idOrNull);
+        ensureReady();
+        if (idOrNull != null) {
+            requireValidSessionId(idOrNull);
+            try (Connection conn = connect()) {
+                if (!containsSession(conn, idOrNull)) {
+                    throw new IllegalArgumentException("Unknown session: " + idOrNull);
+                }
+            } catch (SQLException error) {
+                throw new IllegalStateException("Failed to validate chat session", error);
+            }
         }
-        projectionIndex.setActive(idOrNull);
+        transaction("set active chat session", conn ->
+                setMetadata(conn, "active_session_id", idOrNull));
         return idOrNull;
     }
 
     /**
-     * Write a regenerated summary into the shard + index row only
+     * Write a regenerated summary into the session row only
      * (SPEC-CSP-API-011a). No-op if the session was deleted mid-flight.
      */
     public synchronized void writeSummary(String id, String summary) {
         Session s = getSession(id);
         if (s == null) return;
         s.summary = summary;
-        commitSessionMutation(s, MutationOperation.UPSERT, false);
+        commitSessionMutation(s, false);
     }
 
     // ── Helpers ──────────────────────────────────────────────────
 
-    /** FS-safe id (no separators) used as the shard filename (SPEC-CSP-MODEL-001). */
     private static String newId() {
         return UUID.randomUUID().toString().replace("-", "");
     }
@@ -1115,15 +1457,42 @@ public class ChatSessionStore implements AutoCloseable {
 
     private static void normalizeIndexMemoryPolicy(Index idx) {
         for (SessionMeta m : idx.sessions) {
-            if (m != null) {
-                m.memoryPolicy = coerceMemoryPolicy(m.memoryPolicy);
-                m.title = truncateText(m.title, MAX_TITLE);
-                m.source = truncateText(m.source, MAX_SOURCE);
-                m.contextLabel = truncateText(m.contextLabel, MAX_CONTEXT_LABEL);
-                m.summary = truncateText(m.summary, MAX_SUMMARY);
-                m.lastMessagePreview = truncateText(m.lastMessagePreview, PREVIEW_LEN);
-            }
+            if (m != null) normalizeMeta(m);
         }
+    }
+
+    private static void normalizeMeta(SessionMeta m) {
+        m.memoryPolicy = coerceMemoryPolicy(m.memoryPolicy);
+        m.title = truncateText(m.title, MAX_TITLE);
+        m.source = truncateText(m.source, MAX_SOURCE);
+        m.contextLabel = truncateText(m.contextLabel, MAX_CONTEXT_LABEL);
+        m.summary = truncateText(m.summary, MAX_SUMMARY);
+        m.lastMessagePreview = truncateText(m.lastMessagePreview, PREVIEW_LEN);
+    }
+
+    /** Derive the list-row fields ({@code lastMessagePreview}/{@code messageCount}) from a session. */
+    private static SessionMeta toMeta(Session s) {
+        SessionMeta m = new SessionMeta();
+        m.id = s.id;
+        m.title = truncateText(s.title, MAX_TITLE);
+        m.createdAt = s.createdAt;
+        m.updatedAt = s.updatedAt;
+        m.source = truncateText(s.source, MAX_SOURCE);
+        m.contextLabel = truncateText(s.contextLabel, MAX_CONTEXT_LABEL);
+        m.memoryPolicy = coerceMemoryPolicy(s.memoryPolicy);
+        m.summary = truncateText(s.summary, MAX_SUMMARY);
+        m.messageCount = s.messages != null ? s.messages.size() : 0;
+        m.lastMessagePreview = lastPreview(s);
+        return m;
+    }
+
+    private static String lastPreview(Session s) {
+        if (s.messages == null || s.messages.isEmpty()) return null;
+        String content = s.messages.get(s.messages.size() - 1).content;
+        if (content == null) return null;
+        content = content.strip();
+        return codePoints(content) > PREVIEW_LEN
+                ? prefixCodePoints(content, PREVIEW_LEN) : content;
     }
 
     /** Keep only the newest complete-turn tail within {@link #MAX_MESSAGES}. */
@@ -1422,93 +1791,6 @@ public class ChatSessionStore implements AutoCloseable {
 
     // ── Models ───────────────────────────────────────────────────
 
-    private enum RecoveryStatus { CLEAN, DIRTY }
-
-    private enum MutationOperation { CREATE, UPSERT, DELETE }
-
-    private enum RecoveryStateKind { MISSING, VALID, INVALID }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private static final class DeletionIntent {
-        public int protocolVersion;
-        public String state;
-        public String sessionId;
-
-        @JsonFormat(shape = JsonFormat.Shape.STRING)
-        public Instant requestedAt;
-
-        public DeletionIntent() {
-        }
-
-        private static DeletionIntent pending(String sessionId) {
-            DeletionIntent intent = new DeletionIntent();
-            intent.protocolVersion = DELETION_PROTOCOL_VERSION;
-            intent.state = "PENDING";
-            intent.sessionId = sessionId;
-            intent.requestedAt = Instant.now();
-            return intent;
-        }
-    }
-
-    private static final class RecoveryStateRead {
-        private final RecoveryStateKind kind;
-        private final RecoveryState state;
-        private final Throwable error;
-
-        private RecoveryStateRead(
-                RecoveryStateKind kind, RecoveryState state, Throwable error) {
-            this.kind = kind;
-            this.state = state;
-            this.error = error;
-        }
-
-        private static RecoveryStateRead missing() {
-            return new RecoveryStateRead(RecoveryStateKind.MISSING, null, null);
-        }
-
-        private static RecoveryStateRead valid(RecoveryState state) {
-            return new RecoveryStateRead(RecoveryStateKind.VALID, state, null);
-        }
-
-        private static RecoveryStateRead invalid(Throwable error) {
-            return new RecoveryStateRead(RecoveryStateKind.INVALID, null, error);
-        }
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    private static final class RecoveryState {
-        public int protocolVersion;
-        public String state;
-        public String operation;
-        public String sessionId;
-        public String activeBefore;
-        public String activeAfter;
-
-        public RecoveryState() {
-        }
-
-        private static RecoveryState clean() {
-            RecoveryState state = new RecoveryState();
-            state.protocolVersion = RECOVERY_PROTOCOL_VERSION;
-            state.state = RecoveryStatus.CLEAN.name();
-            return state;
-        }
-
-        private static RecoveryState dirty(
-                MutationOperation operation,
-                String sessionId,
-                String activeBefore,
-                String activeAfter) {
-            RecoveryState state = clean();
-            state.state = RecoveryStatus.DIRTY.name();
-            state.operation = operation.name();
-            state.sessionId = sessionId;
-            state.activeBefore = activeBefore;
-            state.activeAfter = activeAfter;
-            return state;
-        }
-    }
-
     @JsonIgnoreProperties(ignoreUnknown = true)
     private static final class PageCursor {
         public String id;
@@ -1554,7 +1836,7 @@ public class ChatSessionStore implements AutoCloseable {
         public List<Object> suggestedTasks;  // opaque (SPEC-CSP-MODEL-003)
     }
 
-    /** Projection row in {@code index.json}; never carries {@code messages}. */
+    /** List-row metadata; never carries {@code messages}. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class SessionMeta {
         public String id;
@@ -1574,7 +1856,7 @@ public class ChatSessionStore implements AutoCloseable {
         public int messageCount;
     }
 
-    /** Serialized as {@code index.json}. */
+    /** Full metadata listing. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Index {
         public String activeSessionId;
@@ -1609,12 +1891,6 @@ public class ChatSessionStore implements AutoCloseable {
     public synchronized void close() {
         if (closed) return;
         closed = true;
-        RuntimeException projectionFailure = null;
-        try {
-            projectionIndex.close();
-        } catch (RuntimeException error) {
-            projectionFailure = error;
-        }
         IOException failure = null;
         if (writerLock != null) {
             try {
@@ -1632,9 +1908,7 @@ public class ChatSessionStore implements AutoCloseable {
             }
         }
         if (failure != null) {
-            if (projectionFailure != null) failure.addSuppressed(projectionFailure);
             throw new IllegalStateException("Failed to release chat-session writer lock", failure);
         }
-        if (projectionFailure != null) throw projectionFailure;
     }
 }

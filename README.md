@@ -156,14 +156,14 @@ PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
 - **Goal（目标）**：描述、衡量指标、基线值、目标值、设置日期
 - **KnownPattern（已知模式）**：发现的行为模式 + 置信度评分
 - **ImprovementLog（改进记录）**：行动 → 结果 → 日期，追踪闭环
-- **聊天正文**：以 `{memory.dir}/chat-sessions/index.db` 元数据投影 + 每会话一个权威分片保存；会话与消息 ID 由本机后端生成
-- **分片资源边界**：请求体、opaque 上下文、建议任务和最终 UTF-8 shard 均由服务端限额；前端采用服务端 canonical 消息并镜像完整-turn retention
-- **崩溃恢复与分页**：`index.state` 记录跨文件 DIRTY intent，重启从 authoritative shards 修复投影；会话列表/搜索按 50 条游标分页
-- **删除一致性与单 writer**：`delete-<sessionId>.state` 保证 AgentState 与正文最终同时删除；DesktopServer 以 `.writer.lock` 阻止同一数据目录被两个进程并发写入
+- **聊天正文**：以 `{memory.dir}/chat-sessions/chat.db` 单一 SQLite 数据库（WAL 模式）保存会话与消息；会话与消息 ID 由本机后端生成；旧版分片存储在首次启动时自动迁移并归档到 `chat-sessions/legacy/`
+- **资源边界**：请求体、opaque 上下文、建议任务和单会话序列化体积均由服务端限额；前端采用服务端 canonical 消息并镜像完整-turn retention
+- **崩溃恢复与分页**：每次写操作在单个 SQLite 事务内提交，崩溃恢复由 WAL 保证；会话列表/搜索按 50 条游标分页，搜索走 FTS5 trigram 索引（短查询回退 LIKE）
+- **删除一致性与单 writer**：`pending_deletions` 表记录持久删除意图，保证 AgentState 与正文最终同时删除；DesktopServer 以 `.writer.lock` 阻止同一数据目录被两个进程并发写入
 - **Agent 会话状态**：模型历史按桌面聊天会话隔离，存于 `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/`，重启后自动恢复
 - **长会话压缩**：达到 message/token 阈值后把旧前缀滚动写入 `AgentState.summary`，仅保留近期原始消息；摘要失败不会覆盖旧历史
 
-聊天正文分片是 UI transcript 的权威，AgentState 是模型执行历史的权威，前端不会把 transcript 每轮重复塞回 prompt。升级前已经存在于服务端分片、但尚无 AgentState 的会话，会在下一次发送时把当前 user 之前的有效 user/assistant 历史单次懒迁移到 AgentState；旧 WebView 会话数据不参与该迁移。
+聊天正文库表是 UI transcript 的权威，AgentState 是模型执行历史的权威，前端不会把 transcript 每轮重复塞回 prompt。升级前已经存在于服务端、但尚无 AgentState 的会话，会在下一次发送时把当前 user 之前的有效 user/assistant 历史单次懒迁移到 AgentState；旧 WebView 会话数据不参与该迁移。
 
 Agent 每次对话前自动加载记忆，对话后自动保存新的发现。
 
@@ -336,6 +336,7 @@ java -jar self-analyst-app/target/self-analyst-app-1.0.0.jar
 
 - Java 21
 - [AgentScope Java 2.0.1](https://github.com/agentscope-ai/agentscope-java) — LLM Agent 框架
+- [jtokkit](https://github.com/knuddelsgmbh/jtokkit) — 本地 token 计数（tiktoken cl100k_base）
 - [Javalin](https://javalin.io) — 嵌入式 HTTP 服务器
 - [picocli](https://picocli.info) — CLI 框架
 - SQLite + JDBC — 活动数据存储

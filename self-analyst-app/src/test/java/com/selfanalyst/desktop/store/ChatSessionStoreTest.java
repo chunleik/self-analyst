@@ -6,12 +6,17 @@ import com.selfanalyst.desktop.store.ChatSessionStore.Index;
 import com.selfanalyst.desktop.store.ChatSessionStore.Message;
 import com.selfanalyst.desktop.store.ChatSessionStore.Session;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -19,7 +24,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -27,7 +31,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Sharded persistence, CRUD, invariants, isolation, index rebuild (SPEC-CSP-TST-001..014). */
+/**
+ * SQLite single-database persistence, CRUD, invariants, cursor pagination and
+ * FTS5/LIKE search (SPEC-CSS-TST-001..013, -017, -018; behavior contract of
+ * SPEC-CSP-TST-001..013 preserved).
+ */
 class ChatSessionStoreTest {
 
     private static Message msg(String role, String content) {
@@ -46,16 +54,42 @@ class ChatSessionStoreTest {
         return r;
     }
 
-    // ── TST-001 ──
+    private static ObjectMapper storeMapper() {
+        return new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .enable(SerializationFeature.INDENT_OUTPUT)
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    }
+
+    // ── SPEC-CSS-TST-001 ──
     @Test
     void freshIndexIsEmpty(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Index idx = store.listIndex();
         assertNull(idx.activeSessionId);
         assertTrue(idx.sessions.isEmpty());
+        assertTrue(Files.isRegularFile(memoryDir.resolve("chat-sessions").resolve("chat.db")));
     }
 
-    // ── TST-002 ──
+    // ── SPEC-CSS-TST-017: prove the trigram virtual table is active, not LIKE fallback ──
+    @Test
+    void freshStoreCreatesWorkingTrigramFtsIndex(@TempDir Path memoryDir) throws Exception {
+        ChatSessionStore store = new ChatSessionStore(memoryDir);
+        store.create(req("中文子串检索"));
+
+        Path database = memoryDir.resolve("chat-sessions").resolve("chat.db");
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             PreparedStatement query = connection.prepareStatement(
+                     "SELECT count(*) FROM sessions_fts WHERE sessions_fts MATCH ?")) {
+            query.setString(1, "\"文子串\"");
+            try (var rows = query.executeQuery()) {
+                assertTrue(rows.next());
+                assertEquals(1, rows.getInt(1));
+            }
+        }
+    }
+
+    // ── SPEC-CSS-TST-002 ──
     @Test
     void indexRowsAreMetaWithoutMessages(@TempDir Path memoryDir) throws Exception {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -68,28 +102,25 @@ class ChatSessionStoreTest {
         assertEquals(1, meta.messageCount);
         assertEquals("你好世界", meta.lastMessagePreview);
 
-        Path indexFile = memoryDir.resolve("chat-sessions").resolve("index.db");
-        assertTrue(Files.isRegularFile(indexFile));
-        String projectionJson = new ObjectMapper().registerModule(
-                new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
+        String projectionJson = new ObjectMapper().registerModule(new JavaTimeModule())
                 .writeValueAsString(idx);
         assertFalse(projectionJson.contains("\"messages\""),
-                "SQLite projection rows must not contain messages");
+                "list metadata must not contain messages");
     }
 
-    // ── TST-003 ──
+    // ── SPEC-CSS-TST-003 ──
     @Test
-    void createAssignsIdTimestampsShardAndActive(@TempDir Path memoryDir) {
+    void createAssignsIdTimestampsAndActive(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("会话A"));
         assertNotNull(s.id);
         assertNotNull(s.createdAt);
         assertNotNull(s.updatedAt);
-        assertTrue(Files.exists(memoryDir.resolve("chat-sessions").resolve(s.id + ".json")));
+        assertTrue(ChatSessionStore.isGeneratedSessionId(s.id));
         assertEquals(s.id, store.listIndex().activeSessionId);
     }
 
-    // ── TST-004 ──
+    // ── SPEC-CSS-TST-004 ──
     @Test
     void appendUserAndPendingOrderedWithServerIds(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -105,7 +136,7 @@ class ChatSessionStoreTest {
         assertNotNull(loaded.messages.get(1).id);
     }
 
-    // ── TST-005 ──
+    // ── SPEC-CSS-TST-005 ──
     @Test
     void updateMessagePendingToSentAdvancesUpdatedAt(@TempDir Path memoryDir) throws Exception {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -127,7 +158,7 @@ class ChatSessionStoreTest {
         assertTrue(store.getSession(s.id).updatedAt.isAfter(before));
     }
 
-    // ── TST-006 ──
+    // ── SPEC-CSS-TST-006 ──
     @Test
     void updateMetaChangesTitleNotMessages(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -139,9 +170,9 @@ class ChatSessionStoreTest {
         assertEquals("新标题", store.listIndex().sessions.get(0).title);
     }
 
-    // ── TST-007 ──
+    // ── SPEC-CSS-TST-007 ──
     @Test
-    void deleteActiveReselectsNewestAndRemovesShard(@TempDir Path memoryDir) throws Exception {
+    void deleteActiveReselectsNewestAndRemovesRows(@TempDir Path memoryDir) throws Exception {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session a = store.create(req("A"));
         Thread.sleep(5);
@@ -149,13 +180,14 @@ class ChatSessionStoreTest {
         DeleteResult result = store.delete(b.id);
         assertTrue(result.deleted());
         assertEquals(a.id, result.activeSessionId()); // reselect remaining
-        assertFalse(Files.exists(memoryDir.resolve("chat-sessions").resolve(b.id + ".json")));
+        assertNull(store.getSession(b.id));
+        assertTrue(store.listIndex().sessions.stream().noneMatch(meta -> b.id.equals(meta.id)));
 
         DeleteResult last = store.delete(a.id);
         assertNull(last.activeSessionId()); // none left
     }
 
-    // ── TST-008 ──
+    // ── SPEC-CSS-TST-008 ──
     @Test
     void manySessionsAllRetainedNoPrune(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -169,21 +201,21 @@ class ChatSessionStoreTest {
         }
     }
 
-    // ── TST-009 ──
+    // ── SPEC-CSS-TST-009 (semantic isolation; storage is single-db now) ──
     @Test
-    void appendToAisolatesFromBshard(@TempDir Path memoryDir) throws Exception {
+    void appendToSessionADoesNotTouchSessionB(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session a = store.create(req("A"));
         Session b = store.create(req("B"));
-        Path bShard = memoryDir.resolve("chat-sessions").resolve(b.id + ".json");
-        byte[] before = Files.readAllBytes(bShard);
 
         store.appendMessages(a.id, List.of(msg("user", "只改 A")));
-        byte[] after = Files.readAllBytes(bShard);
-        assertEquals(new String(before), new String(after), "B's shard must be byte-identical");
+
+        Session reloadedB = store.getSession(b.id);
+        assertEquals("B", reloadedB.title);
+        assertTrue(reloadedB.messages.isEmpty());
     }
 
-    // ── TST-010 ──
+    // ── SPEC-CSS-TST-010 ──
     @Test
     void over200MessagesKeepsNewest200(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -204,7 +236,7 @@ class ChatSessionStoreTest {
         assertEquals("m249", loaded.messages.get(199).content);
     }
 
-    // ── TST-011 ──
+    // ── SPEC-CSS-TST-011 ──
     @Test
     void overLongContentTruncatedWithEllipsis(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -282,12 +314,9 @@ class ChatSessionStoreTest {
     }
 
     @Test
-    void rejectsInvalidOrOversizedMessageBatchesBeforeWriting(@TempDir Path memoryDir)
-            throws Exception {
+    void rejectsInvalidOrOversizedMessageBatchesBeforeWriting(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("validation"));
-        Path shard = memoryDir.resolve("chat-sessions").resolve(s.id + ".json");
-        byte[] before = Files.readAllBytes(shard);
         List<Message> tooMany = new ArrayList<>();
         for (int i = 0; i <= ChatSessionStore.MAX_MESSAGE_BATCH; i++) {
             tooMany.add(msg("user", "m" + i));
@@ -306,12 +335,12 @@ class ChatSessionStoreTest {
         int sessionsBefore = store.listIndex().sessions.size();
         assertThrows(IllegalArgumentException.class, () -> store.create(emptyInitial));
         assertEquals(sessionsBefore, store.listIndex().sessions.size());
-        assertEquals(new String(before), new String(Files.readAllBytes(shard)));
+        // Failed mutations must leave the persisted session untouched.
+        assertTrue(store.getSession(s.id).messages.isEmpty());
     }
 
     @Test
-    void assistantLifecycleRejectsUserEditsAndLateErrorsAfterSent(@TempDir Path memoryDir)
-            throws Exception {
+    void assistantLifecycleRejectsUserEditsAndLateErrorsAfterSent(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("lifecycle"));
         Message user = msg("user", "question");
@@ -326,20 +355,19 @@ class ChatSessionStoreTest {
         Message sent = store.updateMessage(s.id, appended.get(1).id,
                 "answer", "sent", null, List.of(Map.of("title", "task")));
         assertEquals("sent", sent.status);
-        Path shard = memoryDir.resolve("chat-sessions").resolve(s.id + ".json");
-        byte[] beforeLateError = Files.readAllBytes(shard);
 
         assertThrows(IllegalArgumentException.class,
                 () -> store.updateMessage(s.id, sent.id,
                         "late failure", "error", "network", null));
-        assertEquals(new String(beforeLateError), new String(Files.readAllBytes(shard)));
-        assertEquals("sent", store.getSession(s.id).messages.get(1).status);
+        Session persisted = store.getSession(s.id);
+        assertEquals("sent", persisted.messages.get(1).status);
+        assertEquals("answer", persisted.messages.get(1).content);
     }
 
     @Test
-    void shardByteBudgetDropsOnlyCompleteOldTurns(@TempDir Path memoryDir) throws Exception {
+    void sessionByteBudgetDropsOnlyCompleteOldTurns(@TempDir Path memoryDir) throws Exception {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
-        Session s = store.create(req("bounded shard"));
+        Session s = store.create(req("bounded session"));
         String large = "😀".repeat(ChatSessionStore.MAX_CONTENT);
         List<Message> turns = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
@@ -354,16 +382,15 @@ class ChatSessionStoreTest {
         store.appendMessages(s.id, turns);
 
         Session persisted = store.getSession(s.id);
-        Path shard = memoryDir.resolve("chat-sessions").resolve(s.id + ".json");
-        assertTrue(Files.size(shard) <= ChatSessionStore.MAX_SHARD_BYTES);
+        assertTrue(storeMapper().writeValueAsBytes(persisted).length
+                <= ChatSessionStore.MAX_SHARD_BYTES);
         assertTrue(persisted.messages.size() < ChatSessionStore.MAX_MESSAGES);
         assertEquals("user", persisted.messages.getFirst().role);
         assertEquals(0, persisted.messages.size() % 2);
     }
 
     @Test
-    void rejectsASingleTurnThatWouldOrphanItsUserAtMessageLimit(@TempDir Path memoryDir)
-            throws Exception {
+    void rejectsASingleTurnThatWouldOrphanItsUserAtMessageLimit(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("single turn"));
         List<Message> turn = new ArrayList<>();
@@ -376,26 +403,21 @@ class ChatSessionStoreTest {
             turn.add(assistant);
         }
         store.appendMessages(s.id, turn);
-        Path shard = memoryDir.resolve("chat-sessions").resolve(s.id + ".json");
-        byte[] before = Files.readAllBytes(shard);
         Message extraAssistant = msg("assistant", "one too many");
         extraAssistant.status = "pending";
 
         assertThrows(IllegalArgumentException.class,
                 () -> store.appendMessages(s.id, List.of(extraAssistant)));
 
-        assertEquals(new String(before), new String(Files.readAllBytes(shard)));
-        assertEquals("user", store.getSession(s.id).messages.getFirst().role);
-        assertEquals(ChatSessionStore.MAX_MESSAGES, store.getSession(s.id).messages.size());
+        Session persisted = store.getSession(s.id);
+        assertEquals("user", persisted.messages.getFirst().role);
+        assertEquals(ChatSessionStore.MAX_MESSAGES, persisted.messages.size());
     }
 
     @Test
-    void rejectsASingleTurnThatCannotFitTheShardByteBudget(@TempDir Path memoryDir)
-            throws Exception {
+    void rejectsASingleTurnThatCannotFitTheSessionByteBudget(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("single huge turn"));
-        Path shard = memoryDir.resolve("chat-sessions").resolve(s.id + ".json");
-        byte[] before = Files.readAllBytes(shard);
         String large = "😀".repeat(ChatSessionStore.MAX_CONTENT);
         List<Message> turn = new ArrayList<>();
         Message user = msg("user", large);
@@ -410,7 +432,6 @@ class ChatSessionStoreTest {
         assertThrows(IllegalArgumentException.class,
                 () -> store.appendMessages(s.id, turn));
 
-        assertEquals(new String(before), new String(Files.readAllBytes(shard)));
         assertTrue(store.getSession(s.id).messages.isEmpty());
     }
 
@@ -438,48 +459,6 @@ class ChatSessionStoreTest {
     }
 
     @Test
-    void oversizedLegacyShardIsReadableThenConvergesOnMutation(@TempDir Path memoryDir)
-            throws Exception {
-        Path chatDir = memoryDir.resolve("chat-sessions");
-        Files.createDirectories(chatDir);
-        String id = "d".repeat(32);
-        Session legacy = new Session();
-        legacy.id = id;
-        legacy.title = "legacy".repeat(100);
-        legacy.source = "manual";
-        legacy.createdAt = java.time.Instant.parse("2026-01-01T00:00:00Z");
-        legacy.updatedAt = legacy.createdAt;
-        legacy.messages = new ArrayList<>();
-        for (int i = 0; i < 101; i++) {
-            Message user = msg("user", "u" + i);
-            user.status = "sent";
-            legacy.messages.add(user);
-            if (i < 100) {
-                Message assistant = msg("assistant", "a" + i);
-                assistant.status = "sent";
-                legacy.messages.add(assistant);
-            }
-        }
-        new ObjectMapper().registerModule(
-                new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
-                .writeValue(chatDir.resolve(id + ".json").toFile(), legacy);
-        ChatSessionStore store = new ChatSessionStore(memoryDir);
-
-        Session readable = store.getSession(id);
-        assertEquals(201, readable.messages.size());
-        assertEquals(600, readable.title.length());
-        Index rebuilt = store.listIndex();
-        assertTrue(rebuilt.sessions.getFirst().title.codePointCount(
-                0, rebuilt.sessions.getFirst().title.length()) <= ChatSessionStore.MAX_TITLE);
-
-        Session converged = store.updateMeta(id, "repaired", null, null);
-        assertEquals("repaired", converged.title);
-        assertTrue(converged.messages.size() <= ChatSessionStore.MAX_MESSAGES);
-        assertEquals("user", converged.messages.getFirst().role);
-        assertTrue(Files.size(chatDir.resolve(id + ".json")) <= ChatSessionStore.MAX_SHARD_BYTES);
-    }
-
-    @Test
     void indexPreviewTruncatesEmojiByCodePoint(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("preview"));
@@ -496,18 +475,20 @@ class ChatSessionStoreTest {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         List<Session> sessions = new ArrayList<>();
         for (int i = 0; i < 5; i++) sessions.add(store.create(req("session-" + i)));
-        Path chatDir = memoryDir.resolve("chat-sessions");
+        Path database = memoryDir.resolve("chat-sessions").resolve("chat.db");
         Instant sameTime = Instant.parse("2026-08-23T00:00:00Z");
-        ObjectMapper mapper = new ObjectMapper().registerModule(
-                new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
-        for (int i = 0; i < sessions.size(); i++) {
-            Path shard = chatDir.resolve(sessions.get(i).id + ".json");
-            Session raw = mapper.readValue(shard.toFile(), Session.class);
-            raw.updatedAt = sameTime;
-            if (i == 4) raw.summary = "needle in an older page";
-            mapper.writeValue(shard.toFile(), raw);
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + database);
+             PreparedStatement statement = conn.prepareStatement(
+                     "UPDATE sessions SET updated_at = ?, summary = ? WHERE id = ?")) {
+            for (int i = 0; i < sessions.size(); i++) {
+                statement.setString(1, sameTime.toString());
+                statement.setString(2, i == 4 ? "needle in an older page" : null);
+                statement.setString(3, sessions.get(i).id);
+                statement.addBatch();
+            }
+            statement.executeBatch();
         }
-        Files.delete(chatDir.resolve("index.state"));
+        store.close();
         ChatSessionStore restarted = new ChatSessionStore(memoryDir);
         List<String> fullOrder = restarted.listIndex().sessions.stream()
                 .map(meta -> meta.id).toList();
@@ -548,52 +529,7 @@ class ChatSessionStoreTest {
                 () -> restarted.listIndexPage(2, first.nextCursor(), null));
     }
 
-    // ── TST-014 ──
-    @Test
-    void corruptIndexRebuiltFromShards(@TempDir Path memoryDir) throws Exception {
-        ChatSessionStore store = new ChatSessionStore(memoryDir);
-        Session a = store.create(req("A"));
-        store.appendMessages(a.id, List.of(msg("user", "正文A")));
-        Session b = store.create(req("B"));
-
-        Files.writeString(memoryDir.resolve("chat-sessions").resolve("index.json"), """
-                {"activeSessionId":null,"sessions":[{"id":"%s","title":"stale"}]}
-                """.formatted("f".repeat(32)));
-        // Corrupt the rebuildable SQLite projection.
-        Path indexFile = memoryDir.resolve("chat-sessions").resolve("index.db");
-        Files.writeString(indexFile, "{ this is not valid json");
-
-        Index rebuilt = store.listIndex();
-        assertEquals(2, rebuilt.sessions.size());
-        // Bodies survive.
-        assertEquals("正文A", store.getSession(a.id).messages.get(0).content);
-        assertNotNull(store.getSession(b.id));
-        try (var paths = Files.list(indexFile.getParent())) {
-            assertTrue(paths.anyMatch(path ->
-                    path.getFileName().toString().startsWith("index.db.corrupt-")));
-        }
-    }
-
-    @Test
-    void invalidSqliteMigrationMarkerFailsClosed(@TempDir Path memoryDir) throws Exception {
-        ChatSessionStore store = new ChatSessionStore(memoryDir);
-        Session session = store.create(req("marker"));
-        Path chatDir = memoryDir.resolve("chat-sessions");
-        Path marker = chatDir.resolve("index.db.ready");
-        Files.writeString(marker, "{\"protocolVersion\":99,\"projection\":\"future\"}");
-        byte[] databaseBefore = Files.readAllBytes(chatDir.resolve("index.db"));
-        byte[] shardBefore = Files.readAllBytes(chatDir.resolve(session.id + ".json"));
-        byte[] stateBefore = Files.readAllBytes(chatDir.resolve("index.state"));
-
-        assertThrows(IllegalStateException.class,
-                () -> new ChatSessionStore(memoryDir).listIndex());
-
-        assertArrayEquals(databaseBefore, Files.readAllBytes(chatDir.resolve("index.db")));
-        assertArrayEquals(shardBefore, Files.readAllBytes(chatDir.resolve(session.id + ".json")));
-        assertArrayEquals(stateBefore, Files.readAllBytes(chatDir.resolve("index.state")));
-    }
-
-    // ── TST-012 / TST-013 preconditions: not-found + invalid-pointer signals ──
+    // ── SPEC-CSS-TST-012 / -013 preconditions: not-found + invalid-pointer signals ──
     @Test
     void unknownIdReturnsNullSignals(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
@@ -627,24 +563,19 @@ class ChatSessionStoreTest {
     @Test
     void setActiveSessionRejectsUnknownId(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+        assertThrows(IllegalArgumentException.class,
                 () -> store.setActiveSession("e".repeat(32)));
     }
 
     @Test
-    void shardJsonRoundTripsOpaqueFields(@TempDir Path memoryDir) throws Exception {
-        // Guards SPEC-CSP-MODEL-003/004: opaque + unknown fields survive.
+    void opaqueFieldsRoundTripThroughTheDatabase(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
-        Session s = store.create(req("A"));
-        Path shard = memoryDir.resolve("chat-sessions").resolve(s.id + ".json");
-        String json = Files.readString(shard);
-        // Inject an unknown field; must not break reads.
-        json = json.replaceFirst("\\{", "{ \"unknownX\": 1,");
-        Files.writeString(shard, json);
-        Session reloaded = new ObjectMapper().registerModule(
-                new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule())
-                .readValue(shard.toFile(), Session.class);
-        assertEquals(s.id, reloaded.id);
+        CreateRequest request = req("opaque");
+        request.contextSnapshot = Map.of("type", "task", "payload", Map.of("a", 1, "b", "x"));
+        Session created = store.create(request);
+
+        Session reloaded = store.getSession(created.id);
+        assertEquals(created.contextSnapshot, reloaded.contextSnapshot);
     }
 
     @Test
@@ -673,7 +604,7 @@ class ChatSessionStoreTest {
     }
 
     @Test
-    void updateMemoryPolicyPersistsToShardAndIndex(@TempDir Path memoryDir) throws Exception {
+    void updateMemoryPolicyPersistsToSessionAndIndex(@TempDir Path memoryDir) throws Exception {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
         Session s = store.create(req("memory"));
         var before = s.updatedAt;
@@ -698,98 +629,42 @@ class ChatSessionStoreTest {
         assertTrue(store.listIndex().sessions.isEmpty());
     }
 
+    // ── SPEC-CSS-TST-017 / -018: FTS5 trigram search + LIKE fallback ──
     @Test
-    void legacyShardAndIndexDefaultMemoryPolicyOnRead(@TempDir Path memoryDir) throws Exception {
-        Path chatDir = memoryDir.resolve("chat-sessions");
-        Files.createDirectories(chatDir);
-        String id = "a".repeat(32);
-        Files.writeString(chatDir.resolve(id + ".json"), """
-                {
-                  "id": "%s",
-                  "title": "Legacy",
-                  "createdAt": "2026-01-01T00:00:00Z",
-                  "updatedAt": "2026-01-01T00:00:00Z",
-                  "source": "manual",
-                  "messages": []
-                }
-                """.formatted(id));
-        Files.writeString(chatDir.resolve("index.json"), """
-                {
-                  "activeSessionId": "%s",
-                  "sessions": [
-                    {
-                      "id": "%s",
-                      "title": "Legacy",
-                      "createdAt": "2026-01-01T00:00:00Z",
-                      "updatedAt": "2026-01-01T00:00:00Z",
-                      "source": "manual",
-                      "messageCount": 0
-                    }
-                  ]
-                }
-                """.formatted(id, id));
-
+    void searchMatchesChineseAndEnglishSubstringsCaseInsensitively(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
+        store.create(req("配置优化讨论"));
+        store.create(req("Weekly PLAN review"));
+        store.create(req("无关会话"));
 
-        assertEquals("smart", store.getSession(id).memoryPolicy);
-        assertEquals("smart", store.listIndex().sessions.get(0).memoryPolicy);
-        byte[] legacyIndex = Files.readAllBytes(chatDir.resolve("index.json"));
-        store.updateMeta(id, "SQLite row update", null, null);
-        assertArrayEquals(legacyIndex, Files.readAllBytes(chatDir.resolve("index.json")),
-                "normal mutations must not rewrite the migrated v1 JSON projection");
-        assertEquals("SQLite row update", store.listIndex().sessions.getFirst().title);
-        assertTrue(Files.isRegularFile(chatDir.resolve("index.db")));
-        assertTrue(Files.isRegularFile(chatDir.resolve("index.db.ready")));
+        ChatSessionStore.IndexPage chinese = store.listIndexPage(10, null, "配置优化");
+        assertEquals(1, chinese.sessions().size());
+        assertEquals("配置优化讨论", chinese.sessions().getFirst().title);
+
+        ChatSessionStore.IndexPage english = store.listIndexPage(10, null, "plan");
+        assertEquals(1, english.sessions().size());
+        assertEquals("Weekly PLAN review", english.sessions().getFirst().title);
     }
 
     @Test
-    void invalidMemoryPolicyInShardDefaultsToSmartOnRead(@TempDir Path memoryDir) throws Exception {
-        Path chatDir = memoryDir.resolve("chat-sessions");
-        Files.createDirectories(chatDir);
-        String id = "b".repeat(32);
-        Files.writeString(chatDir.resolve(id + ".json"), """
-                {
-                  "id": "%s",
-                  "title": "Future",
-                  "createdAt": "2026-01-01T00:00:00Z",
-                  "updatedAt": "2026-01-01T00:00:00Z",
-                  "source": "manual",
-                  "memoryPolicy": "future_policy",
-                  "messages": []
-                }
-                """.formatted(id));
-
+    void shortQueriesFallBackToLike(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
+        store.create(req("配置优化讨论"));
+        store.create(req("无关"));
 
-        assertEquals("smart", store.getSession(id).memoryPolicy);
+        ChatSessionStore.IndexPage page = store.listIndexPage(10, null, "配置");
+        assertEquals(1, page.sessions().size());
+        assertEquals("配置优化讨论", page.sessions().getFirst().title);
     }
 
     @Test
-    void ghostMetaWithoutShardIsDroppedDuringV1Recovery(@TempDir Path memoryDir) throws Exception {
-        Path chatDir = memoryDir.resolve("chat-sessions");
-        Files.createDirectories(chatDir);
-        String id = "c".repeat(32);
-        Files.writeString(chatDir.resolve("index.json"), """
-                {
-                  "activeSessionId": "%s",
-                  "sessions": [
-                    {
-                      "id": "%s",
-                      "title": "Future",
-                      "createdAt": "2026-01-01T00:00:00Z",
-                      "updatedAt": "2026-01-01T00:00:00Z",
-                      "source": "manual",
-                      "memoryPolicy": "future_policy",
-                      "messageCount": 0
-                    }
-                  ]
-                }
-                """.formatted(id, id));
-
+    void likeWildcardsAreSearchedLiterally(@TempDir Path memoryDir) {
         ChatSessionStore store = new ChatSessionStore(memoryDir);
+        store.create(req("100% 完成"));
+        store.create(req("100x 完成"));
 
-        Index recovered = store.listIndex();
-        assertTrue(recovered.sessions.isEmpty());
-        assertNull(recovered.activeSessionId);
+        ChatSessionStore.IndexPage page = store.listIndexPage(10, null, "100%");
+        assertEquals(1, page.sessions().size());
+        assertEquals("100% 完成", page.sessions().getFirst().title);
     }
 }

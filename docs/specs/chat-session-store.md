@@ -2,6 +2,8 @@
 
 > Specification-Driven Development spec. 本文档定义桌面端 `会话` tab 的会话/消息数据由 WebView `localStorage` 改为**后端分片文件持久化 + REST CRUD** 的行为契约。实现必须可追溯至本文档中的规格 ID。
 
+> **取代说明（2026-08-28）**：存储内部实现（分片文件 + SQLite 投影 + index.state/tombstone 恢复机制）已由 [`chat-session-sqlite-store.md`](chat-session-sqlite-store.md)（`SPEC-CSS-*`）取代——会话正文与元数据收敛为 SQLite 单库（`chat.db`，WAL）+ FTS5 trigram 搜索。本文档的 REST 接口契约（§7）、前端契约（§8）、数据模型字段与裁剪不变量（`SPEC-CSP-DEC-005/-013/-014`、`SPEC-CSP-MODEL-*`）**继续有效**；`SPEC-CSP-DEC-002`（shard 权威）、`SPEC-CSP-DEC-008`（分片布局）、`SPEC-CSP-DEC-015/-016/-017`、`SPEC-CSP-API-010` 及恢复机制专项测试 `SPEC-CSP-TST-014/-035..037/-040/-042/-044..047/-049/-052` 以 `SPEC-CSS-*` 为准。
+
 ---
 
 ## 1. 文档元信息
@@ -16,7 +18,7 @@
 | 主要前端逻辑 | `self-analyst-app/src/main/resources/desktop-ui/`（chat/api/state/init.js） |
 | 主要后端逻辑 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/controller/DesktopChatSessionController.java`（新增） |
 | 路由注册 | `self-analyst-app/src/main/java/com/selfanalyst/desktop/DesktopServer.java` |
-| 会话存储 | `ChatSessionStore.java` + `SqliteChatSessionIndex.java`（`index.db` + `index.state` + 每会话权威分片） |
+| 会话存储 | `ChatSessionStore.java`（自 2026-08-28 起为 SQLite 单库 `chat.db` 实现，见 `SPEC-CSS-*`；原 `SqliteChatSessionIndex.java`/`index.state`/分片已删除） |
 
 ---
 
@@ -65,11 +67,11 @@
 
 - **SPEC-CSP-DEC-014**（请求资源边界）：桌面 chat/session mutation body 最多 256 KiB，JSON 最大深度 32；超限返回 413，错误根类型、字段类型、空消息批次、null 消息以及非法 role/status 返回 400，且不得修改 shard/index。
 
-- **SPEC-CSP-DEC-015**（跨文件恢复）：shard 是正文权威，SQLite `index.db` 是派生投影，`index.state` 以 CLEAN/DIRTY 记录唯一在途 mutation 及 active before/after。shard 原子 replace（或删除目录项）是业务 commit point；其后的 SQLite row/CLEAN 写失败保留 DIRTY 并仍返回成功，下一次访问从 shards 幂等恢复。
+- **SPEC-CSP-DEC-015**（跨文件恢复，**[Superseded]**）：旧 shard/index.state 恢复协议已由 `SPEC-CSS-DEC-002/-006` 和 `SPEC-CSS-API-001/-003` 的 SQLite 单库事务及迁移契约取代；以下仅保留历史语义。shard 是正文权威，SQLite `index.db` 是派生投影，`index.state` 以 CLEAN/DIRTY 记录唯一在途 mutation 及 active before/after。shard 原子 replace（或删除目录项）是业务 commit point；其后的 SQLite row/CLEAN 写失败保留 DIRTY 并仍返回成功，下一次访问从 shards 幂等恢复。
 
-- **SPEC-CSP-DEC-016**（SQLite 有界索引）：无参数 `GET /sessions` 保持旧版全量响应；`limit/cursor/q` 由 SQLite 按 `updated_at DESC, id DESC` 执行 keyset 查询、字段过滤和 `LIMIT`。普通 mutation 只 UPSERT/DELETE 一个 metadata row 并在同一 SQLite 事务更新 generation/active，不再解析或重写全部索引。
+- **SPEC-CSP-DEC-016**（SQLite 有界索引，**[Superseded]**）：索引投影机制已由 `SPEC-CSS-*` 的单库 schema 与查询契约取代；REST 分页兼容性继续有效。无参数 `GET /sessions` 保持旧版全量响应；`limit/cursor/q` 由 SQLite 按 `updated_at DESC, id DESC` 执行 keyset 查询、字段过滤和 `LIMIT`。普通 mutation 只 UPSERT/DELETE 一个 metadata row 并在同一 SQLite 事务更新 generation/active，不再解析或重写全部索引。
 
-- **SPEC-CSP-DEC-017**（跨存储删除 saga）：删除会话先在 chat-sessions 目录原子写入 `delete-<sessionId>.state` PENDING tombstone，再删除 AgentScope AgentState 与 transcript。tombstone 是不可逆删除意图的 commit point：写入前失败时两边保持不变；写入后任一崩溃/失败均保留 tombstone。任一 store 访问先幂等完成 transcript 删除，DELETE 重试或下次启动再补齐 AgentState 并清理 tombstone；只有两边都确认删除后才 best-effort 清 tombstone。
+- **SPEC-CSP-DEC-017**（跨存储删除 saga，**[Superseded]**）：文件 tombstone 已由 `SPEC-CSS-DEC-004` 的 `pending_deletions` 表取代；跨 AgentState 的补偿删除语义继续有效。删除会话先在 chat-sessions 目录原子写入 `delete-<sessionId>.state` PENDING tombstone，再删除 AgentScope AgentState 与 transcript。tombstone 是不可逆删除意图的 commit point：写入前失败时两边保持不变；写入后任一崩溃/失败均保留 tombstone。任一 store 访问先幂等完成 transcript 删除，DELETE 重试或下次启动再补齐 AgentState 并清理 tombstone；只有两边都确认删除后才 best-effort 清 tombstone。
 
 - **SPEC-CSP-DEC-018**（单生产 writer）：DesktopServer 以 `.writer.lock` 获取 chat-sessions 的进程级独占 lease，并在 shutdown 释放。第二个指向同一 memoryDir 的生产实例必须 fail fast，不得与现有实例同时执行 index/state/tombstone 恢复或写入；崩溃后由操作系统释放 lease。
 
@@ -255,7 +257,9 @@
 - **SPEC-CSP-API-009e**：辅助字段和 opaque JSON 必须满足 DEC-013；所有 public mutation（含异步 summary）均不得绕过。
 - **SPEC-CSP-API-009f**：最终 shard 超 16 MiB 时按完整旧 user turn 继续淘汰，直至满足总预算；若最新唯一 turn 本身超过 200 条或 16 MiB，则整次 mutation 原子拒绝，不得删除其 user 锚点后保留 orphan assistant。
 
-### SPEC-CSP-API-010：原子写、跨文件恢复、分片隔离与降级
+### SPEC-CSP-API-010：原子写、跨文件恢复、分片隔离与降级 **[Superseded]**
+
+> 本节描述的 shard/index.state/tombstone 内部协议已由 `SPEC-CSS-*` 全部取代，仅保留为历史记录；当前实现的原子性、恢复和删除机制以 [`chat-session-sqlite-store.md`](chat-session-sqlite-store.md) 为准。
 
 - **SPEC-CSP-API-010a**：分片、state、tombstone 和 migration marker 使用唯一临时文件、flush、同目录 `ATOMIC_MOVE`；SQLite row/metadata 使用单一 FULL-synchronous transaction。任一原子机制不可用时 fail closed。
 - **SPEC-CSP-API-010b**：普通 mutation 只触及**该会话分片 + 一个 SQLite row/metadata 事务 + index.state**，不重写其它 shard 或 v1 `index.json`。
@@ -390,7 +394,7 @@
 | SPEC-CSP-API-006..007 | `DesktopChatSessionController.java`、`ChatSessionStore.java` | 单元测试 |
 | SPEC-CSP-API-008 | `DesktopChatSessionController.java`、`DesktopServer.java`、`ChatSessionStore.java` | 单元测试 |
 | SPEC-CSP-API-009 | `ChatSessionStore.java`（裁剪不变量） | 单元测试 |
-| SPEC-CSP-API-010 | `ChatSessionStore.java`（原子写/分片隔离/降级） | 单元测试、代码审查 |
+| SPEC-CSP-API-010 **[Superseded]** | 历史 shard/index.state 实现；当前实现见 `SPEC-CSS-*` | 历史记录 |
 | SPEC-CSP-API-011 | `ChatSummaryService.java`、`DesktopChatSessionController.java`（异步再生成）、`ChatSessionStore.java`（writeSummary） | 单元测试（`ChatSummaryServiceTest`）、代码审查 |
 | SPEC-CSP-API-012 | `DesktopAgentController.java`、`SelfAnalystAgent.java`、`ChatSessionStore.java` | 单元/集成测试、代码审查 |
 | SPEC-CSP-FE-001..012 | `desktop-ui/api.js`、`chat.js`、`state.js`、`init.js`、`events.js` | 手动/验收测试、`scripts/check-desktop-chat-session-store.ps1`、JS 测试、代码审查 |

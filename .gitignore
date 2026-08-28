@@ -17,6 +17,7 @@ tools/
 dist/
 .superpowers/
 .worktrees/
+.workbuddy/
 .claude/*
 # 例外：随仓库共享 SDD 命令流，其余 .claude（settings.local.json 等本地配置）仍忽略
 !.claude/commands/

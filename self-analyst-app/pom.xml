@@ -60,6 +60,12 @@
             <version>1.1.1</version>
         </dependency>
         <dependency>
+            <!-- tiktoken (cl100k_base) Java port for accurate local token counting -->
+            <groupId>com.knuddels</groupId>
+            <artifactId>jtokkit</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+        <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>

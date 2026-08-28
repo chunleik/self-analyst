@@ -25,6 +25,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PlanMiddlewareTest {
 
     @Test
+    void estimatesTokensWithCl100kInsteadOfCharacterHeuristic() {
+        assertEquals(2, PlanMiddleware.estimateTokens("hello world"));
+        assertEquals(0, PlanMiddleware.estimateTokens(null));
+    }
+
+    @Test
     void preservesModelEventsAndEstimatesUsageWhenProviderOmitsIt(@TempDir Path tempDir) {
         UsageMeter meter = new UsageMeter(Config.testDefaults(tempDir), tempDir);
         try {

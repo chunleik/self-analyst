@@ -166,7 +166,6 @@ public final class PlanMiddleware implements MiddlewareBase {
     }
 
     static long estimateTokens(String text) {
-        if (text == null || text.isEmpty()) return 0;
-        return (text.length() + 2) / 3;
+        return TokenEstimator.estimateTokens(text);
     }
 }

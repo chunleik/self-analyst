@@ -24,6 +24,8 @@ an error or omission, please open an issue.
 | [Apache POI](https://poi.apache.org) | Office document extraction | Apache-2.0 |
 | [SLF4J](https://www.slf4j.org) | Logging facade | MIT |
 | [Logback](https://logback.qos.ch) | Logging implementation | EPL-1.0 / LGPL-2.1 (dual) |
+| [tomlj](https://github.com/tomlj/tomlj) | TOML 1.0 parsing | Apache-2.0 |
+| [jtokkit](https://github.com/knuddelsgmbh/jtokkit) | Local token counting (tiktoken cl100k_base) | MIT |
 | [JUnit 5](https://junit.org/junit5/) | Testing (test scope only) | EPL-2.0 |
 
 ## Bundled / downloaded binaries and models

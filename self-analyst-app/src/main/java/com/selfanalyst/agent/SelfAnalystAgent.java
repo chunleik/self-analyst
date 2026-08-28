@@ -840,10 +840,9 @@ public class SelfAnalystAgent implements AutoCloseable {
         }
     }
 
-    /** 粗略 token 估算（中英文混合按 ~3 字符/token），仅用于响应未带 usage 时的回退计量。 */
+    /** jtokkit (cl100k_base) 精确计数，仅用于响应未带 usage 时的回退计量。 */
     private static long estimateTokens(String text) {
-        if (text == null || text.isEmpty()) return 0;
-        return (text.length() + 2) / 3;
+        return TokenEstimator.estimateTokens(text);
     }
 
     private static String chatResponseText(ChatResponse response) {

@@ -1473,11 +1473,18 @@ input:checked + .toggle-switch::after {
 }
 
 /* ----- Chat Tab ----- */
+#tab-chat {
+  overflow: hidden;
+}
+
 .chat-tab-layout {
   display: grid;
   grid-template-columns: 260px minmax(400px, 1fr) minmax(280px, 360px);
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-primary);
 }
 
@@ -1585,6 +1592,8 @@ input:checked + .toggle-switch::after {
   flex-direction: column;
   background: var(--bg-primary);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-workspace-header {
@@ -1774,6 +1783,7 @@ input:checked + .toggle-switch::after {
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-color);
   padding: 12px;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

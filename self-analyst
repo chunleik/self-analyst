@@ -1,5 +1,0 @@
-#!/bin/bash
-# SelfAnalyst CLI wrapper
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-JAR="$SCRIPT_DIR/self-analyst-app/target/self-analyst-app-1.0.0.jar"
-exec java -jar "$JAR" "$@"

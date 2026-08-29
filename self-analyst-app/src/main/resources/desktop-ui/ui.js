@@ -45,6 +45,7 @@ function updateStatusBar() {
   state.dom.llmText.title = llmTitle;
 
   updateAudioToggle();
+  updateAudioAvailability();
 }
 
 function setStatusDot(el, ok, label) {
@@ -56,6 +57,25 @@ function audioCaptureRunning() {
   var st = state.status || {};
   var collectors = st.collectors || {};
   return collectors.audio === "running";
+}
+
+function audioConfigured() {
+  var st = state.status || {};
+  var aw = st.aw || {};
+  // Keep the audio UI visible when talking to an older backend that does not
+  // expose the configuration flag yet.
+  return aw.audioEnabled !== false;
+}
+
+function updateAudioAvailability() {
+  var available = audioConfigured();
+  var audioNav = state.dom.tabs && Array.prototype.find.call(state.dom.tabs, function (tab) {
+    return tab.dataset.tab === "audio";
+  });
+  if (audioNav) audioNav.classList.toggle("hidden", !available);
+  if (state.dom.audioToggleBtn) state.dom.audioToggleBtn.classList.toggle("hidden", !available);
+  if (state.dom.tabAudio) state.dom.tabAudio.classList.toggle("hidden", !available);
+  if (!available && state.tab === "audio") switchTab("agent");
 }
 
 function updateAudioToggle() {
@@ -71,6 +91,7 @@ function updateAudioToggle() {
 // ---- Tab Switching ----
 
 function switchTab(tab) {
+  if (tab === "audio" && !audioConfigured()) tab = "agent";
   state.tab = tab;
   state.dom.tabs.forEach(function (t) {
     t.classList.toggle("active", t.dataset.tab === tab);

@@ -87,6 +87,7 @@ public class DesktopStatusController implements AutoCloseable {
         aw.put("mode", config.awEmbedded() ? "embedded" : "external");
         aw.put("port", config.awPort());
         aw.put("webUrl", "http://localhost:" + config.awPort() + "/");
+        aw.put("audioEnabled", config.audioEnabled());
         status.put("aw", aw);
 
         // Collectors section

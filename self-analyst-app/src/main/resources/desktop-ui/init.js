@@ -73,6 +73,7 @@ function init() {
     if (st && st.language) { state.lang = st.language; state.status = st; }
   }).catch(function () { /* keep default lang */ }).then(function () {
     applyI18n(document);
+    updateAudioAvailability();
     setupEvents();
     switchTab("agent");
     // Render the chat list only after the backend index resolves (SPEC-CSP-FE-002).

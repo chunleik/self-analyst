@@ -84,7 +84,9 @@ public interface AudioEngine {
 aw.audio.enabled=false     # 或 AW_AUDIO_ENABLED=true
 ```
 
-AppSession 在启动时检查此配置，false 时跳过 AudioWatcher。
+AppSession 在启动时检查此配置，false 时跳过 AudioWatcher。桌面 UI 的状态接口同时返回
+`aw.audioEnabled=false`，此时顶部“录音”页签和录音开关均隐藏；若界面正停留在录音页，
+则切回 Agent 页。运行期间仅暂停录音不会隐藏入口。
 
 
 ## 5. 测试规格

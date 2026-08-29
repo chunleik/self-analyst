@@ -26,8 +26,13 @@ const desktopServer = fs.readFileSync(
   new URL("../../main/java/com/selfanalyst/desktop/DesktopServer.java", import.meta.url),
   "utf8",
 );
+const statusController = fs.readFileSync(
+  new URL("../../main/java/com/selfanalyst/desktop/controller/DesktopStatusController.java", import.meta.url),
+  "utf8",
+);
 
 assert.match(indexHtml, /data-tab="audio"[^>]*data-i18n="tab\.audio"/);
+assert.match(indexHtml, /class="[^"]*\bhidden\b[^"]*"[^>]*data-tab="audio"/);
 assert.match(indexHtml, /id="tab-audio"/);
 assert.match(indexHtml, /id="audio-transcript-list"/);
 
@@ -40,6 +45,9 @@ assert.match(initJs, /audioTranscriptList:\s*(?:document\.getElementById\("audio
 assert.match(uiJs, /function loadAudioEvents\(\)/);
 assert.match(uiJs, /function renderAudioTab\(\)/);
 assert.match(uiJs, /state\.tab === "audio"/);
+assert.match(uiJs, /function audioConfigured\(\)/);
+assert.match(uiJs, /aw\.audioEnabled !== false/);
+assert.match(uiJs, /function updateAudioAvailability\(\)/);
 assert.match(uiJs, /resp\.latestEventAt/);
 assert.match(uiJs, /resp\.diagnostics/);
 assert.match(uiJs, /state\.audioDiagnostics/);
@@ -60,6 +68,7 @@ assert.match(i18nJs, /"audio\.diagnostics\.silent":\s*\{\s*zh:\s*"最近采样�
 assert.match(i18nJs, /"audio\.diagnostics\.emptyTranscript":\s*\{\s*zh:\s*"检测到声音/);
 
 assert.match(desktopServer, /app\.get\("\/desktop\/audio\/events",\s*audioEventsCtrl::getEvents\)/);
+assert.match(statusController, /aw\.put\("audioEnabled",\s*config\.audioEnabled\(\)\)/);
 
 const diagnosisContext = {
   state: {
@@ -85,3 +94,45 @@ assert.equal(
   diagnosisContext.__diagnosis,
   "audio.diagnostics.silent:2026-07-05T14:39:58.089295400Z",
 );
+
+function fakeElement(tab) {
+  const classes = new Set();
+  return {
+    dataset: tab ? { tab } : {},
+    classList: {
+      toggle(name, enabled) {
+        if (enabled) classes.add(name); else classes.delete(name);
+      },
+      contains(name) { return classes.has(name); },
+    },
+  };
+}
+
+const audioNav = fakeElement("audio");
+const agentNav = fakeElement("agent");
+const audioButton = fakeElement();
+const audioSection = fakeElement();
+const agentSection = fakeElement();
+const chatSection = fakeElement();
+const availabilityContext = {
+  state: {
+    tab: "audio",
+    status: { aw: { audioEnabled: false } },
+    dom: {
+      tabs: [agentNav, audioNav],
+      audioToggleBtn: audioButton,
+      tabAudio: audioSection,
+      tabAgent: agentSection,
+      tabChat: chatSection,
+    },
+  },
+  document: { getElementById: () => null },
+};
+vm.runInNewContext(
+  `${uiJs}\nupdateAudioAvailability();\nthis.__tab = state.tab;`,
+  availabilityContext,
+);
+assert.equal(availabilityContext.__tab, "agent");
+assert.equal(audioNav.classList.contains("hidden"), true);
+assert.equal(audioButton.classList.contains("hidden"), true);
+assert.equal(audioSection.classList.contains("hidden"), true);

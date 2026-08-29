@@ -1,8 +1,8 @@
-# SelfAnalyst 配置格式迁移 TOML SDD 规格说明书
+# SelfAnalyst 用户配置与桌面编辑器 SDD 规格说明书
 
-> Specification-Driven Development spec. 本文档定义用户级配置文件由 Java `.properties`
-> 迁移到 **TOML v1.0**（`config.toml`）的行为契约：格式与键映射、加载优先级、存量自动迁移、
-> 桌面端 raw 编辑器的适配。实现必须可追溯至本文档中的规格 ID。
+> 本文档定义用户级配置文件 **TOML v1.0**（`config.toml`）的当前行为契约：格式与键映射、
+> 加载优先级、旧 `.properties` 自动迁移，以及桌面端 raw 编辑器。本文同时接管旧版配置编辑器
+> 规格中仍有效的 `SPEC-CFGUI-*` 契约。
 
 ---
 
@@ -11,11 +11,11 @@
 | 属性 | 值 |
 |------|-----|
 | 功能名称 | 用户级配置文件从 `.properties` 迁移到 TOML（`{memoryDir}/config.toml`） |
-| 文档状态 | 设计中（Draft） |
+| 文档状态 | 已实现（当前契约） |
 | 日期 | 2026-07-02 |
 | 目标平台 | Windows 优先（中文路径、反斜杠路径为一等场景） |
-| 规格前缀 | `SPEC-TOML-*` |
-| 取代关系 | 取代 `SPEC-CFGUI-NON-001`（原「不改变 `.properties` 格式」非目标，见 desktop-config-editor.md） |
+| 规格前缀 | `SPEC-TOML-*`、`SPEC-CFGUI-*` |
+| 取代关系 | 接管旧版配置编辑器规格的有效契约；`SPEC-CFGUI-NON-001` 已由 TOML 格式取代 |
 | 主要后端逻辑 | `self-analyst-app`：`config/Config.java`、`desktop/store/UserConfigStore.java`、`desktop/controller/DesktopConfigController.java` |
 | 主要前端逻辑 | `self-analyst-app/src/main/resources/desktop-ui/`（config/api/events/state.js） |
 | 配置存储 | `{memoryDir}/config.toml`（UTF-8） |
@@ -24,8 +24,8 @@
 
 ## 2. 背景与动机
 
-用户级配置目前是 `{memoryDir}/config.properties`，桌面端配置模态是对该文件的**纯文本直接编辑**
-（见 `docs/specs/desktop-config-editor.md`）。`.properties` 语义对手编用户有实际伤害：
+早期版本使用 `{memoryDir}/config.properties`，桌面端配置模态直接编辑该文件。该方案已迁移为
+`{memoryDir}/config.toml`；保留下面的迁移动机用于解释兼容层和 `.bak` 文件来源：
 
 1. **Windows 路径静默损坏**：`memory.dir=D:\docs` 中 `\d` 是未知转义，Java Properties 解析时
    丢弃反斜杠得到 `D:docs`；raw 保存校验只拦非法 `\u` 转义，这种损坏不报错、直接生效。
@@ -56,12 +56,12 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
   `SPEC-CFGUI-API-002b` 语义）；结构化写入（`PUT /desktop/config`、`ConfigTools.setConfigValue`）
   **整文件重新生成** TOML（分区表、不保留用户注释）——与既有 `.properties` 结构化 `save()`
   丢注释的行为持平，不新增保真承诺。
-- **SPEC-TOML-DEC-005**：存量迁移为**后端启动时一次性自动转换**（见 §6），迁移后
+- **SPEC-TOML-DEC-005**：存量迁移为**后端启动时一次性自动转换**（见“存量迁移契约”），迁移后
   `config.properties` 重命名保留备份，避免"两份文件谁生效"的歧义。
 - **SPEC-TOML-DEC-006（已废止）**：配置历史功能已移除；旧 `config-history.json` 不主动删除，
   但应用不再读取或写入。
 - **SPEC-TOML-DEC-007**：TOML 解析器作为第三方依赖引入（Java 无标准库实现）。选型、版本号
-  属实现细节，留给 plan；spec 层只约束能力：TOML v1.0 兼容、解析错误含行/列位置、
+  属构建配置与实现细节；spec 层只约束能力：TOML v1.0 兼容、解析错误含行/列位置、
   无需注释保真写回（raw 逐字写、结构化重新生成，均不经库序列化注释）。
 
 ---
@@ -77,7 +77,62 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ---
 
-## 5. 格式与键映射契约
+## 5. 配置编辑器基础契约（`SPEC-CFGUI-*`）
+
+本节把原独立配置编辑器规格中仍有效的契约收敛到当前文档。凡涉及文件格式、路径和校验器的
+细节，以后续 `SPEC-TOML-*` 条款为准。
+
+### 5.1 设计与目标
+
+- **SPEC-CFGUI-DEC-001**：编辑器展示和保存的是用户级覆盖文件原文，不把默认值合并成已启用配置。
+- **SPEC-CFGUI-DEC-002**：raw 文本不脱敏。编辑器必须显示真实 API key，否则保存脱敏占位符会破坏密钥。接口始终受回环 Host/Origin 边界保护；只有 Tauri 管理启动时额外要求 desktop token。standalone 模式的同机进程边界见 [`../../SECURITY.md`](../../SECURITY.md)。
+- **SPEC-CFGUI-DEC-003**：raw 保存提交完整文本并逐字覆盖，不做逐键 diff；成功写入使用同目录临时文件后 `REPLACE_EXISTING` 替换目标。当前实现未请求 Java `ATOMIC_MOVE`，因此不承诺崩溃级原子 rename。
+- **SPEC-CFGUI-DEC-004**：受支持键和需重启键由后端单一声明维护，UI 与 Agent 工具不得复制另一套列表。
+- **SPEC-CFGUI-DEC-005**：用户配置统一使用 UTF-8。
+- **SPEC-CFGUI-GOAL-001**：桌面配置入口提供纯文本编辑器，不展示结构化配置表单。
+- **SPEC-CFGUI-GOAL-002**：编辑器读取和保存用户级 `config.toml` 原文，不把默认值固化为覆盖。
+- **SPEC-CFGUI-GOAL-003**：合法文本经同目录临时文件替换写入，并尽量保留注释、顺序和空行。
+- **SPEC-CFGUI-GOAL-004**：保存后明确列出需要重启后端才能生效的键。
+- **SPEC-CFGUI-GOAL-005**：保留 LLM 与 Embedding 连接测试能力。
+- **SPEC-CFGUI-GOAL-006**：非法配置不得进入目标文件，错误必须可读。
+
+### 5.2 UI 契约
+
+- **SPEC-CFGUI-UI-001a**：配置入口打开单个等宽、多行、可滚动的纯文本编辑器。
+- **SPEC-CFGUI-UI-001b**：配置模态不再展示结构化分区、字段、开关或下拉框。
+- **SPEC-CFGUI-UI-002a**：打开时调用 `GET /desktop/config/raw` 并填充编辑器。
+- **SPEC-CFGUI-UI-002b**：文件不存在或为空时展示完整注释模板，不自动写盘。
+- **SPEC-CFGUI-UI-002c**：载入失败时编辑器只读并禁止保存。
+- **SPEC-CFGUI-UI-003a**：界面提供配置状态、放弃更改和保存更改操作。
+- **SPEC-CFGUI-UI-003b**：脏状态按当前文本与最近一次成功载入/保存的基准文本逐字符比较。
+- **SPEC-CFGUI-UI-003c**：放弃更改恢复基准文本。
+- **SPEC-CFGUI-UI-003d**：保存提交完整文本；保存期间按钮显示进行中并禁用重复提交。
+- **SPEC-CFGUI-UI-003e**：保存成功后更新基准、清除脏状态，并显示 `restartRequired` 与 `unknownKeys`。
+- **SPEC-CFGUI-UI-003f**：保存失败显示完整校验错误，不清除脏状态、不改变基准。
+- **SPEC-CFGUI-UI-004a**：存在未保存修改时，关闭按钮和遮罩关闭都必须先确认。
+- **SPEC-CFGUI-UI-005a**：编辑器保留“测试 LLM 连接”和“测试 Embedding 连接”入口。
+- **SPEC-CFGUI-UI-005b**：连接测试使用编辑器当前文本中的 URL、模型和密钥。
+- **SPEC-CFGUI-UI-005c**：密钥缺省或仍为占位符时，按后端既有语义回退到有效配置。
+
+### 5.3 API 与非目标
+
+- **SPEC-CFGUI-API-001a**：`GET /desktop/config/raw` 至少返回 `{ text, path, exists }`。
+- **SPEC-CFGUI-API-001b**：文本不脱敏；文件不存在或为空时返回完整模板。
+- **SPEC-CFGUI-API-002a**：`PUT /desktop/config/raw` 在写盘前完成语法、结构和已知键类型校验。
+- **SPEC-CFGUI-API-002b**：校验通过后先写同目录临时文件，再替换目标，保留注释、顺序和空行；不承诺 `ATOMIC_MOVE`。
+- **SPEC-CFGUI-API-002c**：响应包含 `saved`、`restartRequired` 和 `unknownKeys`。
+- **SPEC-CFGUI-API-002d**：校验失败或临时文件写入失败不得替换目标；替换失败返回错误且不得报告保存成功。当前实现不承诺自动清理替换失败后残留的 `.tmp`。
+- **SPEC-CFGUI-API-003a**：`GET/PUT /desktop/config` 结构化端点保持兼容。
+- **SPEC-CFGUI-API-003b**：LLM 与 Embedding 连接测试端点保持兼容。
+- **SPEC-CFGUI-API-003c**：Agent `ConfigTools` 继续通过同一用户配置存储读写。
+- **SPEC-CFGUI-NON-001（已取代）**：旧“不改变 `.properties` 格式”约束已由 `SPEC-TOML-*` 取代。
+- **SPEC-CFGUI-NON-002**：不承诺语法高亮、自动补全或行内诊断。
+- **SPEC-CFGUI-NON-003**：不改变本文件定义的配置加载优先级。
+- **SPEC-CFGUI-NON-004**：raw 文本不对敏感值做脱敏。
+
+---
+
+## 6. 格式与键映射契约
 
 ### SPEC-TOML-FMT-001：文件与编码
 
@@ -119,7 +174,7 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ---
 
-## 6. 存量迁移契约
+## 7. 存量迁移契约
 
 ### SPEC-TOML-MIG-001：迁移时机与条件
 
@@ -163,7 +218,7 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ---
 
-## 7. 后端接口契约（对 `SPEC-CFGUI-API-*` 的修订）
+## 8. 后端接口契约
 
 ### SPEC-TOML-API-001：raw 端点改为 TOML
 
@@ -175,8 +230,8 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
   解析失败返回 HTTP 400，错误信息含**行/列位置**与原因，不修改磁盘文件。
 - **SPEC-TOML-API-001c**：解析通过后执行已知键类型校验（SPEC-TOML-FMT-003d）与结构校验
   （SPEC-TOML-FMT-003c）；任一失败返回 400 并列出违规键与期望类型，不落盘。
-- **SPEC-TOML-API-001d**：全部校验通过后逐字原子写入 `config.toml`（temp + rename，
-  round-trip 逐字符一致），响应结构与 `restartRequired`/`unknownKeys` 语义不变
+- **SPEC-TOML-API-001d**：全部校验通过后逐字写入同目录 temp，再以 `REPLACE_EXISTING` 替换 `config.toml`；
+  成功后的 round-trip 逐字符一致，响应结构与 `restartRequired`/`unknownKeys` 语义不变
   （`SPEC-CFGUI-API-002c`，比较对象为拍平后的点分键集）。
 - **SPEC-TOML-API-001e**：`GET /desktop/config/raw` 响应在既有 `{ text, path, exists }`
   基础上新增只读字段 `supportedKeys`：按 `SupportedKeys` 声明顺序的
@@ -189,13 +244,13 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 - **SPEC-TOML-API-002a**：`GET /desktop/config`、`PUT /desktop/config`（结构化）保留，
   行为契约不变；其底层读写目标改为 `config.toml`（写入走整文件重新生成，SPEC-TOML-DEC-004）。
 - **SPEC-TOML-API-002b**：`ConfigTools.getConfig`/`setConfigValue`（`SPEC-CFG-TOOL-001..004`）
-  对外契约不变（点分键、白名单、重启提示、原子写），底层持久化目标改为 `config.toml`。
+  对外契约不变（点分键、白名单、重启提示、临时文件替换），底层持久化目标改为 `config.toml`。
 - **SPEC-TOML-API-002c**：`POST /desktop/config/test-llm`、`POST /desktop/config/test-embedding`
   行为不变。
 
 ---
 
-## 8. 桌面端 UI 契约（对 `SPEC-CFGUI-UI-*` 的修订）
+## 9. 桌面端 UI 契约
 
 - **SPEC-TOML-UI-001**：配置模态的纯文本编辑器交互契约（载入、脏态、保存、放弃、关闭保护）
   全部沿用 `SPEC-CFGUI-UI-001..004`，仅编辑对象变为 `config.toml` 文本；界面上展示的文件名/
@@ -233,6 +288,11 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 | 规格 ID | 测试 | 预期 |
 |---------|------|------|
+| SPEC-CFGUI-TST-001..003 | raw GET/PUT round-trip；文件存在、缺失和合法保存 | `text/path/exists` 正确；合法文本逐字符往返一致 |
+| SPEC-CFGUI-TST-004 | raw PUT 提交非法 TOML | 400，磁盘文件不变 |
+| SPEC-CFGUI-TST-005..006 | 修改重启键、提交未知键 | `restartRequired`、`unknownKeys` 正确 |
+| SPEC-CFGUI-TST-007..009 | 打开、编辑、保存、关闭配置模态 | 纯文本编辑、脏态、保存反馈和关闭确认符合 UI 契约 |
+| SPEC-CFGUI-TST-010 | 使用编辑器当前文本测试连接 | 使用当前 LLM/Embedding 配置并标明测试目标 |
 | SPEC-TOML-TST-001 | 解析含 `[llm]` 表、`[aw.collection]` 子表、顶层点分键的 TOML | 拍平结果与等价点分键集一致 |
 | SPEC-TOML-TST-002 | 值为 `'D:\docs'` 字面量字符串 | 归一化后反斜杠原样保留 |
 | SPEC-TOML-TST-003 | 布尔/整数/浮点/字符串数组值 | 按 SPEC-TOML-FMT-003a/b 归一化（数组逗号拼接） |
@@ -259,6 +319,9 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 | 规格 ID | 目标文件/组件 | 验证方式 |
 |---------|--------------|---------|
+| SPEC-CFGUI-DEC-*、SPEC-CFGUI-GOAL-*、SPEC-CFGUI-NON-* | 本文第 5 节；`UserConfigStore.java`、`DesktopConfigController.java` | 代码审查、单元测试 |
+| SPEC-CFGUI-UI-* | `desktop-ui/config.js`、`index.html`、`ui.js`、`events.js`、`api.js`、`state.js`、`styles.css` | `check-desktop-config-editor.ps1`、UI 验收 |
+| SPEC-CFGUI-API-* | `DesktopConfigController.java`、`DesktopServer.java`、`UserConfigStore.java` | `DesktopConfigControllerTest`、集成测试 |
 | SPEC-TOML-DEC-001..007 | 本 spec（设计决策）；`config/TomlSupport.java`（DEC-003/004/007）、`config/Config.java`（DEC-001）、`desktop/store/ConfigMigration.java`（DEC-005） | 代码审查 |
 | SPEC-TOML-FMT-001..003 | `config/TomlSupport.java`（解析/拍平/归一化/类型校验）、`config/SupportedKeys.java`、`config/Config.java` | 单元测试 `TomlSupportTest`、`ConfigTest` |
 | SPEC-TOML-FMT-004 | `config/TomlSupport.java#buildTemplate`、`desktop/controller/DesktopConfigController.java#buildTemplate` | 单元测试 `TomlSupportTest`、`DesktopConfigControllerTest` + 代码审查 |

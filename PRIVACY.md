@@ -1,111 +1,108 @@
-# 隐私说明 / Privacy Notice
+# 隐私说明
 
-SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集你的数字活动以提供洞察，
-因此默认就有较高的系统权限。本文如实说明：**采集什么、存在哪里、什么会离开你的电脑、
-发给谁、以及如何关闭。**
+SelfAnalyst 是在本机运行的个人活动分析工具。它可能接触窗口标题、屏幕文字、音频、文件正文、
+聊天记录和长期记忆。本文说明这些数据存在哪里、何时会发送给第三方，以及如何关闭相关功能。
 
-> 一句话总结：活动数据、OCR/转写结果、记忆都**默认只存本地**；只有当你向 Agent 提问、
-> 或开启摘要/索引/搜索功能时，相关文本才会被发送到你**自己配置的** LLM 服务。
-> 音频、文件监控**默认关闭**。
+> 默认情况下，活动数据库和记忆保存在本机；音频、文件监控、Wiki 摘要、Embedding 和联网搜索
+> 默认关闭。向 Agent 提问或主动开启依赖远程模型的功能时，相应内容会发送到你配置的服务。
 
----
+## 1. 本地数据
 
-## 1. 数据存在哪里（默认全部本地）
+实际目录由 `config.toml`、环境变量和内置默认值共同决定。源码直接运行时，classpath 默认通常为
+项目下的 `./data/`；安装脚本可使用用户目录。不要仅根据示例路径判断真实位置。
 
 | 数据 | 位置 | 说明 |
 |------|------|------|
-| 活动记录（窗口标题 / AFK 空闲） | `~/.self-analyst/aw-data/aw.db` | AW bucket 和事件存于同一个 SQLite 文件 |
-| OCR / 屏幕内容文本 | 同上（aw-data） | 见下文 OCR 范围限制 |
-| 音频转写文本 | 同上（aw-data） | 仅在开启音频时产生 |
-| 成长记忆（目标 / 模式 / 改进记录） | `~/.self-analyst/memory/` | |
-| 聊天正文（UI transcript） | `{memory.dir}/chat-sessions/` | `index.json` + 每会话分片，按服务端会话 ID 明文存储 |
-| Agent 模型上下文 | `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/` | 与聊天正文分开保存；按会话隔离，包含近期消息与滚动摘要，是模型执行历史的权威 |
-| Wiki 摘要 + 语义索引 | `~/.self-analyst/` 下的 SQLite / Lucene 索引 | |
-| API 密钥 | 环境变量或 `application.properties` | **不**随数据上传，仅用于调用你配置的服务 |
+| 活动、窗口、AFK、OCR 和转写事件 | `{aw.data-dir}/aw.db` | AW bucket 与事件使用单一 SQLite 数据库 |
+| 用户配置 | `{memory.dir}/config.toml` | UTF-8 明文，可能包含 API key；旧 `config.properties` 首次迁移后保留为 `.bak` |
+| 成长档案和长期记忆 | `{memory.dir}/memory.json` | 目标、模式、改进记录与长期记忆条目 |
+| 聊天正文 | `{memory.dir}/chat-sessions/chat.db` | SQLite WAL 单库，是 UI transcript 的权威来源 |
+| 聊天旧格式备份 | `{memory.dir}/chat-sessions/legacy/` | 首次迁移旧分片后保留，不再作为当前数据源 |
+| Agent 模型上下文 | `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/` | 按会话隔离的近期消息和滚动摘要 |
+| Wiki 摘要 | `{memory.dir}/llm-wiki.db` | 仅启用 Wiki 后产生 |
+| 本地语义索引 | 配置的 Wiki/File Lucene 目录 | 向量索引在本机，但生成向量可能调用远程 Embedding |
+| 文件监控状态 | `{memory.dir}/file-watch.db` | 仅启用文件监控后产生 |
 
-这些文件都在你本机，SelfAnalyst 自身不会把它们上传到任何中心化服务器——本项目没有
-任何官方后端。
+项目没有官方中心化后端。上述数据不会由 SelfAnalyst 自动上传到项目维护者的服务器。
 
-聊天正文分片与 AgentState 是两份用途不同的本地数据。对升级前已经存在于服务端分片、但
-尚无 AgentState 的会话，下一次发送时会把当前问题之前的有效 user/assistant 历史**单次懒迁移**
-到对应 AgentState；UI-only system、pending 和 error 消息不会导入。旧 WebView 会话数据不会迁移。
-为防止异常请求造成本地文件无界增长，辅助上下文和建议任务受字节/深度/数量预算约束；
-超限 opaque 字段会保留识别信息并标记为 `_truncated`，旧完整 turn 仅在 shard 总预算超限时淘汰。
+## 2. 本地服务与访问控制
 
-## 2. 本地服务
+- 内置 HTTP 服务只监听 `127.0.0.1`，并校验 `Host` 和浏览器 `Origin` 必须指向回环地址。
+- 桌面壳每次启动后端时会生成一个本次生命周期使用的随机 token；除 `/desktop/session` 外的 `/desktop/*` 路由要求
+  `X-SelfAnalyst-Token` 或同值的 HttpOnly、SameSite=Strict cookie。
+- 直接用 `java -jar` 启动、且没有提供 `SELF_ANALYST_DESKTOP_TOKEN` 时，桌面 API 不启用该 token
+  验证，但仍只绑定回环地址。同机恶意进程仍可能访问本地服务。
+- 默认端口是 `5700`，可通过用户级 `config.toml` 的 `aw.port` 修改；桌面壳通过启动握手获取实际端口。
 
-- 内置 HTTP 服务**仅监听 `127.0.0.1`**（回环地址），不对局域网/公网开放；
-  CORS 仅允许 `localhost` / `127.0.0.1` 来源。
-- 默认端口 `5700`，可用 `aw.port` 调整。
-- 同机上的其它进程理论上可访问该端口——若你在多用户/不可信的机器上运行，请注意这一点
-  （见 [SECURITY.md](SECURITY.md)）。
+## 3. 可能发送给第三方的数据
 
-## 3. 什么会离开你的电脑（发给第三方）
+所有目的地都来自用户配置；`*.base-url` 可以指向云服务，也可以指向本地自托管服务。
 
-以下内容**只有在对应功能开启时**，才会被发送到你在配置中指定的服务地址
-（默认是 OpenAI，但 `*.base-url` 可改为任何兼容服务，包括本地自托管模型）：
+| 功能 | 可能发送的数据 | 目的地 | 默认状态 |
+|------|----------------|--------|----------|
+| Agent 对话 | 当前问题、该会话模型历史、所选活动/任务/内容片段 | `llm.base-url` | 用户发起对话时 |
+| AgentState 压缩 | 达到阈值的旧会话前缀 | `llm.base-url` | 压缩默认开启，达到阈值时触发 |
+| 会话摘要与长期记忆提炼 | 会话正文及候选记忆上下文 | `llm.base-url` | 会话变化后异步触发；失败可降级 |
+| Wiki 摘要 | 时间段内的窗口标题和可选内容片段 | `llm.base-url` | `wiki.enabled=false` |
+| 文件摘要 | 被监控目录内的文件正文 | `llm.base-url` | `file.watch.enabled=false` |
+| Embedding | 待建立语义索引的文本 | `embedding.base-url` | `embedding.enabled=false` |
+| 联网搜索 | 搜索查询 | `websearch.mcp-url` | `websearch.enabled=false` |
+| 云端语音转写 | 捕获到的 WAV 音频片段 | `llm.base-url/audio/transcriptions` | 音频总开关默认关闭；`cloud-asr` 或可用的 `auto` 会外发音频 |
 
-| 出口 | 发送的内容 | 目的地（可配） | 默认 |
-|------|-----------|---------------|------|
-| Agent 对话 | 当前提问 + 同会话 AgentState 模型历史 + 本轮选择/检索的活动、任务或内容片段 | `llm.base-url` | 随提问触发 |
-| AgentState 压缩 | 达到阈值的旧会话前缀，用于生成有界滚动摘要 | `llm.base-url` | 默认开启；仅达到 message/token 阈值时触发 |
-| 会话摘要 | 该会话中的聊天正文（不含配置敏感值） | `llm.base-url` | 消息实质变化后异步触发；失败时本地确定性降级 |
-| Wiki 摘要 | 时段内的活动标题 / OCR 文本片段 | `llm.base-url` | **开启**（`wiki.enabled=true`）|
-| 语义索引 Embedding | 待索引文本 | `embedding.base-url` | **开启**（`embedding.enabled=true`）|
-| 文件监控摘要 | **被监控目录的文件内容** | `llm.base-url` | **关闭**（`file.watch.enabled=false`）|
-| 联网搜索 | 你的搜索查询 | `websearch.mcp-url`（默认 `search.parallel.ai`）| **关闭**（`websearch.enabled=false`），按需开启并配 key |
+`aw.audio.engine=local-whisper` 只在本机调用 whisper.cpp；`cloud-asr` 会发送音频；`auto` 优先使用
+可用的云端 ASR，失败或不可用时再回退本地 whisper。因此，若要求音频绝不离开本机，必须同时
+使用 `local-whisper` 并确认本地 whisper 可用，不能只依赖 `auto`。
 
-> ⚠️ **文件监控**是隐私敞口最大的功能：开启后，被监控目录里的文件正文会被发给 LLM
-> 生成摘要。请只监控你确实希望被分析的目录。默认关闭。
+## 4. 采集范围
 
-**不会离开本机的：**
-- OCR 原始调试截图（默认不保存；启用后仅保存在本机，不外发）
-- 原始音频（**转写完全由本地 whisper.cpp 完成**，音频本身不联网；仅转写出的文本可能
-  在你向 Agent 提问时作为上下文被检索）
+- 窗口活动记录包含进程名和窗口标题，不记录键盘输入。
+- UIA 通过本地 Rust accessibility sidecar 读取可访问性树；密码字段以安全标记处理并脱敏。
+- OCR 默认只识别窗口顶部 `ocr.title-strip-height=80` 像素；设为 `0` 会扩大到完整窗口。
+- OCR 调试样本默认关闭；启用 `ocr.sample.enabled` 后会在本地保留截图，可能包含敏感正文。
+- `ocr.excluded.apps` 可按进程名排除不应采集的应用。
+- 音频可来自麦克风、Windows 系统回放或两者；总开关默认关闭。
+- 文件监控会读取配置目录内的受支持文件正文，并可能将正文交给远程 LLM 生成摘要；只应配置明确允许分析的目录。
 
-## 4. 采集范围的隐私设计
+## 5. 关闭功能
 
-- **OCR 默认只读窗口顶部 80 像素**（`ocr.title-strip-height=80`）——只抓应用标题栏 /
-  标签栏以识别"开着什么"，不读正文。设为更大值或 `0`（全窗口）会显著增加隐私暴露。
-- **OCR 原始调试样本默认关闭**（`ocr.sample.enabled=false`）。启用后会保存裁剪前的完整窗口
-  截图和识别结果，可能包含聊天消息、文档正文或网页内容，仅应在本地排障期间开启。
-- **可排除应用**：`ocr.excluded.apps` 可按进程名跳过 OCR（如密码管理器、银行应用）。
-- 活动追踪只记录**窗口标题**，不记录键盘输入内容。
+在桌面配置编辑器的 `config.toml` 中设置：
 
-## 5. 如何关闭各项采集
+```toml
+[aw.audio]
+enabled = false
+engine = "local-whisper" # 即使以后启用音频，也禁止使用云端 ASR
 
-在 `application.properties` 或对应环境变量中设置：
+[file.watch]
+enabled = false
 
-```properties
-aw.audio.enabled=false          # 关闭音频采集（默认即关）
-file.watch.enabled=false        # 关闭文件内容监控（默认即关）
-wiki.enabled=false              # 关闭 LLM 时段摘要
-embedding.enabled=false         # 关闭语义索引 embedding
-websearch.enabled=false         # 关闭联网搜索
-ocr.sample.enabled=false        # 不保存 OCR 原始调试截图（默认）
-aw.collection.content=false     # 完全关闭 UIA 与 OCR 窗口内容采集
+[wiki]
+enabled = false
+
+[embedding]
+enabled = false
+
+[websearch]
+enabled = false
+
+[ocr.sample]
+enabled = false
+
+[aw.collection]
+content = false
 ```
 
-OCR 内容识别随启动开启；如完全不想截屏识别，可参考 `docs/specs/content.md` 关闭
-`ContentWatcher`。
+## 6. 删除数据
 
-## 6. 删除你的数据
+退出应用后删除实际的 `{aw.data-dir}` 和 `{memory.dir}` 即可清除本地数据。配置可能把两者放在
+不同目录，删除前请在 `config.toml` 或日志中确认路径。
 
-直接删除本机数据目录即可（默认 `~/.self-analyst/`，开发环境下为项目内 `./data/`）。
-没有远程副本需要清理。
+在 UI 删除会话时，`chat.db` 的 `pending_deletions` 会先记录持久删除意图，再清除对应 AgentState
+和聊天正文；启动时会继续完成中断的删除。由会话提炼后独立保存的长期记忆不会随会话自动删除，
+需要在记忆界面单独删除。`chat-sessions/legacy/`、旧配置 `.bak` 和损坏数据库备份属于恢复材料，
+应用不会自动清理，如不再需要可在退出后手动删除。
 
-在 UI 删除聊天会话时，后端会在同一 Agent 生命周期 gate 中清除 ReActAgent cache、对应的
-AgentState、会话分片和索引项；即使 LLM 未配置、Agent 没有初始化，也会直接清理磁盘上的
-AgentState。若该 gate 正在处理聊天，请求返回 HTTP 409，以上数据均保持不变，避免只删除
-一部分；稍后重试成功后才会全部删除。已经从会话中提取、并作为独立条目保存的长期记忆
-不会被隐式删除，可在记忆面板中单独删除。
+## 7. 第三方服务责任
 
-## 7. 你对第三方服务的责任
-
-SelfAnalyst 把文本转发给**你自己配置**的 LLM / Embedding / 搜索服务。这些服务如何留存、
-使用你的数据，受**它们各自的隐私政策**约束（例如 OpenAI 的数据使用条款）。若对隐私要求高，
-可将 `*.base-url` 指向本地自托管模型，使数据完全不出本机。
-
----
-
-*本说明描述软件的实际行为，随功能演进会更新。如发现与代码行为不符，请提 Issue。*
+远程 LLM、Embedding、搜索和云端 ASR 如何留存或使用数据，取决于对应服务的隐私政策。
+SelfAnalyst 无法替你删除这些第三方已经接收的数据。对隐私要求较高时，应使用可信的本地服务、
+关闭相应功能，并定期检查配置与本地数据目录。

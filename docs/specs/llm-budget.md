@@ -9,7 +9,7 @@
 | 属性 | 值 |
 |------|-----|
 | 功能名称 | LLM Token 用量限制与每日预算 |
-| 文档状态 | Ready for implementation |
+| 文档状态 | 已实现（当前契约） |
 | 日期 | 2026-06-20 |
 | 规格前缀 | `SPEC-BUDGET-*` |
 | 核心组件 | `com.selfanalyst.usage.UsageMeter` |

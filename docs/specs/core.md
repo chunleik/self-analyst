@@ -36,17 +36,19 @@ App (入口) → AppSession (生命周期管理)
                       ├── ActivityWatchTools (AW 数据查询工具)
                       │     └── HTTP → ActivityWatch API
                       ├── ConfigTools (配置读写工具)
-                      │     └── UserConfigStore → config.properties
+                      │     └── UserConfigStore → config.toml
                       ├── DynamicMemoryContextMiddleware (动态记忆上下文)
                       └── PlanMiddleware (生命周期与预算中间件)
 ```
 
 ### 2.2 模块依赖规则
 
-- **SPEC-ARCH-001**: 所有模块间的依赖必须通过构造器注入，禁止使用静态单例或服务定位器。
+- **SPEC-ARCH-001**: 应用服务依赖优先通过构造器注入；进程级原生资源允许受控共享实例，
+  例如 `AxSidecarClient.shared()`，但必须提供明确的关闭和失败降级路径。
 - **SPEC-ARCH-002**: `Config` 是不可变 record，一旦构造即不可修改。
 - **SPEC-ARCH-003**: `MemoryStore` 的 `save()` 和 `load()` 是唯一访问文件系统的入口，其他模块不得直接读写 `memory.json`。
-- **SPEC-ARCH-004**: `ActivityWatchTools` 是唯一发起 HTTP 请求的模块，所有 AW API 调用必须通过此模块。
+- **SPEC-ARCH-004**: Agent 发起的 AW 查询必须通过 `ActivityWatchTools`；watcher heartbeat 等采集链路
+  可直接调用本地 AW HTTP API。
 
 ---
 
@@ -56,11 +58,15 @@ App (入口) → AppSession (生命周期管理)
 
 配置项按以下优先级解析（高到低）：
 
-1. 环境变量（如 `OPENAI_API_KEY`）
-2. `application.properties` 文件中的属性
-3. 硬编码默认值
+1. 支持该入口的环境变量（如 `OPENAI_API_KEY`）
+2. `{memoryDir}/config.toml`
+3. 尚未迁移的 `{memoryDir}/config.properties`
+4. legacy 用户配置
+5. classpath `application.properties` 默认值
+6. 硬编码默认值
 
-**验证方式**: 设置环境变量后加载 Config，确认环境变量值覆盖 properties 文件值。
+`aw.port` 不接受环境变量覆盖，只读取用户 TOML 或默认值。详细迁移和拍平规则见
+[`config-toml.md`](config-toml.md)。
 
 ### SPEC-CFG-002: 配置项清单
 
@@ -72,7 +78,7 @@ App (入口) → AppSession (生命周期管理)
 | `aw.base-url` | `AW_BASE_URL` | `http://localhost:5600/api/0` | String (URL)；仅外部 AW 模式使用 |
 | `aw.timeout` | `AW_TIMEOUT` | `15000` | int (毫秒) |
 | `aw.port` | 无 | `5700` | int；仅由 `config.toml` 覆盖 |
-| `memory.dir` | `MEMORY_DIR` | `${user.home}/.self-analyst` | Path |
+| `memory.dir` | `MEMORY_DIR` | `./data/memory` | Path |
 
 `aw.port` 是端口配置的唯一用户入口。内嵌模式的 `aw.base-url` 必须由该端口派生；桌面壳不得使用环境变量或内置端口覆盖它。Java 后端完成配置加载和监听后，必须通过桌面启动握手把实际端口通知桌面壳。
 
@@ -82,9 +88,8 @@ App (入口) → AppSession (生命周期管理)
 
 ### SPEC-CFG-004: API Key 校验
 
-`Config.validate()` 必须在以下情况抛出 `IllegalStateException`：
-- `llmApiKey` 为 null
-- `llmApiKey` 为空白字符串
+`llmApiKey` 为 null、空白或占位符时，应用仍启动本地采集和桌面服务，但 Agent、云端 ASR、
+会话 LLM 摘要等依赖模型的能力进入 unavailable/degraded，并在状态接口和日志中明确报告。
 
 ---
 
@@ -241,22 +246,28 @@ record ImprovementLog(
 | 方法 | 参数 | 描述 |
 |------|------|------|
 | `getConfig()` | 无 | 读取所有配置项的有效值，API key 字段脱敏（前4后4位，中间 `****`） |
-| `setConfigValue(key, value)` | key: 点分配置键；value: 新值（空字符串=删除用户覆盖） | 写入单个配置项到 `config.properties` |
+| `setConfigValue(key, value)` | key: 点分配置键；value: 新值（空字符串=删除用户覆盖） | 写入单个配置项到 `config.toml` |
 
 ### SPEC-CFG-TOOL-002: 白名单键集合
 
-`setConfigValue` 只接受以下键（共 26 个），其他键返回错误信息：
+`setConfigValue` 只接受以下键，其他键返回错误信息；白名单的代码权威来源为
+`ConfigTools.ALLOWED_KEYS`：
 
 ```
+app.language
 llm.api-key, llm.base-url, llm.model, llm.temperature
 websearch.enabled, websearch.mcp-url, websearch.api-key
 agent.summaryRefreshMinutes, agent.allowAgentTasks, agent.cacheSummaries
 desktop.hideToTray, desktop.autoOpenWindow, desktop.autoStartBackend
 aw.mode, aw.port
 aw.collection.window, aw.collection.afk, aw.collection.content
-aw.ocr.engine, aw.audio.enabled, aw.audio.whisperPath
+aw.ocr.engine
+aw.audio.enabled, aw.audio.whisperPath, aw.audio.vadThreshold
+aw.audio.source, aw.audio.engine, aw.audio.model, aw.audio.chunkSeconds
 embedding.enabled, embedding.base-url, embedding.api-key
 embedding.model, embedding.dimensions, embedding.send-encoding-format
+llm.max-tokens, llm.agent.maxIters, desktop.summary.maxTimelineLlm
+llm.budget.mode, llm.budget.dailyTokens, llm.budget.warnRatio
 ```
 
 ### SPEC-CFG-TOOL-003: 重启提示键集合
@@ -264,18 +275,21 @@ embedding.model, embedding.dimensions, embedding.send-encoding-format
 以下键修改后，工具返回信息中须注明"需重启 SelfAnalyst 后才能生效"：
 
 ```
-llm.model, llm.temperature, aw.mode, aw.port,
+app.language, llm.model, llm.temperature, aw.mode, aw.port,
 aw.collection.window, aw.collection.afk, aw.collection.content,
+aw.audio.source, aw.audio.engine, aw.audio.model, aw.audio.chunkSeconds,
 agent.summaryRefreshMinutes, desktop.autoStartBackend,
-websearch.enabled, websearch.mcp-url, websearch.api-key
+websearch.enabled, websearch.mcp-url, websearch.api-key,
+llm.max-tokens, llm.agent.maxIters, desktop.summary.maxTimelineLlm,
+llm.budget.mode, llm.budget.dailyTokens, llm.budget.warnRatio
 ```
 
 > 说明：`llm.temperature` 在 Agent 构建时注入对话模型；`aw.collection.*` 在嵌入式 AW 启动时决定是否启用对应采集器（window/afk/content）。二者均在启动阶段读取，故修改后需重启生效。
 
 ### SPEC-CFG-TOOL-004: 写入行为
 
-- 通过 `UserConfigStore.set(key, value)` 持久化，底层使用原子写入（temp 文件 + rename）。
-- `DesktopConfigController` 和 `ConfigTools` 各自持有独立的 `UserConfigStore` 实例，共享同一 `config.properties` 文件。原子写入保证无数据损坏，最后写入者的值生效。
+- 通过 `UserConfigStore.set(key, value)` 持久化，底层先写同目录 temp 文件，再以 `REPLACE_EXISTING` 替换目标；当前不承诺 `ATOMIC_MOVE`。
+- `DesktopConfigController` 和 `ConfigTools` 通过 `UserConfigStore` 共享同一 `config.toml`。raw 保存逐字写入；结构化写入重新生成 TOML；两种写入都使用同目录临时文件替换。
 
 ---
 
@@ -383,10 +397,11 @@ System Prompt 必须包含以下四部分（按顺序）：
 
 ### SPEC-BLD-001: Maven 构建
 
-多模块项目（`self-analyst-aw` + `self-analyst-content` + `self-analyst-audio` + `self-analyst-app` + Tauri 桌面壳），从根 pom 构建 Java 部分：
+根 POM 聚合 `self-analyst-aw`、`content`、`audio`、`wiki`、`file`、`app` 和
+`self-analyst-integration-test`；Tauri 桌面壳与 Rust accessibility sidecar 单独构建：
 
-- `mvn compile`: 编译四个 Java 模块所有源文件，Java 21 target。
-- `mvn test`: 运行所有 JUnit Jupiter 测试（38 个：aw AQL + app Memory + content capture）。
+- `mvn compile`: 编译全部 Java 模块，Java 21 target。
+- `mvn test`: 运行 JUnit 5 和桌面 UI Node 测试；测试数量不作为稳定契约。
 - `mvn package -DskipTests`: 在 `self-analyst-app/target/` 生成 fat jar（maven-shade-plugin）。
 - `pnpm tauri build`: 在 `self-analyst-desktop/` 构建桌面安装包（MSI/NSIS）。
 
@@ -411,7 +426,7 @@ System Prompt 必须包含以下四部分（按顺序）：
 
 ### SPEC-NFR-003: 配置错误处理
 
-- API Key 缺失时必须在启动阶段报错，不得在首次对话时才报错。
+- API Key 缺失时应用继续启动，并在日志、状态接口和对话入口明确显示 LLM 不可用。
 - ActivityWatch 不可达时不阻止启动，仅在调用工具时返回错误 JSON。
 
 ### SPEC-NFR-004: 字符编码

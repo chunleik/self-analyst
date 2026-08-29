@@ -1,8 +1,11 @@
 # SelfAnalyst Desktop Agent Dashboard Redesign (ARCHIVED)
 
 > 本设计已实现并正式化为正式 spec。请参见：
-> - [docs/specs/desktop.md](../specs/desktop.md) — Tauri 桌面壳 spec
-> - [docs/specs/desktop-chat-tab.md](../specs/desktop-chat-tab.md) — 会话 tab spec
+> - [docs/specs/desktop.md](../../specs/desktop.md) — Tauri 桌面壳 spec
+> - [docs/specs/desktop-chat-tab.md](../../specs/desktop-chat-tab.md) — 会话 tab spec
+>
+> 本文只保留 2026-06-05 时的设计背景，其中固定端口、`config.properties`、单文件前端等描述均非
+> 当前实现，不应作为操作或开发依据。
 
 日期: 2026-06-05
 状态: Design spec

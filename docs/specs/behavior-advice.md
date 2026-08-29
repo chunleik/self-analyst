@@ -9,7 +9,7 @@
 | 属性 | 值 |
 |------|-----|
 | 功能名称 | 过往行为建议/鼓励显示框 |
-| 文档状态 | Ready for implementation |
+| 文档状态 | 已实现（当前契约） |
 | 日期 | 2026-06-08 |
 | 目标入口 | SelfAnalyst 桌面端 `Agent` tab |
 | 主要前端入口 | `self-analyst-app/src/main/resources/desktop-ui/index.html` |
@@ -20,9 +20,10 @@
 
 ---
 
-## 2. 背景和当前状态
+## 2. 实施前背景与当前定位
 
-当前 `Agent` tab 已显示当前状态、时间轴和未来任务。用户希望新增一个轻量显示框，用于呈现系统根据用户过往行为生成的一条建议、鼓励或提醒。
+实施本特性前，`Agent` tab 已显示当前状态、时间轴和未来任务，但没有基于过往行为的建议卡片。
+本特性增加一个轻量显示框，用于呈现系统生成的一条建议、鼓励或提醒。
 
 该功能只负责展示“系统观察到什么，以及建议用户如何延续或调整”。它不是目标管理页，不负责管理 `Goal`、`KnownPattern` 或 `ImprovementLog`，也不自动创建任务。
 
@@ -304,7 +305,7 @@
 打开：
 
 ```text
-http://localhost:5700/desktop-ui/
+http://localhost:<aw.port>/desktop-ui/
 ```
 
 验收：

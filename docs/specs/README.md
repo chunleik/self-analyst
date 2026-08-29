@@ -1,15 +1,15 @@
 # SelfAnalyst 规格约定（SDD Conventions）
 
-SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本文件把原本散落在 `CLAUDE.md` 和各 spec 里的隐式惯例**成文**，作为编写 / 评审 spec 的依据。
+SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本文件集中说明编写、评审和维护正式规格的约定。
 
-> SDD 索引（有哪些 spec、Key Prefix）见根目录 [`CLAUDE.md`](../../CLAUDE.md) 的「SDD Document Index」；本文件只讲**怎么写、写什么**。
+> SDD 索引（有哪些 spec、Key Prefix）见 [`docs/README.md`](../README.md)；本文件只讲**怎么写、写什么**。
 
 ---
 
 ## 1. 核心原则
 
 - **覆盖范围**：每个模块（`self-analyst-*` 子模块）和每个重大特性都必须有一份正式 spec。
-- **spec 是契约层**：描述「**要满足什么**」（行为、接口、约束、数据契约），不描述「**怎么实现**」（具体类的私有逻辑、版本号、方法名清单、构建接线）。实现细节留在 plan（`*.plan.md` / `docs/superpowers/plans/`）。
+- **spec 是契约层**：描述「**要满足什么**」（行为、接口、约束、数据契约），不描述「**怎么实现**」（具体类的私有逻辑、版本号、方法名清单、构建接线）。一次性实施步骤保留在 Issue、提交或短期工作记录中，不作为长期项目文档维护。
 - **可追溯**：每条需求有稳定编号 ID，贯穿 spec → 源码 → commit。
 
 ## 2. spec 分类
@@ -20,7 +20,7 @@ SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本
 | **Feature Spec** | `docs/specs/<feature>.md` | 跨模块的特性 | `desktop-chat-tab.md`、`llm-wiki.md` |
 | **Archive** | `docs/archive/design-proposals/` | 被正式 spec 取代的旧设计提案 | — |
 
-新增 spec 后必须在 `CLAUDE.md` 的 SDD 索引表登记（文档链接、用途、Key Prefix）。
+新增 spec 后必须在 [`docs/README.md`](../README.md) 的 SDD 索引表登记（文档链接、用途、Key Prefix）。
 
 ## 3. 编号方案
 
@@ -40,7 +40,7 @@ SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本
 1. 模块标识      模块名 / 版本 / 类型 / 默认开关
 2. 架构契约      依赖、数据流、职责边界（SPEC-*-00x）
 3. 组件规格      每个类/组件一节，按 SPEC-*-0NN 编号，子项 a/b/c
-4. 配置          properties 清单 + 读取入口
+4. 配置          配置键清单 + 读取入口
 5. 测试规格      单测级「测试 → 预期」表
 ── 追溯矩阵      ID → 源文件
 ```
@@ -51,11 +51,11 @@ Feature Spec 以 `desktop-chat-tab.md` 为规范模板（结构更丰富，含�
 
 - 位于 spec **末尾**，把 spec ID 段映射到承载它的源文件。
 - 形式：`| 规格 ID | 文件 |`，可用 `SPEC-X-001..003` 表示一段。
-- 注：`CLAUDE.md` 表述为「ID → 源文件 + 验证方式」，但现有 spec 的矩阵实际只列 **ID → 文件**；验证由 spec §5「测试规格」+ 对应 plan 的验证方案承担，矩阵不单列验证列。
+- 追溯矩阵至少包含 **ID → 文件/组件**；如验证方式不便从测试规格直接判断，可增加「验证方式」列。
 
-## 6. spec vs plan 的边界
+## 6. 规格与实现记录的边界
 
-| 进 spec（契约） | 留在 plan（实现/构建） |
+| 进 spec（契约） | 留在代码、Issue、提交或测试脚本 |
 |------|------|
 | 行为、接口签名、数据契约（表列、字段类型） | 私有实现逻辑、算法步骤 |
 | 不变量与约束（并发、降级、退避） | 依赖**版本号**、`Config` 方法名清单 |
@@ -67,7 +67,6 @@ Feature Spec 以 `desktop-chat-tab.md` 为规范模板（结构更丰富，含�
 
 - spec 相关提交在 message 中引用对应 spec ID。
 - message 用中文或英文，聚焦「为什么」。
-- 所有 commit 带 `Co-Authored-By` trailer。
 
 ---
 
@@ -75,5 +74,5 @@ Feature Spec 以 `desktop-chat-tab.md` 为规范模板（结构更丰富，含�
 
 1. 在 `docs/specs/` 新建 `<name>.md`，套用第 4 节骨架，分配 Key Prefix。
 2. 为每条需求编号，写好末尾追溯矩阵。
-3. 在 `CLAUDE.md` 的 SDD 索引表登记。
+3. 在 `docs/README.md` 的 SDD 索引表登记。
 4. 实现时 commit message 引用 spec ID；源文件与矩阵保持一致。

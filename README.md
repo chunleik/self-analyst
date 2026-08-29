@@ -32,7 +32,7 @@
 ```bash
 # 设置 API Key
 export OPENAI_API_KEY=sk-your-key
-# 或编辑 src/main/resources/application.properties
+# 也可在首次启动后通过桌面配置编辑器写入用户级 config.toml
 
 # 首次构建前：下载外部工具（PaddleOCR + whisper.cpp + 模型，约 700MB）
 powershell -File scripts/download-tools.ps1
@@ -47,25 +47,26 @@ java -jar dist/self-analyst-app.jar
 .\dist\SelfAnalyst.exe
 ```
 
-> `java -jar` 只启动后台服务，本身不提供命令行交互；启动后请用桌面端
-> 或浏览器访问 `http://localhost:5700/desktop-ui/` 与 Agent 对话。
+> `java -jar` 只启动后台服务，本身不提供命令行交互；启动后请用桌面端或浏览器访问
+> `http://localhost:<aw.port>/desktop-ui/` 与 Agent 对话，默认 `aw.port=5700`。
 
-桌面模式会启动同目录下的 `self-analyst-app.jar`，并在窗口中加载轻量桌面页
-`http://localhost:5700/desktop-ui/`。右键托盘图标可使用：
+桌面模式会启动同目录下的 `self-analyst-app.jar`，通过临时握手文件取得 Java 实际监听端口，
+再加载 `http://localhost:<aw.port>/desktop-ui/`。桌面 API 使用每次启动生成的临时 token 认证。
+右键托盘图标可使用：
 
 | 菜单项 | 行为 |
 |--------|------|
 | 显示窗口 | 显示并聚焦桌面窗口 |
-| Web版桌面 | 用系统默认浏览器打开 `http://localhost:5700/desktop-ui/` |
+| Web版桌面 | 通过携带本次启动临时 token 的会话链接，在系统默认浏览器打开当前端口的桌面页 |
 | 关于 | 显示版本、桌面壳和后端服务信息 |
 | 退出 | 终止 Java 后端并退出桌面程序 |
 
-> **关于完整 Web 仪表盘**：`http://localhost:5700/` 提供的完整仪表盘使用
+> **关于完整 Web 仪表盘**：`http://localhost:<aw.port>/` 提供的完整仪表盘使用
 > [ActivityWatch aw-webui](https://github.com/ActivityWatch/aw-webui)（MPL-2.0）
 > 的预编译产物，**不随本仓库分发**，因此桌面端/前端不提供其入口。轻量桌面页
 > `/desktop-ui/`、CLI 和全部 REST 接口不依赖它；缺失时该路由返回 404，其余功能不受影响。
 > 如需完整仪表盘，可自行构建 aw-webui 并放入 `self-analyst-aw/src/main/resources/webui/`，
-> 然后直接在浏览器访问 `http://localhost:5700/`。
+> 然后直接在浏览器访问实际配置端口的根路径。
 
 桌面端为 Windows 单实例运行；重复双击 `SelfAnalyst.exe` 时会提示
 `SelfAnalyst 已在运行`，不会再创建额外托盘图标或后端进程。
@@ -96,24 +97,29 @@ java -jar dist/self-analyst-app.jar
 | `aw.data-dir` | `AW_DATA_DIR` | `./data/aw-data` | 活动数据存储目录（相对启动目录；可改为 `${user.home}/.self-analyst/aw-data`） |
 | `memory.dir` | `MEMORY_DIR` | `./data/memory` | 目标/模式/记忆存储目录（相对启动目录；可改为 `${user.home}/.self-analyst`） |
 | `aw.ocr.engine` | `AW_OCR_ENGINE` | `auto` | OCR 引擎：`auto`、`paddle`、`tesseract` |
-| `aw.audio.enabled` | `AW_AUDIO_ENABLED` | `false` | 音频采集（需麦克风） |
+| `aw.audio.enabled` | `AW_AUDIO_ENABLED` | `false` | 音频采集总开关 |
+| `aw.audio.source` | `AW_AUDIO_SOURCE` | `mic` | `mic`、Windows `system` 或 `both` |
+| `aw.audio.engine` | `AW_AUDIO_ENGINE` | `auto` | `auto`、`local-whisper` 或 `cloud-asr`；`auto` 优先可用云端 ASR |
+| `aw.audio.model` | `AW_AUDIO_MODEL` | `gpt-4o-transcribe` | 云端 ASR 模型 |
+| `aw.audio.chunkSeconds` | `AW_AUDIO_CHUNK_SECONDS` | `10` | 每个音频片段秒数 |
 | `wiki.enabled` | `WIKI_ENABLED` | `false` | 对话式历史复盘；开启后生成多级时间摘要，相关文本会发送给 LLM |
 | `wiki.backfill.enabled` | `WIKI_BACKFILL_ENABLED` | `false` | 启动时补算最近 7 天；关闭后仍持续生成新结束的时间块 |
 | `wiki.semantic.enabled` | `WIKI_SEMANTIC_ENABLED` | `true` | 允许 Wiki 语义检索；还需同时开启 Embedding |
-
-内嵌 AW 模式下，内部 API 地址由 `aw.port` 自动派生；`aw.base-url` 仅在外部 AW 模式下生效。
 | `embedding.enabled` | `EMBEDDING_ENABLED` | `false` | 生成本地 Lucene 语义索引所需的远程 Embedding 请求 |
 | `file.watch.enabled` | `FILE_WATCH_ENABLED` | `false` | 目录文件监控 + LLM 摘要（内容会发送给 LLM，注意隐私） |
 | `file.watch.paths` | `FILE_WATCH_PATHS` | - | 监控目录，逗号分隔绝对路径 |
+
+内嵌 AW 模式下，内部 API 地址由 `aw.port` 自动派生；`aw.base-url` 仅在外部 AW 模式下生效。
 
 ### AW 模式
 
 - **embedded**（默认）：使用内嵌 Java AW 服务器，自动采集窗口和 AFK 数据，零外部依赖
 - **external**：连接已有的 Python/Rust ActivityWatch 实例（端口 5600）
 
-```properties
-aw.mode=external
-aw.base-url=http://localhost:5600/api/0
+```toml
+[aw]
+mode = "external"
+base-url = "http://localhost:5600/api/0"
 ```
 
 ### 对话式历史复盘
@@ -137,15 +143,13 @@ semantic.enabled = false
 
 | 层 | 机制 | 说明 |
 |----|------|------|
-| UIA 树 | Windows UIAutomation (PowerShell) | 直接读 UI 控件文本，零开销 |
+| 无障碍树 | 常驻 Rust accessibility sidecar（Windows UIAutomation） | 读取控件文本，失败时降级到 OCR |
 | OCR 兜底 | PaddleOCR-json / Tesseract | UIA 内容不足时截屏识别 |
 | 混合判断 | ThinDetector 启发式 | 自动决定是否需要 OCR |
 
-```properties
-# OCR 引擎选择
-aw.ocr.engine=auto     # auto = PaddleOCR 优先，不可用时回退 Tesseract
-# aw.ocr.engine=paddle   # 强制 PaddleOCR
-# aw.ocr.engine=tesseract # 强制 Tesseract
+```toml
+[aw.ocr]
+engine = "auto" # auto = PaddleOCR 优先，不可用时回退 Tesseract
 ```
 
 PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
@@ -190,16 +194,20 @@ self-analyst/
 ├── self-analyst-content/        (内容识别模块 — 可独立复用)
 │   └── src/main/java/.../content/
 │       ├── ContentWatcher.java  三层内容采集器
-│       ├── uia/                 UIA 树遍历 (PowerShell)
+│       ├── uia/                 accessibility sidecar 客户端 + 文本提取
 │       ├── ocr/                 PaddleOCR + Tesseract 引擎
 │       ├── thin/                ThinDetector 内容密度启发式
 │       └── capture/             截屏 + OCR + 混合合并
+│
+├── self-analyst-axsidecar/      (Rust 无障碍树边车)
+│   └── src/main.rs              常驻 JSONL 协议 + Windows UIAutomation
 │
 ├── self-analyst-audio/           (音频采集模块 — 可独立复用)
 │   └── src/main/java/.../audio/
 │       ├── AudioWatcher.java    音频采集主循环
 │       ├── WhisperEngine.java   whisper.cpp 本地转录
-│       ├── AudioCapturer.java   Java Sound API + VAD 静音检测
+│       ├── CloudAudioEngine.java OpenAI-compatible 云端 ASR
+│       ├── AudioCapturer.java   麦克风/WASAPI + VAD 静音检测
 │       └── AudioEngine.java     STT 引擎接口
 │
 ├── self-analyst-wiki/            (LLM Wiki 模块 — 可独立复用)
@@ -236,18 +244,7 @@ self-analyst/
 
 ## 文档
 
-SDD (Specification-Driven Development) 规格文档:
-
-- [docs/architecture.md](docs/architecture.md) — 系统架构
-- [docs/specs/core.md](docs/specs/core.md) — App 模块 spec
-- [docs/specs/content.md](docs/specs/content.md) — 内容识别模块 spec
-- [docs/specs/audio.md](docs/specs/audio.md) — 音频采集模块 spec
-- [docs/specs/file.md](docs/specs/file.md) — 目录文件监控模块 spec
-- [docs/specs/desktop.md](docs/specs/desktop.md) — Tauri 桌面壳 spec
-- [docs/specs/desktop-chat-tab.md](docs/specs/desktop-chat-tab.md) — 会话 tab spec
-- [docs/specs/chat-session-store.md](docs/specs/chat-session-store.md) — 会话后端分片、AgentState 与发送/重试契约
-- [docs/specs/agent-context-compaction.md](docs/specs/agent-context-compaction.md) — Harness 2.0.1 压缩边界、事务保护与统一测试入口
-- [docs/README.md](docs/README.md) — 文档导航索引
+完整架构、模块规格、功能规格和归档入口见 [docs/README.md](docs/README.md)。
 
 ## 安装脚本
 
@@ -343,7 +340,7 @@ powershell -File scripts/download-tools.ps1
 | 官方构建脚本 (`build-dist.ps1` / `download-tools.ps1`) | ✅ | ❌ PowerShell 脚本，且下载的是 Windows 版二进制 |
 | 活动追踪（窗口 / AFK） | ✅ | ✅ 已有 `MacWindowTracker` / `LinuxWindowTracker`（mac 需授予**辅助功能**权限） |
 | 内容识别（UIA / OCR） | ✅ | ❌ 仅 `WindowsCapture`，非 Windows 下 `ContentWatcher` 直接抛 `UnsupportedOperationException` |
-| 音频转写（whisper） | ✅ | ⚠️ 引擎逻辑跨平台，但工具路径写死 `.exe`，需替换 mac/linux 版二进制并调整路径 |
+| 音频转写 | ✅ 本地 whisper 或云端 ASR | ⚠️ 云端 ASR 可用；本地 whisper 需提供对应平台二进制 |
 
 ### macOS / Linux 上手动构建
 
@@ -379,10 +376,11 @@ java -jar self-analyst-app/target/self-analyst-app-1.0.0.jar
 - [Javalin](https://javalin.io) — 嵌入式 HTTP 服务器
 - [picocli](https://picocli.info) — CLI 框架
 - SQLite + JDBC — 活动数据存储
-- JNA — 原生窗口/AFK 追踪，UIAutomation COM 调用
+- JNA — 原生窗口/AFK、截屏与 Windows 音频输入
+- Rust `uiautomation` — 常驻 accessibility sidecar 的 Windows UIAutomation 客户端
 - PaddleOCR-json — 中文 OCR 识别引擎
 - Tess4J — Tesseract OCR 引擎 (回退方案)
-- whisper.cpp — 本地语音转文字引擎
+- whisper.cpp / OpenAI-compatible ASR — 本地或云端语音转文字
 - Tauri 2.x — 桌面应用壳 (WebView2 + 系统托盘)
 - Jackson — JSON 序列化
 - Project Reactor — 异步编排
@@ -392,14 +390,14 @@ java -jar self-analyst-app/target/self-analyst-app-1.0.0.jar
 SelfAnalyst 会采集你的数字活动（窗口、可选的屏幕 OCR / 音频 / 文件内容），权限较高。
 我们坚持透明：
 
-- 活动数据、OCR/转写结果、记忆**默认只存本地**；音频与文件监控**默认关闭**。
-- 音频转写由本地 whisper.cpp 完成，**音频本身不联网**；OCR 默认只读窗口顶部标题条。
-- 仅在对应功能开启时，相关**文本**才会发送到你**自行配置**的 LLM / Embedding / 搜索服务。
-- 本地服务仅绑定 `127.0.0.1`，不对外暴露。
+- 活动数据库和记忆默认保存在本机；音频与文件监控默认关闭。
+- `local-whisper` 不外发音频；`cloud-asr` 和可用的 `auto` 会把 WAV 发送到配置的 ASR 服务。
+- 对话、摘要、文件监控、Embedding 和搜索可能把相应内容发送到用户配置的第三方服务。
+- 本地服务只绑定 `127.0.0.1`；桌面模式还用每次启动生成的临时 token 保护 `/desktop/*`。
 
 完整说明见 [PRIVACY.md](PRIVACY.md)；漏洞报告流程见 [SECURITY.md](SECURITY.md)。
 
-## License
+## 许可证
 
 Apache License 2.0 — 详见 [LICENSE](LICENSE)。
 

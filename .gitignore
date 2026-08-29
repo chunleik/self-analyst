@@ -17,13 +17,10 @@ tools/
 dist/
 /dist-portable/
 /artifacts/
+# 本地设计/brainstorm 临时产物（可由不同开发工具生成），不属于项目文档或仓库配置
 .superpowers/
 .worktrees/
 .workbuddy/
-.claude/*
-# 例外：随仓库共享 SDD 命令流，其余 .claude（settings.local.json 等本地配置）仍忽略
-!.claude/commands/
-!.claude/commands/**
 
 # 本机 cargo 配置（含机器相关的 linker 路径），见同目录 .example
 self-analyst-desktop/src-tauri/.cargo/config.toml

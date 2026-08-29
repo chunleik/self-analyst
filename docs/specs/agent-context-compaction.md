@@ -29,7 +29,7 @@ sandbox 统一时再进行。
 
 ## 2. 双层上下文
 
-- `{memory.dir}/chat-sessions/<sessionId>.json` 仍是 UI transcript 权威，保留用户可见正文。
+- `{memory.dir}/chat-sessions/chat.db` 中的会话与消息表是 UI transcript 权威，保留用户可见正文。
 - `AgentState.context` 只保留近期原始消息。
 - `AgentState.summary` 保存更早历史的滚动摘要。
 - 模型推理前临时注入 `summary + recent context`；摘要消息不写回 `AgentState.context`。
@@ -59,7 +59,7 @@ keepTokens = 12000
 
 压缩只能在现有 application-wide chat/delete gate 内执行：
 
-1. 旧 server transcript 如需迁移，先完成一次性 seed。
+1. `chat.db` 已有 transcript 但 AgentState 不存在时，先完成一次性 seed。
 2. 先检查 `userMessageId` 幂等；已有 terminal assistant 时直接返回，不触发摘要模型。
 3. 加载当前 `(desktop, sessionId)` AgentState；`shutdownInterrupted=true` 或存在未配对
    ToolUse/ToolResult 时跳过压缩。
@@ -75,7 +75,7 @@ keepTokens = 12000
 
 ## 5. 本轮桌面上下文
 
-- 会话模式以 shard 中 server-owned user content 与 `contextSnapshot` 为准，忽略请求体伪造内容。
+- 会话模式以 `chat.db` 中 server-owned user content 与 `contextSnapshot` 为准，忽略请求体伪造内容。
 - `contextSnapshot` 在 `RuntimeContext` 中传递；`ConversationContextMiddleware` 在每次 reasoning
   前把它插入当前 user 前面，角色为 USER、标记为 reference-only data。
 - 序列化后最多 12000 字符；前端同时把 task/timeline/evidence 投影到有限字段与长度。

@@ -9,7 +9,7 @@
 | 属性 | 值 |
 |------|-----|
 | 功能名称 | LLM Wiki 多级时间摘要与语义索引 |
-| 文档状态 | Ready for implementation |
+| 文档状态 | 已实现（当前契约） |
 | 日期 | 2026-06-08 |
 | 目标模块 | `self-analyst-wiki` |
 | 主要包 | `com.selfanalyst.wiki` |
@@ -23,9 +23,9 @@
 
 ---
 
-## 2. 背景和当前状态
+## 2. 实施前背景与缺口
 
-SelfAnalyst 当前已经具备以下能力:
+实施 LLM Wiki 前，SelfAnalyst 已经具备以下基础能力：
 
 - `self-analyst-aw`: 持久采集窗口、AFK 等 ActivityWatch 事件。
 - `self-analyst-content`: 以 `aw-watcher-content_{hostname}` bucket 记录 UIA/OCR 内容事件。
@@ -33,7 +33,7 @@ SelfAnalyst 当前已经具备以下能力:
 - `SelfAnalystAgent`: 使用长期记忆 `memory.json` 和 ActivityWatch 工具回答用户问题。
 - `MemoryStore`: 只保存目标、行为模式、改进记录，不适合保存永久时间线摘要。
 
-当前缺口:
+当时的缺口：
 
 - 没有小时、半天、天、周、双周、月级别的长期任务摘要。
 - Agent 每次分析历史时间段时需要重新查原始事件，成本高且上下文不可复用。
@@ -690,7 +690,6 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 - `self-analyst-app/src/main/java/com/selfanalyst/agent/SelfAnalystAgent.java`
 - `docs/specs/llm-wiki.md`
 - `docs/README.md`
-- `CLAUDE.md`
 
 ### 17.2 不应修改的文件
 

@@ -9,7 +9,7 @@
 | 属性 | 值 |
 |------|-----|
 | 特性名称 | 无障碍树边车（Accessibility Sidecar） |
-| 文档状态 | Ready for implementation（macOS 部分为设计预留） |
+| 文档状态 | Windows 已实现；macOS 部分为设计预留 |
 | 日期 | 2026-06-19 |
 | 涉及模块 | `self-analyst-content`（Java 客户端）、新增 `self-analyst-axsidecar`（Rust 二进制） |
 | 取代 | `SPEC-UIA-001`（PowerShell one-shot 实现） |
@@ -18,16 +18,17 @@
 
 ---
 
-## 2. 背景与当前状态
+## 2. 改造前背景
 
-现状（见 [content.md](content.md) §5）：
+改造前实现（见 [content.md](content.md) §5 的已取代条款）：
 
-- `SPEC-UIA-001`：每次 UIA 查询都 `fork` 一个一次性 `powershell.exe`，脚本内 `Add-Type -AssemblyName UIAutomationClient/Types` 调 `System.Windows.Automation`，输出 JSON 树。
-- 实测单次 1–3 秒（`ContentWatcher` 注释自证），开销几乎全在进程启动 + 程序集加载/JIT，真正遍历树仅毫秒级。
-- `ContentWatcher` 用 `cachedWalk/cachedHwnd` 仅在前台窗口切换时 walk 一次——延迟问题，非吞吐问题。
-- **平台抽象是「漏」的**：`PlatformCapture.getForegroundWindow()` 直接返回 JNA 的 `HWND`，`UiaPowerShell.query(HWND)` 同理。这使 macOS 无法以「再加一个实现类」的方式接入。
+- `SPEC-UIA-001` 曾在每次 UIA 查询时启动一次 `powershell.exe`，加载 .NET UIAutomation 并输出 JSON 树。
+- 单次调用曾耗时 1–3 秒，主要成本是进程启动、程序集加载与 JIT，而非树遍历本身。
+- `ContentWatcher` 曾用 `cachedWalk/cachedHwnd` 降低调用频率，但不能消除窗口切换时的冷启动延迟。
+- 旧接口直接暴露 JNA `HWND`，阻碍了 OS 中性实现。
 
-唯一的进程出入口是 `UiaPowerShell.query(HWND) → UiaNode`，下游（`extractText`、控件类型映射、`ThinDetector`）只依赖纯数据模型 `UiaNode`，与进程实现解耦。这是改造可隔离的根因。
+旧下游已经只依赖纯数据模型 `UiaNode`；当前实现用 `AxSidecarClient.query(long) → UiaNode` 替换旧
+PowerShell 入口，并保留 Java 侧文本提取与 Thin/OCR 合并逻辑。
 
 ---
 
@@ -44,7 +45,7 @@
 ### SPEC-AXS-002：边车语言与形态
 
 - 边车用 **Rust** 实现。理由（设计决策）：
-  - Windows（`windows-rs`）与 macOS（`objc2` / `core-foundation` / `accessibility-sys`）共享**同一工具链、同一 stdio/JSON 骨架、同一构建路径**；
+  - Windows 当前使用 Rust `uiautomation` crate；未来 macOS 可使用 `objc2` / `core-foundation` / Accessibility 绑定，并共享同一 stdio/JSON 骨架与构建路径；
   - Rust 已在仓库内（Tauri 桌面壳），不新增第二种边车语言；
   - 单个自包含原生二进制，**无运行时依赖**（对比 .NET 在 macOS 需随包分发运行时）。
 - 不选 C#：其唯一优势是贴合现有 PowerShell 的 UIAutomation API，纯 Windows 红利，到 macOS（无 AX 托管绑定，需 P/Invoke）不成立。
@@ -147,7 +148,7 @@ Unknown
 
 ### SPEC-AXS-040：Windows 原生采集
 
-- 用 UI Automation（`windows-rs`，`IUIAutomation` / `IUIAutomationElement`）。
+- 使用 Rust `uiautomation` crate 封装 Windows UI Automation；底层仍对应 `IUIAutomation` / `IUIAutomationElement`。
 - 提取属性等价于 `SPEC-UIA-002`：`Name`、`ControlType`、`ClassName`、`IsPassword`、`BoundingRectangle`、`ValuePattern.Value`。
 - 遍历等价于 `SPEC-UIA-003`：`ControlViewWalker` 的 `GetFirstChild → GetNextSibling`。
 - `ControlType`（50000..）按 SPEC-AXS-016 映射为中性角色。
@@ -155,7 +156,7 @@ Unknown
 
 ### SPEC-AXS-041：进程内常驻
 
-- 边车进程启动时初始化一次 UIAutomation COM（`CoInitializeEx` + `CUIAutomation`），后续请求复用，不重复付初始化成本。
+- 边车进程启动时创建并缓存 `UIAutomation` 与 `ControlViewWalker`，后续请求复用同一 backend，不重复承担进程和 COM 初始化成本。
 
 ---
 
@@ -220,13 +221,14 @@ Unknown
 
 ## 9. 配置
 
-| 属性 | 默认 | 语义 |
+| 入口 | 默认 | 语义 |
 |------|------|------|
-| `content.axsidecar.path` | 内置释放路径 | 边车二进制路径；缺省时从资源释放到临时目录（沿用现状 `.ps1`/PaddleOCR 释放模式） |
-| `content.axsidecar.timeout-ms` | 1500 | 单次查询超时；超时 kill+重启并降级 |
-| `content.axsidecar.enabled` | true | 关闭则完全跳过 UIA 采集（等价无 UIA 降级） |
+| system property `content.axsidecar.path` 或环境变量 `CONTENT_AXSIDECAR_PATH` | 未显式指定 | 显式边车路径；system property 优先 |
+| system property `content.axsidecar.timeout-ms` | `1500` | 单次查询超时；超时后终止当前边车并在下次查询重启 |
 
-读取入口与现有 content 配置一致（系统属性 / 环境变量）。
+未指定路径时，Java 先尝试从 classpath `/axsidecar/<binary>` 释放到临时文件，再尝试开发目录
+`self-analyst-axsidecar/target/release/`；均不存在时 UIA 返回空并降级 OCR。当前没有
+`content.axsidecar.enabled` 配置键；禁用全部内容采集使用 `aw.collection.content=false`。
 
 ---
 

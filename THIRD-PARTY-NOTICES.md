@@ -1,77 +1,68 @@
-# Third-Party Notices
+# 第三方组件声明
 
-SelfAnalyst is licensed under the Apache License 2.0 (see [LICENSE](LICENSE)).
+SelfAnalyst 采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。项目依赖或在发布产物中包含
+下列第三方组件；每个组件继续适用其自身许可证。若发现遗漏或许可证信息错误，请提交 Issue。
 
-It depends on, and in its distribution (`dist/`) bundles, the third-party
-components listed below. Each remains under its own license; the texts referenced
-here govern those components, not SelfAnalyst's own code.
+## Java 依赖
 
-This list is provided in good faith for attribution and compliance. If you spot
-an error or omission, please open an issue.
+| 组件 | 用途 | 许可证 |
+|------|------|--------|
+| [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) | LLM Agent 框架 | Apache-2.0 |
+| [Javalin](https://javalin.io) | 嵌入式 HTTP 服务 | Apache-2.0 |
+| [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) | SQLite JDBC 驱动 | Apache-2.0 |
+| [JNA / JNA Platform](https://github.com/java-native-access/jna) | 窗口/AFK、截屏、WASAPI 等原生调用 | Apache-2.0 / LGPL-2.1 双许可证；本项目按 Apache-2.0 使用 |
+| [Jackson](https://github.com/FasterXML/jackson) | JSON 序列化 | Apache-2.0 |
+| [Tess4J](https://github.com/nguyenq/tess4j) | Tesseract OCR Java 封装 | Apache-2.0 |
+| [Apache Lucene](https://lucene.apache.org) | 本地向量/KNN 语义索引 | Apache-2.0 |
+| [Apache PDFBox](https://pdfbox.apache.org) | PDF 文本提取 | Apache-2.0 |
+| [Apache POI](https://poi.apache.org) | Office 文档提取 | Apache-2.0 |
+| [SLF4J](https://www.slf4j.org) | 日志门面 | MIT |
+| [Logback](https://logback.qos.ch) | 日志实现 | EPL-1.0 / LGPL-2.1 双许可证 |
+| [tomlj](https://github.com/tomlj/tomlj) | TOML 1.0 解析 | Apache-2.0 |
+| [jtokkit](https://github.com/knuddelsgmbh/jtokkit) | 本地 token 计数 | MIT |
+| [JUnit 5](https://junit.org/junit5/) | 测试依赖 | EPL-2.0 |
 
-## Java dependencies (declared in `pom.xml`)
+## 下载或打包的工具和模型
 
-| Component | Purpose | License |
-|-----------|---------|---------|
-| [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) | LLM Agent framework | Apache-2.0 |
-| [Javalin](https://javalin.io) | Embedded HTTP server | Apache-2.0 |
-| [sqlite-jdbc (Xerial)](https://github.com/xerial/sqlite-jdbc) | SQLite JDBC driver | Apache-2.0 |
-| [JNA / JNA Platform](https://github.com/java-native-access/jna) | Native window/AFK tracking, UIAutomation COM | Apache-2.0 / LGPL-2.1 (dual; used under Apache-2.0) |
-| [Jackson](https://github.com/FasterXML/jackson) | JSON serialization | Apache-2.0 |
-| [Tess4J](https://github.com/nguyenq/tess4j) | Tesseract OCR Java wrapper | Apache-2.0 |
-| [Apache Lucene](https://lucene.apache.org) | Vector / KNN semantic index | Apache-2.0 |
-| [Apache PDFBox](https://pdfbox.apache.org) | PDF text extraction | Apache-2.0 |
-| [Apache POI](https://poi.apache.org) | Office document extraction | Apache-2.0 |
-| [SLF4J](https://www.slf4j.org) | Logging facade | MIT |
-| [Logback](https://logback.qos.ch) | Logging implementation | EPL-1.0 / LGPL-2.1 (dual) |
-| [tomlj](https://github.com/tomlj/tomlj) | TOML 1.0 parsing | Apache-2.0 |
-| [jtokkit](https://github.com/knuddelsgmbh/jtokkit) | Local token counting (tiktoken cl100k_base) | MIT |
-| [JUnit 5](https://junit.org/junit5/) | Testing (test scope only) | EPL-2.0 |
+这些内容不提交到 Git 仓库。`scripts/download-tools.ps1` 下载到 `tools/`，构建脚本再按发行变体
+放入 `dist/` 或免安装包。
 
-## Bundled / downloaded binaries and models
+| 组件 | 用途 | 许可证 |
+|------|------|--------|
+| [PaddleOCR-json](https://github.com/hiroi-sora/PaddleOCR-json) | 中文 OCR 引擎和模型 | Apache-2.0 |
+| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | 本地语音转写 | MIT |
+| [OpenAI Whisper 模型](https://github.com/openai/whisper) | whisper.cpp 模型权重来源 | MIT |
+| [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) | OCR 回退引擎 | Apache-2.0 |
 
-These are not in the Git repository; `scripts/download-tools.ps1` fetches them
-into `tools/`, and `scripts/build-dist.ps1` packages them into `dist/`.
+## Tauri 桌面壳
 
-| Component | Purpose | License |
-|-----------|---------|---------|
-| [PaddleOCR-json](https://github.com/hiroi-sora/PaddleOCR-json) (PaddleOCR engine + models) | Chinese OCR | Apache-2.0 |
-| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | Local speech-to-text inference | MIT |
-| Whisper ggml models (from [OpenAI Whisper](https://github.com/openai/whisper)) | STT model weights | MIT |
-| [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) | OCR fallback engine | Apache-2.0 |
+| 组件 | 用途 | 许可证 |
+|------|------|--------|
+| [Tauri 2.x](https://tauri.app) | 桌面应用壳 | MIT / Apache-2.0 |
+| Microsoft Edge WebView2 Runtime | Windows 系统 WebView | Microsoft 专有可再发行条款；本项目不捆绑固定 Runtime |
 
-## Desktop shell (Tauri)
+Rust crate 依赖声明在 `self-analyst-desktop/src-tauri/Cargo.toml`，锁定版本记录在对应 `Cargo.lock`。
 
-| Component | Purpose | License |
-|-----------|---------|---------|
-| [Tauri 2.x](https://tauri.app) | Desktop application shell | MIT / Apache-2.0 |
-| Microsoft Edge WebView2 Runtime | Windows WebView (system component, not redistributed) | Proprietary (Microsoft redistributable terms) |
+## 无障碍树边车
 
-Rust crate dependencies of the Tauri shell are declared in
-`self-analyst-desktop/src-tauri/Cargo.toml`; their licenses (predominantly
-MIT / Apache-2.0) are resolved by Cargo and recorded in `Cargo.lock`.
+| 组件 | 用途 | 许可证 |
+|------|------|--------|
+| [uiautomation](https://github.com/leexgone/uiautomation-rs) | `self-analyst-axsidecar` 的 Windows UIAutomation 客户端 | Apache-2.0 |
+| [serde](https://serde.rs) / `serde_json` | sidecar JSONL 协议 | MIT / Apache-2.0 |
 
-## Accessibility sidecar (Rust)
+## 桌面前端
 
-| Component | Purpose | License |
-|-----------|---------|---------|
-| [uiautomation](https://github.com/leexgone/uiautomation-rs) | Windows UI Automation client for the accessibility-tree sidecar (`self-analyst-axsidecar`) | Apache-2.0 |
+| 组件 | 用途 | 许可证 |
+|------|------|--------|
+| [Deep Chat 2.5.0](https://github.com/OvidijusParsiunas/deep-chat) | 会话消息面和输入组件 | MIT |
 
-## Desktop frontend
+Deep Chat bundle 位于 `self-analyst-app/src/main/resources/desktop-ui/deep-chat.bundle.js`，许可证原文位于
+`self-analyst-app/src/main/resources/third-party/deep-chat-LICENSE.txt`。bundle 来自官方
+`deep-chat@2.5.0` npm 包，SHA-256 为
+`12E0B5352E26E257C4D80BCA9FCFB75DC382608EE9B15CF920A469D51C3496EA`。
 
-| Component | Purpose | License |
-|-----------|---------|---------|
-| [Deep Chat 2.5.0](https://github.com/OvidijusParsiunas/deep-chat) | Vendored web component for the chat message surface and composer | MIT |
+## ActivityWatch 兼容性说明
 
-The Deep Chat distribution bundle is stored at
-`self-analyst-app/src/main/resources/desktop-ui/deep-chat.bundle.js`. Its
-license text is bundled in the application resources at
-`self-analyst-app/src/main/resources/third-party/deep-chat-LICENSE.txt`. The
-bundle was extracted from the official `deep-chat@2.5.0` npm package and has
-SHA-256 `12E0B5352E26E257C4D80BCA9FCFB75DC382608EE9B15CF920A469D51C3496EA`.
-
-## Note on ActivityWatch compatibility
-
-SelfAnalyst's embedded AW server is an independent Java implementation that is
-**data-format and API compatible** with [ActivityWatch](https://activitywatch.net)
-(MPL-2.0). It does not incorporate ActivityWatch source code.
+SelfAnalyst 内嵌 AW 服务是独立 Java 实现，在数据格式和 API 上兼容
+[ActivityWatch](https://activitywatch.net)（MPL-2.0），不包含 ActivityWatch 源代码。完整 aw-webui
+预编译产物不随仓库或默认发行包分发。

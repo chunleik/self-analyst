@@ -9,7 +9,7 @@
 | 属性 | 值 |
 |------|-----|
 | 功能名称 | 聊天会话存储收敛为 SQLite 单库（WAL + FTS5），替代分片/投影/恢复机制 |
-| 文档状态 | Implemented and verified |
+| 文档状态 | 已实现并验证 |
 | 日期 | 2026-08-28 |
 | 目标平台 | SelfAnalyst 桌面后端，Windows 优先 |
 | 规格前缀 | `SPEC-CSS-*`（Chat Session Sqlite） |
@@ -69,26 +69,26 @@ CREATE TABLE IF NOT EXISTS metadata(
 );  -- schema_version=2, active_session_id, generation
 
 CREATE TABLE IF NOT EXISTS sessions(
-  id TEXT PRIMARY KEY,               -- hex32
-  title TEXT NOT NULL,
-  created_at TEXT NOT NULL,          -- ISO-8601，可字典序排序
-  updated_at TEXT NOT NULL,
-  source TEXT NOT NULL,
+  id TEXT PRIMARY KEY NOT NULL CHECK(length(id) = 32),
+  title TEXT,
+  created_at TEXT,                   -- 应用写入 ISO-8601
+  updated_at TEXT,
+  source TEXT,
   context_label TEXT,
   context_snapshot TEXT,             -- canonical JSON，≤64KiB
-  memory_policy TEXT NOT NULL,
+  memory_policy TEXT,
   summary TEXT,
   last_message_preview TEXT,
-  message_count INTEGER NOT NULL DEFAULT 0
+  message_count INTEGER NOT NULL DEFAULT 0 CHECK(message_count >= 0)
 );
 
 CREATE TABLE IF NOT EXISTS messages(
-  id TEXT PRIMARY KEY,               -- hex12
+  id TEXT PRIMARY KEY NOT NULL,      -- 应用校验 hex12
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,
   role TEXT NOT NULL,
   content TEXT,
-  created_at TEXT NOT NULL,
+  created_at TEXT,
   status TEXT,
   error TEXT,
   context_snapshot TEXT,
@@ -104,13 +104,15 @@ CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
 -- AFTER INSERT/UPDATE/DELETE 触发器维护 sessions_fts（SQLite 官方 external-content 范式）
 
 CREATE TABLE IF NOT EXISTS pending_deletions(
-  session_id TEXT PRIMARY KEY,
+  session_id TEXT PRIMARY KEY NOT NULL,
   requested_at TEXT NOT NULL
 );
 ```
 
 - 列表排序键：`updated_at DESC, id DESC`（与 `META_ORDER` 一致；ISO-8601 字符串字典序即时间序，同刻时以 id 决胜）。
 - `Session`/`Message` 的 JSON 序列化形状（REST 契约）不变；`createdAt/updatedAt` 以 ISO-8601 字符串存取，与 Jackson `Instant` 映射一致。
+- `title/created_at/updated_at/source/memory_policy` 等非空要求由应用写入和规范化逻辑保证，物理
+  schema 为兼容旧数据保留 nullable；上面的 SQL 与当前 `initializeSchema` DDL 一致。
 
 ---
 

@@ -1,168 +1,142 @@
 # self-analyst-desktop SDD 规格说明书
 
-> Specification-Driven Development — Tauri 桌面壳，封装 desktop-ui + 系统托盘。
-
----
+> Tauri 桌面壳负责单实例、Java 后端生命周期、端口握手、桌面认证、WebView 和系统托盘。
 
 ## 1. 系统标识
 
 | 属性 | 值 |
 |------|-----|
-| 产品名称 | SelfAnalyst Desktop |
+| 模块 | `self-analyst-desktop` |
 | 版本 | 1.0.0 |
-| 壳框架 | Tauri 2.x (Rust + TS) |
-| 前端 | desktop-ui 轻量桌面页 |
-| 后端 | self-analyst-app.jar (Java 21, 已有) |
-
----
+| 壳框架 | Tauri 2.x / Rust |
+| WebView | Windows WebView2（系统 Evergreen Runtime） |
+| 后端 | `self-analyst-app.jar` / Java 21 |
 
 ## 2. 架构契约
 
-### SPEC-DSK-ARCH-001: 进程边界
+### SPEC-DSK-ARCH-001：进程与通信边界
 
-```
-┌─ self-analyst-desktop ────────────────────────┐
-│                                                │
-│  ┌─ Tauri 壳 (Rust) ────────────────────────┐ │
-│  │  窗口管理 + 系统托盘 + 子进程管理          │ │
-│  │   └─ WebView2 (系统原生) ────────────────┐ │ │
-│  │      渲染 desktop-ui                     │ │ │
-│  │       └─ HTTP: http://localhost:5700 ─┐  │ │ │
-│  └───────────────────────────────────────┘  │ │ │
-│                                            │  │ │
-│  ┌─ Java 后端 (子进程) ──────────────────┐ │  │ │
-│  │  AwServer + Watchers + Content + Audio│←┘  │ │
-│  │  端口: 5700                            │     │ │
-│  └────────────────────────────────────────┘     │ │
-│                                                 │ │
-└─────────────────────────────────────────────────┘ │
-                                                  │
+```text
+SelfAnalyst.exe
+  ├─ 生成随机 desktop token
+  ├─ 创建唯一端口握手文件路径
+  ├─ 启动 java -jar self-analyst-app.jar
+  │    ├─ 监听 127.0.0.1:<aw.port>
+  │    ├─ 注册 /desktop/lifecycle/*
+  │    └─ 原子发布实际端口
+  ├─ token 探活 /desktop/lifecycle/health
+  └─ 创建 WebView、托盘和浏览器会话链接
 ```
 
-- **SPEC-DSK-ARCH-001a**: Rust 壳与 Java 后端仅通过 HTTP (localhost:5700) 通信，无其他 IPC。
-- **SPEC-DSK-ARCH-001b**: Tauri 启动时自动拉起 Java 后端子进程，退出时终止。
-- **SPEC-DSK-ARCH-001c**: WebView 默认加载 `http://localhost:5700/desktop-ui/`。完整 Web 仪表盘（aw-webui，MPL-2.0）不随仓库分发，缺失时 `http://localhost:5700/` 返回 404，桌面端不提供入口。
-- **SPEC-DSK-ARCH-001d**: Windows 上使用命名 mutex 保证桌面端单实例运行；重复启动只提示 `SelfAnalyst 已在运行`，不创建窗口、托盘或 Java 后端。
-
----
+- **SPEC-DSK-ARCH-001a**：业务交互只通过回环 HTTP；启动阶段允许通过环境变量传递 token 和握手文件路径，并通过唯一临时文件返回实际端口。
+- **SPEC-DSK-ARCH-001b**：Java JAR 与桌面可执行文件位于同一发布目录；受管子进程的工作目录为该目录。
+- **SPEC-DSK-ARCH-001c**：WebView 加载 `http://localhost:<actualPort>/desktop-ui/`，不得硬编码 5700 覆盖 Java 配置。
+- **SPEC-DSK-ARCH-001d**：桌面模式为每次启动生成随机 token；除 `/desktop/session` 外的
+  `/desktop/*` 请求必须通过 header 或会话 cookie 认证。
 
 ## 3. 模块结构
 
-```
+```text
 self-analyst-desktop/
-├── src-tauri/
-│   ├── Cargo.toml
-│   ├── tauri.conf.json
-│   └── src/
-│       ├── main.rs              # 入口: 调用库 run()
-│       └── lib.rs               # 单实例、Java 子进程、窗口和托盘
 ├── package.json
-└── README.md
+├── pnpm-lock.yaml
+└── src-tauri/
+    ├── Cargo.toml
+    ├── tauri.conf.json
+    ├── capabilities/default.json
+    └── src/
+        ├── main.rs
+        └── lib.rs
 ```
 
-**前置依赖**：
-- Rust (stable)
-- Node.js 18+ (pnpm/npm)
-- Visual Studio Build Tools (Windows, 用于编译 Rust)
-- Java 21 (已安装)
-
----
+构建要求：Rust stable、Node.js 20+、pnpm、Java 21；Windows 发布还需要 MSVC、Windows SDK 和
+系统 WebView2 Runtime。
 
 ## 4. 行为规格
 
-### SPEC-DSK-TRAY-001: 系统托盘
+### SPEC-DSK-TRAY-001：系统托盘
 
-| 菜单项 | 行为 |
-|--------|------|
-| 显示窗口 | `window.show()` + `window.set_focus()` — 显示并聚焦隐藏窗口 |
-| Web版桌面 | `open::that("http://localhost:5700/desktop-ui/")` — 系统默认浏览器 |
-| 关于 | 使用原生消息框显示版本、桌面端和后端服务信息 |
-| 退出 | 终止 Java 子进程 → `app.exit(0)` |
+| 菜单 | 行为 |
+|------|------|
+| 显示窗口 | 显示并聚焦主窗口 |
+| Web版桌面 | 打开带本次启动临时 `token` 的 `/desktop/session`，由后端设置 HttpOnly cookie 后重定向到桌面页 |
+| 关于 | 展示产品、桌面壳和当前后端端口信息 |
+| 退出 | 调用认证 shutdown，保存状态并退出全部受管进程 |
 
-- **SPEC-DSK-TRAY-001a**: 托盘只允许由 Rust 代码手动创建，`tauri.conf.json` 不配置 `app.trayIcon`，避免自动托盘和手动托盘重复出现。
-- **SPEC-DSK-TRAY-001b**: 手动托盘必须显式使用默认窗口图标，避免 Windows 隐藏图标区出现空白或不可见图标。
-- **SPEC-DSK-TRAY-001c**: 左键点击托盘图标 → 显示并聚焦窗口。
-- **SPEC-DSK-TRAY-001d**: 托盘不提供「Web仪表盘」入口——完整仪表盘（aw-webui，MPL-2.0）不随仓库分发，避免指向 404。如本地放置了 aw-webui，可直接在浏览器访问 `http://localhost:5700/`。
+- 左键单击托盘图标显示主窗口。
+- 关闭窗口只隐藏到托盘；“退出”是正常终止入口。
+- 不提供会指向缺失 aw-webui 的“Web 仪表盘”菜单。
 
-### SPEC-DSK-WIN-001: 窗口行为
+### SPEC-DSK-WIN-001：窗口与单实例
 
-- 初始大小：1200×800，可调整
-- 最小尺寸：800×600
-- 标题：`SelfAnalyst`
-- **SPEC-DSK-WIN-001a**: 关闭按钮 → `window.hide()` 隐藏到托盘，不退出
-- **SPEC-DSK-WIN-001b**: 窗口 `data_directory` 指向 `./data/desktop/`
+- 主窗口默认 1200×800，最小 800×600，启动后居中。
+- Windows 使用命名 mutex 保证单实例；重复启动提示已运行并立即退出。
+- 便携版依赖系统 WebView2 Runtime，不在包内重复捆绑固定版本。
 
-### SPEC-DSK-BACKEND-001: Java 后端管理
+### SPEC-DSK-BACKEND-001：Java 后端管理
 
-- **SPEC-DSK-BACKEND-001a**: Tauri `setup` 钩子中启动 `java -jar self-analyst-app.jar`
-- **SPEC-DSK-BACKEND-001b**: 启动后轮询 `http://localhost:5700/0/info`，最多等待 10s
-- **SPEC-DSK-BACKEND-001c**: 10s 内未就绪 → 弹错误对话框 → 退出
-- **SPEC-DSK-BACKEND-001d**: Tauri `on_exit` 中发送 `SIGTERM` 终止 Java 进程
-- **SPEC-DSK-BACKEND-001e**: Java 进程意外退出时，Tauri 显示"后端已停止"通知并退出
+- **SPEC-DSK-BACKEND-001a**：启动命令为 `java -jar self-analyst-app.jar`，注入
+  `SELF_ANALYST_DESKTOP_TOKEN` 和 `SELF_ANALYST_DESKTOP_PORT_FILE`。
+- **SPEC-DSK-BACKEND-001b**：最多等待 30 秒取得合法端口，再最多等待 30 秒使用 token 调用
+  `/desktop/lifecycle/health`；任一阶段失败都退出，不回退到硬编码端口。
+- **SPEC-DSK-BACKEND-001c**：端口文件内容必须为 `1..65535` 十进制整数；消费后清理。
+- **SPEC-DSK-BACKEND-001d**：正常退出调用 `/desktop/lifecycle/shutdown`；异常退出依靠受管子进程机制回收 Java，不能遗留孤儿后端。
+- **SPEC-DSK-BACKEND-001e**：后端启动期间提前退出时，桌面壳立即失败并提示查看后端日志。
 
-### SPEC-DSK-WEB-001: WebView 配置
+### SPEC-DSK-WEB-001：WebView 与认证
 
-- `url`: `http://localhost:5700/desktop-ui/`
-- 启用 DevTools（`Ctrl+Shift+I`，仅 dev 构建）
-- CSP 允许 `localhost:5700` 连接
-- 禁用导航到外部 URL（拦截 `on_navigation`）
-
----
+- WebView 使用 Java 发布的实际端口加载 `/desktop-ui/`。
+- 初始化脚本只为同源 `/desktop/*` fetch 注入 `X-SelfAnalyst-Token`，不得把 token 发给外部源。
+- 系统浏览器入口通过 `/desktop/session?token=...` 交换 HttpOnly、SameSite=Strict cookie；失败 token 返回 403。
+- 应用服务只绑定 `127.0.0.1`，并校验 Host 与 Origin 的回环边界。
 
 ## 5. 构建规格
 
-### SPEC-DSK-BLD-001: 构建产物
+### SPEC-DSK-BLD-001：构建产物
 
-| 平台 | 产物 |
-|------|------|
-| Windows | `dist/SelfAnalyst.exe` (13MB) |
-| | `dist/self-analyst-app.jar` (54MB) |
-| | `dist/tools/` (PaddleOCR + whisper, 737MB) |
+`scripts/build-dist.ps1` 负责编译 Java、Rust accessibility sidecar 和 Tauri 桌面壳，并组装：
 
-- **SPEC-DSK-BLD-001a**: `powershell -File scripts/build-dist.ps1` 一键构建完整 dist/
-- **SPEC-DSK-BLD-001b**: 构建步骤: mvn package → 复制 jar + tools → cargo build --release → 复制 exe
-- **SPEC-DSK-BLD-001c**: exe 从自身所在目录寻找 `self-analyst-app.jar`（同级目录）
+```text
+dist/
+├── SelfAnalyst.exe
+├── self-analyst-app.jar
+└── tools/
+```
 
-### SPEC-DSK-BLD-002: 开发模式
+`scripts/build-portable.ps1` 另行组装包含精简 Java 运行时的 `dist-portable/`，并在 `artifacts/`
+生成 minimal/full 免安装 ZIP：
 
-- `pnpm tauri dev` — 启动 Tauri 开发窗口
-- Java 后端需手动启动 `java -jar self-analyst-app.jar`
+```text
+dist-portable/
+├── SelfAnalyst.exe
+├── self-analyst-app.jar
+├── runtime/
+└── tools/
+```
 
----
+### SPEC-DSK-BLD-002：开发模式
+
+```powershell
+cd self-analyst-desktop
+pnpm install
+pnpm tauri dev
+```
 
 ## 6. 测试规格
 
-### SPEC-DSK-TST-001: 手动测试
+- `cargo test --manifest-path self-analyst-desktop/src-tauri/Cargo.toml`
+- `scripts/check-desktop-tray.ps1`
+- 使用非默认 `aw.port` 验证端口握手、健康检查、WebView、浏览器入口和退出均使用同一端口。
+- 验证非法/缺失端口文件、错误 token、后端提前退出和重复启动都 fail closed。
+- 验证 WebView 只向同源 `/desktop/*` 注入 token，外部请求不携带认证信息。
 
-| 测试 | 步骤 | 预期 |
-|------|------|------|
-| 启动 | 双击 exe | Java 启动 → WebView 显示 desktop-ui |
-| 最小化 | 点关闭按钮 | 窗口隐藏，托盘图标显示 |
-| 恢复 | 左键点击托盘图标 | 窗口重新显示 |
-| 重复启动 | 桌面端运行时再次双击 exe | 提示 `SelfAnalyst 已在运行`，托盘图标数量不增加 |
-| Web版桌面 | 托盘→Web版桌面 | 默认浏览器打开 `http://localhost:5700/desktop-ui/` |
-| 关于 | 托盘→关于 | 原生消息框显示版本和后端服务 |
-| 退出 | 托盘→退出 | Java 进程终止，窗口关闭 |
-| 后端挂掉 | kill Java 进程 | Tauri 提示"后端已停止"并退出 |
+## 7. 追溯矩阵
 
----
-
-## 7. 与现有模块关系
-
-- 不依赖 `self-analyst-app` 作为 Maven 模块（通过子进程启动 jar）
-- 运行时默认加载 Java 后端提供的 `desktop-ui/` 轻量桌面页
-- 完整 Web UI（aw-webui，MPL-2.0）不随仓库分发；缺失时 `http://localhost:5700/` 返回 404，桌面端不再提供其入口
-- `tools/` 目录内容打包进 bundle
-
----
-
-## 规格追溯矩阵
-
-| 规格 ID | 对应文件 |
-|---------|---------|
-| SPEC-DSK-ARCH-001 | lib.rs |
-| SPEC-DSK-TRAY-001 | lib.rs, tauri.conf.json |
-| SPEC-DSK-WIN-001 | lib.rs, tauri.conf.json |
-| SPEC-DSK-BACKEND-001 | lib.rs |
-| SPEC-DSK-WEB-001 | lib.rs, tauri.conf.json |
-| SPEC-DSK-BLD-001..002 | tauri.conf.json, package.json |
+| 规格 ID | 文件/组件 |
+|---------|-----------|
+| SPEC-DSK-ARCH-001 | `src-tauri/src/lib.rs`、`App.java`、`AppSession.java` |
+| SPEC-DSK-TRAY-001 | `src-tauri/src/lib.rs#create_tray` |
+| SPEC-DSK-WIN-001 | `src-tauri/src/lib.rs#run`、单实例 mutex |
+| SPEC-DSK-BACKEND-001 | `src-tauri/src/lib.rs#start_java`、`App#publishPort`、`AppSession#registerDesktopLifecycle` |
+| SPEC-DSK-WEB-001 | `src-tauri/src/lib.rs#create_main_window`、`AwServer`、`LocalRequestGuard` |
+| SPEC-DSK-BLD-001..002 | `scripts/build-dist.ps1`、`scripts/build-portable.ps1`、`tauri.conf.json` |

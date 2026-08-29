@@ -69,9 +69,12 @@ App (入口) → AppSession (生命周期管理)
 | `llm.api-key` | `OPENAI_API_KEY` | `""` | String |
 | `llm.base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` | String (URL) |
 | `llm.model` | `LLM_MODEL` | `gpt-4o` | String |
-| `aw.base-url` | `AW_BASE_URL` | `http://localhost:5600/api/0` | String (URL) |
+| `aw.base-url` | `AW_BASE_URL` | `http://localhost:5600/api/0` | String (URL)；仅外部 AW 模式使用 |
 | `aw.timeout` | `AW_TIMEOUT` | `15000` | int (毫秒) |
+| `aw.port` | 无 | `5700` | int；仅由 `config.toml` 覆盖 |
 | `memory.dir` | `MEMORY_DIR` | `${user.home}/.self-analyst` | Path |
+
+`aw.port` 是端口配置的唯一用户入口。内嵌模式的 `aw.base-url` 必须由该端口派生；桌面壳不得使用环境变量或内置端口覆盖它。Java 后端完成配置加载和监听后，必须通过桌面启动握手把实际端口通知桌面壳。
 
 ### SPEC-CFG-003: `${user.home}` 占位符替换
 

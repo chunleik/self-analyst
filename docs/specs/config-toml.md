@@ -144,6 +144,22 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
   6. 硬编码默认值
 - **SPEC-TOML-MIG-002b**：`Config.load()` 与 `UserConfigStore` 对用户级文件的读取行为
   一致（同一优先级、同一拍平归一化规则），不得出现两处解析结果不一致。
+- **SPEC-TOML-MIG-002c**：`aw.port` 不接受环境变量覆盖。用户配置仅来自
+  `{memoryDir}/config.toml`（或首次启动时迁移到该文件的旧配置）；文件未配置时使用 classpath 默认值。
+  Tauri 不得自行解析另一份端口配置，也不得向 Java 注入端口覆盖值。
+
+### SPEC-TOML-PORT-001：桌面启动端口握手
+
+- **SPEC-TOML-PORT-001a**：Java 后端是 `aw.port` 的唯一解析者。完成 Javalin 启动并注册带认证的
+  desktop lifecycle 路由后，将有效端口原子写入 Tauri 为本次启动提供的临时握手文件。
+- **SPEC-TOML-PORT-001b**：Tauri 必须等待握手文件，使用其中端口执行健康检查、创建 WebView、生成
+  Web 版桌面链接及发送退出请求；不得回退到硬编码端口继续运行。
+- **SPEC-TOML-PORT-001c**：握手文件名每次启动唯一，内容只能是 `1..65535` 的十进制端口；消费后和
+  退出时均应清理。
+- **SPEC-TOML-PORT-001d**：内嵌 AW 模式下，Java 内部客户端使用的 `aw.base-url` 必须由有效
+  `aw.port` 派生；仅外部 AW 模式保留独立配置 `aw.base-url` 的语义。
+- **SPEC-TOML-PORT-001e**：握手文件发布与后端健康检查分别最多等待 30 秒；任一阶段失败时 Tauri
+  必须退出并依靠受管 Job Object 回收 Java 子进程，不得长期占用单实例锁。
 
 ---
 
@@ -234,6 +250,8 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 | SPEC-TOML-TST-016 | 编辑器内测试 LLM 连接，键写在 `[llm]` 表内（手动/UI） | 正确解析出 base-url/model/api-key 并发起测试 |
 | SPEC-TOML-TST-017 | `GET .../raw` 响应含 `supportedKeys`，逐项 `assignment` 可被 `parseAndFlatten` 还原为对应默认值 | `supportedKeys` 覆盖全部受支持键，顺序与 `SupportedKeys` 一致 |
 | SPEC-TOML-TST-018 | 点击配置入口（手动/UI） | 直接显示文件名、实际路径与纯文本编辑器，不出现旧参考/插入面板 |
+| SPEC-TOML-TST-019 | `config.toml` 设置 `aw.port` 后由桌面壳启动 | Java 监听该端口，Tauri 使用握手返回的同一端口完成健康检查和页面加载 |
+| SPEC-TOML-TST-020 | 桌面启动握手端口为 `0`、越界值或非数字 | Tauri 拒绝该握手并退出，不使用硬编码端口兜底 |
 
 ---
 

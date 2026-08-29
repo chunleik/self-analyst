@@ -6,7 +6,7 @@ use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -26,24 +26,30 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND},
 };
 
+const STARTUP_PHASE_TIMEOUT: Duration = Duration::from_secs(30);
+
 struct JavaBackend {
     child: Mutex<Option<Child>>,
     job: isize,
     token: String,
-    port: u16,
+    port: Mutex<Option<u16>>,
+    port_file: std::path::PathBuf,
 }
 
 impl JavaBackend {
     fn shutdown_gracefully(&self) {
-        let url = backend_url(self.port, "/desktop/lifecycle/shutdown");
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(2)))
-            .build()
-            .into();
-        let _ = agent
-            .post(&url)
-            .header("X-SelfAnalyst-Token", &self.token)
-            .send_empty();
+        let port = self.port.lock().ok().and_then(|guard| *guard);
+        if let Some(port) = port {
+            let url = backend_url(port, "/desktop/lifecycle/shutdown");
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(2)))
+                .build()
+                .into();
+            let _ = agent
+                .post(&url)
+                .header("X-SelfAnalyst-Token", &self.token)
+                .send_empty();
+        }
 
         if let Ok(mut guard) = self.child.lock() {
             if let Some(mut child) = guard.take() {
@@ -73,6 +79,7 @@ impl Drop for JavaBackend {
                 let _ = child.wait();
             }
         }
+        let _ = std::fs::remove_file(&self.port_file);
     }
 }
 
@@ -115,11 +122,11 @@ fn show_already_running_message() {
     show_message("SelfAnalyst", "SelfAnalyst 已在运行");
 }
 
-fn show_about_message() {
+fn show_about_message(port: u16) {
     let message = format!(
         "SelfAnalyst v{}\n桌面端: Tauri\n后端服务: {}",
         env!("CARGO_PKG_VERSION"),
-        backend_url(backend_port(), "")
+        backend_url(port, "")
     );
     show_message("关于 SelfAnalyst", &message);
 }
@@ -211,16 +218,16 @@ fn parse_java_version(path: &str) -> u32 {
     0
 }
 
-fn backend_port() -> u16 {
-    std::env::var("AW_PORT")
-        .ok()
-        .and_then(|v| v.parse::<u16>().ok())
-        .filter(|p| *p > 0)
-        .unwrap_or(5700)
-}
-
 fn backend_url(port: u16, path: &str) -> String {
     format!("http://localhost:{}{}", port, path)
+}
+
+fn parse_backend_port(raw: &str) -> io::Result<u16> {
+    raw.trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid backend port"))
 }
 
 fn lifecycle_token() -> io::Result<String> {
@@ -270,7 +277,7 @@ fn create_kill_on_close_job(child: &Child) -> io::Result<isize> {
     }
 }
 
-fn start_java(app: AppHandle, port: u16) -> String {
+fn start_java(app: AppHandle) {
     // jar is alongside the exe in dist/
     let exe_dir = std::env::current_exe()
         .unwrap_or_default()
@@ -289,6 +296,9 @@ fn start_java(app: AppHandle, port: u16) -> String {
     eprintln!("Using Java: {}", java.display());
 
     let token = lifecycle_token().expect("Failed to create desktop lifecycle token");
+    let port_file_nonce = lifecycle_token().expect("Failed to create desktop port-file nonce");
+    let port_file = std::env::temp_dir().join(format!("self-analyst-port-{port_file_nonce}.txt"));
+    let _ = std::fs::remove_file(&port_file);
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -302,8 +312,8 @@ fn start_java(app: AppHandle, port: u16) -> String {
         // Run with CWD = exe dir so the backend resolves its relative paths
         // (tools/PaddleOCR-json, tools/whisper, ./data, ./config) next to the exe.
         .current_dir(&exe_dir)
-        .env("AW_PORT", port.to_string())
         .env("SELF_ANALYST_DESKTOP_TOKEN", &token)
+        .env("SELF_ANALYST_DESKTOP_PORT_FILE", &port_file)
         .arg("-jar")
         .arg(jar.to_string_lossy().to_string())
         .stdin(Stdio::null())
@@ -321,20 +331,62 @@ fn start_java(app: AppHandle, port: u16) -> String {
         child: Mutex::new(Some(child)),
         job,
         token: token.clone(),
-        port,
+        port: Mutex::new(None),
+        port_file: port_file.clone(),
     });
 
-    // Poll until backend is ready
+    // Java owns config.toml parsing and publishes the effective port only after
+    // its authenticated desktop lifecycle routes are ready.
     let handle = app.clone();
     let health_token = token.clone();
-    let health_url = backend_url(port, "/desktop/lifecycle/health");
     thread::spawn(move || {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(2)))
-            .build()
-            .into();
-        for _ in 0..3600 {
-            thread::sleep(Duration::from_millis(500));
+        let port_deadline = Instant::now() + STARTUP_PHASE_TIMEOUT;
+        let port = loop {
+            if Instant::now() >= port_deadline {
+                eprintln!("Java backend did not publish its configured port");
+                handle.exit(1);
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+            match std::fs::read_to_string(&port_file) {
+                Ok(raw) => match parse_backend_port(&raw) {
+                    Ok(port) => break port,
+                    Err(error) => {
+                        eprintln!("Java backend published an invalid port: {error}");
+                        let _ = std::fs::remove_file(&port_file);
+                        handle.exit(1);
+                        return;
+                    }
+                },
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    if backend_exited(&handle) {
+                        handle.exit(1);
+                        return;
+                    }
+                }
+                Err(error) => {
+                    eprintln!("Failed to read Java backend port: {error}");
+                    handle.exit(1);
+                    return;
+                }
+            }
+        };
+        let _ = std::fs::remove_file(&port_file);
+        if let Some(state) = handle.try_state::<JavaBackend>() {
+            if let Ok(mut guard) = state.port.lock() {
+                *guard = Some(port);
+            }
+        }
+
+        let health_url = backend_url(port, "/desktop/lifecycle/health");
+        let health_deadline = Instant::now() + STARTUP_PHASE_TIMEOUT;
+        while Instant::now() < health_deadline {
+            let remaining = health_deadline.saturating_duration_since(Instant::now());
+            let request_timeout = std::cmp::min(remaining, Duration::from_secs(2));
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                .timeout_global(Some(request_timeout))
+                .build()
+                .into();
             if agent
                 .get(&health_url)
                 .header("X-SelfAnalyst-Token", &health_token)
@@ -345,6 +397,11 @@ fn start_java(app: AppHandle, port: u16) -> String {
                 let window_handle = handle.clone();
                 let window_token = health_token.clone();
                 if let Err(error) = handle.run_on_main_thread(move || {
+                    if let Err(error) = create_tray(&window_handle, &window_token, port) {
+                        eprintln!("Failed to create tray icon: {error}");
+                        window_handle.exit(1);
+                        return;
+                    }
                     if let Err(error) = create_main_window(&window_handle, port, &window_token) {
                         eprintln!("Failed to create desktop window: {error}");
                         window_handle.exit(1);
@@ -355,24 +412,32 @@ fn start_java(app: AppHandle, port: u16) -> String {
                 }
                 return;
             }
-            if let Some(state) = handle.try_state::<JavaBackend>() {
-                if let Ok(mut guard) = state.child.lock() {
-                    if let Some(child) = guard.as_mut() {
-                        if matches!(child.try_wait(), Ok(Some(_))) {
-                            eprintln!(
-                                "Java backend exited during startup; see self-analyst-backend.log"
-                            );
-                            handle.exit(1);
-                            return;
-                        }
-                    }
-                }
+            if backend_exited(&handle) {
+                handle.exit(1);
+                return;
+            }
+            let remaining = health_deadline.saturating_duration_since(Instant::now());
+            if !remaining.is_zero() {
+                thread::sleep(std::cmp::min(remaining, Duration::from_millis(500)));
             }
         }
         eprintln!("Java backend failed to start");
         handle.exit(1);
     });
-    token
+}
+
+fn backend_exited(app: &AppHandle) -> bool {
+    if let Some(state) = app.try_state::<JavaBackend>() {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(child) = guard.as_mut() {
+                if matches!(child.try_wait(), Ok(Some(_))) {
+                    eprintln!("Java backend exited during startup; see self-analyst-backend.log");
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn create_main_window(app: &AppHandle, port: u16, token: &str) -> tauri::Result<()> {
@@ -410,7 +475,7 @@ fn create_main_window(app: &AppHandle, port: u16, token: &str) -> tauri::Result<
     Ok(())
 }
 
-fn create_tray(app: &AppHandle, token: &str) -> tauri::Result<tauri::tray::TrayIcon> {
+fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::tray::TrayIcon> {
     let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
     let web_desktop_item = MenuItem::with_id(app, "web_desktop", "Web版桌面", true, None::<&str>)?;
     let about_item = MenuItem::with_id(app, "about", "关于", true, None::<&str>)?;
@@ -420,11 +485,7 @@ fn create_tray(app: &AppHandle, token: &str) -> tauri::Result<tauri::tray::TrayI
         &[&show_item, &web_desktop_item, &about_item, &quit_item],
     )?;
 
-    let desktop_session_url = format!(
-        "{}?token={}",
-        backend_url(backend_port(), "/desktop/session"),
-        token
-    );
+    let desktop_session_url = format!("{}?token={}", backend_url(port, "/desktop/session"), token);
     TrayIconBuilder::new()
         .icon(
             app.default_window_icon()
@@ -443,7 +504,7 @@ fn create_tray(app: &AppHandle, token: &str) -> tauri::Result<tauri::tray::TrayI
                 let _ = open::that(&desktop_session_url);
             }
             "about" => {
-                show_about_message();
+                show_about_message(port);
             }
             "quit" => {
                 app.exit(0);
@@ -480,9 +541,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let port = backend_port();
-            let token = start_java(app.handle().clone(), port);
-            let _tray = create_tray(app.handle(), &token)?;
+            start_java(app.handle().clone());
 
             Ok(())
         })
@@ -504,4 +563,21 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_backend_port;
+
+    #[test]
+    fn parses_published_backend_port() {
+        assert_eq!(parse_backend_port(" 45731\r\n").unwrap(), 45731);
+    }
+
+    #[test]
+    fn rejects_invalid_published_backend_port() {
+        assert!(parse_backend_port("0").is_err());
+        assert!(parse_backend_port("65536").is_err());
+        assert!(parse_backend_port("not-a-port").is_err());
+    }
 }

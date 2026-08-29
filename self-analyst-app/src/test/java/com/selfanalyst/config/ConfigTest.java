@@ -143,6 +143,54 @@ class ConfigTest {
     }
 
     @Test
+    void configuredAwPortComesFromToml(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), "[aw]\nport = 45731\n",
+                StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> {
+            Config config = Config.load();
+            assertEquals(45731, config.awPort());
+            assertEquals("http://localhost:45731/api/0", config.awBaseUrl());
+        });
+    }
+
+    @Test
+    void externalAwModeKeepsConfiguredBaseUrl(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [aw]
+                mode = "external"
+                port = 45731
+                base-url = "http://example.test:5600/api/0"
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () ->
+                assertEquals("http://example.test:5600/api/0", Config.load().awBaseUrl()));
+    }
+
+    @Test
+    void legacyHomePropertiesCannotOverrideAwPort(@TempDir Path dir) throws Exception {
+        Path homeDir = dir.resolve("home");
+        Path memoryDir = dir.resolve("memory");
+        Files.createDirectories(homeDir.resolve(".self-analyst"));
+        Files.createDirectories(memoryDir);
+        Files.writeString(homeDir.resolve(".self-analyst/config.properties"),
+                "aw.port=59999\n", StandardCharsets.UTF_8);
+        Files.writeString(memoryDir.resolve("config.toml"),
+                "[llm]\nmodel = \"from-toml\"\n", StandardCharsets.UTF_8);
+
+        String previousHome = System.getProperty("user.home");
+        String previousMemory = System.getProperty("memory.dir");
+        System.setProperty("user.home", homeDir.toString());
+        System.setProperty("memory.dir", memoryDir.toString());
+        try {
+            assertEquals(5700, Config.load().awPort());
+        } finally {
+            restoreSystemProperty("user.home", previousHome);
+            restoreSystemProperty("memory.dir", previousMemory);
+        }
+    }
+
+    @Test
     void tomlWinsWhenBothTomlAndPropertiesPresent(@TempDir Path dir) throws Exception {
         // SPEC-TOML-TST-009 load half: properties residue ignored while toml exists.
         Files.writeString(dir.resolve("config.toml"), "[llm]\nmodel = \"from-toml\"\n",
@@ -203,6 +251,14 @@ class ConfigTest {
             } else {
                 System.setProperty("memory.dir", previous);
             }
+        }
+    }
+
+    private static void restoreSystemProperty(String key, String previous) {
+        if (previous == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, previous);
         }
     }
 

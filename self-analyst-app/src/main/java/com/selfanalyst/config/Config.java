@@ -87,6 +87,7 @@ public record Config(
 
     public static Config load() {
         Properties props = loadClasspathProps();
+        String defaultAwPort = props.getProperty("aw.port", "5700");
 
         // Compute memory.dir early — needed to find user config saved by desktop UI
         String memDir = memoryDirOf(props);
@@ -101,6 +102,11 @@ public record Config(
                 props.putAll(userProps);
             } catch (IOException ignored) {}
         }
+
+        // The legacy home-level properties file remains a fallback for other keys,
+        // but the desktop/backend port has one user source: {memoryDir}/config.toml
+        // (or the not-yet-migrated properties file in that same directory).
+        props.setProperty("aw.port", defaultAwPort);
 
         // Overlay user-level config from {memoryDir}: config.toml preferred, else the
         // un-migrated config.properties (CLI-only path). SPEC-TOML-MIG-002a.
@@ -117,15 +123,19 @@ public record Config(
         if (llmTemperature < 0 || llmTemperature > 2) {
             llmTemperature = 0.7;
         }
-        String awUrl = envOrProp(props, "aw.base-url", "AW_BASE_URL",
+        String configuredAwUrl = envOrProp(props, "aw.base-url", "AW_BASE_URL",
                 "http://localhost:5600/api/0");
         int awTimeout = Integer.parseInt(
                 envOrProp(props, "aw.timeout", "AW_TIMEOUT", "15000"));
 
         boolean awEmbedded = "embedded".equalsIgnoreCase(
                 envOrProp(props, "aw.mode", "AW_MODE", "embedded"));
-        int awPort = Integer.parseInt(
-                envOrProp(props, "aw.port", "AW_PORT", "5600"));
+        // config.toml is the single user-controlled source for the embedded server port.
+        // The Tauri parent learns the effective value from the Java startup handshake.
+        int awPort = Integer.parseInt(props.getProperty("aw.port", "5700"));
+        String awUrl = awEmbedded
+                ? "http://localhost:" + awPort + "/api/0"
+                : configuredAwUrl;
         Path awDataDir = Path.of(envOrProp(props, "aw.data-dir", "AW_DATA_DIR",
                 memDir + "/aw-data"));
 

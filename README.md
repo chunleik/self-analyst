@@ -80,7 +80,7 @@ java -jar dist/self-analyst-app.jar
 
 ## 配置
 
-所有配置在 `application.properties` 或通过环境变量设置：
+用户覆盖配置统一写入 `{memory.dir}/config.toml`；下表列出的环境变量仅适用于保留环境变量入口的配置项：
 
 | 属性 | 环境变量 | 默认值 | 说明 |
 |------|---------|--------|------|
@@ -92,7 +92,7 @@ java -jar dist/self-analyst-app.jar
 | `agent.compaction.triggerTokens` | `AGENT_COMPACTION_TRIGGER_TOKENS` | `60000` | 达到估算 token 数触发压缩；`0` 关闭该触发器 |
 | `agent.compaction.keepMessages` / `keepTokens` | `AGENT_COMPACTION_KEEP_MESSAGES` / `AGENT_COMPACTION_KEEP_TOKENS` | `10` / `12000` | 压缩后保留的近期原文预算；单 message 阈值按消息保留，单 token 阈值保证 token 窗口小于触发值 |
 | `aw.mode` | `AW_MODE` | `embedded` | AW 模式：`embedded` 或 `external` |
-| `aw.port` | `AW_PORT` | `5700` | AW 服务端口 |
+| `aw.port` | — | `5700` | AW 服务端口；桌面壳与 Java 后端统一从 `config.toml` 获取，修改后需重启 |
 | `aw.data-dir` | `AW_DATA_DIR` | `./data/aw-data` | 活动数据存储目录（相对启动目录；可改为 `${user.home}/.self-analyst/aw-data`） |
 | `memory.dir` | `MEMORY_DIR` | `./data/memory` | 目标/模式/记忆存储目录（相对启动目录；可改为 `${user.home}/.self-analyst`） |
 | `aw.ocr.engine` | `AW_OCR_ENGINE` | `auto` | OCR 引擎：`auto`、`paddle`、`tesseract` |
@@ -100,6 +100,8 @@ java -jar dist/self-analyst-app.jar
 | `wiki.enabled` | `WIKI_ENABLED` | `false` | 对话式历史复盘；开启后生成多级时间摘要，相关文本会发送给 LLM |
 | `wiki.backfill.enabled` | `WIKI_BACKFILL_ENABLED` | `false` | 启动时补算最近 7 天；关闭后仍持续生成新结束的时间块 |
 | `wiki.semantic.enabled` | `WIKI_SEMANTIC_ENABLED` | `true` | 允许 Wiki 语义检索；还需同时开启 Embedding |
+
+内嵌 AW 模式下，内部 API 地址由 `aw.port` 自动派生；`aw.base-url` 仅在外部 AW 模式下生效。
 | `embedding.enabled` | `EMBEDDING_ENABLED` | `false` | 生成本地 Lucene 语义索引所需的远程 Embedding 请求 |
 | `file.watch.enabled` | `FILE_WATCH_ENABLED` | `false` | 目录文件监控 + LLM 摘要（内容会发送给 LLM，注意隐私） |
 | `file.watch.paths` | `FILE_WATCH_PATHS` | - | 监控目录，逗号分隔绝对路径 |

@@ -61,6 +61,35 @@ class ContentCaptureTest {
     }
 
     @Test
+    void exposesWeixinConversationTitleAsStructuredContext() {
+        String uiaText = """
+                微信
+                MMUIRenderSubWindowHW
+                微信
+                通讯录
+                收藏
+                发现
+                手机
+                手机
+                更多
+                更多
+                徐工3期小分队(3)
+                聊天记录
+                从手机导入聊天记录
+                语音通话
+                聊天信息
+                这里是用于确保窗口走 UIA-only 分支的正文内容，字符数需要超过 thin window 的判断阈值。
+                """;
+        ContentCapture capture = new ContentCapture(null, null);
+
+        ContentResult result = capture.capture(
+                1L, "Weixin.exe", "微信", null, uiaText);
+
+        assertEquals("徐工3期小分队(3)", result.contextTitle());
+        assertEquals("uia", result.source());
+    }
+
+    @Test
     void fullWindowModeKeepsSingleCharacterText() {
         System.setProperty("ocr.title-strip-height", "0");
         BufferedImage screenshot = solidImage(1200, 100, Color.WHITE);

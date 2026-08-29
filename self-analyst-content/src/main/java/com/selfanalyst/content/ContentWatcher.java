@@ -2,6 +2,7 @@ package com.selfanalyst.content;
 
 import com.selfanalyst.content.capture.ContentCapture;
 import com.selfanalyst.content.capture.ContentResult;
+import com.selfanalyst.content.capture.ContextTitleExtractor;
 import com.selfanalyst.content.platform.PlatformCapture;
 import com.selfanalyst.content.platform.WindowsCapture;
 import com.selfanalyst.content.uia.UiaTreeWalker;
@@ -177,9 +178,8 @@ public class ContentWatcher extends Thread {
 
                 // Refresh UIA when the foreground window or its title changes.
                 UiaTreeWalker.UiaWalkResult walkResult;
-                if (handle == cachedHandle
-                        && Objects.equals(title, cachedTitle)
-                        && cachedWalk != null) {
+                if (canReuseCachedUia(
+                        app, handle, title, cachedHandle, cachedTitle, cachedWalk)) {
                     walkResult = cachedWalk;
                 } else {
                     try {
@@ -237,6 +237,15 @@ public class ContentWatcher extends Thread {
                 && Objects.equals(title, current.title());
     }
 
+    static boolean canReuseCachedUia(String app, long handle, String title,
+                                     long cachedHandle, String cachedTitle,
+                                     UiaTreeWalker.UiaWalkResult cachedWalk) {
+        return !ContextTitleExtractor.supports(app)
+                && handle == cachedHandle
+                && Objects.equals(title, cachedTitle)
+                && cachedWalk != null;
+    }
+
     private static int parseStableCaptureIntervalMs() {
         try {
             int value = Integer.parseInt(System.getProperty(
@@ -268,16 +277,7 @@ public class ContentWatcher extends Thread {
         try {
             String url = serverUrl + "/api/0/buckets/" + bucketId + "/heartbeat";
 
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("app", app != null ? app : "");
-            data.put("title", title != null ? title : "");
-            data.put("text_content", result.textContent() != null ? result.textContent() : "");
-            data.put("source", result.source() != null ? result.source() : "uia");
-            data.put("uia_chars", result.uiaChars());
-            data.put("ocr_chars", result.ocrChars());
-            if (result.sampleId() != null) {
-                data.put("sample_id", result.sampleId());
-            }
+            Map<String, Object> data = heartbeatData(app, title, result);
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("timestamp", Instant.now().toString());
@@ -297,6 +297,23 @@ public class ContentWatcher extends Thread {
         } catch (Exception e) {
             // Silent
         }
+    }
+
+    static Map<String, Object> heartbeatData(String app, String title, ContentResult result) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("app", app != null ? app : "");
+        data.put("title", title != null ? title : "");
+        if (result.contextTitle() != null && !result.contextTitle().isBlank()) {
+            data.put("context_title", result.contextTitle());
+        }
+        data.put("text_content", result.textContent() != null ? result.textContent() : "");
+        data.put("source", result.source() != null ? result.source() : "uia");
+        data.put("uia_chars", result.uiaChars());
+        data.put("ocr_chars", result.ocrChars());
+        if (result.sampleId() != null) {
+            data.put("sample_id", result.sampleId());
+        }
+        return data;
     }
 
     private void ensureBucket() {

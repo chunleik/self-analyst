@@ -58,6 +58,7 @@ self-analyst-content/
     │   │   └── ThinDetector.java            # 内容密度启发式
     │   ├── capture/
     │   │   ├── ContentCapture.java           # 协调器
+    │   │   ├── ContextTitleExtractor.java    # 应用级语义上下文标题提取
     │   │   ├── ScreenCapturer.java           # 截屏工具 (AWT Robot)
     │   │   └── HybridMerger.java            # UIA + OCR 结果合并
     │   └── platform/
@@ -81,6 +82,7 @@ public record ContentEvent(
     double duration,              // 距上次变化的秒数
     String app,                   // 进程名 (如 WeChat.exe)
     String title,                 // 窗口标题
+    String contextTitle,          // 应用内当前上下文标题（可空）
     String textContent,           // 提取的全部文本
     String source,                // "uia" | "ocr" | "hybrid"
     int uiaChars,                 // UIA 提取的字符数
@@ -94,6 +96,9 @@ public record ContentEvent(
   增加列并回填既有事件；旧布局迁移也必须生成相同值。`datastr` 仍是 API 数据的
   规范来源，`app` 列仅用于直接检索和索引。只有 JSON string 类型的
   `datastr.app` 才写入派生列；缺失、`null`、其他 JSON 类型或无效 JSON 均写为空字符串。
+- **SPEC-MDL-100b**: `title` 必须继续表示 Win32 顶层窗口标题；当能够保守地识别
+  应用内部的当前上下文时，heartbeat `data` 额外写入 `context_title`。无法可靠识别时
+  必须省略该字段，不得用猜测值覆盖 `title`。
 
 ### SPEC-MDL-101: UIA Node
 
@@ -168,6 +173,15 @@ public record UiaNode(
 | 其他 | 只递归子节点 |
 
 - **SPEC-UIA-006a**: 空字符串和 null 的 name/value 不加入输出
+
+### SPEC-UIA-007: 微信当前会话标题语义提取
+
+- 仅对进程名精确匹配 `Weixin.exe` 或 `WeChat.exe`（大小写不敏感）的 UIA 文本启用。
+- 微信主界面 UIA 顺序中，当前会话标题位于“聊天记录/聊天記錄”控件之前；提取时还必须
+  在该锚点之后三个非空节点内发现“从手机导入聊天记录”“语音通话”“视频通话”或
+  “聊天信息”等已知标题栏控件，避免把聊天正文中的同名文本误判为标题。
+- 候选为空、为通用微信控件名或超过 200 个 Unicode code point 时不得输出。
+- 成功时保留原 `title`，并将候选写入 `context_title`；失败时省略 `context_title`。
 
 ---
 
@@ -332,6 +346,9 @@ public class HybridMerger {
 - 句柄、应用名和标题必须从同一个前台 HWND 快照解析，禁止分次读取不同前台窗口
 - 窗口句柄、应用名或标题发生变化时，必须立即执行一次 `capture()`
 - 稳定窗口按 `ocr.stable-capture-interval-ms` 重新截图，默认 1500ms
+- `Weixin.exe`/`WeChat.exe` 在 HWND 与 Win32 标题不变时仍可能切换会话，因此每次稳定窗口
+  捕获都必须重新遍历 UIA，不得复用上一会话的 UIA 文本；刷新失败时省略
+  `context_title`，不得回退到旧会话标题
 - 稳定窗口间隔以捕获尝试开始时间和单调时钟计算；失败不得退化为 500ms 重试风暴
 - 稳定窗口在截图间隔内只复用最近快照，不执行截图或 OCR
 - 捕获完成及 heartbeat 发送前必须复核前台身份；窗口已切换时丢弃旧结果
@@ -347,8 +364,9 @@ public class HybridMerger {
 4. isExcluded(app, title)?
    → true: latest = null，跳过本轮（无心跳）
 5. UiaTreeWalker.walk(hwnd) → UIA 文本 + 节点树
-6. ThinDetector.isThin(tree, app, title) → 判断
-7. IF thin:
+6. ContextTitleExtractor.extract(app, uiaText) → contextTitle（可空）
+7. ThinDetector.isThin(tree, app, title) → 判断
+8. IF thin:
    a. ThinDetector.extractDocumentTitle(tree) → docTitle?
       → 非 null: textContent = docTitle, source = "uia"（无截图）
    b. ELSE: ScreenCapturer.captureWindow(hwnd) → 截图顶部 N px (SPEC-OCR-005)
@@ -357,7 +375,8 @@ public class HybridMerger {
             source = "ocr" | "hybrid"
    ELSE:
    textContent = uiaText, source = "uia"
-8. ContentEvent 构造 → POST /api/0/buckets/aw-watcher-content-{host}/heartbeat
+9. ContentEvent 构造；contextTitle 非空时写入 context_title
+   → POST /api/0/buckets/aw-watcher-content-{host}/heartbeat
 ```
 
 内容桶事件密度较高，普通 `GET /api/0/buckets/` 默认不返回
@@ -393,6 +412,16 @@ public class HybridMerger {
 | UIA 有内容 + OCR 为空 | UIA 文本 |
 | UIA 为空 + OCR 有内容 | OCR 文本 |
 | 两者为空 | `""` |
+
+### SPEC-TST-102: 微信当前会话标题测试
+
+| 测试用例 | 预期 |
+|---------|------|
+| `Weixin.exe` 且完整标题栏锚点 | 提取锚点前的当前会话标题 |
+| `WeChat.exe` 且完整标题栏锚点 | 同上，兼容旧进程名 |
+| 非微信应用包含相同文本 | 不提取 |
+| 缺少标题栏锚点或伴随控件 | 不提取 |
+| 候选为微信通用控件名 | 不提取 |
 
 ---
 
@@ -483,7 +512,7 @@ trimBlackBorders(image)
 |---------|---------|---------|
 | SPEC-CTX-001..003 | ContentWatcher.java | — |
 | SPEC-MDL-100..101 | ContentEvent.java, UiaNode.java | — |
-| SPEC-UIA-001..006 | UiaCom.java, UiaTreeWalker.java | UiaTreeWalkerTest |
+| SPEC-UIA-001..007 | UiaCom.java, UiaTreeWalker.java, ContextTitleExtractor.java | UiaTreeWalkerTest, ContextTitleExtractorTest |
 | SPEC-OCR-001..007 | OcrEngine.java, TesseractOcrEngine.java, ContentCapture.java, OcrSampleStore.java | ContentCaptureTest, OcrSampleStoreTest |
 | SPEC-CAP-001 | ScreenCapturer.java | — |
 | SPEC-THN-001..007 | ThinDetector.java | ThinDetectorTest |

@@ -112,6 +112,7 @@ public class ContentCapture implements AutoCloseable {
                                  UiaNode uiaTree, String uiaText) {
         if (uiaText == null) uiaText = "";
         int uiaChars = uiaText.length();
+        String contextTitle = ContextTitleExtractor.extract(app, uiaText);
 
         // Build tree list from single root (or empty)
         List<UiaNode> tree = (uiaTree != null) ? List.of(uiaTree) : List.of();
@@ -123,7 +124,8 @@ public class ContentCapture implements AutoCloseable {
             String docTitle = ThinDetector.extractDocumentTitle(tree);
             if (docTitle != null) {
                 log.debug("Thin window resolved via UIA Document title [{}]", app);
-                return ContentResult.noSample(docTitle, "uia", docTitle.length(), 0);
+                return ContentResult.noSample(
+                        docTitle, "uia", docTitle.length(), 0, contextTitle);
             }
 
             // Step 2: OCR title strip (SPEC-OCR-005)
@@ -170,14 +172,16 @@ public class ContentCapture implements AutoCloseable {
                 int ocrChars = ocrText.length();
                 String merged = merger.merge(uiaText, ocrText);
                 String source = resolveSource(uiaText, ocrText);
-                return new ContentResult(merged, source, uiaChars, ocrChars, sampleId);
+                return new ContentResult(
+                        merged, source, uiaChars, ocrChars, contextTitle, sampleId);
             } catch (Exception e) {
                 // SPEC-WCH-003: OCR failure → fall back to UIA
-                return ContentResult.noSample(uiaText, uiaText.isEmpty() ? "" : "uia", uiaChars, 0);
+                return ContentResult.noSample(
+                        uiaText, uiaText.isEmpty() ? "" : "uia", uiaChars, 0, contextTitle);
             }
         } else {
             // Not thin → UIA text only
-            return ContentResult.noSample(uiaText, "uia", uiaChars, 0);
+            return ContentResult.noSample(uiaText, "uia", uiaChars, 0, contextTitle);
         }
     }
 

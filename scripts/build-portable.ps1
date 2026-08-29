@@ -33,6 +33,7 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
 
 $Dist = Join-Path $Root "dist-portable"
+$Artifacts = Join-Path $Root "artifacts"
 
 # ── Resolve a JDK 21 with jlink ────────────────────────────────────────────────
 function Resolve-Jdk {
@@ -160,7 +161,8 @@ function Show-Sizes {
 
 function New-Zip([string]$name) {
     if ($NoZip) { return }
-    $zip = Join-Path $Root $name
+    New-Item -ItemType Directory -Force -Path $Artifacts | Out-Null
+    $zip = Join-Path $Artifacts $name
     Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
     Write-Host "Zipping -> $zip ..." -ForegroundColor Cyan
     Compress-Archive -Path (Join-Path $Dist "*") -DestinationPath $zip -CompressionLevel Optimal

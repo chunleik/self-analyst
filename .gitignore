@@ -15,6 +15,8 @@ tools/
 !self-analyst-app/src/test/java/com/selfanalyst/tools/
 !self-analyst-app/src/test/java/com/selfanalyst/tools/**
 dist/
+/dist-portable/
+/artifacts/
 .superpowers/
 .worktrees/
 .workbuddy/

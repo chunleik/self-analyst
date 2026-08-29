@@ -289,6 +289,43 @@ powershell -File scripts/check-desktop-tray.ps1
 
 前置：Rust stable、Windows SDK 10.0.22621、MSVC。
 
+### Windows 免安装版
+
+免安装版会将桌面程序、Java 后端、精简 Java 21 运行时和本地工具一起打包，
+目标机器无需另外安装 Java。首次构建前，先下载 PaddleOCR 和 whisper.cpp：
+
+```powershell
+powershell -File scripts/download-tools.ps1
+
+# 同时生成精简版和完整版（默认）
+.\scripts\build-portable.ps1
+```
+
+也可以只生成指定版本：
+
+```powershell
+# 精简版：不包含 Whisper 语音模型，体积较小
+.\scripts\build-portable.ps1 -Variant minimal
+
+# 完整版：包含 Whisper，支持本地语音转写
+.\scripts\build-portable.ps1 -Variant full
+
+# 复用已有的 JAR 和 EXE，仅重新组装免安装包
+.\scripts\build-portable.ps1 -SkipBuild -Variant minimal
+```
+
+构建产物统一输出到 `artifacts/`，未压缩的组装内容位于 `dist-portable/`：
+
+- `artifacts/SelfAnalyst-portable-minimal.zip`：精简版，不含 Whisper 语音模型
+- `artifacts/SelfAnalyst-portable.zip`：完整版，包含 Whisper 语音模型
+- `dist-portable/`：当前打包内容的未压缩目录
+
+使用时解压整个 ZIP，然后运行 `SelfAnalyst.exe`。不要只复制 EXE；同目录下的
+`self-analyst-app.jar`、`runtime/` 和 `tools/` 都是运行所需内容。应用数据保存在
+解压目录下的 `data/` 中，因此移动或覆盖目录前请先备份该目录。
+
+> 免安装包不内置 WebView2 Runtime，目标 Windows 系统需要已经安装 WebView2。
+
 ## 平台支持
 
 项目在 **Windows** 上开箱即用（构建脚本、内置工具、内容识别全部就绪）。

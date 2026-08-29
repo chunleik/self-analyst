@@ -39,11 +39,11 @@ class DesktopAudioEventsControllerTest {
                     Map.of("text", "第二句", "engine", "WhisperEngine", "source", "system")));
             events.insertEvent("aw-watcher-audio_test", new Event(
                     Instant.parse("2026-07-05T13:00:15Z"), 5.0,
-                    Map.of("text", "read_audio_data: reading audio data from 'C:\\Users\\10478\\AppData\\Local\\Temp\\whisper_1.wav' ...read_audio_data: trying to decode with miniaudioAny.",
+                    Map.of("text", "read_audio_data: reading audio data from 'C:\\Users\\testuser\\AppData\\Local\\Temp\\whisper_1.wav' ...read_audio_data: trying to decode with miniaudioAny.",
                             "engine", "WhisperEngine")));
             events.insertEvent("aw-watcher-audio_test", new Event(
                     Instant.parse("2026-07-05T13:00:20Z"), 5.0,
-                    Map.of("text", "read_audio_data: reading audio data from 'C:\\Users\\10478\\AppData\\Local\\Temp\\whisper_2.wav' ...read_audio_data: trying to decode with miniaudio",
+                    Map.of("text", "read_audio_data: reading audio data from 'C:\\Users\\testuser\\AppData\\Local\\Temp\\whisper_2.wav' ...read_audio_data: trying to decode with miniaudio",
                             "engine", "WhisperEngine")));
             events.insertEvent("aw-watcher-window_test", new Event(
                     Instant.parse("2026-07-05T13:00:20Z"), 1.0,

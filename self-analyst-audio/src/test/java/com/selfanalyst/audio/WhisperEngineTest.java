@@ -29,8 +29,8 @@ class WhisperEngineTest {
     @Test
     void diagnosticOutputDoesNotBecomeTranscriptText() {
         String output = """
-                read_audio_data: reading audio data from 'C:\\Users\\10478\\AppData\\Local\\Temp\\whisper_1.wav' ...read_audio_data: trying to decode with miniaudioAny.
-                read_audio_data: reading audio data from 'C:\\Users\\10478\\AppData\\Local\\Temp\\whisper_2.wav' ...read_audio_data: trying to decode with miniaudio
+                read_audio_data: reading audio data from 'C:\\Users\\testuser\\AppData\\Local\\Temp\\whisper_1.wav' ...read_audio_data: trying to decode with miniaudioAny.
+                read_audio_data: reading audio data from 'C:\\Users\\testuser\\AppData\\Local\\Temp\\whisper_2.wav' ...read_audio_data: trying to decode with miniaudio
                 """;
 
         assertEquals("Any.", WhisperEngine.extractTranscript(output));

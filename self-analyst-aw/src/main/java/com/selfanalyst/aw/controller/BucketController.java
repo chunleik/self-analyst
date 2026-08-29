@@ -29,10 +29,12 @@ public class BucketController {
     public void list(Context ctx) {
         try {
             List<BucketMetadata> buckets = bucketStore.listAllWithCounts(eventStore);
+            boolean includeHidden = Boolean.parseBoolean(ctx.queryParam("include_hidden"));
             // Return dict keyed by bucket ID — matches Python AW API format expected by aw-webui
             Map<String, Object> result = new LinkedHashMap<>();
             for (BucketMetadata b : buckets) {
-                if (HIDDEN_PREFIXES.stream().noneMatch(p -> b.id().startsWith(p))) {
+                if (includeHidden
+                        || HIDDEN_PREFIXES.stream().noneMatch(p -> b.id().startsWith(p))) {
                     result.put(b.id(), b.toMap());
                 }
             }

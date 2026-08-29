@@ -88,6 +88,13 @@ public record ContentEvent(
 ) {}
 ```
 
+- **SPEC-MDL-100a**: 统一 ActivityWatch 数据库的 `events` 表必须包含
+  `app TEXT NOT NULL DEFAULT ''` 派生列，并建立 `idx_events_app_timestamp`
+  索引。新事件写入时从 `datastr.app` 同步填充；升级旧统一库时必须在同一事务中
+  增加列并回填既有事件；旧布局迁移也必须生成相同值。`datastr` 仍是 API 数据的
+  规范来源，`app` 列仅用于直接检索和索引。只有 JSON string 类型的
+  `datastr.app` 才写入派生列；缺失、`null`、其他 JSON 类型或无效 JSON 均写为空字符串。
+
 ### SPEC-MDL-101: UIA Node
 
 ```java
@@ -352,6 +359,10 @@ public class HybridMerger {
    textContent = uiaText, source = "uia"
 8. ContentEvent 构造 → POST /api/0/buckets/aw-watcher-content-{host}/heartbeat
 ```
+
+内容桶事件密度较高，普通 `GET /api/0/buckets/` 默认不返回
+`aw-watcher-content_*`，避免 AW Web UI 时间线加载该桶。需要完整发现桶的内部工具必须使用
+`GET /api/0/buckets/?include_hidden=true`；按 bucket ID 查询元信息和事件不受此过滤影响。
 
 ### SPEC-WCH-003: 错误处理
 

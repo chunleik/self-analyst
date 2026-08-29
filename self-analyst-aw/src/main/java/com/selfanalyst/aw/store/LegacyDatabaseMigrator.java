@@ -115,8 +115,7 @@ final class LegacyDatabaseMigrator {
                 throw new SQLException("Migration source files changed while data was being copied");
             }
             try (Statement statement = target.createStatement()) {
-                statement.execute("CREATE INDEX IF NOT EXISTS idx_events_bucket_timestamp "
-                        + "ON events(bucket_id, timestamp)");
+                Database.createEventIndexes(statement);
                 try (ResultSet result = statement.executeQuery("PRAGMA integrity_check")) {
                     if (!result.next() || !"ok".equalsIgnoreCase(result.getString(1))) {
                         throw new SQLException("Migrated database failed SQLite integrity_check");
@@ -134,22 +133,14 @@ final class LegacyDatabaseMigrator {
     }
 
     private static void createTargetSchema(Connection connection) throws SQLException {
+        Database.prepareConnection(connection, false);
         try (Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA journal_mode=WAL");
-            statement.execute("PRAGMA busy_timeout=5000");
-            statement.execute("CREATE TABLE IF NOT EXISTS buckets (id TEXT PRIMARY KEY, name TEXT NOT NULL, "
-                    + "type TEXT NOT NULL, client TEXT NOT NULL, hostname TEXT NOT NULL, created TEXT NOT NULL, "
-                    + "last_updated TEXT NOT NULL)");
-            statement.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
-                    + "bucket_id TEXT NOT NULL, timestamp TEXT NOT NULL, duration REAL NOT NULL DEFAULT 0, "
-                    + "datastr TEXT NOT NULL DEFAULT '{}')");
             statement.execute("CREATE TABLE IF NOT EXISTS migration_state (id INTEGER PRIMARY KEY CHECK(id = 1), "
                     + "manifest TEXT NOT NULL)");
             statement.execute("CREATE TABLE IF NOT EXISTS migration_progress (source_kind TEXT NOT NULL, "
                     + "bucket_id TEXT NOT NULL, last_source_id INTEGER NOT NULL DEFAULT 0, copied_count INTEGER NOT NULL DEFAULT 0, "
                     + "expected_count INTEGER NOT NULL, PRIMARY KEY(source_kind, bucket_id))");
             statement.execute("CREATE TABLE IF NOT EXISTS migration_expected_buckets (bucket_id TEXT PRIMARY KEY)");
-            statement.execute("CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, completed_at TEXT NOT NULL)");
         }
     }
 
@@ -201,15 +192,18 @@ final class LegacyDatabaseMigrator {
         }
 
         String querySql = unifiedSource
-                ? "SELECT id, timestamp, duration, datastr FROM events WHERE bucket_id = ? AND id > ? ORDER BY id LIMIT ?"
-                : "SELECT id, timestamp, duration, datastr FROM events WHERE id > ? ORDER BY id LIMIT ?";
+                ? "SELECT id, timestamp, duration, datastr, " + Database.APP_FROM_DATASTR_SQL
+                        + " FROM events WHERE bucket_id = ? AND id > ? ORDER BY id LIMIT ?"
+                : "SELECT id, timestamp, duration, datastr, " + Database.APP_FROM_DATASTR_SQL
+                        + " FROM events WHERE id > ? ORDER BY id LIMIT ?";
         while (copied < expected) {
             long batchLastId = lastId;
             int batchCount = 0;
             target.setAutoCommit(false);
             try (PreparedStatement query = source.prepareStatement(querySql);
                  PreparedStatement insert = target.prepareStatement(
-                         "INSERT INTO events(bucket_id, timestamp, duration, datastr) VALUES (?, ?, ?, ?)");
+                         "INSERT INTO events(bucket_id, timestamp, duration, datastr, app) "
+                                 + "VALUES (?, ?, ?, ?, ?)");
                  PreparedStatement update = target.prepareStatement(
                          "UPDATE migration_progress SET last_source_id = ?, copied_count = ? "
                                  + "WHERE source_kind = ? AND bucket_id = ?")) {
@@ -226,6 +220,7 @@ final class LegacyDatabaseMigrator {
                         insert.setString(2, rows.getString(2));
                         insert.setDouble(3, rows.getDouble(3));
                         insert.setString(4, rows.getString(4));
+                        insert.setString(5, rows.getString(5));
                         insert.addBatch();
                         batchCount++;
                     }
@@ -329,6 +324,7 @@ final class LegacyDatabaseMigrator {
 
     private static void validateCompletedWorkfile(Path working, String expectedManifest) throws SQLException {
         try (Connection target = open(working)) {
+            createTargetSchema(target);
             String storedManifest;
             try (Statement statement = target.createStatement();
                  ResultSet result = statement.executeQuery("SELECT manifest FROM migration_state WHERE id = 1")) {
@@ -339,6 +335,9 @@ final class LegacyDatabaseMigrator {
             }
             validateProgress(target);
             validateTargetCounts(target);
+            if (!Database.derivedAppsAreValid(target)) {
+                throw new SQLException("Completed migration workfile has inconsistent derived app values");
+            }
             try (Statement statement = target.createStatement();
                  ResultSet result = statement.executeQuery("PRAGMA integrity_check")) {
                 if (!result.next() || !"ok".equalsIgnoreCase(result.getString(1))) {

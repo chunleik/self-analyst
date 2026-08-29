@@ -22,15 +22,18 @@ public class EventStore {
 
     public Event insertEvent(String bucketId, Event event) {
         String sql = """
-            INSERT INTO events (bucket_id, timestamp, duration, datastr)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO events (bucket_id, timestamp, duration, datastr, app)
+            VALUES (?, ?, ?, ?, ?)
             """;
         try (PreparedStatement ps = db.bucketConnection(bucketId)
                 .prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, bucketId);
             ps.setString(2, event.timestamp().toString());
             ps.setDouble(3, event.duration());
-            ps.setString(4, MAPPER.writeValueAsString(event.data()));
+            String dataJson = MAPPER.writeValueAsString(event.data());
+            ps.setString(4, dataJson);
+            var appNode = MAPPER.readTree(dataJson).get("app");
+            ps.setString(5, appNode != null && appNode.isTextual() ? appNode.textValue() : "");
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 long id = keys.next() ? keys.getLong(1) : -1;

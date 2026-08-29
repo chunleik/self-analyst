@@ -29,7 +29,7 @@ public class ActivityWatchTools {
 
     @Tool(description = "列出所有 ActivityWatch 数据桶及其元信息，包括 bucket ID、类型、事件数量等")
     public String listBuckets() {
-        return get("buckets/");
+        return get("buckets/?include_hidden=true");
     }
 
     @Tool(description = "从指定的 bucket 获取原始事件数据。limit 控制返回条数，" +

@@ -13,6 +13,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ActivityWatchToolsTest {
 
     @Test
+    void listsHiddenBucketsForAgentDiscovery() throws Exception {
+        var paths = new CopyOnWriteArrayList<String>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/0/", exchange -> {
+            paths.add(exchange.getRequestURI().toString());
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        try {
+            ActivityWatchTools tools = new ActivityWatchTools(
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/api/0", 5000);
+
+            tools.listBuckets();
+
+            assertEquals("/api/0/buckets/?include_hidden=true", paths.getFirst());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void boundsEventLimitAndLargeToolResults() throws Exception {
         var paths = new CopyOnWriteArrayList<String>();
         String large = "A".repeat(50_000) + "B".repeat(50_000);

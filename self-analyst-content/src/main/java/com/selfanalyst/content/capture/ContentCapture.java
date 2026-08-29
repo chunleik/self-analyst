@@ -9,8 +9,14 @@ import org.slf4j.LoggerFactory;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 
 /**
  * Orchestrator that ties UIA tree analysis, thin detection,
@@ -18,7 +24,7 @@ import java.util.UUID;
  * <p>
  * SPEC-WCH-002: capture() flow.
  */
-public class ContentCapture {
+public class ContentCapture implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ContentCapture.class);
 
@@ -28,6 +34,15 @@ public class ContentCapture {
     private final ScreenCapturer screen;
     private final OcrEngine ocr;
     private final OcrSampleStore sampleStore;
+    private final LongSupplier nanoTime;
+    private final long forceRefreshNanos;
+    private OcrCacheEntry ocrCache;
+
+    private static final long DEFAULT_FORCE_REFRESH_MS = 60_000L;
+    private static final long EMPTY_OCR_RETRY_MS = 5_000L;
+
+    private record OcrCacheEntry(long handle, String app, String title,
+                                 String fingerprint, String text, long recognizedAtNanos) {}
 
     /**
      * Create a ContentCapture with explicit dependencies.
@@ -37,9 +52,16 @@ public class ContentCapture {
      * @param sampleStore OCR sample store (may be null; samples skipped if null).
      */
     public ContentCapture(ScreenCapturer screen, OcrEngine ocr, OcrSampleStore sampleStore) {
+        this(screen, ocr, sampleStore, System::nanoTime);
+    }
+
+    ContentCapture(ScreenCapturer screen, OcrEngine ocr, OcrSampleStore sampleStore,
+                   LongSupplier nanoTime) {
         this.screen = screen;
         this.ocr = ocr;
         this.sampleStore = sampleStore;
+        this.nanoTime = Objects.requireNonNull(nanoTime);
+        this.forceRefreshNanos = parseForceRefreshMs() * 1_000_000L;
     }
 
     /** Backwards-compatible constructor — no sample store. */
@@ -61,6 +83,8 @@ public class ContentCapture {
         }
         this.ocr = engine;
         this.sampleStore = OcrSampleStore.createDefault();
+        this.nanoTime = System::nanoTime;
+        this.forceRefreshNanos = parseForceRefreshMs() * 1_000_000L;
     }
 
     /**
@@ -112,15 +136,34 @@ public class ContentCapture {
                     HWND hwnd = new HWND(new com.sun.jna.Pointer(handle));
                     BufferedImage image = screen.captureWindow(hwnd);
                     if (image != null && !isBlank(image)) {
-                        BufferedImage cropped = cropForOcr(app, image);
-                        long t0 = System.currentTimeMillis();
-                        ocrText = ocr.recognize(cropped);
-                        long ocrMs = System.currentTimeMillis() - t0;
-                        if (ocrText == null) ocrText = "";
-                        log.debug("OCR title strip: {}ms, {} chars [{}]", ocrMs, ocrText.length(), app);
-                        if (sampleStore != null) {
+                        List<BufferedImage> ocrInputs = cropForOcr(app, image);
+                        String fingerprint = fingerprintOcrInputs(ocrInputs);
+                        long nowNanos = nanoTime.getAsLong();
+                        String cachedText = reusableOcrText(
+                                handle, app, title, fingerprint, nowNanos);
+                        long ocrMs = 0L;
+                        boolean recognizedNow = cachedText == null;
+                        if (recognizedNow) {
+                            long t0 = System.currentTimeMillis();
+                            ocrText = recognizeOcrInputs(ocrInputs, titleStripHeight > 0);
+                            ocrMs = System.currentTimeMillis() - t0;
+                            if (ocrText == null) ocrText = "";
+                            ocrCache = new OcrCacheEntry(
+                                    handle, app, title, fingerprint, ocrText,
+                                    nanoTime.getAsLong());
+                            log.debug("OCR title strip: {}ms, {} chars, {} tile(s) [{}]",
+                                    ocrMs, ocrText.length(), ocrInputs.size(), app);
+                        } else {
+                            ocrText = cachedText;
+                            log.debug("OCR title strip cache hit: {} chars [{}]",
+                                    ocrText.length(), app);
+                        }
+                        if (recognizedNow && sampleStore != null) {
                             sampleId = UUID.randomUUID().toString();
-                            sampleStore.submit(image, app, title, ocrText, uiaChars, sampleId, ocrMs);
+                            if (!sampleStore.submit(
+                                    image, app, title, ocrText, uiaChars, sampleId, ocrMs)) {
+                                sampleId = null;
+                            }
                         }
                     }
                 }
@@ -208,19 +251,23 @@ public class ContentCapture {
      */
     /** PaddleOCR's internal limit_side_len — pre-scale to match so PNG I/O is smaller. */
     private static final int PADDLE_LIMIT_SIDE = 960;
+    /** Context shared by adjacent wide-title-strip tiles to avoid cutting text at a boundary. */
+    private static final int OCR_TILE_OVERLAP = 64;
 
-    private BufferedImage cropForOcr(String app, BufferedImage image) {
+    private List<BufferedImage> cropForOcr(String app, BufferedImage image) {
         image = trimBlackBorders(image);
         int w = image.getWidth(), h = image.getHeight();
 
         // Title-strip mode: only keep the topmost N pixels (app header / tab bar)
-        // to capture context (what window/document is open) without body content.
+        // to capture context (what window/document is open) without body content. Wide,
+        // shallow strips are tiled before OCR so the 960px detector limit does not shrink
+        // an 80px-high strip into unreadably small text.
         if (titleStripHeight > 0) {
             int stripH = Math.min(titleStripHeight, h);
-            return scaleToOcrLimit(image.getSubimage(0, 0, w, stripH));
+            return tileWideTitleStrip(image.getSubimage(0, 0, w, stripH));
         }
 
-        if (app == null) return scaleToOcrLimit(image);
+        if (app == null) return List.of(scaleToOcrLimit(image));
         String lower = app.toLowerCase();
         int top = 0, bottom = 0;
         if (lower.contains("chrome") || lower.contains("msedge") || lower.contains("firefox")) {
@@ -230,8 +277,105 @@ public class ContentCapture {
             top = 38;    // terminal tab strip
             bottom = 80; // IME candidate bar + taskbar bleed
         }
-        if (top + bottom >= h) return scaleToOcrLimit(image);
-        return scaleToOcrLimit(image.getSubimage(0, top, w, h - top - bottom));
+        if (top + bottom >= h) return List.of(scaleToOcrLimit(image));
+        return List.of(scaleToOcrLimit(image.getSubimage(0, top, w, h - top - bottom)));
+    }
+
+    private static List<BufferedImage> tileWideTitleStrip(BufferedImage strip) {
+        if (strip.getWidth() <= PADDLE_LIMIT_SIDE) return List.of(strip);
+
+        List<BufferedImage> tiles = new ArrayList<>();
+        int step = PADDLE_LIMIT_SIDE - OCR_TILE_OVERLAP;
+        for (int x = 0; x < strip.getWidth(); x += step) {
+            int tileWidth = Math.min(PADDLE_LIMIT_SIDE, strip.getWidth() - x);
+            tiles.add(strip.getSubimage(x, 0, tileWidth, strip.getHeight()));
+            if (x + tileWidth >= strip.getWidth()) break;
+        }
+        return tiles;
+    }
+
+    private String reusableOcrText(long handle, String app, String title,
+                                   String fingerprint, long nowNanos) {
+        OcrCacheEntry cached = ocrCache;
+        if (cached == null
+                || cached.handle() != handle
+                || !Objects.equals(cached.app(), app)
+                || !Objects.equals(cached.title(), title)
+                || !cached.fingerprint().equals(fingerprint)) {
+            return null;
+        }
+
+        long ageNanos = nowNanos - cached.recognizedAtNanos();
+        long reuseNanos = cached.text().isBlank()
+                ? EMPTY_OCR_RETRY_MS * 1_000_000L
+                : forceRefreshNanos;
+        return ageNanos >= 0 && ageNanos < reuseNanos ? cached.text() : null;
+    }
+
+    private static String fingerprintOcrInputs(List<BufferedImage> inputs) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+
+        for (BufferedImage input : inputs) {
+            updateDigestInt(digest, input.getWidth());
+            updateDigestInt(digest, input.getHeight());
+            int[] pixels = input.getRGB(
+                    0, 0, input.getWidth(), input.getHeight(), null, 0, input.getWidth());
+            for (int rgb : pixels) {
+                // Four-bit color quantization ignores tiny rendering noise while preserving
+                // text strokes and other meaningful title-strip changes.
+                digest.update((byte) ((rgb >>> 16) & 0xf0));
+                digest.update((byte) ((rgb >>> 8) & 0xf0));
+                digest.update((byte) (rgb & 0xf0));
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static void updateDigestInt(MessageDigest digest, int value) {
+        digest.update((byte) (value >>> 24));
+        digest.update((byte) (value >>> 16));
+        digest.update((byte) (value >>> 8));
+        digest.update((byte) value);
+    }
+
+    private String recognizeOcrInputs(List<BufferedImage> inputs, boolean filterSingleCharacters) {
+        List<String> mergedLines = new ArrayList<>();
+        for (BufferedImage input : inputs) {
+            String recognized = ocr.recognize(input);
+            List<String> chunkLines = new ArrayList<>(
+                    normalizedLines(recognized, filterSingleCharacters));
+            int duplicatePrefix = commonBoundaryLineCount(mergedLines, chunkLines);
+            mergedLines.addAll(chunkLines.subList(duplicatePrefix, chunkLines.size()));
+        }
+        return String.join("\n", mergedLines);
+    }
+
+    private static List<String> normalizedLines(String text, boolean filterSingleCharacters) {
+        if (text == null || text.isBlank()) return List.of();
+        return text.lines()
+                .map(String::strip)
+                .filter(line -> !line.isEmpty())
+                // Title-strip toolbars frequently turn icons into one-character OCR noise.
+                .filter(line -> !filterSingleCharacters
+                        || line.codePointCount(0, line.length()) > 1)
+                .toList();
+    }
+
+    /** Remove only exact suffix/prefix duplicates introduced by adjacent tile overlap. */
+    private static int commonBoundaryLineCount(List<String> accumulated, List<String> next) {
+        int max = Math.min(accumulated.size(), next.size());
+        for (int count = max; count > 0; count--) {
+            if (accumulated.subList(accumulated.size() - count, accumulated.size())
+                    .equals(next.subList(0, count))) {
+                return count;
+            }
+        }
+        return 0;
     }
 
     private static int parseTitleStripHeight() {
@@ -239,6 +383,17 @@ public class ContentCapture {
             return Math.max(0, Integer.parseInt(System.getProperty("ocr.title-strip-height", "80")));
         } catch (NumberFormatException e) {
             return 80;
+        }
+    }
+
+    private static long parseForceRefreshMs() {
+        try {
+            long value = Long.parseLong(System.getProperty(
+                    "ocr.force-refresh-ms", String.valueOf(DEFAULT_FORCE_REFRESH_MS)));
+            return value >= 30_000L && value <= 60_000L
+                    ? value : DEFAULT_FORCE_REFRESH_MS;
+        } catch (NumberFormatException e) {
+            return DEFAULT_FORCE_REFRESH_MS;
         }
     }
 
@@ -265,5 +420,10 @@ public class ContentCapture {
         if (hasUia) return "uia";
         if (hasOcr) return "ocr";
         return "uia"; // both empty, default
+    }
+
+    @Override
+    public void close() {
+        if (sampleStore != null) sampleStore.close();
     }
 }

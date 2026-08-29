@@ -59,7 +59,7 @@ SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集�
 > 生成摘要。请只监控你确实希望被分析的目录。默认关闭。
 
 **不会离开本机的：**
-- 原始截图（OCR 后不外发，仅识别出的文本按上表规则处理）
+- OCR 原始调试截图（默认不保存；启用后仅保存在本机，不外发）
 - 原始音频（**转写完全由本地 whisper.cpp 完成**，音频本身不联网；仅转写出的文本可能
   在你向 Agent 提问时作为上下文被检索）
 
@@ -67,6 +67,8 @@ SelfAnalyst 是一个**在你本机运行**的自我分析工具。它会采集�
 
 - **OCR 默认只读窗口顶部 80 像素**（`ocr.title-strip-height=80`）——只抓应用标题栏 /
   标签栏以识别"开着什么"，不读正文。设为更大值或 `0`（全窗口）会显著增加隐私暴露。
+- **OCR 原始调试样本默认关闭**（`ocr.sample.enabled=false`）。启用后会保存裁剪前的完整窗口
+  截图和识别结果，可能包含聊天消息、文档正文或网页内容，仅应在本地排障期间开启。
 - **可排除应用**：`ocr.excluded.apps` 可按进程名跳过 OCR（如密码管理器、银行应用）。
 - 活动追踪只记录**窗口标题**，不记录键盘输入内容。
 
@@ -80,7 +82,8 @@ file.watch.enabled=false        # 关闭文件内容监控（默认即关）
 wiki.enabled=false              # 关闭 LLM 时段摘要
 embedding.enabled=false         # 关闭语义索引 embedding
 websearch.enabled=false         # 关闭联网搜索
-ocr.title-strip-height=0        # 配合引擎设置可最小化/关闭 OCR 暴露
+ocr.sample.enabled=false        # 不保存 OCR 原始调试截图（默认）
+aw.collection.content=false     # 完全关闭 UIA 与 OCR 窗口内容采集
 ```
 
 OCR 内容识别随启动开启；如完全不想截屏识别，可参考 `docs/specs/content.md` 关闭

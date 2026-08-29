@@ -27,6 +27,9 @@ class ConfigTest {
         assertEquals("false", props.getProperty("wiki.enabled"));
         assertEquals("false", props.getProperty("embedding.enabled"));
         assertEquals("false", props.getProperty("websearch.enabled"));
+        assertEquals("false", props.getProperty("ocr.sample.enabled"));
+        assertEquals("1500", props.getProperty("ocr.stable-capture-interval-ms"));
+        assertEquals("60000", props.getProperty("ocr.force-refresh-ms"));
         assertEquals("true", props.getProperty("agent.compaction.enabled"));
         assertEquals("30", props.getProperty("agent.compaction.triggerMessages"));
         assertEquals("60000", props.getProperty("agent.compaction.triggerTokens"));
@@ -36,6 +39,43 @@ class ConfigTest {
     void testDefaultsDisableCompaction(@TempDir Path dir) {
         Config c = Config.testDefaults(dir);
         assertFalse(c.agentCompactionEnabled(), "unit tests opt in to compaction explicitly");
+        assertFalse(c.ocrSampleEnabled(), "OCR debug samples must be opt-in");
+    }
+
+    @Test
+    void loadsOcrDebugAndFullWindowSettings(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [ocr.sample]
+                enabled = true
+
+                [ocr]
+                title-strip-height = 0
+                stable-capture-interval-ms = 2000
+                force-refresh-ms = 45000
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> {
+            Config config = Config.load();
+            assertTrue(config.ocrSampleEnabled());
+            assertEquals(0, config.ocrTitleStripHeight());
+            assertEquals(2000, config.ocrStableCaptureIntervalMs());
+            assertEquals(45000, config.ocrForceRefreshMs());
+        });
+    }
+
+    @Test
+    void rejectsOcrCadenceOutsideRequiredRanges(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [ocr]
+                stable-capture-interval-ms = 999
+                force-refresh-ms = 60001
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> {
+            Config config = Config.load();
+            assertEquals(1500, config.ocrStableCaptureIntervalMs());
+            assertEquals(60000, config.ocrForceRefreshMs());
+        });
     }
 
     @Test

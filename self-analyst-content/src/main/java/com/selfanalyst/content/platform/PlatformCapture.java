@@ -13,6 +13,13 @@ import com.selfanalyst.content.capture.ContentCapture;
  */
 public interface PlatformCapture {
 
+    /** Foreground identity resolved from one HWND snapshot. */
+    record ForegroundWindow(long handle, String app, String title) {
+        public static ForegroundWindow none() {
+            return new ForegroundWindow(0L, "unknown", "");
+        }
+    }
+
     /**
      * Create a ContentCapture configured for this platform.
      */
@@ -21,16 +28,25 @@ public interface PlatformCapture {
     /**
      * Return the executable name of the foreground window's process.
      */
-    String getActiveAppName();
+    default String getActiveAppName() {
+        return getForegroundWindowInfo().app();
+    }
 
     /**
      * Return the title of the foreground window.
      */
-    String getActiveWindowTitle();
+    default String getActiveWindowTitle() {
+        return getForegroundWindowInfo().title();
+    }
 
     /**
      * Return a neutral handle for the foreground window, or {@code 0} if none.
      * On Windows this is the HWND numeric value.
      */
-    long getForegroundWindow();
+    default long getForegroundWindow() {
+        return getForegroundWindowInfo().handle();
+    }
+
+    /** Resolve handle, process name, and title from the same foreground HWND. */
+    ForegroundWindow getForegroundWindowInfo();
 }

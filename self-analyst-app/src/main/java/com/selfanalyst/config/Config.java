@@ -40,9 +40,12 @@ public record Config(
         int embeddingDimensions,
         boolean embeddingSendEncodingFormat,
         int contentPollIntervalMs,
+        boolean ocrSampleEnabled,
         Path ocrSampleDir,
         String ocrExcludedApps,
         int ocrTitleStripHeight,
+        int ocrStableCaptureIntervalMs,
+        int ocrForceRefreshMs,
         boolean webSearchEnabled,
         String webSearchMcpUrl,
         String webSearchApiKey,
@@ -189,6 +192,8 @@ public record Config(
             contentPollIntervalMs = 500;
         }
 
+        boolean ocrSampleEnabled = Boolean.parseBoolean(
+                envOrProp(props, "ocr.sample.enabled", "OCR_SAMPLE_ENABLED", "false"));
         String ocrSampleDirStr = envOrProp(props, "ocr.sample.dir", "OCR_SAMPLE_DIR", "");
         Path ocrSampleDir = ocrSampleDirStr.isBlank()
                 ? awDataDir.resolve("ocr-samples")
@@ -198,6 +203,18 @@ public record Config(
         int ocrTitleStripHeight = parseIntOr(props,
                 envOrProp(props, "ocr.title-strip-height", "OCR_TITLE_STRIP_HEIGHT", "80"), 80);
         if (ocrTitleStripHeight < 0) ocrTitleStripHeight = 80;
+        int ocrStableCaptureIntervalMs = parseIntOr(props,
+                envOrProp(props, "ocr.stable-capture-interval-ms",
+                        "OCR_STABLE_CAPTURE_INTERVAL_MS", "1500"), 1500);
+        if (ocrStableCaptureIntervalMs < 1_000 || ocrStableCaptureIntervalMs > 2_000) {
+            ocrStableCaptureIntervalMs = 1500;
+        }
+        int ocrForceRefreshMs = parseIntOr(props,
+                envOrProp(props, "ocr.force-refresh-ms", "OCR_FORCE_REFRESH_MS", "60000"),
+                60_000);
+        if (ocrForceRefreshMs < 30_000 || ocrForceRefreshMs > 60_000) {
+            ocrForceRefreshMs = 60_000;
+        }
 
         boolean collectWindow = Boolean.parseBoolean(
                 envOrProp(props, "aw.collection.window", "AW_COLLECTION_WINDOW", "true"));
@@ -345,8 +362,9 @@ public record Config(
                 wikiSemanticEnabled, wikiSemanticIndexDir, wikiSemanticTopK,
                 embeddingEnabled, embeddingBaseUrl, embeddingApiKey,
                 embeddingModel, embeddingDimensions,
-                embeddingSendEncodingFormat, contentPollIntervalMs, ocrSampleDir,
+                embeddingSendEncodingFormat, contentPollIntervalMs, ocrSampleEnabled, ocrSampleDir,
                 ocrExcludedApps, ocrTitleStripHeight,
+                ocrStableCaptureIntervalMs, ocrForceRefreshMs,
                 webSearchEnabled, webSearchMcpUrl, webSearchApiKey,
                 llmTemperature, collectWindow, collectAfk, collectContent, audioEnabled,
                 audioWhisperPath, audioVadThreshold, audioSource, audioEngine, audioModel,
@@ -391,7 +409,7 @@ public record Config(
                 false, false, 60, 12000, 10,
                 false, baseDir.resolve("wiki-semantic-index"), 8,
                 false, "", "", "", 1024, true, 500,
-                baseDir.resolve("ocr-samples"), "", 80,
+                false, baseDir.resolve("ocr-samples"), "", 80, 1500, 60000,
                 false, "https://search.parallel.ai/mcp", "",
                 0.7, false, false, false, false,
                 Path.of("tools/whisper"), 0.0001,

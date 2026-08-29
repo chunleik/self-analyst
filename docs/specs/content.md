@@ -321,8 +321,13 @@ public class HybridMerger {
 
 ### SPEC-WCH-001: 采集循环
 
-- 采集间隔：2 秒（与 WindowWatcher 一致）
-- 每个周期执行一次 `capture()`
+- 前台窗口句柄、应用名和标题按 `aw.collection.content.pollMs` 轮询，默认 500ms
+- 句柄、应用名和标题必须从同一个前台 HWND 快照解析，禁止分次读取不同前台窗口
+- 窗口句柄、应用名或标题发生变化时，必须立即执行一次 `capture()`
+- 稳定窗口按 `ocr.stable-capture-interval-ms` 重新截图，默认 1500ms
+- 稳定窗口间隔以捕获尝试开始时间和单调时钟计算；失败不得退化为 500ms 重试风暴
+- 稳定窗口在截图间隔内只复用最近快照，不执行截图或 OCR
+- 捕获完成及 heartbeat 发送前必须复核前台身份；窗口已切换时丢弃旧结果
 - 采集线程为 daemon，不阻止 JVM 退出
 - 通过 HTTP 向 AW API 推送 heartbeat
 
@@ -417,17 +422,41 @@ public class HybridMerger {
 OCR 截图**必须**仅对窗口顶部 N 像素（`ocr.title-strip-height`，默认 80）进行识别：
 
 - 仅捕获应用标题栏/选项卡行，不捕获正文内容
-- 防止聊天消息、文档正文、网页内容进入存储
-- 设置为 0 可禁用（不推荐，会捕获完整窗口内容）
+- 默认不保存截图；常规内容存储仅接收识别后的标题条文本
+- 设置为 0 会禁用标题条限制（不推荐，会识别完整窗口内容）
+- 宽度超过 960 像素的标题条必须横向分片，避免等比缩放降低文字高度
 
 OCR 处理顺序（thin 窗口）：
 
 ```
 trimBlackBorders(image)
   → subimage(0, 0, w, min(titleStripHeight, h))   ← 顶部裁剪
-  → scaleToOcrLimit(960px)
-  → OcrEngine.recognize()
+  → 宽度 > 960 时按 960px 横向分片，相邻分片重叠 64px
+  → 对每个分片执行 OcrEngine.recognize()
+  → 合并文本，仅去除相邻分片边界上的精确重复行
 ```
+
+标题条模式应过滤由工具栏图标产生的单字符 OCR 噪声。完整窗口模式不执行该过滤，
+避免丢失正文中的合法单字符内容。
+
+### SPEC-OCR-006: 原始调试样本
+
+- `ocr.sample.enabled` 默认必须为 `false`
+- 仅当显式设置为 `true` 时，保存 OCR 前的原始窗口截图及对应 JSON 元数据
+- 调试样本保留原始截图，不使用标题条裁剪图替代
+- 样本使用 240 槽循环覆盖，目录由 `ocr.sample.dir` 配置
+- 原始截图可能包含正文或敏感信息，开关仅用于本地调试
+
+### SPEC-OCR-007: 图片指纹与 OCR 复用
+
+- 指纹必须基于实际 OCR 输入（标题条裁剪及分片之后）；未进入 OCR 输入的像素变化
+  不得直接使缓存失效
+- 指纹使用像素颜色量化后计算 SHA-256，降低轻微渲染噪声造成的无效 OCR
+- 窗口句柄、应用名、窗口标题或图片指纹任一变化时，必须重新执行 OCR
+- 图片未变化时复用最近 OCR 文本，不生成新的调试样本或 `sample_id`
+- 非空结果最多复用 `ocr.force-refresh-ms`（允许 30000～60000ms），默认 60000ms，
+  超时后强制重新识别；复用时间从 OCR 完成时开始计算
+- 空结果仅复用 5000ms，避免一次瞬时失败被长期缓存
 
 ### SPEC-NFR-102: 降级容错
 
@@ -444,9 +473,9 @@ trimBlackBorders(image)
 | SPEC-CTX-001..003 | ContentWatcher.java | — |
 | SPEC-MDL-100..101 | ContentEvent.java, UiaNode.java | — |
 | SPEC-UIA-001..006 | UiaCom.java, UiaTreeWalker.java | UiaTreeWalkerTest |
-| SPEC-OCR-001..005 | OcrEngine.java, TesseractOcrEngine.java, ContentCapture.java | — |
+| SPEC-OCR-001..007 | OcrEngine.java, TesseractOcrEngine.java, ContentCapture.java, OcrSampleStore.java | ContentCaptureTest, OcrSampleStoreTest |
 | SPEC-CAP-001 | ScreenCapturer.java | — |
 | SPEC-THN-001..007 | ThinDetector.java | ThinDetectorTest |
 | SPEC-HYB-001 | HybridMerger.java | HybridMergerTest |
-| SPEC-WCH-001..003 | ContentWatcher.java, ContentCapture.java | — |
+| SPEC-WCH-001..003 | ContentWatcher.java, ContentCapture.java | ContentWatcherTest, ContentCaptureTest |
 | SPEC-BLD-100..102 | pom.xml (content + root + app) | — |

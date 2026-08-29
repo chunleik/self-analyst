@@ -81,9 +81,12 @@ public final class SupportedKeys {
         put("aw.audio.engine", "auto", KeyType.STRING);
         put("aw.audio.model", "gpt-4o-transcribe", KeyType.STRING);
         put("aw.audio.chunkSeconds", "10", KeyType.INTEGER);
+        put("ocr.sample.enabled", "false", KeyType.BOOLEAN);
         put("ocr.sample.dir", "./data/aw-data/ocr-samples", KeyType.STRING);
         put("ocr.excluded.apps", "", KeyType.STRING);
         put("ocr.title-strip-height", "80", KeyType.INTEGER);
+        put("ocr.stable-capture-interval-ms", "1500", KeyType.INTEGER);
+        put("ocr.force-refresh-ms", "60000", KeyType.INTEGER);
 
         put("wiki.enabled", "false", KeyType.BOOLEAN);
         put("wiki.backfill.enabled", "false", KeyType.BOOLEAN);
@@ -156,7 +159,7 @@ public final class SupportedKeys {
         describe("aw.collection.window", "是否采集活动窗口与应用信息。", "Whether to collect active-window and application information.");
         describe("aw.collection.afk", "是否采集用户离开/活跃状态。", "Whether to collect user AFK/active status.");
         describe("aw.collection.content", "是否采集窗口内容用于本地分析。", "Whether to collect window content for local analysis.");
-        describe("aw.collection.content.pollMs", "窗口内容采集轮询间隔（毫秒）。", "Polling interval for window-content collection, in milliseconds.");
+        describe("aw.collection.content.pollMs", "前台窗口元数据检查与内容心跳间隔（毫秒）。", "Interval for foreground-window metadata checks and content heartbeats, in milliseconds.");
         describe("aw.ocr.engine", "OCR 引擎：auto 或受支持的具体引擎名称。", "OCR engine: auto or a specific supported engine name.");
         describe("aw.audio.enabled", "是否启用音频采集与转写。", "Whether to enable audio capture and transcription.");
         describe("aw.audio.whisperPath", "本地 Whisper 可执行文件或目录路径。", "Path to the local Whisper executable or directory.");
@@ -166,9 +169,12 @@ public final class SupportedKeys {
         describe("aw.audio.model", "云端语音转写使用的模型名称。", "Model name used for cloud speech transcription.");
         describe("aw.audio.chunkSeconds", "每个音频转写分块的时长（秒）。", "Duration of each transcription audio chunk, in seconds.");
 
+        describe("ocr.sample.enabled", "是否保存 OCR 原始截图与识别结果用于调试。", "Whether to save raw OCR screenshots and results for debugging.");
         describe("ocr.sample.dir", "OCR 调试样本的保存目录。", "Directory where OCR debug samples are stored.");
         describe("ocr.excluded.apps", "不进行 OCR 的应用名列表，以逗号分隔。", "Comma-separated application names excluded from OCR.");
-        describe("ocr.title-strip-height", "截图顶部忽略的标题栏高度（像素）。", "Height of the top title-bar strip ignored in screenshots, in pixels.");
+        describe("ocr.title-strip-height", "OCR 识别的窗口顶部标题条高度（像素）；0 表示不限制为标题条。", "Height of the top title-bar strip recognized by OCR; 0 disables the title-strip limit.");
+        describe("ocr.stable-capture-interval-ms", "稳定窗口重新截取标题条并检查变化的间隔（1000～2000 毫秒）。", "Interval for recapturing a stable window title strip and checking for changes, from 1000 to 2000 milliseconds.");
+        describe("ocr.force-refresh-ms", "图片未变化时强制重新执行 OCR 的最长间隔（30000～60000 毫秒）。", "Maximum interval before forcing OCR when the image is unchanged, from 30000 to 60000 milliseconds.");
 
         describe("wiki.enabled", "是否启用个人 Wiki 摘要生成。", "Whether to enable personal wiki summary generation.");
         describe("wiki.backfill.enabled", "是否为历史活动补生成 Wiki 内容。", "Whether to backfill wiki content for historical activity.");

@@ -255,15 +255,19 @@ public class AppSession implements AutoCloseable {
             }
             watcherManager.startAll();
             try {
+                System.setProperty("ocr.sample.enabled",
+                        String.valueOf(config.ocrSampleEnabled()));
                 System.setProperty("ocr.sample.dir",
                         config.ocrSampleDir().toAbsolutePath().toString());
                 if (config.ocrExcludedApps() != null && !config.ocrExcludedApps().isBlank()) {
                     System.setProperty("ocr.excluded.apps", config.ocrExcludedApps());
                 }
-                if (config.ocrTitleStripHeight() > 0) {
-                    System.setProperty("ocr.title-strip-height",
-                            String.valueOf(config.ocrTitleStripHeight()));
-                }
+                System.setProperty("ocr.title-strip-height",
+                        String.valueOf(config.ocrTitleStripHeight()));
+                System.setProperty("ocr.stable-capture-interval-ms",
+                        String.valueOf(config.ocrStableCaptureIntervalMs()));
+                System.setProperty("ocr.force-refresh-ms",
+                        String.valueOf(config.ocrForceRefreshMs()));
                 if (config.collectContent()) {
                     contentWatcher = new ContentWatcher("http://localhost:" + config.awPort(),
                             config.contentPollIntervalMs());

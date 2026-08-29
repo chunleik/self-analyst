@@ -107,13 +107,14 @@ public class ContentVerification {
                 return;
             }
             WindowsCapture wc = new WindowsCapture();
-            long handle = wc.getForegroundWindow();
+            var foreground = wc.getForegroundWindowInfo();
+            long handle = foreground.handle();
             if (handle == 0) {
                 System.out.println("  skipped: no foreground window");
                 return;
             }
-            String app = wc.getActiveAppName();
-            String title = wc.getActiveWindowTitle();
+            String app = foreground.app();
+            String title = foreground.title();
             System.out.println("  app=" + app + " title=" + title);
 
             UiaTreeWalker.UiaWalkResult walk;

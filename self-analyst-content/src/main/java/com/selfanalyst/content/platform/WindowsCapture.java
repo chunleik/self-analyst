@@ -58,11 +58,20 @@ public class WindowsCapture implements PlatformCapture {
     }
 
     @Override
-    public String getActiveAppName() {
+    public ForegroundWindow getForegroundWindowInfo() {
         try {
             HWND hwnd = User32.INSTANCE.GetForegroundWindow();
-            if (hwnd == null) return "unknown";
+            if (hwnd == null) return ForegroundWindow.none();
 
+            long handle = com.sun.jna.Pointer.nativeValue(hwnd.getPointer());
+            return new ForegroundWindow(handle, appName(hwnd), windowTitle(hwnd));
+        } catch (Exception e) {
+            return ForegroundWindow.none();
+        }
+    }
+
+    private static String appName(HWND hwnd) {
+        try {
             IntByReference pidRef = new IntByReference();
             User32.INSTANCE.GetWindowThreadProcessId(hwnd, pidRef);
             int pid = pidRef.getValue();
@@ -79,12 +88,8 @@ public class WindowsCapture implements PlatformCapture {
         }
     }
 
-    @Override
-    public String getActiveWindowTitle() {
+    private static String windowTitle(HWND hwnd) {
         try {
-            HWND hwnd = User32.INSTANCE.GetForegroundWindow();
-            if (hwnd == null) return "";
-
             char[] buffer = new char[1024];
             int len = User32.INSTANCE.GetWindowText(hwnd, buffer, buffer.length);
             if (len > 0) {
@@ -93,16 +98,6 @@ public class WindowsCapture implements PlatformCapture {
             return "";
         } catch (Exception e) {
             return "";
-        }
-    }
-
-    @Override
-    public long getForegroundWindow() {
-        try {
-            HWND hwnd = User32.INSTANCE.GetForegroundWindow();
-            return hwnd != null ? com.sun.jna.Pointer.nativeValue(hwnd.getPointer()) : 0L;
-        } catch (Exception e) {
-            return 0L;
         }
     }
 

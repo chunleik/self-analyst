@@ -18,15 +18,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Circular buffer of the 240 most recent OCR screenshots.
+ * Opt-in circular buffer of the 240 most recent raw OCR screenshots.
  *
  * Writes are submitted to a single background thread with a bounded queue;
- * if the writer falls behind the queue is silently dropped so the OCR
+ * if the writer falls behind the queue the new sample is dropped so the OCR
  * capture thread never blocks on I/O.
  *
  * File layout (under {@link #dir}):
- *   slot_00.png / slot_00.json  …  slot_49.png / slot_49.json
+ *   slot_00.png / slot_00.json  …  slot_239.png / slot_239.json
  *
+ * Enable via {@code OCR_SAMPLE_ENABLED=true} or {@code ocr.sample.enabled=true}.
  * Configure the directory via env var OCR_SAMPLE_DIR or system property
  * ocr.sample.dir; defaults to ~/.selfanalyst/ocr-samples.
  */
@@ -48,7 +49,7 @@ public class OcrSampleStore implements AutoCloseable {
         this.writer = new ThreadPoolExecutor(
             1, 1, 0L, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(4),
-            new ThreadPoolExecutor.DiscardPolicy());
+            new ThreadPoolExecutor.AbortPolicy());
         log.info("OcrSampleStore ready: {} (capacity={})", dir, CAPACITY);
     }
 
@@ -57,6 +58,10 @@ public class OcrSampleStore implements AutoCloseable {
      * directory cannot be created (feature is silently disabled).
      */
     public static OcrSampleStore createDefault() {
+        String enabled = System.getProperty("ocr.sample.enabled");
+        if (enabled == null) enabled = System.getenv().getOrDefault("OCR_SAMPLE_ENABLED", "false");
+        if (!Boolean.parseBoolean(enabled)) return null;
+
         String envDir = System.getenv("OCR_SAMPLE_DIR");
         if (envDir == null) envDir = System.getProperty("ocr.sample.dir");
         Path dir = (envDir != null && !envDir.isBlank())
@@ -74,15 +79,20 @@ public class OcrSampleStore implements AutoCloseable {
      * Non-blocking: enqueues a save task for the given image and metadata.
      * {@code sampleId} is the UUID that also appears in the AW heartbeat event,
      * enabling exact row-level lookup in the ActivityWatch database.
-     * Silently dropped if the writer queue is full.
+     * Returns false if the writer queue is full or the store is closing.
      */
-    public void submit(BufferedImage image, String app, String title,
-                       String ocrText, int uiaChars, String sampleId, long ocrMs) {
-        if (image == null) return;
+    public boolean submit(BufferedImage image, String app, String title,
+                          String ocrText, int uiaChars, String sampleId, long ocrMs) {
+        if (image == null) return false;
         int slot = nextSlot.getAndUpdate(i -> (i + 1) % CAPACITY);
         Instant ts = Instant.now();
         // image is read-only after capture; safe to hand off without copying
-        writer.execute(() -> save(slot, image, app, title, ocrText, uiaChars, sampleId, ts, ocrMs));
+        try {
+            writer.execute(() -> save(slot, image, app, title, ocrText, uiaChars, sampleId, ts, ocrMs));
+            return true;
+        } catch (java.util.concurrent.RejectedExecutionException rejected) {
+            return false;
+        }
     }
 
     private void save(int slot, BufferedImage image, String app, String title,

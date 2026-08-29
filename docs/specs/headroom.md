@@ -253,7 +253,7 @@ development memory 不得保存：
 
 ### SPEC-HR-UI-003: 配置 API
 
-`GET /desktop/config` 和 `PUT /desktop/config` 必须支持 Headroom 配置项，并沿用现有 raw config / version history 行为。
+`GET /desktop/config` 和 `PUT /desktop/config` 必须支持 Headroom 配置项，并沿用现有 raw `config.toml` 编辑与保存行为。
 
 ### SPEC-HR-UI-004: Agent 配置工具
 

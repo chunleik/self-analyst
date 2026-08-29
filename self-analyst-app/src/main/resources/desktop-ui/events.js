@@ -200,36 +200,6 @@ function setupEvents() {
       return;
     }
 
-    // All configurable keys reference panel toggle. SPEC-TOML-UI-004a.
-    if (target.id === "config-allkeys-btn") {
-      toggleSupportedKeys();
-      return;
-    }
-
-    // Insert a supported key into the editor. SPEC-TOML-UI-004c.
-    if (target.classList.contains("config-allkeys-insert")) {
-      insertSupportedKey(target.dataset.assignment);
-      return;
-    }
-
-    // Version history toggle
-    if (target.id === "config-history-btn") {
-      toggleConfigHistory();
-      return;
-    }
-
-    // View a historical version (toggle inline preview)
-    if (target.classList.contains("config-history-view")) {
-      toggleVersionPreview(target.dataset.versionId);
-      return;
-    }
-
-    // Switch: load a historical version into the editor as unsaved changes
-    if (target.classList.contains("config-history-switch")) {
-      switchToVersion(target.dataset.versionId);
-      return;
-    }
-
     // Test LLM — values come from the editor text. SPEC-CFGUI-UI-005a/b.
     if (target.id === "test-llm-btn") {
       var llmConfig = readLlmConfigFromEditor();
@@ -240,7 +210,9 @@ function setupEvents() {
         .then(function (resp) {
           state.configSaveResult = {
             type: "success",
-            msg: resp.ok || resp.success ? t("config.connectOk") : t("config.connectFailed", { msg: resp.error || t("common.unknownError") }),
+            msg: resp.ok || resp.success
+              ? t("config.connectOk", { service: "LLM" })
+              : t("config.connectFailed", { service: "LLM", msg: resp.error || t("common.unknownError") }),
           };
           target.disabled = false;
           target.textContent = t("config.testLlm");
@@ -249,7 +221,7 @@ function setupEvents() {
         .catch(function (err) {
           state.configSaveResult = {
             type: "error",
-            msg: t("config.testFailed", { msg: err.message }),
+            msg: t("config.testFailed", { service: "LLM", msg: err.message }),
           };
           target.disabled = false;
           target.textContent = t("config.testLlm");
@@ -268,7 +240,9 @@ function setupEvents() {
         .then(function (resp) {
           state.configSaveResult = {
             type: "success",
-            msg: resp.ok || resp.success ? t("config.connectOk") : t("config.connectFailed", { msg: resp.error || t("common.unknownError") }),
+            msg: resp.ok || resp.success
+              ? t("config.connectOk", { service: "Embedding" })
+              : t("config.connectFailed", { service: "Embedding", msg: resp.error || t("common.unknownError") }),
           };
           target.disabled = false;
           target.textContent = t("config.testEmbedding");
@@ -277,7 +251,7 @@ function setupEvents() {
         .catch(function (err) {
           state.configSaveResult = {
             type: "error",
-            msg: t("config.testFailed", { msg: err.message }),
+            msg: t("config.testFailed", { service: "Embedding", msg: err.message }),
           };
           target.disabled = false;
           target.textContent = t("config.testEmbedding");

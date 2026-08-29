@@ -166,13 +166,33 @@ class TomlSupportTest {
         defaults.put("llm.temperature", "0.7");
         defaults.put("aw.port", "5700");
 
-        String template = TomlSupport.buildTemplate(defaults, declared());
+        String template = TomlSupport.buildTemplate(defaults, declared(), Map.of());
         assertTrue(template.contains("[llm]"), template);
         assertTrue(template.contains("[aw]"), template);
         assertTrue(template.contains("D:\\docs"), template); // path guidance comment
         assertTrue(template.contains("# api-key ="), template);
 
         // With every key commented out the template must still parse (empty tables).
+        assertTrue(TomlSupport.parseAndFlatten(template).isEmpty());
+    }
+
+    @Test
+    void completeTemplateCommentsEverySupportedKeyWithBilingualHelp() {
+        var defaults = SupportedKeys.defaults();
+        var descriptions = SupportedKeys.descriptions();
+        String template = TomlSupport.buildTemplate(
+                defaults, SupportedKeys.types(), descriptions);
+
+        assertEquals(defaults.keySet(), descriptions.keySet());
+        assertEquals(defaults.size(), template.lines()
+                .filter(line -> line.matches("# .+ = .*  # (string|boolean|integer|float|list)"))
+                .count());
+        for (var description : descriptions.values()) {
+            assertFalse(description.zh().isBlank());
+            assertFalse(description.en().isBlank());
+            assertTrue(template.contains("# 中文：" + description.zh()), description.zh());
+            assertTrue(template.contains("# English: " + description.en()), description.en());
+        }
         assertTrue(TomlSupport.parseAndFlatten(template).isEmpty());
     }
 }

@@ -381,18 +381,6 @@ var api = {
       });
     });
   },
-  getConfigHistory: function () {
-    return fetch(API_BASE + "/desktop/config/history").then(function (r) {
-      if (!r.ok) throw new Error("Config history fetch failed: " + r.status);
-      return r.json();
-    });
-  },
-  getConfigVersion: function (id) {
-    return fetch(API_BASE + "/desktop/config/history/" + encodeURIComponent(id)).then(function (r) {
-      if (!r.ok) throw new Error("Config version fetch failed: " + r.status);
-      return r.json();
-    });
-  },
   testLlm: function (c) {
     return fetch(API_BASE + "/desktop/config/test-llm", {
       method: "POST",

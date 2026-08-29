@@ -25,7 +25,7 @@ import java.util.Map;
  *       (SPEC-TOML-FMT-003d).</li>
  *   <li>{@link #generateToml(Map, Map)} — regenerate section-grouped TOML for
  *       structured saves and startup migration (SPEC-TOML-DEC-004).</li>
- *   <li>{@link #buildTemplate(Map, Map)} — commented TOML template served when the
+ *   <li>{@link #buildTemplate(Map, Map, Map)} — commented TOML template served when the
  *       file is empty/missing (SPEC-TOML-FMT-004).</li>
  * </ul>
  * The internal namespace stays flat dotted keys ({@code llm.api-key}); TOML tables
@@ -220,17 +220,22 @@ public final class TomlSupport {
      * {@code #}-commented line showing its default value and a type hint, plus a
      * Windows-path guidance comment (SPEC-TOML-FMT-004b).
      */
-    public static String buildTemplate(Map<String, String> defaults, Map<String, KeyType> declared) {
+    /** Build a complete commented template with Chinese/English key help. */
+    public static String buildTemplate(Map<String, String> defaults,
+                                       Map<String, KeyType> declared,
+                                       Map<String, SupportedKeys.Description> descriptions) {
         StringBuilder sb = new StringBuilder();
-        sb.append("# SelfAnalyst 用户配置（config.toml）\n");
-        sb.append("# 仅填写需要覆盖的项，取消对应行注释后修改即可；未列出的项使用默认值。\n");
-        sb.append("# 路径值请用单引号字面量字符串：'D:\\docs'，或改用正斜杠。\n");
+        sb.append("# SelfAnalyst 用户配置 / User configuration (config.toml)\n");
+        sb.append("# 中文：取消需要修改的配置行注释；保持注释的配置项使用默认值。\n");
+        sb.append("# English: Uncomment only the settings you want to override; commented settings use defaults.\n");
+        sb.append("# 中文：Windows 路径请用单引号字面量字符串：'D:\\docs'，或改用正斜杠。\n");
+        sb.append("# English: For Windows paths, use a single-quoted literal such as 'D:\\docs', or use forward slashes.\n");
 
         Partition p = partition(defaults);
         if (!p.topLevel.isEmpty()) {
             sb.append('\n');
             for (var e : p.topLevel.entrySet()) {
-                appendTemplateLine(sb, e.getKey(), e.getValue(), declared.get(e.getKey()));
+                appendTemplateLine(sb, e.getKey(), e.getValue(), declared.get(e.getKey()), descriptions.get(e.getKey()));
             }
         }
         for (var sec : p.sections.entrySet()) {
@@ -240,13 +245,18 @@ public final class TomlSupport {
             sb.append('\n').append('[').append(table).append("]\n");
             for (var e : keys.entrySet()) {
                 String inTableKey = e.getKey().substring(sec.getKey().length());
-                appendTemplateLine(sb, inTableKey, e.getValue(), declared.get(e.getKey()));
+                appendTemplateLine(sb, inTableKey, e.getValue(), declared.get(e.getKey()), descriptions.get(e.getKey()));
             }
         }
         return sb.toString();
     }
 
-    private static void appendTemplateLine(StringBuilder sb, String key, String value, KeyType type) {
+    private static void appendTemplateLine(StringBuilder sb, String key, String value, KeyType type,
+                                           SupportedKeys.Description description) {
+        if (description != null) {
+            sb.append("# 中文：").append(description.zh()).append('\n');
+            sb.append("# English: ").append(description.en()).append('\n');
+        }
         sb.append("# ").append(emitKey(key)).append(" = ")
                 .append(emitValue(value, type))
                 .append("  # ").append(typeHint(type)).append('\n');
@@ -283,11 +293,10 @@ public final class TomlSupport {
 
     /**
      * Emit a top-level dotted assignment line ({@code llm.model = "gpt-4o"}) for the
-     * reference panel's one-click insert (SPEC-TOML-UI-004c) and the raw response's
-     * {@code supportedKeys} (SPEC-TOML-API-001e). Reuses the same key/value emission
+     * compatibility-only {@code supportedKeys} raw-response field
+     * (SPEC-TOML-API-001e). Reuses the same key/value emission
      * as {@link #generateToml}, so quoting (literal Windows paths, typed scalars) is
-     * identical. Top-level dotted form is unambiguous regardless of any table headers
-     * below it, which is why callers prepend it before the first {@code [table]}.
+     * identical.
      */
     public static String emitAssignment(String dottedKey, String value, KeyType type) {
         return emitKey(dottedKey) + " = " + emitValue(value, type);

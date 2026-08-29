@@ -370,7 +370,6 @@ LLM 提炼结果必须被解析为结构化候选列表。每个候选至少包�
 
 ```js
 memoryItems: [],
-memoryFilter: "",
 memoryLoading: false,
 pendingMemoryCount: 0
 ```
@@ -397,9 +396,11 @@ pendingMemoryCount: 0
 
 这些操作必须调用后端 API，不得只改前端状态。
 
-### SPEC-LTM-FE-005：全局记忆管理
+### SPEC-LTM-FE-005：会话记忆管理
 
-配置弹窗或等价管理入口中提供“记忆管理”区域，支持查看、搜索、编辑、停用、删除所有长期记忆。该入口不得与 raw config 编辑混淆；它管理 `memory.json` 的记忆数据，不管理 `config.toml`。
+记忆操作集中在会话界面的“长期记忆”区域，支持设置会话记忆策略、手动添加、查看相关记忆、
+编辑和停用活跃记忆，以及批准或拒绝待确认记忆。配置文件弹窗只编辑 `config.toml`，不得混入
+记忆数据管理界面。
 
 ### SPEC-LTM-FE-006：隐私与可解释性
 

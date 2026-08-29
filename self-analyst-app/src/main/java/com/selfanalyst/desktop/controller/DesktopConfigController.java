@@ -4,7 +4,6 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
-import com.selfanalyst.desktop.store.ConfigHistoryStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.headroom.HeadroomService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,12 +18,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Config tab endpoints: read, write, and test configuration.
@@ -55,23 +49,9 @@ public class DesktopConfigController {
     // com.selfanalyst.config.SupportedKeys (single source of truth for the raw-edit
     // template, unknown-key detection, type validation, and TOML generation).
 
-    /** Version-name timestamp format (local zone). SPEC-CFGUI-VER-DEC-002. */
-    private static final DateTimeFormatter VERSION_NAME_FMT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
-    /** Summary used when a save changed no key values (only comments/formatting). */
-    static final String NO_CHANGE_SUMMARY = "无键值变化（仅注释或格式）";
-
     private final Config config;
     private final UserConfigStore userStore;
     private final HeadroomService headroomService;
-    private final ConfigHistoryStore historyStore;
-    /** Single daemon thread for best-effort, non-blocking LLM summary refinement. */
-    private final ExecutorService summaryExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "config-version-summary");
-        t.setDaemon(true);
-        return t;
-    });
 
     public DesktopConfigController(Config config, UserConfigStore userStore) {
         this(config, userStore, null);
@@ -81,7 +61,6 @@ public class DesktopConfigController {
         this.config = config;
         this.userStore = userStore;
         this.headroomService = headroomService;
-        this.historyStore = new ConfigHistoryStore(userStore.filePath().getParent());
     }
 
     /**
@@ -341,7 +320,8 @@ public class DesktopConfigController {
      * SPEC-TOML-FMT-004.
      */
     static String buildTemplate() {
-        return TomlSupport.buildTemplate(SupportedKeys.defaults(), SupportedKeys.types());
+        return TomlSupport.buildTemplate(
+                SupportedKeys.defaults(), SupportedKeys.types(), SupportedKeys.descriptions());
     }
 
     /** One supported key's reference info for the raw response. SPEC-TOML-API-001e. */
@@ -352,10 +332,10 @@ public class DesktopConfigController {
                              List<SupportedKeyInfo> supportedKeys) {}
 
     /**
-     * All supported keys as {@code (key, type, defaultAssignment)}, in
-     * {@link SupportedKeys} declaration order, for the "all configurable keys"
-     * reference panel (SPEC-TOML-UI-004 / SPEC-TOML-API-001e). {@code assignment} is
-     * the top-level dotted TOML form the panel inserts verbatim.
+     * Compatibility-only list of supported keys as
+     * {@code (key, type, defaultAssignment)}, in {@link SupportedKeys} declaration
+     * order (SPEC-TOML-API-001e). Current desktop UI reads the complete template
+     * directly; older clients may still consume this field.
      */
     static List<SupportedKeyInfo> supportedKeyInfos() {
         LinkedHashMap<String, TomlSupport.KeyType> types = SupportedKeys.types();
@@ -404,170 +384,7 @@ public class DesktopConfigController {
         List<String> restart = computeRestartRequired(oldP, newP);
         List<String> unknown = computeUnknownKeys(newP);
         userStore.saveRaw(text);
-        recordVersion(oldP, newP, text); // best-effort, never blocks/aborts the save
         return new RawSaveResult(restart, unknown);
-    }
-
-    // ── Version history (SPEC-CFGUI-VER) ─────────────────────────
-
-    /** Format a version's auto-name from its save time. SPEC-CFGUI-VER-DEC-002. */
-    static String formatVersionName(long epochMillis, ZoneId zone) {
-        return VERSION_NAME_FMT.format(Instant.ofEpochMilli(epochMillis).atZone(zone));
-    }
-
-    /**
-     * Deterministic key-level diff summary, used as the immediate version hint
-     * and as the fallback when LLM refinement is unavailable.
-     * SPEC-CFGUI-VER-DEC-002.
-     */
-    static String computeDiffSummary(Properties oldP, Properties newP) {
-        List<String> added = new ArrayList<>();
-        List<String> changed = new ArrayList<>();
-        List<String> removed = new ArrayList<>();
-        for (String k : newP.stringPropertyNames()) {
-            if (!oldP.containsKey(k)) added.add(k);
-            else if (!Objects.equals(oldP.getProperty(k), newP.getProperty(k))) changed.add(k);
-        }
-        for (String k : oldP.stringPropertyNames()) {
-            if (!newP.containsKey(k)) removed.add(k);
-        }
-        if (added.isEmpty() && changed.isEmpty() && removed.isEmpty()) {
-            return NO_CHANGE_SUMMARY;
-        }
-        List<String> parts = new ArrayList<>();
-        if (!added.isEmpty()) parts.add("新增 " + summarizeKeys(added));
-        if (!changed.isEmpty()) parts.add("修改 " + summarizeKeys(changed));
-        if (!removed.isEmpty()) parts.add("删除 " + summarizeKeys(removed));
-        return String.join("；", parts);
-    }
-
-    private static String summarizeKeys(List<String> keys) {
-        int shown = Math.min(keys.size(), 3);
-        String joined = String.join(", ", keys.subList(0, shown));
-        String more = keys.size() > shown ? " 等" + keys.size() + " 项" : "";
-        return keys.size() + " 项(" + joined + more + ")";
-    }
-
-    /** Snapshot the just-saved text; refine the summary via LLM asynchronously. */
-    private void recordVersion(Properties oldP, Properties newP, String newText) {
-        try {
-            String name = formatVersionName(System.currentTimeMillis(), ZoneId.systemDefault());
-            String summary = computeDiffSummary(oldP, newP);
-            ConfigHistoryStore.ConfigVersion v = historyStore.add(
-                    name, summary, newText, ConfigHistoryStore.FORMAT_TOML);
-            // Only key NAMES (never values/raw text) are eligible for LLM refinement,
-            // and only when something actually changed. SPEC-CFGUI-VER-DEC-004.
-            if (!summary.startsWith(NO_CHANGE_SUMMARY)) {
-                summaryExecutor.submit(() -> refineSummaryAsync(v.id(), summary));
-            }
-        } catch (Exception e) {
-            // A history failure must not affect the (already successful) save.
-            log.warn("Failed to record config version: {}", e.getMessage());
-        }
-    }
-
-    /**
-     * Best-effort LLM call to phrase a nicer change summary; degrades silently.
-     * <p>
-     * Privacy contract (SPEC-CFGUI-VER-DEC-004): the prompt contains ONLY the
-     * deterministic key-name diff — never config values or raw file text — so
-     * secrets (api-keys) are never transmitted to the model endpoint.
-     */
-    private void refineSummaryAsync(String versionId, String diffSummary) {
-        try {
-            Properties eff = userStore.load();
-            String apiKey = firstNonBlank(
-                    System.getenv("OPENAI_API_KEY"),
-                    eff.getProperty("llm.api-key"),
-                    config.llmApiKey());
-            if (apiKey == null || apiKey.isBlank() || apiKey.contains("CHANGE_ME")) {
-                return; // no key → keep deterministic summary
-            }
-            String baseUrl = firstNonBlank(eff.getProperty("llm.base-url"), config.llmBaseUrl());
-            String model = firstNonBlank(eff.getProperty("llm.model"), config.llmModel());
-
-            String prompt = "下面是某应用配置的本次改动要点（仅包含配置项名称，不含任何取值）：\n"
-                    + diffSummary + "\n\n"
-                    + "请用不超过 20 个汉字、一句话自然地概括本次改动"
-                    + "（只依据上述要点，不要编造、不要解释、不要标点结尾）。";
-
-            Map<String, Object> reqBody = new LinkedHashMap<>();
-            reqBody.put("model", model);
-            reqBody.put("messages", List.of(Map.of("role", "user", "content", prompt)));
-            reqBody.put("temperature", 0.2);
-            reqBody.put("max_tokens", 60);
-
-            String url = baseUrl.endsWith("/") ? baseUrl + "chat/completions"
-                    : baseUrl + "/chat/completions";
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10)).build();
-            HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(20))
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(reqBody)))
-                    .build();
-
-            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return;
-            JsonNode root = MAPPER.readTree(resp.body());
-            JsonNode content = root.path("choices").path(0).path("message").path("content");
-            if (content.isMissingNode()) return;
-            String summary = content.asText("").trim();
-            if (!summary.isBlank()) {
-                historyStore.updateSummary(versionId, truncate(summary, 60));
-            }
-        } catch (Throwable t) {
-            log.debug("LLM version-summary refinement skipped: {}", t.getMessage());
-        }
-    }
-
-    private static String firstNonBlank(String... vals) {
-        for (String v : vals) {
-            if (v != null && !v.isBlank()) return v;
-        }
-        return null;
-    }
-
-    /**
-     * GET /desktop/config/history — version metadata, newest-first, no text.
-     * SPEC-CFGUI-VER-API-001.
-     */
-    public void getConfigHistory(Context ctx) {
-        List<Map<String, Object>> versions = new ArrayList<>();
-        for (ConfigHistoryStore.ConfigVersion v : historyStore.list()) {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", v.id());
-            m.put("name", v.name());
-            m.put("summary", v.summary());
-            m.put("savedAt", v.savedAt());
-            m.put("format", v.format()); // SPEC-TOML-VER-001
-            versions.add(m);
-        }
-        ctx.json(Map.of("versions", versions));
-    }
-
-    /**
-     * GET /desktop/config/history/{id} — full version including text; 404 if absent.
-     * SPEC-CFGUI-VER-API-002.
-     */
-    public void getConfigVersion(Context ctx) {
-        String id = ctx.pathParam("id");
-        Optional<ConfigHistoryStore.ConfigVersion> found = historyStore.get(id);
-        if (found.isEmpty()) {
-            ctx.status(404).result("{\"error\":\"版本不存在\"}").contentType("application/json");
-            return;
-        }
-        ConfigHistoryStore.ConfigVersion v = found.get();
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id", v.id());
-        m.put("name", v.name());
-        m.put("summary", v.summary());
-        m.put("savedAt", v.savedAt());
-        m.put("format", v.format()); // SPEC-TOML-VER-001
-        m.put("text", v.text());
-        ctx.json(m);
     }
 
     /**

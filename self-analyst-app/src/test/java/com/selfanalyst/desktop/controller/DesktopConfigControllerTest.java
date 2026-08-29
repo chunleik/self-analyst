@@ -4,14 +4,12 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
-import com.selfanalyst.desktop.store.ConfigHistoryStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.lang.reflect.Method;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -44,6 +42,11 @@ class DesktopConfigControllerTest {
         assertTrue(resp.text().contains("[embedding]"), resp.text());
         assertTrue(resp.text().contains("# base-url"), resp.text());
         assertTrue(resp.text().contains("D:\\docs"), resp.text()); // path guidance comment
+        assertTrue(resp.text().contains("# 中文："), resp.text());
+        assertTrue(resp.text().contains("# English:"), resp.text());
+        assertEquals(SupportedKeys.defaults().size(), resp.text().lines()
+                .filter(line -> line.matches("# .+ = .*  # (string|boolean|integer|float|list)"))
+                .count());
         assertTrue(resp.path().endsWith("config.toml"));
         // Template parses as valid TOML (all keys commented → empty tables).
         assertTrue(TomlSupport.parseAndFlatten(resp.text()).isEmpty());
@@ -57,6 +60,20 @@ class DesktopConfigControllerTest {
 
         assertTrue(resp.exists());
         assertEquals("[llm]\nmodel = \"x\"\n", resp.text());
+    }
+
+    @Test
+    void buildRawResponseTreatsWhitespaceOnlyFileAsEmpty(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("  \n\t");
+        var resp = controller(dir, store).buildRawResponse();
+
+        assertFalse(resp.exists());
+        assertEquals(SupportedKeys.defaults().size(), resp.text().lines()
+                .filter(line -> line.matches("# .+ = .*  # (string|boolean|integer|float|list)"))
+                .count());
+        assertTrue(resp.text().contains("# 中文："));
+        assertTrue(resp.text().contains("# English:"));
     }
 
     @Test
@@ -220,27 +237,13 @@ class DesktopConfigControllerTest {
     }
 
     @Test
-    void formatVersionNameIsTimestamp() {
-        // 2026-06-22 00:00:00 UTC → fixed format (SPEC-CFGUI-VER-TST-003)
-        String name = DesktopConfigController.formatVersionName(1781136000000L, ZoneId.of("UTC"));
-        assertTrue(name.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"), name);
-    }
+    void rawSavePreservesExistingHistoryFile(@TempDir Path dir) throws Exception {
+        Path history = dir.resolve("config-history.json");
+        java.nio.file.Files.writeString(history, "legacy-history-sentinel");
 
-    @Test
-    void computeDiffSummaryReportsAddedChangedRemoved() {
-        Properties oldP = new Properties();
-        oldP.setProperty("llm.model", "gpt-4o");
-        oldP.setProperty("aw.port", "5700");
-        Properties newP = new Properties();
-        newP.setProperty("llm.model", "gpt-4o-mini"); // changed
-        newP.setProperty("llm.api-key", "sk-x");      // added
-        // aw.port removed
+        controller(dir, new UserConfigStore(dir)).applyRawSave("[llm]\nmodel = \"gpt-4o\"\n");
 
-        String summary = DesktopConfigController.computeDiffSummary(oldP, newP);
-        assertTrue(summary.contains("新增"), summary);
-        assertTrue(summary.contains("修改"), summary);
-        assertTrue(summary.contains("删除"), summary);
-        assertTrue(summary.contains("llm.api-key"), summary);
+        assertEquals("legacy-history-sentinel", java.nio.file.Files.readString(history));
     }
 
     @Test
@@ -380,21 +383,4 @@ class DesktopConfigControllerTest {
         }
     }
 
-    @Test
-    void applyRawSaveRecordsVersionsNewestFirstWithRetention(@TempDir Path dir) throws Exception {
-        UserConfigStore store = new UserConfigStore(dir);
-        var ctrl = controller(dir, store);
-
-        for (int i = 1; i <= 12; i++) {
-            ctrl.applyRawSave("[llm]\nmodel = \"m" + i + "\"\n"); // SPEC-CFGUI-VER-TST-001/002
-        }
-
-        // Inspect via a fresh store pointed at the same memory dir.
-        ConfigHistoryStore history = new ConfigHistoryStore(dir);
-        var list = history.list();
-        assertEquals(ConfigHistoryStore.MAX_VERSIONS, list.size());
-        assertEquals("[llm]\nmodel = \"m12\"\n", list.get(0).text()); // newest first
-        assertEquals(ConfigHistoryStore.FORMAT_TOML, list.get(0).format());
-        assertTrue(list.get(0).name().matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"));
-    }
 }

@@ -22,22 +22,18 @@ import org.slf4j.LoggerFactory;
  * <p>
  * Any failure while parsing/writing/renaming is isolated — the partial temp file is
  * removed, both original files are left untouched, and startup continues (the loader
- * then falls back to {@code config.properties} per SPEC-TOML-MIG-002a). The history
- * snapshot is best-effort and does not fail the migration.
+ * then falls back to {@code config.properties} per SPEC-TOML-MIG-002a).
  */
 public final class ConfigMigration {
 
     private static final Logger log = LoggerFactory.getLogger(ConfigMigration.class);
-
-    /** Deterministic summary for the auto-migration snapshot. SPEC-TOML-MIG-001d. */
-    static final String MIGRATION_SUMMARY = "从 config.properties 自动迁移";
 
     private ConfigMigration() {}
 
     /**
      * Convert {@code {memoryDir}/config.properties} → {@code config.toml} exactly once.
      * No-op when {@code config.toml} already exists or {@code config.properties} is
-     * absent. SPEC-TOML-MIG-001a/b/c/d.
+     * absent. SPEC-TOML-MIG-001a/b/c.
      */
     public static void migrateIfNeeded(Path memoryDir) {
         Path toml = memoryDir.resolve("config.toml");
@@ -82,7 +78,6 @@ public final class ConfigMigration {
             }
             log.info("已将 config.properties 迁移为 config.toml（原文件备份为 config.properties.bak）");
 
-            recordSnapshot(memoryDir, tomlText);
         } catch (Exception e) {
             // Isolate the failure: drop any partial temp, leave both files intact.
             log.error("config.properties → config.toml 迁移失败，保持原文件不变: {}", e.getMessage());
@@ -92,15 +87,4 @@ public final class ConfigMigration {
         }
     }
 
-    /** Best-effort migration history snapshot; its failure does not fail migration. */
-    private static void recordSnapshot(Path memoryDir, String tomlText) {
-        try {
-            String name = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-                    .format(java.time.Instant.now().atZone(java.time.ZoneId.systemDefault()));
-            new ConfigHistoryStore(memoryDir).add(
-                    name, MIGRATION_SUMMARY, tomlText, ConfigHistoryStore.FORMAT_TOML);
-        } catch (Exception e) {
-            log.warn("迁移快照写入失败（迁移本身已成功）: {}", e.getMessage());
-        }
-    }
 }

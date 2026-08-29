@@ -186,8 +186,6 @@ public class DesktopServer {
         app.put("/desktop/config", configCtrl::putConfig);
         app.get("/desktop/config/raw", configCtrl::getRawConfig);
         app.put("/desktop/config/raw", configCtrl::putRawConfig);
-        app.get("/desktop/config/history", configCtrl::getConfigHistory);
-        app.get("/desktop/config/history/{id}", configCtrl::getConfigVersion);
         app.post("/desktop/config/test-llm", configCtrl::testLlm);
         app.post("/desktop/config/test-embedding", configCtrl::testEmbedding);
 

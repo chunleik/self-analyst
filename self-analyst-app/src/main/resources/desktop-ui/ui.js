@@ -289,14 +289,12 @@ function loadConfig() {
     .then(function (resp) {
       state.configRawText = resp.text || "";
       state.configRawBaseline = resp.text || "";
-      state.configSupportedKeys = (resp && resp.supportedKeys) || [];
+      state.configPath = (resp && resp.path) || "config.toml";
       state.configLoadError = false;
       state.configDirty = false;
       state.configSaveResult = null;
       state.configSaving = false;
-      state.configHistoryExpandedId = null;
       renderConfigTab();
-      loadConfigHistory().then(renderConfigTab);
     })
     .catch(function (err) {
       // Load failed → read-only error state, no saving on unknown content.

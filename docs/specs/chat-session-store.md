@@ -33,7 +33,7 @@
 
 用户诉求：**把会话改为后端持久化**，落在与 `tasks.json` 同级的 `{memoryDir}` 数据目录；采用 REST CRUD 粒度的接口；**会话数量不设上限**；为避免"单文件随会话累积而整文件重写变慢"，存储采用**按会话分片 + 轻量索引**。Phase 2 同时把模型历史切换为按 session 持久化的 AgentState，并修订发送、重试与删除的生命周期语义；布局、视觉、键盘交互和业务上下文字段仍由 `desktop-chat-tab.md` 约束。
 
-后端持久化范式已在 `TaskStore`（`tasks.json`，临时文件 + 原子 rename）与 `UserConfigStore` / `ConfigHistoryStore` 中确立；会话摘要的"LLM 生成 + 确定性兜底 + 异步不阻断"范式已在配置版本历史（`SPEC-CFGUI-VER-DEC-002`）中确立。本特性沿用这两套范式。
+后端持久化范式已在 `TaskStore`（`tasks.json`，临时文件 + 原子 rename）与 `UserConfigStore` 中确立；本特性沿用该原子写入范式。
 
 ---
 

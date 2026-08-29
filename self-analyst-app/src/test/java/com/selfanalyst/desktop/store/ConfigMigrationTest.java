@@ -21,8 +21,8 @@ class ConfigMigrationTest {
     }
 
     @Test
-    void convertsRenamesAndSnapshots(@TempDir Path dir) throws Exception {
-        // SPEC-TOML-TST-008: toml generated, old file renamed .bak, snapshot created.
+    void convertsAndRenames(@TempDir Path dir) throws Exception {
+        // SPEC-TOML-TST-008: toml generated and old file renamed .bak.
         writeProps(dir, "llm.model=gpt-4o\naw.port=5601\n");
 
         ConfigMigration.migrateIfNeeded(dir);
@@ -37,10 +37,20 @@ class ConfigMigrationTest {
         assertEquals("gpt-4o", flat.get("llm.model"));
         assertEquals("5601", flat.get("aw.port"));
 
-        var history = new ConfigHistoryStore(dir).list();
-        assertEquals(1, history.size());
-        assertEquals("从 config.properties 自动迁移", history.get(0).summary());
-        assertEquals(ConfigHistoryStore.FORMAT_TOML, history.get(0).format());
+        assertFalse(Files.exists(dir.resolve("config-history.json")));
+    }
+
+    @Test
+    void migrationPreservesExistingHistoryFile(@TempDir Path dir) throws Exception {
+        byte[] sentinel = "legacy-history-sentinel".getBytes(StandardCharsets.UTF_8);
+        Files.write(dir.resolve("config-history.json"), sentinel);
+        writeProps(dir, "llm.model=gpt-4o\n");
+
+        ConfigMigration.migrateIfNeeded(dir);
+
+        assertTrue(Files.exists(dir.resolve("config.toml")));
+        assertEquals("legacy-history-sentinel",
+                Files.readString(dir.resolve("config-history.json"), StandardCharsets.UTF_8));
     }
 
     @Test

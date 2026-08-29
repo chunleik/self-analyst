@@ -1117,11 +1117,6 @@ input:checked + .toggle-switch::after {
 }
 
 .config-action-bar {
-  position: fixed;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1245,18 +1240,14 @@ input:checked + .toggle-switch::after {
   overflow-y: auto;
 }
 
-/* Config grid inside modal: single column, sticky action bar */
+/* Config grid inside modal: single column */
 .config-modal .config-grid {
   grid-template-columns: 1fr;
   padding: 16px 18px;
 }
 .config-modal .config-action-bar {
-  position: sticky;
-  left: auto;
-  right: auto;
-  bottom: 0;
   grid-column: 1 / -1;
-  margin-top: 4px;
+  margin: 0 0 10px;
 }
 
 /* Raw text config editor (SPEC-CFGUI-UI-001a) */
@@ -1265,6 +1256,29 @@ input:checked + .toggle-switch::after {
   justify-content: flex-end;
   gap: 8px;
   margin-bottom: 10px;
+}
+
+.config-file-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.config-file-heading code {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.config-file-heading span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary, #888);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .config-raw-editor {
@@ -1298,158 +1312,6 @@ input:checked + .toggle-switch::after {
   background: var(--red-dim);
   border: 1px solid var(--red);
   font-size: 13px;
-}
-
-/* Version history (SPEC-CFGUI-VER-UI) */
-.config-toolbar-spacer {
-  flex: 1;
-}
-
-.config-history-panel,
-.config-allkeys-panel {
-  margin-bottom: 10px;
-  overflow-y: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-surface);
-}
-
-.config-history-panel {
-  max-height: 260px;
-}
-
-.config-allkeys-panel {
-  max-height: 300px;
-}
-
-.config-history-preview {
-  margin: 0;
-  padding: 10px 12px;
-  max-height: 200px;
-  overflow: auto;
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: pre;
-  background: var(--bg-input);
-  border-top: 1px solid var(--border-color);
-  color: var(--text-primary);
-}
-
-.config-history-empty {
-  padding: 14px;
-  text-align: center;
-  color: var(--text-secondary, #888);
-  font-size: 13px;
-}
-
-.config-history-item {
-  border-bottom: 1px solid var(--border-color);
-}
-.config-history-item:last-child {
-  border-bottom: none;
-}
-
-.config-history-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-}
-
-.config-history-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.config-history-name {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
-  color: var(--text-primary);
-}
-
-.config-history-summary {
-  font-size: 12px;
-  color: var(--text-secondary, #888);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.config-history-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-/* Pre-migration (properties) snapshots: view-only badge + disabled 切换.
-   SPEC-TOML-VER-002. */
-.config-version-legacy {
-  align-self: flex-start;
-  padding: 1px 7px;
-  border-radius: 10px;
-  font-size: 11px;
-  color: var(--text-secondary, #888);
-  background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  white-space: nowrap;
-}
-
-.config-history-switch[disabled] {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* All configurable keys reference panel (SPEC-TOML-UI-004) */
-.config-allkeys-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border-color);
-}
-.config-allkeys-item:last-child {
-  border-bottom: none;
-}
-
-.config-allkeys-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-
-.config-allkeys-assign {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 12px;
-  color: var(--text-primary);
-  white-space: pre;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.config-allkeys-type {
-  font-size: 11px;
-  color: var(--text-secondary, #888);
-  flex-shrink: 0;
-}
-
-.config-allkeys-actions {
-  flex-shrink: 0;
-}
-
-.config-allkeys-present {
-  font-size: 11px;
-  color: var(--text-secondary, #888);
-  padding: 1px 7px;
-  border-radius: 10px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-input);
-  white-space: nowrap;
 }
 
 /* ===== CHAT DRAWER ===== */
@@ -2011,42 +1873,6 @@ input:checked + .toggle-switch::after {
   margin-right: 6px;
 }
 
-.memory-manager-search {
-  width: 100%;
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-input);
-  color: var(--text-primary);
-}
-.memory-manager-add-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  margin-bottom: 10px;
-}
-.memory-manager-add-row .memory-draft-input {
-  flex: 1;
-  margin-bottom: 0;
-}
-.memory-manager-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.memory-manager-item {
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 10px;
-  background: var(--bg-card);
-}
-.memory-manager-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
 /* Responsive */
 @media (max-width: 1100px) {
   .chat-tab-layout {
@@ -2146,7 +1972,6 @@ input:checked + .toggle-switch::after {
 
   .config-grid {
     grid-template-columns: 1fr;
-    padding-bottom: 120px;
   }
 
   .config-action-bar {

@@ -22,10 +22,18 @@ public final class SupportedKeys {
     /** A supported key's default value and declared TOML type. */
     public record Spec(String defaultValue, KeyType type) {}
 
+    /** Human-readable help rendered above each entry in the editable config template. */
+    public record Description(String zh, String en) {}
+
     private static final LinkedHashMap<String, Spec> KEYS = new LinkedHashMap<>();
+    private static final LinkedHashMap<String, Description> DESCRIPTIONS = new LinkedHashMap<>();
 
     private static void put(String key, String def, KeyType type) {
         KEYS.put(key, new Spec(def, type));
+    }
+
+    private static void describe(String key, String zh, String en) {
+        DESCRIPTIONS.put(key, new Description(zh, en));
     }
 
     static {
@@ -117,6 +125,100 @@ public final class SupportedKeys {
         put("websearch.api-key", "", KeyType.STRING);
 
         put("app.language", "auto", KeyType.STRING);
+
+        describe("log.dir", "应用日志的保存目录。", "Directory where application logs are stored.");
+        describe("memory.dir", "用户数据、记忆与配置文件的根目录。", "Root directory for user data, memories, and configuration.");
+
+        describe("llm.api-key", "LLM 服务的 API 密钥；留空时尝试读取环境变量。", "API key for the LLM service; when empty, the environment variable is used.");
+        describe("llm.base-url", "OpenAI 兼容 LLM API 的基础地址。", "Base URL of the OpenAI-compatible LLM API.");
+        describe("llm.model", "用于对话、总结和 Agent 的模型名称。", "Model name used for chat, summaries, and the agent.");
+        describe("llm.temperature", "模型采样温度，值越高输出越随机（0–2）。", "Model sampling temperature; higher values are more random (0–2).");
+        describe("llm.max-tokens", "单次 LLM 响应的最大 token 数；0 表示不限。", "Maximum tokens in one LLM response; 0 means unlimited.");
+        describe("llm.agent.maxIters", "Agent 单次任务允许的最大推理迭代次数。", "Maximum reasoning iterations allowed for one agent task.");
+        describe("llm.budget.mode", "Token 预算模式：off、warn 或 block。", "Token budget mode: off, warn, or block.");
+        describe("llm.budget.dailyTokens", "每日 token 预算；0 表示不限。", "Daily token budget; 0 means unlimited.");
+        describe("llm.budget.warnRatio", "达到每日预算此比例时发出警告（0–1）。", "Warn when this fraction of the daily budget is reached (0–1).");
+
+        describe("headroom.enabled", "是否通过 Headroom 代理发送 LLM 请求。", "Whether to send LLM requests through the Headroom proxy.");
+        describe("headroom.proxy-url", "Headroom OpenAI 兼容代理地址。", "URL of the OpenAI-compatible Headroom proxy.");
+        describe("headroom.stats.enabled", "是否采集并展示 Headroom 用量统计。", "Whether to collect and display Headroom usage statistics.");
+        describe("headroom.output-shaper", "是否启用 Headroom 输出整形。", "Whether to enable Headroom output shaping.");
+
+        describe("agent.summaryRefreshMinutes", "Agent 状态摘要的刷新间隔（分钟）。", "Refresh interval for agent status summaries, in minutes.");
+        describe("agent.allowAgentTasks", "是否允许 Agent 创建和更新任务。", "Whether the agent may create and update tasks.");
+        describe("agent.cacheSummaries", "是否缓存生成的摘要以减少重复调用。", "Whether to cache generated summaries to reduce repeated calls.");
+        describe("agent.compaction.enabled", "是否自动压缩过长的对话上下文。", "Whether to compact long conversation context automatically.");
+        describe("agent.compaction.triggerMessages", "消息数达到此值时触发上下文压缩；0 表示禁用此条件。", "Compact when this message count is reached; 0 disables this trigger.");
+        describe("agent.compaction.triggerTokens", "Token 数达到此值时触发上下文压缩；0 表示禁用此条件。", "Compact when this token count is reached; 0 disables this trigger.");
+        describe("agent.compaction.keepMessages", "压缩后保留的最近消息数。", "Number of recent messages retained after compaction.");
+        describe("agent.compaction.keepTokens", "压缩后保留的最近 token 数。", "Number of recent tokens retained after compaction.");
+
+        describe("desktop.hideToTray", "关闭主窗口时是否隐藏到系统托盘。", "Whether closing the main window hides it in the system tray.");
+        describe("desktop.autoOpenWindow", "启动桌面端后是否自动打开主窗口。", "Whether to open the main window automatically at startup.");
+        describe("desktop.autoStartBackend", "启动桌面端时是否自动启动后端服务。", "Whether to start the backend service automatically with the desktop app.");
+        describe("desktop.summary.maxTimelineLlm", "每次摘要最多使用 LLM 精炼的时间线条目数；0 表示禁用。", "Maximum timeline entries refined by the LLM per summary; 0 disables it.");
+
+        describe("aw.mode", "ActivityWatch 运行模式：embedded 或 external。", "ActivityWatch mode: embedded or external.");
+        describe("aw.port", "内嵌 ActivityWatch 服务监听端口。", "Listening port for the embedded ActivityWatch service.");
+        describe("aw.base-url", "ActivityWatch HTTP API 基础地址。", "Base URL of the ActivityWatch HTTP API.");
+        describe("aw.timeout", "ActivityWatch HTTP 请求超时时间（毫秒）。", "Timeout for ActivityWatch HTTP requests, in milliseconds.");
+        describe("aw.data-dir", "ActivityWatch 数据文件目录。", "Directory for ActivityWatch data files.");
+        describe("aw.collection.window", "是否采集活动窗口与应用信息。", "Whether to collect active-window and application information.");
+        describe("aw.collection.afk", "是否采集用户离开/活跃状态。", "Whether to collect user AFK/active status.");
+        describe("aw.collection.content", "是否采集窗口内容用于本地分析。", "Whether to collect window content for local analysis.");
+        describe("aw.collection.content.pollMs", "窗口内容采集轮询间隔（毫秒）。", "Polling interval for window-content collection, in milliseconds.");
+        describe("aw.ocr.engine", "OCR 引擎：auto 或受支持的具体引擎名称。", "OCR engine: auto or a specific supported engine name.");
+        describe("aw.audio.enabled", "是否启用音频采集与转写。", "Whether to enable audio capture and transcription.");
+        describe("aw.audio.whisperPath", "本地 Whisper 可执行文件或目录路径。", "Path to the local Whisper executable or directory.");
+        describe("aw.audio.vadThreshold", "语音活动检测阈值（0–1）。", "Voice-activity detection threshold (0–1).");
+        describe("aw.audio.source", "音频来源：mic、system 或 both。", "Audio source: mic, system, or both.");
+        describe("aw.audio.engine", "转写引擎：local-whisper、cloud-asr 或 auto。", "Transcription engine: local-whisper, cloud-asr, or auto.");
+        describe("aw.audio.model", "云端语音转写使用的模型名称。", "Model name used for cloud speech transcription.");
+        describe("aw.audio.chunkSeconds", "每个音频转写分块的时长（秒）。", "Duration of each transcription audio chunk, in seconds.");
+
+        describe("ocr.sample.dir", "OCR 调试样本的保存目录。", "Directory where OCR debug samples are stored.");
+        describe("ocr.excluded.apps", "不进行 OCR 的应用名列表，以逗号分隔。", "Comma-separated application names excluded from OCR.");
+        describe("ocr.title-strip-height", "截图顶部忽略的标题栏高度（像素）。", "Height of the top title-bar strip ignored in screenshots, in pixels.");
+
+        describe("wiki.enabled", "是否启用个人 Wiki 摘要生成。", "Whether to enable personal wiki summary generation.");
+        describe("wiki.backfill.enabled", "是否为历史活动补生成 Wiki 内容。", "Whether to backfill wiki content for historical activity.");
+        describe("wiki.worker.intervalSeconds", "Wiki 后台任务运行间隔（秒）。", "Interval between wiki background runs, in seconds.");
+        describe("wiki.prompt.maxContentChars", "单次 Wiki 提示词包含的最大内容字符数。", "Maximum content characters included in one wiki prompt.");
+        describe("wiki.topApps.limit", "Wiki 摘要统计的高频应用数量上限。", "Maximum number of top applications included in wiki summaries.");
+        describe("wiki.semantic.enabled", "是否为 Wiki 内容启用语义检索。", "Whether to enable semantic search for wiki content.");
+        describe("wiki.semantic.index-dir", "Wiki 语义索引的保存目录。", "Directory where the wiki semantic index is stored.");
+        describe("wiki.semantic.topK", "Wiki 语义检索返回的候选数量。", "Number of candidates returned by wiki semantic search.");
+
+        describe("embedding.enabled", "是否启用 Embedding 与语义检索功能。", "Whether to enable embeddings and semantic search.");
+        describe("embedding.base-url", "OpenAI 兼容 Embedding API 的基础地址。", "Base URL of the OpenAI-compatible embedding API.");
+        describe("embedding.api-key", "Embedding 服务的 API 密钥；留空时复用 LLM 密钥。", "API key for the embedding service; when empty, the LLM key is reused.");
+        describe("embedding.model", "生成向量使用的 Embedding 模型名称。", "Embedding model name used to generate vectors.");
+        describe("embedding.dimensions", "Embedding 向量维度。", "Number of dimensions in generated embedding vectors.");
+        describe("embedding.send-encoding-format", "是否向服务发送 encoding_format 参数。", "Whether to send the encoding_format parameter to the service.");
+
+        describe("file.watch.enabled", "是否监控本地文件并建立内容索引。", "Whether to watch local files and index their content.");
+        describe("file.watch.paths", "要监控的文件或目录路径，以逗号分隔。", "Comma-separated files or directories to watch.");
+        describe("file.watch.maxFileSizeKb", "允许索引的单个文件最大大小（KB）。", "Maximum size of one indexed file, in KB.");
+        describe("file.watch.maxContentChars", "每个文件最多提取并索引的字符数。", "Maximum characters extracted and indexed from each file.");
+        describe("file.watch.worker.intervalSeconds", "文件监控后台扫描间隔（秒）。", "Background file-watch scan interval, in seconds.");
+        describe("file.watch.debounceSeconds", "文件变更后的防抖等待时间（秒）。", "Debounce delay after a file change, in seconds.");
+        describe("file.watch.minReindexIntervalMinutes", "同一文件两次重建索引的最小间隔（分钟）。", "Minimum interval between reindexing the same file, in minutes.");
+        describe("file.watch.heartbeatThrottleSeconds", "文件监控心跳事件的最小间隔（秒）。", "Minimum interval between file-watch heartbeat events, in seconds.");
+        describe("file.watch.extensions", "允许索引的文件扩展名列表。", "List of file extensions allowed for indexing.");
+        describe("file.watch.excludeDirs", "扫描时排除的目录名列表。", "List of directory names excluded from scanning.");
+        describe("file.watch.excludeGlobs", "扫描时排除的 glob 模式列表。", "List of glob patterns excluded from scanning.");
+        describe("file.watch.semantic.enabled", "是否为文件内容启用语义索引。", "Whether to enable semantic indexing for file content.");
+        describe("file.watch.semantic.index-dir", "文件语义索引的保存目录。", "Directory where the file semantic index is stored.");
+
+        describe("websearch.enabled", "是否允许 Agent 使用网络搜索。", "Whether to allow the agent to use web search.");
+        describe("websearch.mcp-url", "网络搜索 MCP 服务地址。", "URL of the web-search MCP service.");
+        describe("websearch.api-key", "网络搜索服务的 API 密钥。", "API key for the web-search service.");
+
+        describe("app.language", "界面与提示词语言：auto、zh 或 en；修改后需重启。", "UI and prompt language: auto, zh, or en; restart required after changing it.");
+
+        if (!DESCRIPTIONS.keySet().equals(KEYS.keySet())) {
+            throw new IllegalStateException("Every supported key must have a bilingual description");
+        }
     }
 
     /** All supported keys → default value, in declaration order. */
@@ -131,6 +233,11 @@ public final class SupportedKeys {
         LinkedHashMap<String, KeyType> m = new LinkedHashMap<>();
         KEYS.forEach((k, v) -> m.put(k, v.type()));
         return m;
+    }
+
+    /** All supported keys → bilingual descriptions, in declaration order. */
+    public static LinkedHashMap<String, Description> descriptions() {
+        return new LinkedHashMap<>(DESCRIPTIONS);
     }
 
     /** Whether {@code key} is in the supported whitelist. */

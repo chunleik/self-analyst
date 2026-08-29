@@ -25,9 +25,7 @@ assert.match(chat, /memory-reject/, "chat.js should expose pending rejection");
 assert.match(chat, /memory-panel-disable/, "chat.js should let users disable active memories");
 
 const config = read("../../main/resources/desktop-ui/config.js");
-assert.match(config, /renderMemoryManager/, "config.js should render memory manager");
-assert.match(config, /memory-manager-add/, "config.js should expose global manual memory add");
-assert.match(config, /memory-manager-edit/, "config.js should expose global memory edit");
+assert.doesNotMatch(config, /renderMemoryManager|memory-manager-/, "config modal must not contain memory management");
 
 const i18n = read("../../main/resources/desktop-ui/i18n.js");
 [
@@ -36,7 +34,6 @@ const i18n = read("../../main/resources/desktop-ui/i18n.js");
   "memory.policy.smart",
   "memory.policy.confirmAll",
   "memory.policy.off",
-  "memory.managerTitle",
   "memory.edit",
   "memory.editApprove",
   "memory.editContent",

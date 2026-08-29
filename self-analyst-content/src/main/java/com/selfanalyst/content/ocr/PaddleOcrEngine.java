@@ -10,7 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
+import java.util.Optional;
 
 /**
  * PaddleOCR-json powered OCR engine — persistent process mode.
@@ -82,14 +82,45 @@ public class PaddleOcrEngine implements OcrEngine {
 
     // ── Process lifecycle ───────────────────────────────────────────
 
-    /** Kill any pre-existing instances left over from a previous force-killed JVM. */
+    /** Kill SelfAnalyst-owned instances left over from a previous force-killed JVM. */
     private void killOrphanedInstances() {
+        ProcessHandle.allProcesses()
+                .filter(ProcessHandle::isAlive)
+                .filter(candidate -> isOrphanedSelfAnalystOcrProcess(
+                        exePath,
+                        candidate.info().command(),
+                        candidate.parent().filter(ProcessHandle::isAlive).isPresent()))
+                .forEach(candidate -> {
+                    try { candidate.destroyForcibly(); } catch (Exception ignored) {}
+                });
+    }
+
+    /**
+     * The bundled executable path establishes ownership, while the absence of a live parent
+     * distinguishes an orphan from an OCR process used by another active SelfAnalyst instance.
+     */
+    static boolean isOrphanedSelfAnalystOcrProcess(Path selfAnalystExecutable,
+                                                   Optional<String> processCommand,
+                                                   boolean hasLiveParent) {
+        if (processCommand.isEmpty() || hasLiveParent) return false;
+
+        Path expected = selfAnalystExecutable.toAbsolutePath().normalize();
+        Path actual;
         try {
-            new ProcessBuilder("taskkill", "/F", "/IM", exePath.getFileName().toString())
-                    .redirectErrorStream(true)
-                    .start()
-                    .waitFor(5, TimeUnit.SECONDS);
-        } catch (Exception ignored) {}
+            actual = Path.of(processCommand.get()).toAbsolutePath().normalize();
+        } catch (RuntimeException invalidPath) {
+            return false;
+        }
+
+        String expectedPath = expected.toString();
+        String actualPath = actual.toString();
+        return isWindows()
+                ? expectedPath.equalsIgnoreCase(actualPath)
+                : expectedPath.equals(actualPath);
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").startsWith("Windows");
     }
 
     private void startProcess() throws IOException {

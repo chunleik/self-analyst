@@ -182,13 +182,15 @@ public interface OcrEngine {
 ### SPEC-OCR-002: PaddleOcrEngine (默认首选)
 
 - 使用 PaddleOCR-json v1.4.1 独立可执行文件 (`tools/PaddleOCR-json/PaddleOCR-json.exe`)
-- 通过 `ProcessBuilder` 命令行 one-shot 调用
-  - 输入：临时 PNG 文件路径 (`-image_path=...`)
+- 通过 `ProcessBuilder` 启动常驻子进程，并使用 stdin/stdout 管道调用
+  - 输入：包含临时 PNG 绝对路径的单行 JSON (`{"image_path":"..."}`)
   - 输出：JSON 格式识别结果 (`{"code":100,"data":[{"text":"...","box":[...], "score":0.98}]}`)
   - 工作目录设为 exe 所在目录以确保模型文件正确加载
+  - 启动时只清理由 SelfAnalyst 工具路径启动且父进程已不存在的遗留进程，不清理其他目录中的同名进程或其他活跃 SelfAnalyst 实例的 OCR 进程
 - **SPEC-OCR-002a**: code=100 时拼接所有 `data[].text` 字段，code≠100 时返回 `""`
 - **SPEC-OCR-002b**: 识别完成后自动删除临时 PNG 文件
 - **SPEC-OCR-002c**: exe 不存在时 `isAvailable()` 返回 false
+- **SPEC-OCR-002d**: 遗留进程清理必须按规范化完整可执行文件路径判断归属，并确认父进程已不存在；不得仅按进程名清理，也不得清理其他活跃 SelfAnalyst 实例的 OCR 进程
 
 ### SPEC-OCR-003: TesseractOcrEngine (回退引擎)
 

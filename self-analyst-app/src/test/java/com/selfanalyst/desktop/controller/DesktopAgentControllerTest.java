@@ -5,12 +5,10 @@ import com.selfanalyst.desktop.store.ChatSessionStore;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 
@@ -98,27 +96,14 @@ class DesktopAgentControllerTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void usageSnapshotIncludesFreshHeadroomStatsWhenAgentMissing(@TempDir java.nio.file.Path dir) {
-        var config = com.selfanalyst.config.Config.testDefaults(dir);
-        AtomicInteger statsCalls = new AtomicInteger();
-        var headroom = new com.selfanalyst.headroom.HeadroomService(
-                true,
-                "http://127.0.0.1:8787/v1",
-                config.llmBaseUrl(),
-                true,
-                false,
-                (uri, timeout) -> com.selfanalyst.headroom.HeadroomService.ProbeResult.ok("reachable"),
-                (uri, timeout) -> com.selfanalyst.headroom.HeadroomService.StatsResult.ok(
-                        Map.of("requestCount", statsCalls.incrementAndGet())));
-        var ctrl = new DesktopAgentController(null, null, null, null, config, headroom);
+    void usagePayloadOmitsRemovedHeadroomSection() {
+        DesktopAgentController controller = new DesktopAgentController(
+                null, null, null, null, null);
 
-        var usage = ctrl.usagePayload();
+        Map<String, Object> usage = controller.usagePayload();
 
         assertEquals("off", usage.get("mode"));
-        assertTrue(usage.containsKey("headroom"));
-        Map<String, Object> headroomPayload = (Map<String, Object>) usage.get("headroom");
-        assertEquals(2L, headroomPayload.get("requestCount"));
+        assertFalse(usage.containsKey("headroom"));
     }
 
     private static ChatSessionStore.Message visible(

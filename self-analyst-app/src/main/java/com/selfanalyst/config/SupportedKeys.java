@@ -50,11 +50,6 @@ public final class SupportedKeys {
         put("llm.budget.dailyTokens", "100000000", KeyType.INTEGER);
         put("llm.budget.warnRatio", "0.8", KeyType.FLOAT);
 
-        put("headroom.enabled", "false", KeyType.BOOLEAN);
-        put("headroom.proxy-url", "http://127.0.0.1:8787/v1", KeyType.STRING);
-        put("headroom.stats.enabled", "true", KeyType.BOOLEAN);
-        put("headroom.output-shaper", "false", KeyType.BOOLEAN);
-
         put("agent.summaryRefreshMinutes", "5", KeyType.INTEGER);
         put("agent.allowAgentTasks", "false", KeyType.BOOLEAN);
         put("agent.cacheSummaries", "true", KeyType.BOOLEAN);
@@ -138,11 +133,6 @@ public final class SupportedKeys {
         describe("llm.budget.mode", "Token 预算模式：off、warn 或 block。", "Token budget mode: off, warn, or block.");
         describe("llm.budget.dailyTokens", "每日 token 预算；0 表示不限。", "Daily token budget; 0 means unlimited.");
         describe("llm.budget.warnRatio", "达到每日预算此比例时发出警告（0–1）。", "Warn when this fraction of the daily budget is reached (0–1).");
-
-        describe("headroom.enabled", "是否通过 Headroom 代理发送 LLM 请求。", "Whether to send LLM requests through the Headroom proxy.");
-        describe("headroom.proxy-url", "Headroom OpenAI 兼容代理地址。", "URL of the OpenAI-compatible Headroom proxy.");
-        describe("headroom.stats.enabled", "是否采集并展示 Headroom 用量统计。", "Whether to collect and display Headroom usage statistics.");
-        describe("headroom.output-shaper", "是否启用 Headroom 输出整形。", "Whether to enable Headroom output shaping.");
 
         describe("agent.summaryRefreshMinutes", "Agent 状态摘要的刷新间隔（分钟）。", "Refresh interval for agent status summaries, in minutes.");
         describe("agent.allowAgentTasks", "是否允许 Agent 创建和更新任务。", "Whether the agent may create and update tasks.");

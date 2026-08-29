@@ -109,17 +109,31 @@ class DesktopConfigControllerTest {
         assertTrue(defaults.containsKey("file.watch.paths"));
         assertTrue(defaults.containsKey("llm.budget.dailyTokens"));
         assertTrue(defaults.containsKey("desktop.summary.maxTimelineLlm"));
+        assertFalse(defaults.keySet().stream().anyMatch(key -> key.startsWith("headroom.")));
     }
 
     @Test
-    void supportedKeysIncludeHeadroomDefaults() {
-        var keys = DesktopConfigController.supportedKeyInfos().stream()
-                .collect(java.util.stream.Collectors.toMap(k -> k.key(), k -> k.assignment()));
+    void configPayloadOmitsRemovedHeadroomSection(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("[headroom]\nenabled = true\n");
 
-        assertEquals("headroom.enabled = false", keys.get("headroom.enabled"));
-        assertEquals("headroom.proxy-url = \"http://127.0.0.1:8787/v1\"", keys.get("headroom.proxy-url"));
-        assertEquals("headroom.stats.enabled = true", keys.get("headroom.stats.enabled"));
-        assertEquals("headroom.output-shaper = false", keys.get("headroom.output-shaper"));
+        Map<String, Object> payload = controller(dir, store).configPayload();
+
+        assertFalse(payload.containsKey("headroom"));
+    }
+
+    @Test
+    void structuredSavePreservesIgnoredLegacyHeadroomKeys(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("[headroom]\nenabled = true\nproxy-url = \"http://127.0.0.1:8787/v1\"\n");
+        var ctrl = controller(dir, store);
+
+        ctrl.applyStructuredSave(Map.of("desktop", Map.of("hideToTray", false)));
+
+        Properties saved = store.loadUser();
+        assertEquals("true", saved.getProperty("headroom.enabled"));
+        assertEquals("http://127.0.0.1:8787/v1", saved.getProperty("headroom.proxy-url"));
+        assertEquals("false", saved.getProperty("desktop.hideToTray"));
     }
 
     @Test
@@ -141,12 +155,7 @@ class DesktopConfigControllerTest {
                 + "[llm.budget]\n"
                 + "dailyTokens = 100000000\n"
                 + "[desktop.summary]\n"
-                + "maxTimelineLlm = 4\n"
-                + "[headroom]\n"
-                + "enabled = false\n"
-                + "proxy-url = \"http://127.0.0.1:8787/v1\"\n"
-                + "stats.enabled = true\n"
-                + "output-shaper = false\n";
+                + "maxTimelineLlm = 4\n";
 
         var result = ctrl.applyRawSave(text);
 
@@ -247,28 +256,6 @@ class DesktopConfigControllerTest {
     }
 
     @Test
-    void structuredPutMapsHeadroomLocalKeysWithoutTouchingAudio(@TempDir Path dir) throws Exception {
-        UserConfigStore store = new UserConfigStore(dir);
-        var ctrl = controller(dir, store);
-
-        ctrl.applyStructuredSave(Map.of(
-                "headroom", Map.of(
-                        "enabled", true,
-                        "proxy-url", "http://127.0.0.1:8788/v1",
-                        "stats", Map.of("enabled", false),
-                        "output-shaper", true
-                )
-        ));
-
-        Properties user = store.loadUser();
-        assertEquals("true", user.getProperty("headroom.enabled"));
-        assertEquals("http://127.0.0.1:8788/v1", user.getProperty("headroom.proxy-url"));
-        assertEquals("false", user.getProperty("headroom.stats.enabled"));
-        assertEquals("true", user.getProperty("headroom.output-shaper"));
-        assertNull(user.getProperty("aw.audio.enabled"));
-    }
-
-    @Test
     void structuredPutMapsNestedAgentCompactionKeys(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         var ctrl = controller(dir, store);
@@ -284,44 +271,6 @@ class DesktopConfigControllerTest {
         assertEquals("24", user.getProperty("agent.compaction.triggerMessages"));
         assertEquals("8", user.getProperty("agent.compaction.keepMessages"));
         assertTrue(result.restartRequired().contains("agent.compaction.triggerMessages"));
-    }
-
-    @Test
-    void structuredPutDoesNotOverrideUnchangedHeadroomDefaults(@TempDir Path dir) throws Exception {
-        UserConfigStore store = new UserConfigStore(dir);
-        var ctrl = controller(dir, store);
-
-        var result = ctrl.applyStructuredSave(Map.of(
-                "headroom", Map.of(
-                        "enabled", false,
-                        "proxy-url", "http://127.0.0.1:8787/v1",
-                        "stats", Map.of("enabled", true),
-                        "output-shaper", false
-                )
-        ));
-
-        assertTrue(result.restartRequired().isEmpty(), result.restartRequired().toString());
-        Properties user = store.loadUser();
-        assertNull(user.getProperty("headroom.enabled"));
-        assertNull(user.getProperty("headroom.proxy-url"));
-        assertNull(user.getProperty("headroom.stats.enabled"));
-        assertNull(user.getProperty("headroom.output-shaper"));
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void structuredConfigIncludesHeadroomSection(@TempDir Path dir) throws Exception {
-        UserConfigStore store = new UserConfigStore(dir);
-        store.saveRaw("[headroom]\nenabled = true\nproxy-url = \"http://127.0.0.1:8787/v1\"\n");
-        var ctrl = controller(dir, store);
-        Properties effective = store.load();
-
-        Map<String, Map<String, Object>> headroom = invokeSection(ctrl, "buildHeadroomSection", effective);
-
-        assertEquals("true", headroom.get("headroomEnabled").get("effectiveValue"));
-        assertEquals("http://127.0.0.1:8787/v1", headroom.get("headroomProxyUrl").get("effectiveValue"));
-        assertEquals("true", headroom.get("headroomStatsEnabled").get("effectiveValue"));
-        assertEquals("false", headroom.get("headroomOutputShaper").get("effectiveValue"));
     }
 
     @Test

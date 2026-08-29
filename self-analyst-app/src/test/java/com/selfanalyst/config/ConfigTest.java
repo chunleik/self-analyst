@@ -33,25 +33,8 @@ class ConfigTest {
     }
 
     @Test
-    void defaultsKeepHeadroomDisabledAndPointAtLocalProxy() throws Exception {
-        Path dir = Files.createTempDirectory("config-headroom-defaults");
-        withMemoryDir(dir, () -> {
-            Config c = Config.load();
-            assertFalse(c.headroomEnabled());
-            assertEquals("http://127.0.0.1:8787/v1", c.headroomProxyUrl());
-            assertTrue(c.headroomStatsEnabled());
-            assertFalse(c.headroomOutputShaper());
-        });
-    }
-
-    @Test
-    void testDefaultsIncludeHeadroomDefaults() throws Exception {
-        Path dir = Files.createTempDirectory("config-headroom-test-defaults");
+    void testDefaultsDisableCompaction(@TempDir Path dir) {
         Config c = Config.testDefaults(dir);
-        assertFalse(c.headroomEnabled());
-        assertEquals("http://127.0.0.1:8787/v1", c.headroomProxyUrl());
-        assertTrue(c.headroomStatsEnabled());
-        assertFalse(c.headroomOutputShaper());
         assertFalse(c.agentCompactionEnabled(), "unit tests opt in to compaction explicitly");
     }
 
@@ -109,27 +92,6 @@ class ConfigTest {
             assertEquals(10, c.agentCompactionKeepMessages());
             assertEquals(5000, c.agentCompactionKeepTokens(),
                     "token-only mode needs a positive cutoff below its trigger");
-        });
-    }
-
-    @Test
-    void loadReadsHeadroomOverridesFromIsolatedMemoryDir() throws Exception {
-        Path dir = Files.createTempDirectory("config-headroom-overrides");
-        Files.writeString(dir.resolve("config.toml"), """
-                [headroom]
-                enabled = true
-                proxy-url = "http://127.0.0.1:9999/v1"
-                output-shaper = true
-                [headroom.stats]
-                enabled = false
-                """, StandardCharsets.UTF_8);
-
-        withMemoryDir(dir, () -> {
-            Config c = Config.load();
-            assertTrue(c.headroomEnabled());
-            assertEquals("http://127.0.0.1:9999/v1", c.headroomProxyUrl());
-            assertFalse(c.headroomStatsEnabled());
-            assertTrue(c.headroomOutputShaper());
         });
     }
 

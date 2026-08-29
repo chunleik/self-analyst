@@ -16,7 +16,6 @@ import com.selfanalyst.desktop.store.ChatSessionDeletionCoordinator;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
-import com.selfanalyst.headroom.HeadroomService;
 import com.selfanalyst.memory.LongTermMemoryService;
 import com.selfanalyst.memory.MemoryStore;
 import io.javalin.Javalin;
@@ -81,7 +80,7 @@ public class DesktopServer {
                          ContentWatcher contentWatcher,
                          AudioCaptureManager audioCaptureManager) {
         this(app, config, agent, eventStore, null, memoryStore,
-                watcherManager, contentWatcher, audioCaptureManager, null);
+                watcherManager, contentWatcher, audioCaptureManager);
     }
 
     public DesktopServer(Javalin app,
@@ -93,20 +92,6 @@ public class DesktopServer {
                          WatcherManager watcherManager,
                          ContentWatcher contentWatcher,
                          AudioCaptureManager audioCaptureManager) {
-        this(app, config, agent, eventStore, bucketStore, memoryStore,
-                watcherManager, contentWatcher, audioCaptureManager, null);
-    }
-
-    public DesktopServer(Javalin app,
-                         Config config,
-                         SelfAnalystAgent agent,
-                         EventStore eventStore,
-                         BucketStore bucketStore,
-                         MemoryStore memoryStore,
-                         WatcherManager watcherManager,
-                         ContentWatcher contentWatcher,
-                         AudioCaptureManager audioCaptureManager,
-                         HeadroomService headroomService) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
@@ -132,11 +117,11 @@ public class DesktopServer {
                 : null;
 
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
-                config, headroomService, chatSessionStore);
-        this.configCtrl = new DesktopConfigController(config, userConfigStore, headroomService);
+                config, chatSessionStore);
+        this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.statusCtrl = new DesktopStatusController(
-                config, watcherManager, contentWatcher, audioCaptureManager, headroomService);
+                config, watcherManager, contentWatcher, audioCaptureManager);
         this.audioCtrl = new DesktopAudioController(audioCaptureManager);
         this.audioEventsCtrl = new DesktopAudioEventsController(
                 eventStore, bucketStore, audioCaptureManager);

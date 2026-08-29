@@ -1,7 +1,6 @@
 package com.selfanalyst.agent;
 
 import com.selfanalyst.config.Config;
-import com.selfanalyst.headroom.HeadroomService;
 import com.selfanalyst.i18n.Lang;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.memory.MemoryStore;
@@ -71,7 +70,6 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final boolean hasConfigTools;
     private final boolean hasFileTools;
     private final UsageMeter usageMeter;
-    private final HeadroomService headroomService;
     private final McpClientWrapper webSearchMcpClient;
     private final AgentStateStore agentStateStore;
     private final TransactionalAgentStateCompactor stateCompactor;
@@ -109,17 +107,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter,
                              Supplier<String> audioRuntimeStatusSupplier) throws IOException {
-        this(config, wikiStore, wikiTools, userConfigStore, fileTools, usageMeter,
-                audioRuntimeStatusSupplier, null);
-    }
-
-    public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
-                             UserConfigStore userConfigStore, FileTools fileTools,
-                             UsageMeter usageMeter,
-                             Supplier<String> audioRuntimeStatusSupplier,
-                             HeadroomService headroomService) throws IOException {
         this.usageMeter = usageMeter;
-        this.headroomService = headroomService;
         this.lang = config.effectiveLanguage();
         this.wikiStore = wikiStore;
         this.semanticEnabled = wikiTools != null && wikiTools.hasSemanticIndex();
@@ -139,8 +127,7 @@ public class SelfAnalystAgent implements AutoCloseable {
             toolkit.registerTool(fileTools);
         }
         if (userConfigStore != null) {
-            toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier,
-                    headroomService != null ? headroomService::runtimeStatusLine : null));
+            toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier));
         }
         Path stateRoot = chatStateRoot(config.memoryDir());
         AgentStateStore builtStateStore = new JsonFileAgentStateStore(stateRoot);
@@ -150,7 +137,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         ReActAgent builtAgent;
         try {
             Integer maxTokens = config.llmMaxTokens() > 0 ? config.llmMaxTokens() : null;
-            String llmBaseUrl = effectiveLlmBaseUrl(config, headroomService);
+            String llmBaseUrl = config.llmBaseUrl();
 
             GenerateOptions.Builder chatOpts = GenerateOptions.builder()
                     .temperature(config.llmTemperature());
@@ -231,10 +218,6 @@ public class SelfAnalystAgent implements AutoCloseable {
         } else {
             this.stateCompactor = null;
         }
-    }
-
-    static String effectiveLlmBaseUrl(Config config, HeadroomService headroomService) {
-        return headroomService != null ? headroomService.effectiveLlmBaseUrl() : config.llmBaseUrl();
     }
 
     /**

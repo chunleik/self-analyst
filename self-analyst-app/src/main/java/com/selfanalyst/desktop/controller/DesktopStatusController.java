@@ -5,7 +5,6 @@ import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.audio.AudioCaptureManager;
 import com.selfanalyst.aw.watcher.Watcher;
 import com.selfanalyst.aw.watcher.WatcherManager;
-import com.selfanalyst.headroom.HeadroomService;
 import io.javalin.http.Context;
 
 import java.net.URI;
@@ -33,7 +32,6 @@ public class DesktopStatusController implements AutoCloseable {
     private final WatcherManager watcherManager;
     private final ContentWatcher contentWatcher;
     private final AudioCaptureManager audioCaptureManager;
-    private final HeadroomService headroomService;
 
     private final AtomicBoolean llmAvailableCache = new AtomicBoolean(false);
     private final AtomicLong llmCacheUpdatedAt = new AtomicLong(0);
@@ -48,19 +46,10 @@ public class DesktopStatusController implements AutoCloseable {
                                    WatcherManager watcherManager,
                                    ContentWatcher contentWatcher,
                                    AudioCaptureManager audioCaptureManager) {
-        this(config, watcherManager, contentWatcher, audioCaptureManager, null);
-    }
-
-    public DesktopStatusController(Config config,
-                                   WatcherManager watcherManager,
-                                   ContentWatcher contentWatcher,
-                                   AudioCaptureManager audioCaptureManager,
-                                   HeadroomService headroomService) {
         this.config = config;
         this.watcherManager = watcherManager;
         this.contentWatcher = contentWatcher;
         this.audioCaptureManager = audioCaptureManager;
-        this.headroomService = headroomService;
         // Kick off first check immediately, then every 60 seconds
         llmChecker.scheduleAtFixedRate(this::refreshLlmAvailability, 0, 60, TimeUnit.SECONDS);
     }
@@ -77,6 +66,10 @@ public class DesktopStatusController implements AutoCloseable {
      * GET /desktop/status
      */
     public void getStatus(Context ctx) {
+        ctx.json(statusPayload());
+    }
+
+    Map<String, Object> statusPayload() {
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("backend", "running");
         // Effective language for the desktop UI to pick its message column (SPEC-I18N-RES-003)
@@ -100,9 +93,8 @@ public class DesktopStatusController implements AutoCloseable {
 
         // LLM section
         status.put("llm", buildLlmStatus(llmAvailableCache.get()));
-        status.put("headroom", buildHeadroomStatus());
 
-        ctx.json(status);
+        return status;
     }
 
     Map<String, Object> buildLlmStatus(boolean available) {
@@ -113,18 +105,12 @@ public class DesktopStatusController implements AutoCloseable {
         llm.put("configured", configured);
         llm.put("available", available);
         llm.put("model", config.llmModel());
-        llm.put("baseUrl", headroomService != null ? headroomService.effectiveLlmBaseUrl() : config.llmBaseUrl());
+        llm.put("baseUrl", config.llmBaseUrl());
         return llm;
     }
 
-    Map<String, Object> buildHeadroomStatus() {
-        return headroomService != null
-                ? headroomService.snapshotWithFreshStats().toMap()
-                : Map.of("status", "disabled", "enabled", false);
-    }
-
     String effectiveBaseUrlForAvailabilityCheck() {
-        return headroomService != null ? headroomService.effectiveLlmBaseUrl() : config.llmBaseUrl();
+        return config.llmBaseUrl();
     }
 
     private String watcherStatus(String type) {

@@ -45,7 +45,7 @@ public final class TomlSupport {
      * prefix are emitted as top-level dotted assignments before the first table.
      */
     static final List<String> SECTION_ORDER = List.of(
-            "llm.", "aw.", "wiki.", "embedding.", "agent.", "desktop.", "headroom.", "websearch.", "file.");
+            "llm.", "aw.", "wiki.", "embedding.", "agent.", "desktop.", "websearch.", "file.");
 
     // ── Parse + flatten + normalize (SPEC-TOML-FMT-002/003) ──────────────
 

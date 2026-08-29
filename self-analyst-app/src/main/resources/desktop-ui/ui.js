@@ -34,14 +34,10 @@ function updateStatusBar() {
 
   // LLM
   var llmOk = st.llm && st.llm.configured;
-  var headroom = (state.usage && state.usage.headroom) || st.headroom || {};
-  var headroomStatus = headroom.status || "unknown";
-  var headroomLabel = t("headroom.status." + headroomStatus);
-  var llmTitle = t("status.llm") + " " + (llmOk ? t("status.ok") : t("status.notReady")) +
-    " · Headroom " + headroomLabel;
+  var llmTitle = t("status.llm") + " " + (llmOk ? t("status.ok") : t("status.notReady"));
   setStatusDot(state.dom.llmDot, llmOk, t("status.llm"));
   state.dom.llmDot.title = llmTitle;
-  state.dom.llmText.textContent = t("status.llm") + " · Headroom " + headroomLabel;
+  state.dom.llmText.textContent = t("status.llm");
   state.dom.llmText.title = llmTitle;
 
   updateAudioToggle();

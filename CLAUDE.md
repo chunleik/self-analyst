@@ -35,7 +35,6 @@ SelfAnalyst 遵循规格驱动开发（Specification-Driven Development，SDD）
 | [docs/specs/llm-wiki.md](docs/specs/llm-wiki.md) | LLM Wiki 多层级摘要与语义索引 | `SPEC-WIKI-*`、`SPEC-WIKI-SEM-*`、`SPEC-WIKI-EMB-*` |
 | [docs/specs/behavior-advice.md](docs/specs/behavior-advice.md) | 基于行为的建议与鼓励展示卡片 | `SPEC-ADV-*` |
 | [docs/specs/web-search.md](docs/specs/web-search.md) | 智能体通过 MCP 使用 Parallel Search 进行网络搜索 | `SPEC-WS-*` |
-| [docs/specs/headroom.md](docs/specs/headroom.md) | Headroom 集成：使用本地代理降低 LLM 令牌成本，并在开发期间跨智能体共享记忆与失败经验 | `SPEC-HR-*` |
 | [docs/specs/accessibility-sidecar.md](docs/specs/accessibility-sidecar.md) | UIA → 常驻 Rust 边车程序及操作系统中立的无障碍树协议（取代 PowerShell 单次运行方式，并为 macOS 预留扩展能力） | `SPEC-AXS-*` |
 | [docs/specs/llm-budget.md](docs/specs/llm-budget.md) | LLM 令牌用量限制与每日预算（`max_tokens`、可配置的 `maxIters`、计量及 `off`/`warn`/`block` 预算模式） | `SPEC-BUDGET-*` |
 | [docs/specs/desktop-config-editor.md](docs/specs/desktop-config-editor.md) | 桌面端“配置”纯文本编辑器的原始设计；当前文件格式与接口修订见 `config-toml.md`，配置历史已移除 | `SPEC-CFGUI-*` |

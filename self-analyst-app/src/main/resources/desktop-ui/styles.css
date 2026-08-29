@@ -286,7 +286,9 @@ a:hover {
   display: inline-block;
   flex-shrink: 0;
 }
-.status-dot.green { background: var(--green); }
+.status-dot.green {
+  background: #16c784;
+}
 .status-dot.orange { background: var(--orange); }
 .status-dot.red { background: var(--red); }
 .status-dot.gray { background: var(--gray); }

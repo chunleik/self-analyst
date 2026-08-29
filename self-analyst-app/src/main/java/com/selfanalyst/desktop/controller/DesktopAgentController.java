@@ -7,7 +7,6 @@ import com.selfanalyst.desktop.service.SummaryPromptService;
 import com.selfanalyst.desktop.service.SummaryService;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
-import com.selfanalyst.headroom.HeadroomService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.message.Msg;
@@ -49,7 +48,6 @@ public class DesktopAgentController {
     private final SelfAnalystAgent agent;
     private final TaskStore taskStore;
     private final Config config;
-    private final HeadroomService headroomService;
     private final ChatSessionStore chatSessionStore;
 
     public DesktopAgentController(SummaryService summaryService,
@@ -57,16 +55,7 @@ public class DesktopAgentController {
                                    SelfAnalystAgent agent,
                                    TaskStore taskStore,
                                    Config config) {
-        this(summaryService, adviceService, agent, taskStore, config, null, null);
-    }
-
-    public DesktopAgentController(SummaryService summaryService,
-                                  BehaviorAdviceService adviceService,
-                                  SelfAnalystAgent agent,
-                                   TaskStore taskStore,
-                                   Config config,
-                                   HeadroomService headroomService) {
-        this(summaryService, adviceService, agent, taskStore, config, headroomService, null);
+        this(summaryService, adviceService, agent, taskStore, config, null);
     }
 
     public DesktopAgentController(SummaryService summaryService,
@@ -74,7 +63,6 @@ public class DesktopAgentController {
                                   SelfAnalystAgent agent,
                                   TaskStore taskStore,
                                   Config config,
-                                  HeadroomService headroomService,
                                   ChatSessionStore chatSessionStore) {
         this.summaryService = summaryService;
         this.adviceService = adviceService;
@@ -82,7 +70,6 @@ public class DesktopAgentController {
         this.agent = agent;
         this.taskStore = taskStore;
         this.config = config;
-        this.headroomService = headroomService;
         this.chatSessionStore = chatSessionStore;
     }
 
@@ -225,9 +212,6 @@ public class DesktopAgentController {
             payload.put("status", "ok");
         } else {
             payload.putAll(agent.usageSnapshot());
-        }
-        if (headroomService != null) {
-            payload.put("headroom", headroomService.snapshotWithFreshStats().toMap());
         }
         return payload;
     }

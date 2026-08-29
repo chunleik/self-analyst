@@ -66,7 +66,7 @@ class DesktopChatSessionLifecycleControllerTest {
                     {"message":"queued turn","sessionId":"%s","userMessageId":"%s"}
                     """.formatted(session.id, user.id), null);
             DesktopAgentController controller = new DesktopAgentController(
-                    null, null, agent, null, config, null, store);
+                    null, null, agent, null, config, store);
 
             controller.chat(captured.context());
 
@@ -147,7 +147,7 @@ class DesktopChatSessionLifecycleControllerTest {
     void chatRejectsOversizedOrWronglyTypedBodiesBeforeAgentExecution(@TempDir Path memoryDir) {
         Config config = Config.testDefaults(memoryDir);
         DesktopAgentController controller = new DesktopAgentController(
-                null, null, null, null, config, null, null);
+                null, null, null, null, config, null);
 
         CapturedContext oversized = new CapturedContext(
                 "x".repeat(DesktopChatJson.MAX_BODY_BYTES + 1), null);
@@ -185,7 +185,7 @@ class DesktopChatSessionLifecycleControllerTest {
         ChatSessionStore.Message secondPending = message("assistant", "thinking", "pending");
         store.appendMessages(session.id, java.util.List.of(secondUser, secondPending));
         DesktopAgentController controller = new DesktopAgentController(
-                null, null, null, null, config, null, store);
+                null, null, null, null, config, store);
         CapturedContext captured = new CapturedContext("""
                 {"message":"first","sessionId":"%s","userMessageId":"%s"}
                 """.formatted(session.id, first.get(0).id), null);

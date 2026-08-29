@@ -10,7 +10,6 @@ import com.selfanalyst.audio.AudioCaptureManager;
 import com.selfanalyst.desktop.DesktopServer;
 import com.selfanalyst.desktop.store.ConfigMigration;
 import com.selfanalyst.desktop.store.UserConfigStore;
-import com.selfanalyst.headroom.HeadroomService;
 import com.selfanalyst.usage.UsageMeter;
 import com.selfanalyst.wiki.*;
 import com.selfanalyst.wiki.semantic.*;
@@ -35,7 +34,6 @@ public class AppSession implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(AppSession.class);
     private final Config config;
     private final UsageMeter usageMeter;
-    private final HeadroomService headroomService;
     private final SelfAnalystAgent agent;
     private AwServer awServer;
     private WatcherManager watcherManager;
@@ -61,7 +59,6 @@ public class AppSession implements AutoCloseable {
         ConfigMigration.migrateIfNeeded(Config.resolveMemoryDir());
         this.config = Config.load();
         this.usageMeter = new UsageMeter(config, config.memoryDir());
-        this.headroomService = HeadroomService.fromConfig(config);
         if (config.awEmbedded()) {
             startEmbeddedAW();
         }
@@ -153,7 +150,7 @@ public class AppSession implements AutoCloseable {
                     ? () -> audioCaptureManager.status().status()
                     : null;
             a = new SelfAnalystAgent(config, wikiStore, wikiTools, userConfigStore, fileTools,
-                    usageMeter, audioRuntimeStatus, headroomService);
+                    usageMeter, audioRuntimeStatus);
         } catch (Exception e) {
             log.warn("Agent 初始化失败 (API key 无效?): {}", e.getMessage());
         }
@@ -236,7 +233,7 @@ public class AppSession implements AutoCloseable {
             var memoryStore = agent != null ? agent.memory() : null;
             desktopServer = new DesktopServer(awServer.app(), config, agent,
                     awServer.eventStore(), awServer.bucketStore(), memoryStore,
-                    watcherManager, contentWatcher, audioCaptureManager, headroomService);
+                    watcherManager, contentWatcher, audioCaptureManager);
             desktopServer.start();
             awServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));

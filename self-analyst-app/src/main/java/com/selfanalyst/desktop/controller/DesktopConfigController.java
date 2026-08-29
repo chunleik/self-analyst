@@ -5,7 +5,6 @@ import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
 import com.selfanalyst.desktop.store.UserConfigStore;
-import com.selfanalyst.headroom.HeadroomService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
@@ -41,8 +40,7 @@ public class DesktopConfigController {
             "agent.compaction.enabled", "agent.compaction.triggerMessages",
             "agent.compaction.triggerTokens", "agent.compaction.keepMessages",
             "agent.compaction.keepTokens",
-            "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
-            "headroom.enabled", "headroom.proxy-url", "headroom.stats.enabled", "headroom.output-shaper"
+            "websearch.enabled", "websearch.mcp-url", "websearch.api-key"
     );
 
     // Supported config keys, defaults and declared types live in the shared
@@ -51,22 +49,20 @@ public class DesktopConfigController {
 
     private final Config config;
     private final UserConfigStore userStore;
-    private final HeadroomService headroomService;
 
     public DesktopConfigController(Config config, UserConfigStore userStore) {
-        this(config, userStore, null);
-    }
-
-    public DesktopConfigController(Config config, UserConfigStore userStore, HeadroomService headroomService) {
         this.config = config;
         this.userStore = userStore;
-        this.headroomService = headroomService;
     }
 
     /**
      * GET /desktop/config
      */
     public void getConfig(Context ctx) {
+        ctx.json(configPayload());
+    }
+
+    Map<String, Object> configPayload() {
         Properties defaults = userStore.load(); // merged classpath + user
 
         Map<String, Object> response = new LinkedHashMap<>();
@@ -78,8 +74,7 @@ public class DesktopConfigController {
         response.put("desktop", buildDesktopSection(defaults));
         response.put("embedding", buildEmbeddingSection(defaults));
         response.put("websearch", buildWebSearchSection(defaults));
-        response.put("headroom", buildHeadroomSection(defaults));
-        ctx.json(response);
+        return response;
     }
 
     /**
@@ -161,7 +156,6 @@ public class DesktopConfigController {
         sectionToPrefix.put("desktop", "desktop.");
         sectionToPrefix.put("embedding", "embedding.");
         sectionToPrefix.put("websearch", "websearch.");
-        sectionToPrefix.put("headroom", "headroom.");
         return sectionToPrefix;
     }
 
@@ -239,18 +233,6 @@ public class DesktopConfigController {
                     "webSearchEnabled", "enabled",
                     "webSearchMcpUrl", "mcp-url",
                     "webSearchApiKey", "api-key");
-            case "headroom" -> mapKey(rawKey, prefix,
-                    "headroomEnabled", "enabled",
-                    "enabled", "enabled",
-                    "headroomProxyUrl", "proxy-url",
-                    "proxyUrl", "proxy-url",
-                    "proxy-url", "proxy-url",
-                    "headroomStatsEnabled", "stats.enabled",
-                    "statsEnabled", "stats.enabled",
-                    "stats.enabled", "stats.enabled",
-                    "headroomOutputShaper", "output-shaper",
-                    "outputShaper", "output-shaper",
-                    "output-shaper", "output-shaper");
             default -> prefix + rawKey;
         };
     }
@@ -688,18 +670,6 @@ public class DesktopConfigController {
         return m;
     }
 
-    private Map<String, Map<String, Object>> buildHeadroomSection(Properties eff) {
-        var m = new LinkedHashMap<String, Map<String, Object>>();
-        m.put("headroomEnabled", field("headroom.enabled", eff.getProperty("headroom.enabled", "false")));
-        m.put("headroomProxyUrl", field("headroom.proxy-url", eff.getProperty("headroom.proxy-url", "http://127.0.0.1:8787/v1")));
-        m.put("headroomStatsEnabled", field("headroom.stats.enabled", eff.getProperty("headroom.stats.enabled", "true")));
-        m.put("headroomOutputShaper", field("headroom.output-shaper", eff.getProperty("headroom.output-shaper", "false")));
-        if (headroomService != null) {
-            m.put("headroomStatus", field("headroom.runtimeStatus", headroomService.runtimeStatusLine()));
-        }
-        return m;
-    }
-
     /**
      * Build a config field object with metadata:
      * effectiveValue, savedValue, source, overridden, restartRequiredOnChange.
@@ -732,7 +702,6 @@ public class DesktopConfigController {
                         || RESTART_REQUIRED.contains("agent." + name)
                         || RESTART_REQUIRED.contains("desktop." + name)
                         || RESTART_REQUIRED.contains("embedding." + name)
-                        || RESTART_REQUIRED.contains("headroom." + name)
                         || RESTART_REQUIRED.contains(name));
         return f;
     }
@@ -741,7 +710,7 @@ public class DesktopConfigController {
      * Try to find user-saved value by searching common key prefixes.
      */
     private String findUserValue(Properties user, String name) {
-        String[] prefixes = {"llm.", "aw.", "aw.collection.", "aw.audio.", "agent.", "desktop.", "embedding.", "websearch.", "headroom."};
+        String[] prefixes = {"llm.", "aw.", "aw.collection.", "aw.audio.", "agent.", "desktop.", "embedding.", "websearch."};
         for (String prefix : prefixes) {
             String val = user.getProperty(prefix + name);
             if (val != null) return val;

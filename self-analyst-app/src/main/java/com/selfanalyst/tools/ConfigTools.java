@@ -27,7 +27,6 @@ public class ConfigTools {
             "embedding.enabled", "embedding.base-url", "embedding.api-key",
             "embedding.model", "embedding.dimensions", "embedding.send-encoding-format",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
-            "headroom.enabled", "headroom.proxy-url", "headroom.stats.enabled", "headroom.output-shaper",
             "llm.max-tokens", "llm.agent.maxIters", "desktop.summary.maxTimelineLlm",
             "llm.budget.mode", "llm.budget.dailyTokens", "llm.budget.warnRatio"
     );
@@ -39,36 +38,26 @@ public class ConfigTools {
             "aw.audio.source", "aw.audio.engine", "aw.audio.model", "aw.audio.chunkSeconds",
             "agent.summaryRefreshMinutes", "desktop.autoStartBackend",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
-            "headroom.enabled", "headroom.proxy-url", "headroom.stats.enabled", "headroom.output-shaper",
             "llm.max-tokens", "llm.agent.maxIters", "desktop.summary.maxTimelineLlm",
             "llm.budget.mode", "llm.budget.dailyTokens", "llm.budget.warnRatio"
     );
 
     private final UserConfigStore userStore;
     private final Supplier<String> audioRuntimeStatusSupplier;
-    private final Supplier<String> headroomRuntimeStatusSupplier;
 
     public ConfigTools(UserConfigStore userStore) {
-        this(userStore, null, null);
+        this(userStore, null);
     }
 
     public ConfigTools(UserConfigStore userStore, Supplier<String> audioRuntimeStatusSupplier) {
-        this(userStore, audioRuntimeStatusSupplier, null);
-    }
-
-    public ConfigTools(UserConfigStore userStore,
-                       Supplier<String> audioRuntimeStatusSupplier,
-                       Supplier<String> headroomRuntimeStatusSupplier) {
         this.userStore = userStore;
         this.audioRuntimeStatusSupplier = audioRuntimeStatusSupplier;
-        this.headroomRuntimeStatusSupplier = headroomRuntimeStatusSupplier;
     }
 
     @Tool(description = "获取 SelfAnalyst 当前所有配置项的有效值（含默认值）。" +
             "可修改的配置键包括：app.language（zh/en/auto，需重启后端生效）；" +
             "llm.api-key、llm.base-url、llm.model、llm.temperature；" +
             "websearch.enabled、websearch.mcp-url、websearch.api-key；" +
-            "headroom.enabled、headroom.proxy-url、headroom.stats.enabled、headroom.output-shaper；" +
             "agent.summaryRefreshMinutes、agent.allowAgentTasks、agent.cacheSummaries；" +
             "desktop.hideToTray、desktop.autoOpenWindow、desktop.autoStartBackend；" +
             "aw.collection.window、aw.collection.afk、aw.collection.content、aw.audio.enabled、aw.audio.whisperPath、" +
@@ -90,12 +79,6 @@ public class ConfigTools {
                 {"llm.base-url",    eff.getProperty("llm.base-url",    "https://api.openai.com/v1"), null},
                 {"llm.model",       eff.getProperty("llm.model",       "gpt-4o"),                    null},
                 {"llm.temperature", eff.getProperty("llm.temperature", "0.7"),                       null},
-        });
-        appendSection(sb, "Headroom", new String[][]{
-                {"headroom.enabled",       eff.getProperty("headroom.enabled",       "false"), null},
-                {"headroom.proxy-url",     eff.getProperty("headroom.proxy-url",     "http://127.0.0.1:8787/v1"), null},
-                {"headroom.stats.enabled", eff.getProperty("headroom.stats.enabled", "true"),  null},
-                {"headroom.output-shaper", eff.getProperty("headroom.output-shaper", "false"), null},
         });
         appendSection(sb, "联网搜索", new String[][]{
                 {"websearch.enabled", eff.getProperty("websearch.enabled", "false"),                                 null},
@@ -125,16 +108,10 @@ public class ConfigTools {
                 {"aw.audio.chunkSeconds", eff.getProperty("aw.audio.chunkSeconds", "10"), null},
         });
         String audioRuntimeStatus = audioRuntimeStatus();
-        String headroomRuntimeStatus = headroomRuntimeStatus();
-        if (audioRuntimeStatus != null || headroomRuntimeStatus != null) {
-            java.util.List<String[]> rows = new java.util.ArrayList<>();
-            if (audioRuntimeStatus != null) {
-                rows.add(new String[]{"aw.audio.runtimeStatus", audioRuntimeStatus, null});
-            }
-            if (headroomRuntimeStatus != null) {
-                rows.add(new String[]{"headroom.runtimeStatus", headroomRuntimeStatus, null});
-            }
-            appendSection(sb, "运行时状态", rows.toArray(new String[0][]));
+        if (audioRuntimeStatus != null) {
+            appendSection(sb, "运行时状态", new String[][]{
+                    {"aw.audio.runtimeStatus", audioRuntimeStatus, null}
+            });
         }
         appendSection(sb, "Embedding", new String[][]{
                 {"embedding.enabled",  eff.getProperty("embedding.enabled",  "true"),                          null},
@@ -198,16 +175,6 @@ public class ConfigTools {
         if (audioRuntimeStatusSupplier == null) return null;
         try {
             String status = audioRuntimeStatusSupplier.get();
-            return status == null || status.isBlank() ? "unknown" : status;
-        } catch (Exception e) {
-            return "unknown";
-        }
-    }
-
-    private String headroomRuntimeStatus() {
-        if (headroomRuntimeStatusSupplier == null) return null;
-        try {
-            String status = headroomRuntimeStatusSupplier.get();
             return status == null || status.isBlank() ? "unknown" : status;
         } catch (Exception e) {
             return "unknown";

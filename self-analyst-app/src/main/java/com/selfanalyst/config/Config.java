@@ -81,10 +81,6 @@ public record Config(
         String budgetMode,
         long budgetDailyTokens,
         double budgetWarnRatio,
-        boolean headroomEnabled,
-        String headroomProxyUrl,
-        boolean headroomStatsEnabled,
-        boolean headroomOutputShaper,
         String appLanguage) {
 
     private static final Logger log = LoggerFactory.getLogger(Config.class);
@@ -323,15 +319,6 @@ public record Config(
                 envOrProp(props, "llm.budget.warnRatio", "LLM_BUDGET_WARN_RATIO", "0.8"), 0.8);
         if (budgetWarnRatio <= 0 || budgetWarnRatio > 1) budgetWarnRatio = 0.8;
 
-        boolean headroomEnabled = Boolean.parseBoolean(
-                envOrProp(props, "headroom.enabled", "HEADROOM_ENABLED", "false"));
-        String headroomProxyUrl = envOrProp(props, "headroom.proxy-url", "HEADROOM_PROXY_URL",
-                "http://127.0.0.1:8787/v1");
-        boolean headroomStatsEnabled = Boolean.parseBoolean(
-                envOrProp(props, "headroom.stats.enabled", "HEADROOM_STATS_ENABLED", "true"));
-        boolean headroomOutputShaper = Boolean.parseBoolean(
-                envOrProp(props, "headroom.output-shaper", "HEADROOM_OUTPUT_SHAPER", "false"));
-
         boolean webSearchEnabled = Boolean.parseBoolean(
                 envOrProp(props, "websearch.enabled", "WEBSEARCH_ENABLED", "false"));
         String webSearchMcpUrl = envOrProp(props, "websearch.mcp-url", "WEBSEARCH_MCP_URL",
@@ -365,7 +352,6 @@ public record Config(
                 agentCompactionTriggerTokens, agentCompactionKeepMessages,
                 agentCompactionKeepTokens, desktopSummaryMaxTimelineLlm,
                 budgetMode, budgetDailyTokens, budgetWarnRatio,
-                headroomEnabled, headroomProxyUrl, headroomStatsEnabled, headroomOutputShaper,
                 appLanguage);
     }
 
@@ -404,7 +390,6 @@ public record Config(
                 baseDir.resolve("file-semantic-index"),
                 2048, 8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,
-                false, "http://127.0.0.1:8787/v1", true, false,
                 "auto");
     }
 

@@ -73,7 +73,7 @@ class DesktopAgentStreamingIntegrationTest {
         Javalin app = null;
         try (SelfAnalystAgent agent = new SelfAnalystAgent(config)) {
             DesktopAgentController controller = new DesktopAgentController(
-                    null, null, agent, null, config, null, store);
+                    null, null, agent, null, config, store);
             app = Javalin.create();
             app.post("/desktop/chat/stream", controller::chatStream);
             app.start("127.0.0.1", 0);

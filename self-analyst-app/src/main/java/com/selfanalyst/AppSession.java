@@ -9,6 +9,7 @@ import com.selfanalyst.audio.AudioCaptureOptions;
 import com.selfanalyst.audio.AudioCaptureManager;
 import com.selfanalyst.desktop.DesktopServer;
 import com.selfanalyst.desktop.store.ConfigMigration;
+import com.selfanalyst.desktop.store.ContentEventV2Migration;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.usage.UsageMeter;
 import com.selfanalyst.wiki.*;
@@ -50,6 +51,8 @@ public class AppSession implements AutoCloseable {
     private FileEmbeddingWorker fileEmbeddingWorker;
     private FileIndexWorker fileIndexWorker;
     private FileWatcher fileWatcher;
+    private boolean contentPersistenceReady = true;
+    private String contentMigrationError;
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public AppSession() throws IOException {
@@ -171,7 +174,7 @@ public class AppSession implements AutoCloseable {
         }
 
         // Wiki summarization worker
-        if (wikiStore != null && a != null && awServer != null) {
+        if (wikiStore != null && a != null && awServer != null && contentPersistenceReady) {
             try {
                 WikiFactBuilder factBuilder = new WikiFactBuilder(
                         awServer.eventStore(), config.wikiPromptMaxContentChars());
@@ -233,7 +236,8 @@ public class AppSession implements AutoCloseable {
             var memoryStore = agent != null ? agent.memory() : null;
             desktopServer = new DesktopServer(awServer.app(), config, agent,
                     awServer.eventStore(), awServer.bucketStore(), memoryStore,
-                    watcherManager, contentWatcher, audioCaptureManager);
+                    watcherManager, contentWatcher, audioCaptureManager,
+                    contentPersistenceReady, contentMigrationError);
             desktopServer.start();
             awServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));
@@ -243,6 +247,17 @@ public class AppSession implements AutoCloseable {
     private void startEmbeddedAW() {
         try {
             awServer = new AwServer(config.awDataDir(), config.awPort());
+            try {
+                var migration = ContentEventV2Migration.migrate(awServer.db());
+                contentPersistenceReady = migration.ready();
+                log.info("内容事件标题化迁移完成 (scanned={}, sanitized={})",
+                        migration.scanned(), migration.sanitized());
+            } catch (Exception migrationFailure) {
+                contentPersistenceReady = false;
+                contentMigrationError = migrationFailure.getMessage();
+                log.error("内容事件标题化迁移失败，内容采集与 Wiki 已禁用: {}",
+                        contentMigrationError);
+            }
             awServer.start(config.awPort());
             log.info("嵌入式 AW 服务已启动 (端口 {})", config.awPort());
             watcherManager = new WatcherManager(
@@ -269,16 +284,18 @@ public class AppSession implements AutoCloseable {
                         String.valueOf(config.ocrStableCaptureIntervalMs()));
                 System.setProperty("ocr.force-refresh-ms",
                         String.valueOf(config.ocrForceRefreshMs()));
-                if (config.collectContent()) {
+                if (config.collectContent() && contentPersistenceReady) {
                     contentWatcher = new ContentWatcher("http://localhost:" + config.awPort(),
                             config.contentPollIntervalMs());
                     contentWatcher.start();
-                    log.info("内容采集已启动 (UIA, OCR={})", config.ocrEngine());
+                    log.info("上下文标题识别已启动 (UIA, OCR={})", config.ocrEngine());
+                } else if (!contentPersistenceReady) {
+                    log.warn("上下文标题识别因历史数据迁移失败而禁用");
                 } else {
-                    log.info("内容采集已按配置禁用 (aw.collection.content=false)");
+                    log.info("上下文标题识别已按配置禁用 (aw.collection.content=false)");
                 }
             } catch (Exception e2) {
-                log.warn("内容采集未启动: {}", e2.getMessage());
+                log.warn("上下文标题识别未启动: {}", e2.getMessage());
             }
             try {
                 audioCaptureManager = new AudioCaptureManager(

@@ -92,12 +92,14 @@ public class ContentVerification {
         });
 
         step("ContentEvent.toHeartbeatData null safety", () -> {
-            ContentEvent event = new ContentEvent(Instant.now(), 5.0, null, null, null, null, 0, 0);
+            ContentEvent event = new ContentEvent(
+                    Instant.now(), 5.0, null, null, null, null,
+                    null, null, 0, 0);
             Map<String, Object> data = event.toHeartbeatData();
             check("".equals(data.get("app")), "null app should default to empty string");
             check("".equals(data.get("title")), "null title should default to empty string");
-            check("".equals(data.get("text_content")), "null textContent should default to empty string");
-            check("uia".equals(data.get("source")), "null source should default to uia");
+            check(!data.containsKey("text_content"), "persisted event must not contain text_content");
+            check("window".equals(data.get("title_source")), "null title source should default to window");
         });
 
         step("real foreground window capture (ThinDetector + OCR)", () -> {
@@ -128,10 +130,8 @@ public class ContentVerification {
 
             System.out.println("  source=" + result.source() + " uia_chars=" + result.uiaChars()
                     + " ocr_chars=" + result.ocrChars() + " time=" + (t1-t0) + "ms");
-            System.out.println("  text_content(" + result.textContent().length() + " chars): "
-                    + (result.textContent().length() > 300
-                        ? result.textContent().substring(0, 300).replace("\n", "\\n") + "..."
-                        : result.textContent().replace("\n", "\\n")));
+            System.out.println("  transient_text_chars=" + result.textContent().length()
+                    + " context_title_detected=" + (result.contextTitle() != null));
             check(result.source() != null && !result.source().isEmpty(), "source should be non-empty");
             if (result.ocrChars() > 0) {
                 System.out.println("  >>> OCR PRODUCED " + result.ocrChars() + " CHARACTERS <<<");

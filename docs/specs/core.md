@@ -27,7 +27,7 @@ App (入口) → AppSession (生命周期管理)
                 ├── UserConfigStore (用户配置读写)
                 ├── AwServer (嵌入式 ActivityWatch 服务)
                 │     ├── WatcherManager (窗口/AFK 采集)
-                │     ├── ContentWatcher (内容采集)
+                │     ├── ContentWatcher (上下文标题识别)
                 │     └── AudioWatcher (音频采集)
                 ├── DesktopServer (桌面 API 路由)
                 └── SelfAnalystAgent (核心智能体)
@@ -271,7 +271,7 @@ llm.budget.mode, llm.budget.dailyTokens, llm.budget.warnRatio
 ```
 
 `aw.ocr.engine` 默认值为 `off`，可选值为 `off`、`auto`、`paddle`、`tesseract`；
-只有非 `off` 值才允许内容采集执行 OCR 截图。
+只有非 `off` 值才允许上下文标题识别执行 OCR 截图。
 
 ### SPEC-CFG-TOOL-003: 重启提示键集合
 

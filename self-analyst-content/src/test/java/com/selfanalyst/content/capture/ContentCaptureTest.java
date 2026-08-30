@@ -2,6 +2,7 @@ package com.selfanalyst.content.capture;
 
 import com.selfanalyst.content.ocr.OcrEngine;
 import com.sun.jna.platform.win32.WinDef.HWND;
+import com.selfanalyst.content.uia.UiaNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -109,6 +110,39 @@ class ContentCaptureTest {
     }
 
     @Test
+    void projectsSingleOcrLineToPersistableTitleOnly() {
+        System.setProperty("ocr.title-strip-height", "80");
+        ContentCapture capture = new ContentCapture(
+                new StubScreenCapturer(solidImage(800, 200, Color.WHITE)),
+                new RecordingOcrEngine("一篇文章的标题"), null);
+
+        ContentResult result = capture.capture(1L, "Weixin.exe", "微信", null, "");
+
+        assertNotNull(result.titleCandidate());
+        assertEquals("一篇文章的标题", result.titleCandidate().value());
+        assertEquals("ocr_title", result.titleCandidate().source());
+    }
+
+    @Test
+    void richWeixinDocumentStillProducesArticleTitleCandidate() {
+        UiaNode root = UiaNode.create("微信", null, 50032, "Window", null, false);
+        UiaNode document = UiaNode.create(
+                "富内容文章标题", null, 50030, "Document", null, false);
+        document.addChild(UiaNode.create(
+                "正文".repeat(100), null, 50020, "Text", null, false));
+        root.addChild(document);
+        ContentCapture capture = new ContentCapture(null, null);
+
+        ContentResult result = capture.capture(
+                1L, "Weixin.exe", "微信", root, "正文".repeat(100));
+
+        assertNotNull(result.titleCandidate());
+        assertEquals("富内容文章标题", result.titleCandidate().value());
+        assertEquals("article", result.titleCandidate().kind());
+        assertEquals("uia_document", result.titleCandidate().source());
+    }
+
+    @Test
     void fullWindowModeKeepsSingleCharacterText() {
         System.setProperty("ocr.title-strip-height", "0");
         BufferedImage screenshot = solidImage(1200, 100, Color.WHITE);
@@ -120,6 +154,23 @@ class ContentCaptureTest {
 
         assertEquals(List.of(new Dimension(960, 80)), ocr.inputSizes);
         assertEquals("+", result.textContent());
+        assertNull(result.titleCandidate(),
+                "full-window OCR text must never become a persisted title candidate");
+    }
+
+    @Test
+    void fullWindowOcrBodyCannotBecomeTitleCandidate() {
+        System.setProperty("ocr.title-strip-height", "0");
+        String forbidden = "SELF_ANALYST_FORBIDDEN_OCR_BODY_31D8";
+        ContentCapture capture = new ContentCapture(
+                new StubScreenCapturer(solidImage(1200, 100, Color.WHITE)),
+                new RecordingOcrEngine(forbidden), null);
+
+        ContentResult result = capture.capture(1L, "Weixin.exe", "微信", null, "");
+
+        assertEquals(forbidden, result.textContent());
+        assertNull(result.titleCandidate());
+        assertNull(TitleCaptureResult.from(result).contextTitle());
     }
 
     @Test

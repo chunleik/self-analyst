@@ -14,7 +14,6 @@ public class WikiFactBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(WikiFactBuilder.class);
     private static final int MAX_TITLE_LEN = 160;
-    private static final int MAX_CONTENT_LEN = 800;
     private static final int MAX_WINDOW_SESSIONS = 20;
 
     private final EventStore eventStore;
@@ -41,10 +40,12 @@ public class WikiFactBuilder {
         int switchCount = windowEvents.size();
         List<WikiEntry.AppDuration> topApps = computeTopApps(windowEvents);
         List<String> titleSamples = sampleTitles(windowEvents);
-        List<String> contentSamples = sampleContent(contentEvents);
+        int titleChars = titleSamples.stream().mapToInt(String::length).sum();
+        List<String> contextTitleSamples = sampleContextTitles(
+                contentEvents, Math.max(0, maxContentChars - titleChars));
 
         return new WikiFacts(period, activeSeconds, afkSeconds, switchCount,
-                topApps, titleSamples, contentSamples);
+                topApps, titleSamples, contextTitleSamples);
     }
 
     public WikiFacts buildFactsFromChildren(List<WikiEntry> childEntries, WikiPeriod period) {
@@ -134,46 +135,27 @@ public class WikiFactBuilder {
         return titles;
     }
 
-    /**
-     * Group consecutive content events by (app, title), merge each session's
-     * text into one representative snippet, then return at most MAX_WINDOW_SESSIONS entries.
-     * This prevents the same window's 10 near-identical captures from each occupying
-     * a separate sample slot.
-     */
-    private List<String> sampleContent(List<Event> contentEvents) {
-        // 1. Build sessions: consecutive events sharing the same app+title
-        record Session(String app, String title, List<String> texts) {}
-        List<Session> sessions = new ArrayList<>();
+    /** Sample unique application/window context titles without reading persisted body text. */
+    private List<String> sampleContextTitles(List<Event> contentEvents, int charBudget) {
+        if (charBudget <= 0) return List.of();
+        Set<String> seen = new LinkedHashSet<>();
+        List<String> samples = new ArrayList<>();
+        int totalChars = 0;
         for (Event e : contentEvents) {
             String app  = (String) e.data().getOrDefault("app",  "");
             String title = (String) e.data().getOrDefault("title", "");
-            String text  = (String) e.data().getOrDefault("text_content", "");
-            if (text.isBlank()) continue;
-            if (!sessions.isEmpty()) {
-                Session last = sessions.get(sessions.size() - 1);
-                if (last.app().equals(app) && last.title().equals(title)) {
-                    last.texts().add(text);
-                    continue;
-                }
-            }
-            List<String> texts = new ArrayList<>();
-            texts.add(text);
-            sessions.add(new Session(app, title, texts));
-        }
-
-        // 2. For each session pick the longest sample (richest capture) and label it
-        List<String> samples = new ArrayList<>();
-        int totalChars = 0;
-        for (Session s : sessions) {
+            String contextTitle = (String) e.data().getOrDefault("context_title", "");
+            String effectiveTitle = !contextTitle.isBlank() ? contextTitle : title;
+            if (effectiveTitle.isBlank()) continue;
+            String kind = (String) e.data().getOrDefault("context_kind", "unknown");
+            String key = app + "\u0000" + effectiveTitle + "\u0000" + kind;
+            if (!seen.add(key)) continue;
             if (samples.size() >= MAX_WINDOW_SESSIONS) break;
-            String best = s.texts().stream()
-                    .max(Comparator.comparingInt(String::length))
-                    .orElse("");
-            if (best.isBlank()) continue;
-            String snippet = best.length() > MAX_CONTENT_LEN
-                    ? best.substring(0, MAX_CONTENT_LEN - 3) + "..." : best;
-            String entry = "[" + s.app() + "] " + snippet;
-            if (totalChars + entry.length() > maxContentChars) break;
+            String normalized = effectiveTitle.length() > MAX_TITLE_LEN
+                    ? effectiveTitle.substring(0, MAX_TITLE_LEN - 3) + "..."
+                    : effectiveTitle;
+            String entry = "[" + app + "] " + normalized;
+            if (totalChars + entry.length() > charBudget) break;
             samples.add(entry);
             totalChars += entry.length();
         }
@@ -195,14 +177,14 @@ public class WikiFactBuilder {
             int switchCount,
             List<WikiEntry.AppDuration> topApps,
             List<String> titleSamples,
-            List<String> contentSamples,
+            List<String> contextTitleSamples,
             List<String> childSummaries) {
 
         public WikiFacts(WikiPeriod period, long activeSeconds, long afkSeconds, int switchCount,
                           List<WikiEntry.AppDuration> topApps, List<String> titleSamples,
-                          List<String> contentSamples) {
+                          List<String> contextTitleSamples) {
             this(period, activeSeconds, afkSeconds, switchCount, topApps,
-                    titleSamples, contentSamples, List.of());
+                    titleSamples, contextTitleSamples, List.of());
         }
     }
 }

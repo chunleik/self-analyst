@@ -229,7 +229,7 @@ Unknown
 未指定路径时，Java 先尝试从 classpath `/axsidecar/<binary>` 释放到临时文件，再尝试开发目录
 `self-analyst-axsidecar/target/release/`；均不存在时 UIA 返回空，可选 OCR 是否接管由
 `aw.ocr.engine` 决定。当前没有
-`content.axsidecar.enabled` 配置键；禁用全部内容采集使用 `aw.collection.content=false`。
+`content.axsidecar.enabled` 配置键；禁用全部上下文标题识别使用 `aw.collection.content=false`。
 
 ---
 
@@ -289,7 +289,7 @@ Unknown
 ### SPEC-AXS-060：边车构建产物
 
 - 新增 `self-analyst-axsidecar`（Cargo 项目）。`scripts/` 构建脚本编译当前 OS 的边车二进制并随包分发；运行时按 OS 选择。
-- 二进制随 `self-analyst-content` 资源打包，运行时释放到临时目录或安装目录；该边车始终属于核心内容采集，不依赖可选 PaddleOCR 包。
+- 二进制随 `self-analyst-content` 资源打包，运行时释放到临时目录或安装目录；该边车始终属于核心上下文标题识别，不依赖可选 PaddleOCR 包。
 
 ### SPEC-AXS-061：模块接线
 

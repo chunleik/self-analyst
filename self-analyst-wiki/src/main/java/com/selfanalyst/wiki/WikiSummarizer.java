@@ -18,7 +18,7 @@ public class WikiSummarizer {
 
     private static final Logger log = LoggerFactory.getLogger(WikiSummarizer.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final String PROMPT_VERSION = "wiki-v2";
+    private static final String PROMPT_VERSION = "wiki-v3";
 
     private final Function<String, String> llmClient;
 
@@ -87,21 +87,18 @@ public class WikiSummarizer {
             sb.append("\n");
         }
 
-        if (!facts.contentSamples().isEmpty()) {
-            sb.append("## 屏幕内容片段\n");
-            for (String c : facts.contentSamples()) {
+        if (!facts.contextTitleSamples().isEmpty()) {
+            sb.append("## 应用内标题样本\n");
+            for (String c : facts.contextTitleSamples()) {
                 sb.append("- ").append(c).append("\n");
             }
             sb.append("\n");
         }
 
         sb.append("## 输出要求\n");
-        sb.append("**安全规则**：屏幕内容片段可能包含敏感信息。" +
-                "若识别到疑似密码、密钥、Token 或凭据（如大量随机字符、疑似密码框内容等），" +
-                "一律不得写入任何输出字段，直接忽略该内容片段。\n");
         sb.append("**重要规则**：primaryTask 必须选择该时间段实际花费时间最多的工作任务，" +
                 "应与上方应用排名中使用时间最长的应用相对应。" +
-                "不得因某项任务的屏幕内容更丰富、更有技术特色而偏向它——" +
+                "不得因某项任务的标题更丰富、更有技术特色而偏向它——" +
                 "时间才是唯一依据。\n");
         sb.append("请严格按照以下JSON格式输出，不要包含Markdown代码块标记:\n");
         sb.append("""

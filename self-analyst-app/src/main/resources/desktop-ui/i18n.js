@@ -21,6 +21,7 @@ var MESSAGES = {
   "status.notReady": { zh: "未就绪", en: "not ready" },
   "status.running": { zh: "运行中", en: "Running" },
   "status.degraded": { zh: "降级", en: "Degraded" },
+  "status.contextTitleMigrationFailed": { zh: "上下文标题数据迁移失败", en: "Context-title data migration failed" },
   "status.disabled": { zh: "已禁用", en: "Disabled" },
   "audio.start": { zh: "开始录音", en: "Start recording" },
   "audio.stop": { zh: "暂停录音", en: "Pause recording" },

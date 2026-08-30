@@ -33,7 +33,7 @@
 export OPENAI_API_KEY=sk-your-key
 # 也可在首次启动后通过桌面配置编辑器写入用户级 config.toml
 
-# 构建核心 dist/（UIA 内容采集，不包含 PaddleOCR）
+# 构建核心 dist/（UIA 上下文标题识别，不包含 PaddleOCR）
 powershell -File scripts/build-dist.ps1
 
 # 启动后台服务（在 http://localhost:5700 提供 REST API 与桌面页）
@@ -131,15 +131,16 @@ semantic.enabled = false
 
 重启后，后台会低速生成 `HOUR → MONTH` 多级摘要，Agent 可直接回答“昨天做了什么”或“本周和上周有什么变化”。历史补算完成后无需依赖重启：Worker 每轮都会发现新结束的时间块；即使某轮延迟，也会从上次成功游标继续补齐。`semantic.enabled=false` 不影响按时间复盘，只关闭模糊主题检索。
 
-如需“最近什么时候处理过配置问题”这类语义检索，再配置并开启 `[embedding] enabled = true`。启用 Wiki 会把裁剪后的窗口标题和可选屏幕内容发送给自行配置的 LLM，请先确认供应商与隐私策略。
+如需“最近什么时候处理过配置问题”这类语义检索，再配置并开启 `[embedding] enabled = true`。启用 Wiki 只会把窗口标题、应用内上下文标题、聚合指标和既有派生摘要发送给自行配置的 LLM，不会发送 UIA/OCR 原始正文。
 
-### 内容采集
+### 上下文标题识别
 
-窗口内容采集默认仅使用 UIA；OCR 是需要截图权限的可选增强：
+上下文标题识别默认使用 UIA。实现可以在内存中遍历完整无障碍树，但 ActivityWatch 只保存
+系统窗口标题、微信对话人/文章标题等结构化标题，不保存 UIA/OCR 原始正文。OCR 是需要截图权限的可选增强：
 
 | 层 | 机制 | 说明 |
 |----|------|------|
-| 无障碍树 | 常驻 Rust accessibility sidecar（Windows UIAutomation） | 默认路径，读取可访问控件文本 |
+| 无障碍树 | 常驻 Rust accessibility sidecar（Windows UIAutomation） | 默认路径，临时读取可访问控件文本并提取标题 |
 | OCR 增强（可选） | PaddleOCR-json / Tesseract | 显式启用后，仅在 UIA 内容不足时截屏识别 |
 | 混合判断 | ThinDetector 启发式 | OCR 启用时决定是否需要截图 |
 
@@ -196,7 +197,7 @@ self-analyst/
 │
 ├── self-analyst-content/        (内容识别模块 — 可独立复用)
 │   └── src/main/java/.../content/
-│       ├── ContentWatcher.java  三层内容采集器
+│       ├── ContentWatcher.java  上下文标题识别器
 │       ├── uia/                 accessibility sidecar 客户端 + 文本提取
 │       ├── ocr/                 可选 PaddleOCR + Tesseract 引擎
 │       ├── thin/                ThinDetector 内容密度启发式
@@ -397,6 +398,7 @@ SelfAnalyst 会采集你的数字活动（窗口、可选的屏幕 OCR / 音频 
 我们坚持透明：
 
 - 活动数据库和记忆默认保存在本机；音频与文件监控默认关闭。
+- 窗口 UIA 正文只在标题识别期间临时存在；活动数据库使用内容事件 v2，仅保存结构化标题。
 - `local-whisper` 不外发音频；`cloud-asr` 和可用的 `auto` 会把 WAV 发送到配置的 ASR 服务。
 - 对话、摘要、文件监控、Embedding 和搜索可能把相应内容发送到用户配置的第三方服务。
 - 本地服务只绑定 `127.0.0.1`；桌面模式还用每次启动生成的临时 token 保护 `/desktop/*`。

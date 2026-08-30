@@ -71,7 +71,7 @@ public class FileIndexWorker {
         try {
             reconcileScan();
         } catch (Exception e) {
-            log.warn("File reconcile scan failed: {}", e.getMessage());
+            log.warn("File reconcile scan failed ({})", errorType(e));
         }
         executor.scheduleWithFixedDelay(this::tick,
                 intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
@@ -111,7 +111,7 @@ public class FileIndexWorker {
                         }
                         maybeEnqueue(root, file, attrs);
                     } catch (Exception e) {
-                        log.debug("Reconcile skip {}: {}", file, e.getMessage());
+                        log.debug("Reconcile skip {} ({})", file, errorType(e));
                     }
                     return FileVisitResult.CONTINUE;
                 }
@@ -179,7 +179,7 @@ public class FileIndexWorker {
                 return;
             }
         } catch (Exception e) {
-            log.warn("FileIndexWorker round failed: {}", e.getMessage());
+            log.warn("FileIndexWorker round failed ({})", errorType(e));
         }
     }
 
@@ -237,10 +237,10 @@ public class FileIndexWorker {
             // 达到每日 token 预算：保持 PENDING，下个周期/次日重试，不计入失败重试次数
             log.debug("File {} 因 token 预算暂停，保持 PENDING 稍后重试", abs);
         } catch (Exception e) {
-            log.warn("File index failed for {}: {}", abs, e.getMessage());
+            log.warn("File index failed for {} ({})", abs, errorType(e));
             int retryCount = rec.retryCount() + 1;
             long delayMinutes = (long) Math.min(1440, Math.pow(2, retryCount));
-            store.markFailed(abs, truncate(e.getMessage(), 500),
+            store.markFailed(abs, "FILE_INDEX_FAILED:" + errorType(e),
                     Instant.now().plus(Duration.ofMinutes(delayMinutes)));
         }
     }
@@ -255,8 +255,8 @@ public class FileIndexWorker {
             }
             return text;
         } catch (Exception e) {
-            log.debug("Extractor failed for {} ({}), using metadata fallback: {}",
-                    file, extension, e.getMessage());
+            log.debug("Extractor failed for {} ({}), using metadata fallback ({})",
+                    file, extension, errorType(e));
             try {
                 return extractorFactory.metadataOnly().extract(file);
             } catch (Exception e2) {
@@ -286,8 +286,7 @@ public class FileIndexWorker {
         return HexFormat.of().formatHex(md.digest());
     }
 
-    private static String truncate(String s, int maxLen) {
-        if (s == null) return null;
-        return s.length() <= maxLen ? s : s.substring(0, maxLen - 3) + "...";
+    private static String errorType(Throwable error) {
+        return error == null ? "Unknown" : error.getClass().getSimpleName();
     }
 }

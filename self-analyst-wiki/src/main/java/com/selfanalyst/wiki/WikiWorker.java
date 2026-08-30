@@ -25,7 +25,6 @@ public class WikiWorker {
             WikiLevel.WEEK, WikiLevel.BIWEEK, WikiLevel.MONTH
     };
     private static final Duration BACKFILL_LOOKBACK = Duration.ofDays(7);
-    private static final String PROMPT_VERSION = "wiki-v1";
 
     private final WikiStore store;
     private final WikiFactBuilder factBuilder;
@@ -253,7 +252,7 @@ public class WikiWorker {
 
             store.updateStatus(id, WikiStatus.SUMMARIZED, result.summary(), result.primaryTask(),
                     result.taskSegments(), result.metrics(),
-                    List.of(), "llm", PROMPT_VERSION);
+                    List.of(), "llm", summarizer.promptVersion());
 
             log.debug("Summarized wiki entry {}: {}", id, result.primaryTask());
 
@@ -290,7 +289,7 @@ public class WikiWorker {
 
     private boolean isEmpty(WikiFactBuilder.WikiFacts facts) {
         return facts.activeSeconds() == 0 && facts.afkSeconds() == 0
-                && facts.titleSamples().isEmpty() && facts.contentSamples().isEmpty()
+                && facts.titleSamples().isEmpty() && facts.contextTitleSamples().isEmpty()
                 && facts.childSummaries().isEmpty();
     }
 

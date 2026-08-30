@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,5 +39,28 @@ class DesktopStatusControllerTest {
         controller.close();
 
         assertTrue(controller.isLlmCheckerShutdownForTest());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reportsContextTitleMigrationFailureAsDegraded(@TempDir Path dir) {
+        DesktopStatusController controller = new DesktopStatusController(
+                Config.testDefaults(dir), null, null, null,
+                false, "simulated migration failure");
+
+        try {
+            Map<String, Object> payload = controller.statusPayload();
+            Map<String, String> collectors =
+                    (Map<String, String>) payload.get("collectors");
+            Map<String, Object> persistence =
+                    (Map<String, Object>) payload.get("contentPersistence");
+
+            assertEquals("degraded", collectors.get("contextTitle"));
+            assertEquals("degraded", collectors.get("content"));
+            assertEquals(false, persistence.get("ready"));
+            assertEquals("migration_failed", persistence.get("status"));
+        } finally {
+            controller.close();
+        }
     }
 }

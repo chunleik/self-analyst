@@ -21,16 +21,28 @@ function hideError() {
 function updateStatusBar() {
   var st = state.status || {};
   var collectors = st.collectors || {};
+  var contentPersistence = st.contentPersistence || {};
+  var contentPersistenceFailed = contentPersistence.ready === false;
 
   setStatusDot(state.dom.backendDot, true, t("status.service"));
   state.dom.backendText.textContent = t("status.service");
 
   // Collectors
-  var collectorsOk = st.collectors === "running" || st.collectors_status === "running" ||
+  var collectorsOk = !contentPersistenceFailed && (
+    st.collectors === "running" || st.collectors_status === "running" ||
     collectors.window === "running" || collectors.afk === "running" ||
-    collectors.content === "running" || collectors.audio === "running";
+    collectors.contextTitle === "running" || collectors.content === "running" ||
+    collectors.audio === "running");
   setStatusDot(state.dom.collectorsDot, collectorsOk, t("status.capture"));
   state.dom.collectorsText.textContent = t("status.capture");
+  if (contentPersistenceFailed) {
+    var persistenceTitle = t("status.contextTitleMigrationFailed");
+    if (contentPersistence.error) persistenceTitle += ": " + contentPersistence.error;
+    state.dom.collectorsDot.title = persistenceTitle;
+    state.dom.collectorsText.title = persistenceTitle;
+  } else {
+    state.dom.collectorsText.title = state.dom.collectorsDot.title;
+  }
 
   // LLM
   var llmOk = st.llm && st.llm.configured;

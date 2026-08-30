@@ -158,8 +158,8 @@ public final class SupportedKeys {
         describe("aw.data-dir", "ActivityWatch 数据文件目录。", "Directory for ActivityWatch data files.");
         describe("aw.collection.window", "是否采集活动窗口与应用信息。", "Whether to collect active-window and application information.");
         describe("aw.collection.afk", "是否采集用户离开/活跃状态。", "Whether to collect user AFK/active status.");
-        describe("aw.collection.content", "是否采集窗口内容用于本地分析。", "Whether to collect window content for local analysis.");
-        describe("aw.collection.content.pollMs", "前台窗口元数据检查与内容心跳间隔（毫秒）。", "Interval for foreground-window metadata checks and content heartbeats, in milliseconds.");
+        describe("aw.collection.content", "是否识别并保存活动窗口的上下文标题；不会保存 UIA/OCR 原始正文。", "Whether to identify and save active-window context titles without persisting raw UIA/OCR body text.");
+        describe("aw.collection.content.pollMs", "前台窗口元数据检查与上下文标题心跳间隔（毫秒）。", "Interval for foreground-window metadata checks and context-title heartbeats, in milliseconds.");
         describe("aw.ocr.engine", "可选屏幕 OCR：off、auto、paddle 或 tesseract；默认 off。", "Optional screen OCR: off, auto, paddle, or tesseract; defaults to off.");
         describe("aw.audio.enabled", "是否启用音频采集与转写。", "Whether to enable audio capture and transcription.");
         describe("aw.audio.whisperPath", "本地 Whisper 可执行文件或目录路径。", "Path to the local Whisper executable or directory.");

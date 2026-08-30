@@ -55,6 +55,7 @@ assert.match(eventsJs, /api\.setAudioCapture\(!audioCaptureRunning\(\)\)/);
 
 assert.match(uiJs, /function audioCaptureRunning\(\)/);
 assert.match(uiJs, /collectors\.audio === "running"/);
+assert.match(uiJs, /collectors\.contextTitle === "running"/);
 assert.match(uiJs, /audio-toggle-btn/);
 assert.match(uiJs, /audio\.stop/);
 assert.match(uiJs, /audio\.start/);

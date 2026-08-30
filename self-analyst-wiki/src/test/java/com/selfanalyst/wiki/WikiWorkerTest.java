@@ -175,6 +175,8 @@ class WikiWorkerTest {
                 .stream().filter(candidate -> candidate.id().equals(week.id())).findFirst().orElseThrow();
         assertEquals(7, summarizedWeek.metrics().activeSeconds(),
                 "parent metrics must aggregate only the seven exact UTC children");
+        assertEquals(summarizer.promptVersion(), summarizedWeek.promptVersion(),
+                "persisted provenance must use the title-only summarizer prompt version");
     }
 
     @Test

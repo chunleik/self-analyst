@@ -3,6 +3,7 @@ package com.selfanalyst.aw.controller;
 import com.selfanalyst.aw.model.Event;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
+import com.selfanalyst.aw.store.ContentEventPolicyViolationException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
@@ -25,6 +26,10 @@ public class HeartbeatController {
     public void handle(Context ctx) {
         try {
             String bucketId = ctx.pathParam("id");
+            if (bucketStore.get(bucketId).isEmpty()) {
+                ctx.status(404).json(Map.of("error", "Bucket not found: " + bucketId));
+                return;
+            }
             Map<String, Object> body = MAPPER.readValue(ctx.body(), new TypeReference<Map<String, Object>>() {});
 
             Instant timestamp = Instant.parse((String) body.get("timestamp"));
@@ -46,6 +51,10 @@ public class HeartbeatController {
             response.put("duration", result.duration());
             response.put("data", result.data());
             ctx.json(response);
+        } catch (ContentEventPolicyViolationException e) {
+            ctx.status(422).json(Map.of(
+                    "error", "Content event violates persisted-field policy",
+                    "field", e.field()));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to process heartbeat: " + e.getMessage()));
         }

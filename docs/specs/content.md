@@ -20,7 +20,9 @@
 
 ### SPEC-CTX-001: 模块职责
 
-`self-analyst-content` 是一个独立的内容采集模块，负责从活跃窗口中提取文本内容，通过 HTTP 推送到 ActivityWatch API。
+`self-analyst-content` 是一个独立的上下文标题识别模块。它可以在内存中查询活跃窗口的完整
+UIA/OCR 文本，但通过 HTTP 推送到 ActivityWatch API 的事件只能包含结构化标题和诊断计数。
+持久化边界以 [`content-title-persistence.md`](content-title-persistence.md) 为准。
 
 ### SPEC-CTX-002: 四层采集策略
 
@@ -74,7 +76,10 @@ self-analyst-content/
 
 ## 4. 数据模型
 
-### SPEC-MDL-100: ContentEvent
+### SPEC-MDL-100: ContentEvent（v1 已废弃）
+
+下列包含 `textContent` 的 v1 模型不再允许写入数据库，由 `SPEC-CTP-011..013` 取代；保留
+在此仅用于说明历史迁移来源。
 
 ```java
 public record ContentEvent(
@@ -99,6 +104,8 @@ public record ContentEvent(
 - **SPEC-MDL-100b**: `title` 必须继续表示 Win32 顶层窗口标题；当能够保守地识别
   应用内部的当前上下文时，heartbeat `data` 额外写入 `context_title`。无法可靠识别时
   必须省略该字段，不得用猜测值覆盖 `title`。
+- **SPEC-MDL-100c**: 规范持久化模型为内容事件 v2；字段白名单、标题来源和诊断字段见
+  `SPEC-CTP-011`。`textContent` 只能作为采集调用内的临时结果。
 
 ### SPEC-MDL-101: UIA Node
 
@@ -115,7 +122,8 @@ public record UiaNode(
 ```
 
 - **SPEC-MDL-101a**: `controlType` 值必须能映射到人类可读名称（如 50020 → "Text"）
-- **SPEC-MDL-101b**: `textContent` 由 UIA 树中所有文本节点的 name/value 递归拼接而成
+- **SPEC-MDL-101b**: 临时 `textContent` 由 UIA 树中所有文本节点的 name/value 递归拼接而成；
+  该值不得进入 Snapshot、heartbeat、数据库、索引或日志
 - **SPEC-MDL-101c**: 密码类型节点 (`isPassword = true`) 的 value 必须替换为 `"***"`，不提取真实密码
 
 ---
@@ -182,6 +190,8 @@ public record UiaNode(
   “聊天信息”等已知标题栏控件，避免把聊天正文中的同名文本误判为标题。
 - 候选为空、为通用微信控件名或超过 200 个 Unicode code point 时不得输出。
 - 成功时保留原 `title`，并将候选写入 `context_title`；失败时省略 `context_title`。
+- UIA Document 标题在微信进程中作为 `context_kind=article` 的文章候选；聊天标题仍使用
+  `context_kind=chat`。两者都必须遵守 `SPEC-CTP-012` 的候选约束。
 
 ---
 
@@ -226,7 +236,7 @@ public interface OcrEngine {
 
 - 通过系统属性 `aw.ocr.engine` 或环境变量 `AW_OCR_ENGINE` 配置
 - 支持值: `off`（默认）、`auto`、`paddle`、`tesseract`
-- `off`: 不创建 OCR 引擎，不执行用于 OCR 的窗口截图，仅保留 UIA 内容采集
+- `off`: 不创建 OCR 引擎，不执行用于 OCR 的窗口截图，仅保留 UIA 上下文标题识别
 - `auto`: PaddleOCR 存在则用，否则回退 Tesseract
 - `paddle`: 强制 PaddleOCR，不存在时记录警告并继续使用 UIA
 - `tesseract`: 强制 Tesseract
@@ -285,7 +295,7 @@ figma, excalidraw, miro, canva, tldraw
 
 - 递归搜索树中 `ControlType=50030`（Document）节点
 - 取第一个非空 `Name` 属性值作为内部页面/文档标题
-- 返回非 null 时直接作为 `textContent`，`source="uia"`，跳过截图和 OCR
+- 返回非 null 时作为临时 `textContent` 和结构化文档标题候选，跳过截图和 OCR；只有候选字段可持久化
 - 适用场景：Electron/Tauri 应用启用了 Accessibility 时，WebView 暴露 Document 节点，其 Name = 当前页面标题
 
 ### SPEC-THN-006: 应用排除列表（内置）
@@ -379,7 +389,8 @@ public class HybridMerger {
    c. ELSE: textContent = uiaText, source = "uia"（无截图）
    ELSE:
    textContent = uiaText, source = "uia"
-9. ContentEvent 构造；contextTitle 非空时写入 context_title
+9. 将临时 ContentResult 投影为不含正文的 TitleCaptureResult
+10. 构造内容事件 v2；只写入 SPEC-CTP-011 白名单字段
    → POST /api/0/buckets/aw-watcher-content-{host}/heartbeat
 ```
 
@@ -393,6 +404,7 @@ public class HybridMerger {
 - OCR 异常：使用 UIA 文本，标记 source 为 "uia"
 - 两者都异常：跳过本次采集
 - 不得因单次采集失败而终止循环
+- 无论成功或降级路径如何，heartbeat 都不得包含临时 UIA/OCR 原文
 
 ---
 
@@ -447,7 +459,7 @@ public class HybridMerger {
 ### SPEC-BLD-102: self-analyst-app 集成
 
 - `self-analyst-app` 的 pom.xml 添加对 `self-analyst-content` 的依赖（可选，当前通过 HTTP 通信）
-- `AppSession` 中可选用 `ContentWatcher` 启动内容采集
+- `AppSession` 中可选用 `ContentWatcher` 启动上下文标题识别；历史内容事件迁移失败时不得启动
 - `AppSession` 必须把 `Config.ocrEngine()` 传入 `aw.ocr.engine` 运行时属性，保证用户配置真实生效
 - 默认 `build-dist.ps1` / `build-portable.ps1` 不复制 PaddleOCR；仅 `-WithOcr` 显式打包
 - `download-tools.ps1` 仅在传入 `-WithOcr` 时下载 PaddleOCR
@@ -470,7 +482,7 @@ OCR 默认关闭。显式启用后，截图**必须**仅对窗口顶部 N 像素
 （`ocr.title-strip-height`，默认 80）进行识别：
 
 - 仅捕获应用标题栏/选项卡行，不捕获正文内容
-- 默认不保存截图；常规内容存储仅接收识别后的标题条文本
+- 默认不保存截图；常规内容存储仅接收识别后的结构化标题候选，不接收 OCR 原始文本
 - 设置为 0 会禁用标题条限制（不推荐，会识别完整窗口内容）
 - 宽度超过 960 像素的标题条必须横向分片，避免等比缩放降低文字高度
 

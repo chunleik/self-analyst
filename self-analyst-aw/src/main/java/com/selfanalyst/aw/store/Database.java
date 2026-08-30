@@ -251,9 +251,9 @@ public class Database implements AutoCloseable {
         });
     }
 
-    private static void validateBucketId(String bucketId) {
+    static void validateBucketId(String bucketId) {
         if (bucketId == null || bucketId.isBlank() || !bucketId.matches(SAFE_BUCKET_ID)) {
-            throw new IllegalArgumentException("Invalid bucket id: " + bucketId);
+            throw new IllegalArgumentException("Invalid bucket id");
         }
     }
 

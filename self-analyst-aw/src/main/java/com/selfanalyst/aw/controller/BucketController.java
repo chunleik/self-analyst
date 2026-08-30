@@ -4,6 +4,8 @@ import com.selfanalyst.aw.model.Bucket;
 import com.selfanalyst.aw.model.BucketMetadata;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
+import com.selfanalyst.aw.store.ContentEventPolicy;
+import com.selfanalyst.aw.store.ContentEventPolicyViolationException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
@@ -61,11 +63,25 @@ public class BucketController {
             String client = (String) body.getOrDefault("client", "unknown");
             String hostname = (String) body.getOrDefault("hostname", "unknown");
 
+            // Older servers allowed orphan events before bucket creation. A content bucket
+            // must not adopt such rows unless every one already satisfies the v2 policy.
+            if (ContentEventPolicy.isContentBucket(id, client)) {
+                for (var event : eventStore.queryAllEvents(id)) {
+                    ContentEventPolicy.validate(id, client, event.data());
+                }
+            }
+
             Bucket bucket = Bucket.create(id, name, type, client, hostname);
             bucketStore.create(bucket);
 
             BucketMetadata meta = BucketMetadata.fromBucket(bucket, 0);
             ctx.json(meta.toMap());
+        } catch (ContentEventPolicyViolationException e) {
+            ctx.status(422).json(Map.of(
+                    "error", "Content bucket contains events that violate persisted-field policy",
+                    "field", e.field()));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to create bucket: " + e.getMessage()));
         }

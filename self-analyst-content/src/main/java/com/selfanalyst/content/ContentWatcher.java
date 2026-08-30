@@ -3,6 +3,7 @@ package com.selfanalyst.content;
 import com.selfanalyst.content.capture.ContentCapture;
 import com.selfanalyst.content.capture.ContentResult;
 import com.selfanalyst.content.capture.ContextTitleExtractor;
+import com.selfanalyst.content.capture.TitleCaptureResult;
 import com.selfanalyst.content.platform.PlatformCapture;
 import com.selfanalyst.content.platform.WindowsCapture;
 import com.selfanalyst.content.uia.UiaTreeWalker;
@@ -49,6 +50,7 @@ public class ContentWatcher extends Thread {
     private final long pollIntervalNanos;
     private final long stableCaptureIntervalNanos;
     private volatile boolean running = true;
+    private volatile boolean heartbeatHealthy = true;
     private volatile Thread captureThread;
 
     /** Minimum heartbeat duration (seconds) — must exceed vis-timeline's filterShortEvents threshold of 1s. */
@@ -57,7 +59,7 @@ public class ContentWatcher extends Thread {
     /** Latest capture snapshot — written by capture thread, read by heartbeat thread. */
     private volatile Snapshot latest;
 
-    private record Snapshot(long handle, String app, String title, ContentResult result) {}
+    private record Snapshot(long handle, String app, String title, TitleCaptureResult result) {}
 
     public ContentWatcher(String serverUrl, int pollIntervalMs) {
         this.serverUrl = serverUrl;
@@ -194,11 +196,12 @@ public class ContentWatcher extends Thread {
 
                 ContentResult result = capture.capture(
                     handle, app, title, walkResult.root(), walkResult.text());
+                TitleCaptureResult titleResult = TitleCaptureResult.from(result);
 
                 PlatformCapture.ForegroundWindow confirmed =
                         platform.getForegroundWindowInfo();
                 if (sameWindow(handle, app, title, confirmed)) {
-                    latest = new Snapshot(handle, app, title, result);
+                    latest = new Snapshot(handle, app, title, titleResult);
                 } else {
                     latest = null;
                 }
@@ -273,7 +276,7 @@ public class ContentWatcher extends Thread {
             "ContentWatcher is only supported on Windows. OS: " + os);
     }
 
-    private void sendHeartbeat(String app, String title, ContentResult result) {
+    private void sendHeartbeat(String app, String title, TitleCaptureResult result) {
         try {
             String url = serverUrl + "/api/0/buckets/" + bucketId + "/heartbeat";
 
@@ -293,26 +296,28 @@ public class ContentWatcher extends Thread {
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
 
-            httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> response =
+                    httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            heartbeatHealthy = response.statusCode() >= 200 && response.statusCode() < 300;
         } catch (Exception e) {
-            // Silent
+            heartbeatHealthy = false;
         }
     }
 
-    static Map<String, Object> heartbeatData(String app, String title, ContentResult result) {
+    static Map<String, Object> heartbeatData(String app, String title, TitleCaptureResult result) {
         Map<String, Object> data = new LinkedHashMap<>();
+        data.put("schema_version", 2);
         data.put("app", app != null ? app : "");
         data.put("title", title != null ? title : "");
-        if (result.contextTitle() != null && !result.contextTitle().isBlank()) {
+        if (result != null && result.contextTitle() != null && !result.contextTitle().isBlank()) {
             data.put("context_title", result.contextTitle());
+            data.put("context_kind", result.contextKind());
+            data.put("title_confidence", result.titleConfidence());
         }
-        data.put("text_content", result.textContent() != null ? result.textContent() : "");
-        data.put("source", result.source() != null ? result.source() : "uia");
-        data.put("uia_chars", result.uiaChars());
-        data.put("ocr_chars", result.ocrChars());
-        if (result.sampleId() != null) {
-            data.put("sample_id", result.sampleId());
-        }
+        data.put("title_source", result != null && result.titleSource() != null
+                ? result.titleSource() : "window");
+        data.put("uia_chars", result != null ? result.uiaChars() : 0);
+        data.put("ocr_chars", result != null ? result.ocrChars() : 0);
         return data;
     }
 
@@ -350,5 +355,14 @@ public class ContentWatcher extends Thread {
 
     public boolean isRunning() {
         return running;
+    }
+
+    public String status() {
+        return statusOf(running, heartbeatHealthy);
+    }
+
+    static String statusOf(boolean running, boolean heartbeatHealthy) {
+        if (!running) return "disabled";
+        return heartbeatHealthy ? "running" : "degraded";
     }
 }

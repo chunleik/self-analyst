@@ -4,6 +4,7 @@ import com.selfanalyst.aw.export.DataExporter;
 import com.selfanalyst.aw.export.DataImporter;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
+import com.selfanalyst.aw.store.ContentEventPolicyViolationException;
 import io.javalin.http.Context;
 
 import java.util.Map;
@@ -33,6 +34,12 @@ public class ExportController {
             Map<String, Object> data = ctx.bodyAsClass(Map.class);
             Map<String, Object> result = importer.importData(data);
             ctx.json(result);
+        } catch (ContentEventPolicyViolationException e) {
+            ctx.status(422).json(Map.of(
+                    "error", "Imported content event violates persisted-field policy",
+                    "field", e.field()));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to import data: " + e.getMessage()));
         }

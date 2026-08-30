@@ -13,7 +13,8 @@ SelfAnalyst 是在本机运行的个人活动分析工具。它可能接触窗�
 
 | 数据 | 位置 | 说明 |
 |------|------|------|
-| 活动、窗口、AFK、OCR 和转写事件 | `{aw.data-dir}/aw.db` | AW bucket 与事件使用单一 SQLite 数据库 |
+| 活动、窗口、AFK、上下文标题和转写事件 | `{aw.data-dir}/aw.db` | 上下文标题事件不含 UIA/OCR 原始正文；音频转写策略暂保持现状 |
+| OCR 调试样本 | `ocr.sample.dir` | 默认关闭；显式启用后可能包含完整截图和 OCR 文本 |
 | 用户配置 | `{memory.dir}/config.toml` | UTF-8 明文，可能包含 API key；旧 `config.properties` 首次迁移后保留为 `.bak` |
 | 成长档案和长期记忆 | `{memory.dir}/memory.json` | 目标、模式、改进记录与长期记忆条目 |
 | 聊天正文 | `{memory.dir}/chat-sessions/chat.db` | SQLite WAL 单库，是 UI transcript 的权威来源 |
@@ -43,7 +44,7 @@ SelfAnalyst 是在本机运行的个人活动分析工具。它可能接触窗�
 | Agent 对话 | 当前问题、该会话模型历史、所选活动/任务/内容片段 | `llm.base-url` | 用户发起对话时 |
 | AgentState 压缩 | 达到阈值的旧会话前缀 | `llm.base-url` | 压缩默认开启，达到阈值时触发 |
 | 会话摘要与长期记忆提炼 | 会话正文及候选记忆上下文 | `llm.base-url` | 会话变化后异步触发；失败可降级 |
-| Wiki 摘要 | 时间段内的窗口标题和可选内容片段 | `llm.base-url` | `wiki.enabled=false` |
+| Wiki 摘要 | 时间段内的窗口标题、应用内上下文标题、聚合指标和既有派生摘要 | `llm.base-url` | `wiki.enabled=false` |
 | 文件摘要 | 被监控目录内的文件正文 | `llm.base-url` | `file.watch.enabled=false` |
 | Embedding | 待建立语义索引的文本 | `embedding.base-url` | `embedding.enabled=false` |
 | 联网搜索 | 搜索查询 | `websearch.mcp-url` | `websearch.enabled=false` |
@@ -56,8 +57,10 @@ SelfAnalyst 是在本机运行的个人活动分析工具。它可能接触窗�
 ## 4. 采集范围
 
 - 窗口活动记录包含进程名和窗口标题，不记录键盘输入。
-- UIA 通过本地 Rust accessibility sidecar 读取可访问性树；密码字段以安全标记处理并脱敏。
-- 屏幕 OCR 默认关闭（`aw.ocr.engine=off`），此时内容采集不会为 OCR 截图。
+- UIA 通过本地 Rust accessibility sidecar 临时读取可访问性树；密码字段以安全标记处理并脱敏。
+- UIA 原始文本不会写入活动数据库、Wiki 数据库、语义索引或日志；活动数据库只保存结构化上下文标题和诊断计数。
+- 升级时会在上下文标题 watcher 启动前净化历史 `text_content`，并执行 WAL 截断和 SQLite `VACUUM`；迁移失败时上下文标题 watcher 和 Wiki worker 会保持禁用。
+- 屏幕 OCR 默认关闭（`aw.ocr.engine=off`），此时上下文标题识别不会为 OCR 截图。
 - 显式启用 OCR 后，默认只识别窗口顶部 `ocr.title-strip-height=80` 像素；设为 `0` 会扩大到完整窗口。
 - OCR 调试样本默认关闭；启用 `ocr.sample.enabled` 后会在本地保留截图，可能包含敏感正文。
 - `ocr.excluded.apps` 可按进程名排除不应采集的应用。

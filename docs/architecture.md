@@ -2,7 +2,7 @@
 
 ## 概述
 
-SelfAnalyst 通过窗口/AFK、可选屏幕内容、音频和文件数据构建个人活动时间线，再由 LLM Agent、
+SelfAnalyst 通过窗口/AFK、上下文标题、可选音频和文件数据构建个人活动时间线，再由 LLM Agent、
 多级 Wiki 摘要和长期记忆形成“感知 → 认知 → 改进”闭环。项目以 Java 21 Maven 多模块为主体，
 桌面壳和无障碍边车使用 Rust。
 
@@ -41,14 +41,19 @@ FileWatcher ────────────────┘                 
 Desktop UI → /desktop/* → Desktop controllers → chat.db / AgentState / memory.json
 ```
 
-### 内容采集
+### 上下文标题识别
 
-Windows 内容采集先把前台窗口句柄交给进程级共享的 `AxSidecarClient`。Rust 边车通过 JSONL 协议
-返回 OS 中性的无障碍树；`UiaTreeWalker` 在 Java 侧执行文本提取和密码字段脱敏。边车不存在、
+Windows 上下文标题识别先把前台窗口句柄交给进程级共享的 `AxSidecarClient`。Rust 边车通过 JSONL 协议
+返回 OS 中性的无障碍树；`UiaTreeWalker` 在 Java 侧临时执行文本提取和密码字段脱敏。边车不存在、
 超时或失败时返回空树；仅当用户显式启用 OCR 时才截图降级，不再启动 PowerShell one-shot 进程。
 
+完整 UIA/OCR 文本只存在于当前识别调用中。`ContentWatcher` 在发送 heartbeat 前投影为内容事件 v2，
+只保留系统窗口标题、应用内上下文标题、标题来源、置信度和诊断计数。AW 的共享写入策略会拒绝
+内容 bucket 中的 `text_content` 及未知字段；历史 v1 事件在 watcher 启动前完成净化。
+
 OCR 默认关闭。启用后裁剪窗口顶部标题条，并对稳定画面复用指纹缓存；具体刷新和隐私边界见
-[specs/content.md](specs/content.md) 与 [specs/accessibility-sidecar.md](specs/accessibility-sidecar.md)。
+[specs/content.md](specs/content.md)、[specs/content-title-persistence.md](specs/content-title-persistence.md)
+与 [specs/accessibility-sidecar.md](specs/accessibility-sidecar.md)。
 
 ### 音频采集
 
@@ -58,8 +63,8 @@ OCR 默认关闭。启用后裁剪窗口顶部标题条，并对稳定画面复�
 
 ### 文件与 Wiki
 
-`FileWatcher` 去抖后向 AW 写 heartbeat，并把待处理项写入 `file-watch.db`；`FileIndexWorker` 提取正文、
-生成摘要，再按配置写入 Lucene 索引。`WikiWorker` 从已完成时间段生成 HOUR 到 MONTH 多级摘要，
+`FileWatcher` 去抖后向 AW 写 heartbeat，并把待处理项写入 `file-watch.db`；`FileIndexWorker` 临时提取正文、
+只把摘要和主题写入数据库及 Lucene 索引。`WikiWorker` 从标题事件和已完成时间段生成 HOUR 到 MONTH 多级摘要，
 不会为高层摘要重新读取全部原始屏幕内容。
 
 ## 配置

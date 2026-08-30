@@ -92,6 +92,21 @@ public class DesktopServer {
                          WatcherManager watcherManager,
                          ContentWatcher contentWatcher,
                          AudioCaptureManager audioCaptureManager) {
+        this(app, config, agent, eventStore, bucketStore, memoryStore,
+                watcherManager, contentWatcher, audioCaptureManager, true, null);
+    }
+
+    public DesktopServer(Javalin app,
+                         Config config,
+                         SelfAnalystAgent agent,
+                         EventStore eventStore,
+                         BucketStore bucketStore,
+                         MemoryStore memoryStore,
+                         WatcherManager watcherManager,
+                         ContentWatcher contentWatcher,
+                         AudioCaptureManager audioCaptureManager,
+                         boolean contentPersistenceReady,
+                         String contentMigrationError) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
@@ -121,7 +136,8 @@ public class DesktopServer {
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.statusCtrl = new DesktopStatusController(
-                config, watcherManager, contentWatcher, audioCaptureManager);
+                config, watcherManager, contentWatcher, audioCaptureManager,
+                contentPersistenceReady, contentMigrationError);
         this.audioCtrl = new DesktopAudioController(audioCaptureManager);
         this.audioEventsCtrl = new DesktopAudioEventsController(
                 eventStore, bucketStore, audioCaptureManager);

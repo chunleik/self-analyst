@@ -16,7 +16,13 @@ public final class ContextTitleExtractor {
             "语音通话", "語音通話", "视频通话", "視訊通話",
             "聊天信息", "聊天資訊");
     private static final Set<String> GENERIC_LABELS = Set.of(
-            "微信", "weixin", "wechat", "更多", "聊天记录", "聊天記錄");
+            "微信", "weixin", "wechat", "更多", "聊天记录", "聊天記錄",
+            "搜索", "返回", "前进", "刷新", "菜单", "设置", "确定", "取消",
+            "发送", "分享", "收藏", "阅读原文", "点赞", "在看",
+            "search", "back", "forward", "refresh", "menu", "settings", "ok",
+            "cancel", "send", "share", "favorite", "favourites");
+    private static final java.util.regex.Pattern PURE_URL = java.util.regex.Pattern.compile(
+            "(?i)^(?:[a-z][a-z0-9+.-]*:|www\\.)\\S+$");
     private static final int MAX_TITLE_CODE_POINTS = 200;
     private static final int COMPANION_LOOKAHEAD = 3;
 
@@ -31,6 +37,11 @@ public final class ContextTitleExtractor {
      * text that happens to contain the same words.</p>
      */
     static String extract(String app, String uiaText) {
+        ContextTitleCandidate candidate = extractCandidate(app, uiaText);
+        return candidate != null ? candidate.value() : null;
+    }
+
+    public static ContextTitleCandidate extractCandidate(String app, String uiaText) {
         if (!supports(app) || uiaText == null || uiaText.isBlank()) return null;
 
         List<String> lines = uiaText.lines()
@@ -42,9 +53,43 @@ public final class ContextTitleExtractor {
             if (!hasHeaderCompanion(lines, i + 1)) continue;
 
             String candidate = lines.get(i - 1);
-            if (isValidTitle(candidate)) return candidate;
+            if (isValidTitleCandidate(candidate)) {
+                return new ContextTitleCandidate(
+                        candidate, "chat", "uia_context", "high");
+            }
         }
         return null;
+    }
+
+    /** Build a document/article title candidate without retaining the source tree or text. */
+    public static ContextTitleCandidate fromDocumentTitle(String app, String documentTitle) {
+        if (!isValidTitleCandidate(documentTitle)) return null;
+        return new ContextTitleCandidate(
+                documentTitle,
+                supports(app) ? "article" : "document",
+                "uia_document",
+                "high");
+    }
+
+    /**
+     * Conservatively project OCR title-strip text to one title. Multiple distinct lines are
+     * ambiguous UI chrome and therefore produce no persisted candidate.
+     */
+    public static ContextTitleCandidate fromOcrTitle(String app, String ocrText) {
+        if (ocrText == null || ocrText.isBlank()) return null;
+        List<String> candidates = ocrText.lines()
+                .map(String::strip)
+                .filter(line -> !line.isEmpty())
+                .filter(line -> line.codePointCount(0, line.length()) > 1)
+                .filter(ContextTitleExtractor::isValidTitleCandidate)
+                .distinct()
+                .toList();
+        if (candidates.size() != 1) return null;
+        return new ContextTitleCandidate(
+                candidates.getFirst(),
+                supports(app) ? "article" : "page",
+                "ocr_title",
+                "medium");
     }
 
     public static boolean supports(String app) {
@@ -60,11 +105,17 @@ public final class ContextTitleExtractor {
         return false;
     }
 
-    private static boolean isValidTitle(String candidate) {
-        return !candidate.isBlank()
+    public static boolean isValidTitleCandidate(String candidate) {
+        if (candidate == null || candidate.isBlank()
+                || candidate.contains("\n") || candidate.contains("\r")) return false;
+        long sentenceTerminators = candidate.codePoints()
+                .filter(cp -> cp == '。' || cp == '！' || cp == '？' || cp == '!' || cp == '?')
+                .count();
+        return !PURE_URL.matcher(candidate.strip()).matches()
                 && !GENERIC_LABELS.contains(candidate.toLowerCase(Locale.ROOT))
                 && !CHAT_HISTORY_ANCHORS.contains(candidate)
                 && !HEADER_COMPANIONS.contains(candidate)
+                && sentenceTerminators < 2
                 && candidate.codePointCount(0, candidate.length()) <= MAX_TITLE_CODE_POINTS;
     }
 }

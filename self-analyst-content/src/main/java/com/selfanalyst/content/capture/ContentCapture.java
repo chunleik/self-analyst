@@ -107,20 +107,24 @@ public class ContentCapture implements AutoCloseable {
                                  UiaNode uiaTree, String uiaText) {
         if (uiaText == null) uiaText = "";
         int uiaChars = uiaText.length();
-        String contextTitle = ContextTitleExtractor.extract(app, uiaText);
+        ContextTitleCandidate titleCandidate =
+                ContextTitleExtractor.extractCandidate(app, uiaText);
 
         // Build tree list from single root (or empty)
         List<UiaNode> tree = (uiaTree != null) ? List.of(uiaTree) : List.of();
+        String docTitle = ThinDetector.extractDocumentTitle(tree);
+        if (titleCandidate == null && docTitle != null) {
+            titleCandidate = ContextTitleExtractor.fromDocumentTitle(app, docTitle);
+        }
 
         if (thin.isThin(tree, app, title, uiaChars)) {
             // Step 1: UIA Document title (SPEC-THN-005)
             // Electron/Tauri apps expose page title via ControlType=Document.Name when
             // accessibility is enabled. No screenshot needed — zero privacy risk.
-            String docTitle = ThinDetector.extractDocumentTitle(tree);
             if (docTitle != null) {
                 log.debug("Thin window resolved via UIA Document title [{}]", app);
                 return ContentResult.noSample(
-                        docTitle, "uia", docTitle.length(), 0, contextTitle);
+                        docTitle, "uia", docTitle.length(), 0, titleCandidate);
             }
 
             // Step 2: OCR title strip (SPEC-OCR-005)
@@ -165,18 +169,21 @@ public class ContentCapture implements AutoCloseable {
                     }
                 }
                 int ocrChars = ocrText.length();
+                if (titleCandidate == null && titleStripHeight > 0) {
+                    titleCandidate = ContextTitleExtractor.fromOcrTitle(app, ocrText);
+                }
                 String merged = merger.merge(uiaText, ocrText);
                 String source = resolveSource(uiaText, ocrText);
                 return new ContentResult(
-                        merged, source, uiaChars, ocrChars, contextTitle, sampleId);
+                        merged, source, uiaChars, ocrChars, titleCandidate, sampleId);
             } catch (Exception e) {
                 // SPEC-WCH-003: OCR failure → fall back to UIA
                 return ContentResult.noSample(
-                        uiaText, uiaText.isEmpty() ? "" : "uia", uiaChars, 0, contextTitle);
+                        uiaText, uiaText.isEmpty() ? "" : "uia", uiaChars, 0, titleCandidate);
             }
         } else {
             // Not thin → UIA text only
-            return ContentResult.noSample(uiaText, "uia", uiaChars, 0, contextTitle);
+            return ContentResult.noSample(uiaText, "uia", uiaChars, 0, titleCandidate);
         }
     }
 

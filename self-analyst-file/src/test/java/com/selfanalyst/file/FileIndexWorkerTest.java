@@ -25,10 +25,12 @@ class FileIndexWorkerTest {
     private FileSummarizer summarizer;
     private FileContentExtractorFactory factory;
     private PathFilter pathFilter;
+    private Path dbPath;
 
     @BeforeEach
     void setUp(@TempDir Path tmp) throws Exception {
-        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        dbPath = tmp.resolve("file-watch.db");
+        store = new FileWatchStore(dbPath);
         root = Files.createDirectories(tmp.resolve("root"));
         file = Files.writeString(root.resolve("notes.txt"), "version one content");
         llmCalls = new AtomicInteger();
@@ -127,5 +129,51 @@ class FileIndexWorkerTest {
         String s = "abcdefghij";
         assertEquals("abcde", FileIndexWorker.truncateByCodepoint(s, 5));
         assertEquals(s, FileIndexWorker.truncateByCodepoint(s, 100));
+    }
+
+    @Test
+    void rawFileBodyIsNeverPersistedInFileDatabase() throws Exception {
+        String forbidden = "SELF_ANALYST_FORBIDDEN_FILE_BODY_9C2E";
+        Files.writeString(file, forbidden);
+        upsert();
+
+        worker(0).processOneRound();
+        assertEquals("S", store.findByPath(file.toAbsolutePath().toString()).summary());
+        store.close();
+        store = null;
+
+        for (Path path : List.of(
+                dbPath, Path.of(dbPath + "-wal"), Path.of(dbPath + "-shm"))) {
+            if (!Files.exists(path)) continue;
+            String bytes = new String(Files.readAllBytes(path),
+                    java.nio.charset.StandardCharsets.ISO_8859_1);
+            assertFalse(bytes.contains(forbidden), "raw file body leaked into " + path);
+        }
+    }
+
+    @Test
+    void promptEchoedByFailureIsNotPersistedAsLastError() throws Exception {
+        String forbidden = "SELF_ANALYST_FORBIDDEN_FILE_BODY_9C2E";
+        Files.writeString(file, forbidden);
+        summarizer = new FileSummarizer(prompt -> {
+            throw new RuntimeException(prompt);
+        });
+        upsert();
+
+        worker(0).processOneRound();
+        FileRecord record = store.findByPath(file.toAbsolutePath().toString());
+        assertEquals(FileStatus.FAILED, record.status());
+        assertEquals("FILE_INDEX_FAILED:RuntimeException", record.lastError());
+        assertFalse(record.lastError().contains(forbidden));
+        store.close();
+        store = null;
+
+        for (Path path : List.of(
+                dbPath, Path.of(dbPath + "-wal"), Path.of(dbPath + "-shm"))) {
+            if (!Files.exists(path)) continue;
+            String bytes = new String(Files.readAllBytes(path),
+                    java.nio.charset.StandardCharsets.ISO_8859_1);
+            assertFalse(bytes.contains(forbidden), "failure leaked raw body into " + path);
+        }
     }
 }

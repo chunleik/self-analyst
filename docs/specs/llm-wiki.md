@@ -28,7 +28,7 @@
 实施 LLM Wiki 前，SelfAnalyst 已经具备以下基础能力：
 
 - `self-analyst-aw`: 持久采集窗口、AFK 等 ActivityWatch 事件。
-- `self-analyst-content`: 以 `aw-watcher-content_{hostname}` bucket 记录 UIA/OCR 内容事件。
+- `self-analyst-content`: 以 `aw-watcher-content_{hostname}` bucket 记录不含原始正文的上下文标题事件。
 - `SummaryService`: 临时查询窗口和 AFK 事件，生成当前状态与时间线摘要。
 - `SelfAnalystAgent`: 使用长期记忆 `memory.json` 和 ActivityWatch 工具回答用户问题。
 - `MemoryStore`: 只保存目标、行为模式、改进记录，不适合保存永久时间线摘要。
@@ -372,16 +372,18 @@ record WikiMetrics(
 
 - **SPEC-WIKI-SRC-005**: 窗口事件用于计算应用耗时、窗口切换次数、窗口标题样本。
 - **SPEC-WIKI-SRC-006**: AFK 事件用于计算非活跃时间。
-- **SPEC-WIKI-SRC-007**: 内容事件只用于生成 prompt 的临时上下文。
-- **SPEC-WIKI-SRC-008**: 内容事件的 `text_content` 不得写入 `llm-wiki.db`。
-- **SPEC-WIKI-SRC-009**: 生成 prompt 前必须对标题和内容文本做长度裁剪。
+- **SPEC-WIKI-SRC-007（已废弃）**: 旧版允许把内容事件正文用于 prompt；由
+  `SPEC-CTP-040` 的标题事实契约取代。
+- **SPEC-WIKI-SRC-008（已废弃）**: 旧版只禁止把 `text_content` 写入 Wiki；当前
+  `SPEC-CTP-011` 已在 AW 入库前禁止该字段。
+- **SPEC-WIKI-SRC-009（已废弃）**: 不再采样内容文本；标题预算由 `SPEC-CTP-040` 约束。
 
 ### 9.3 Prompt 输入限制
 
 - **SPEC-WIKI-SRC-010**: 单次 prompt 输入总字符数默认不得超过 `wiki.prompt.maxContentChars`。
 - **SPEC-WIKI-SRC-011**: 单个窗口标题样本默认不得超过 160 个字符。
-- **SPEC-WIKI-SRC-012**: 单个内容文本片段默认不得超过 500 个字符。
-- **SPEC-WIKI-SRC-013**: 内容片段必须按时间顺序和代表性抽样，不得无界拼接所有事件。
+- **SPEC-WIKI-SRC-012（已废弃）**: 不再存在内容文本片段输入。
+- **SPEC-WIKI-SRC-013（已废弃）**: 改为按 `(app, effectiveTitle, contextKind)` 去重标题样本。
 
 ---
 
@@ -650,7 +652,7 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 
 ## 15. 隐私和安全
 
-- **SPEC-WIKI-PRV-001**: `llm-wiki.db` 不得保存完整 `text_content`。
+- **SPEC-WIKI-PRV-001**: `llm-wiki.db` 不得保存完整 `text_content`；Wiki 事实构建器也不得读取该字段。
 - **SPEC-WIKI-PRV-002**: 数据库允许保存应用名、聚合耗时、切换次数、摘要、任务片段、脱敏证据描述。
 - **SPEC-WIKI-PRV-003**: API Key、LLM base URL、用户配置敏感字段不得写入 Wiki 数据库。
 - **SPEC-WIKI-PRV-004**: prompt 输入必须有硬性字符上限。
@@ -659,6 +661,8 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 - **SPEC-WIKI-PRV-007**: Lucene 文档不得包含完整 OCR/UIA `text_content`。
 - **SPEC-WIKI-PRV-008**: `wiki_semantic_documents.last_error` 不得包含 API key、embedding 请求体或完整索引文本。
 - **SPEC-WIKI-PRV-009**: 语义检索返回的 `matchedText` 必须来自规范化摘要文本，不得来自原始屏幕文本。
+- **SPEC-WIKI-PRV-011**: Wiki prompt 只能接收窗口标题、上下文标题、聚合指标和既有派生摘要，
+  不得接收“屏幕内容片段”。
 - **SPEC-WIKI-PRV-010**: embedding 向量不得写入 `llm-wiki.db` 或日志。
 
 ---

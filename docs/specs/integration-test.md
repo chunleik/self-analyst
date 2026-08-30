@@ -26,7 +26,7 @@
 |------|---------|
 | `self-analyst-aw` | AQL 引擎单元测试 |
 | `self-analyst-app` | MemoryStore 单元测试 |
-| `self-analyst-content` | 内容采集测试 |
+| `self-analyst-content` | UIA/OCR 临时识别与标题事件测试 |
 | `self-analyst-audio` | 无独立测试 |
 | `self-analyst-wiki` | 无独立测试 |
 
@@ -263,7 +263,7 @@ src/main/java/com/selfanalyst/integration/<module>/<Module>Verification.java
 
 | 方法 | 规格 |
 |------|------|
-| `statusEndpoint` | GET `/desktop/status` → 返回 JSON 含 backend/aw/collectors/llm 四段，collectors 全部显示 disabled |
+| `statusEndpoint` | GET `/desktop/status` → 返回 JSON 含 backend/aw/collectors/contentPersistence/llm；`collectors.contextTitle` 与兼容字段 `content` 均显示 disabled，迁移状态为 ready |
 | `configRoundTrip` | GET `/desktop/config` → 验证默认值和 metadata（effectiveValue/savedValue/source），PUT `/desktop/config` 覆盖 model → GET 验证生效 |
 | `taskCrud` | POST → GET list → PUT update → POST complete → POST archive → DELETE → GET 验证删除，覆盖完整生命周期 |
 | `chatWithoutAgent` | POST `/desktop/chat` → agent=null 时返回包含 "LLM 未配置" 的 message，suggestedTasks 为空数组 |

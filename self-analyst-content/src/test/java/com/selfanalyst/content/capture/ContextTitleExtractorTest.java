@@ -91,4 +91,46 @@ class ContextTitleExtractorTest {
         assertNull(ContextTitleExtractor.extract(
                 "Weixin.exe", "微信\n" + rejected + "\n聊天记录\n聊天信息"));
     }
+
+    @Test
+    void classifiesWeixinDocumentTitleAsArticle() {
+        ContextTitleCandidate candidate = ContextTitleExtractor.fromDocumentTitle(
+                "Weixin.exe", "如何建立可靠的数据边界");
+
+        assertEquals("如何建立可靠的数据边界", candidate.value());
+        assertEquals("article", candidate.kind());
+        assertEquals("uia_document", candidate.source());
+        assertEquals("high", candidate.confidence());
+    }
+
+    @Test
+    void rejectsGenericWeixinDocumentTitle() {
+        assertNull(ContextTitleExtractor.fromDocumentTitle("Weixin.exe", "微信"));
+    }
+
+    @Test
+    void persistsOnlyUnambiguousOcrTitleCandidate() {
+        ContextTitleCandidate candidate = ContextTitleExtractor.fromOcrTitle(
+                "Weixin.exe", "一篇文章的标题");
+
+        assertEquals("一篇文章的标题", candidate.value());
+        assertEquals("article", candidate.kind());
+        assertEquals("ocr_title", candidate.source());
+        assertNull(ContextTitleExtractor.fromOcrTitle(
+                "Weixin.exe", "文章标题\n工具栏按钮"));
+    }
+
+    @Test
+    void rejectsMultilineUrlGenericControlAndParagraphCandidates() {
+        assertNull(ContextTitleExtractor.fromDocumentTitle(
+                "Weixin.exe", "文章标题\n这里是正文"));
+        assertNull(ContextTitleExtractor.fromDocumentTitle(
+                "Weixin.exe", "https://example.com/article/1"));
+        assertNull(ContextTitleExtractor.fromDocumentTitle(
+                "Weixin.exe", "file:///C:/private/message.txt"));
+        assertNull(ContextTitleExtractor.fromDocumentTitle("Weixin.exe", "分享"));
+        assertNull(ContextTitleExtractor.fromDocumentTitle("Weixin.exe", "Search"));
+        assertNull(ContextTitleExtractor.fromDocumentTitle(
+                "Weixin.exe", "这是第一句话。这是第二句话。"));
+    }
 }

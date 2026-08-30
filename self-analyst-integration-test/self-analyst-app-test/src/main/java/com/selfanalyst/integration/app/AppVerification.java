@@ -57,6 +57,8 @@ public class AppVerification {
                 Map<?, ?> collectors = (Map<?, ?>) status.get("collectors");
                 check("disabled".equals(collectors.get("window")), "window collector should be disabled");
                 check("disabled".equals(collectors.get("content")), "content collector should be disabled");
+                check("disabled".equals(collectors.get("contextTitle")),
+                        "context title collector should be disabled");
                 check("disabled".equals(collectors.get("audio")), "audio collector should be disabled");
             });
 

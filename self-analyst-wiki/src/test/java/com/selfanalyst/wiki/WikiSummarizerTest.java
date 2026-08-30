@@ -28,12 +28,19 @@ class WikiSummarizerTest {
 
     @Test
     void shouldUseRawFactsForHour() {
-        WikiSummarizer summarizer = new WikiSummarizer(prompt -> SAMPLE_VALID_JSON);
+        WikiSummarizer summarizer = new WikiSummarizer(prompt -> {
+            assertTrue(prompt.contains("应用内标题样本"));
+            assertTrue(prompt.contains("项目讨论群"));
+            assertFalse(prompt.contains("屏幕内容片段"));
+            assertFalse(prompt.contains("SELF_ANALYST_FORBIDDEN_BODY_7F3A"));
+            return SAMPLE_VALID_JSON;
+        });
         WikiFactBuilder.WikiFacts facts = new WikiFactBuilder.WikiFacts(
                 new WikiPeriod(WikiLevel.HOUR, t1, t2, tz.getId()),
                 3600, 120, 15,
                 List.of(new WikiEntry.AppDuration("IntelliJ", 2400)),
-                List.of("IntelliJ - SelfAnalyst"), List.of(), List.of());
+                List.of("IntelliJ - SelfAnalyst"),
+                List.of("[Weixin.exe] 项目讨论群"), List.of());
 
         WikiSummarizer.SummaryResult result = summarizer.summarize(facts, Duration.ofSeconds(30));
         assertEquals("主要在进行Java后端开发", result.summary());

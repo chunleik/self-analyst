@@ -14,13 +14,16 @@ public class EventStore {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final Database db;
     private final PulseTimeConfig pulseConfig;
+    private final BucketStore bucketStore;
 
     public EventStore(Database db, PulseTimeConfig pulseConfig) {
         this.db = db;
         this.pulseConfig = pulseConfig;
+        this.bucketStore = new BucketStore(db);
     }
 
     public Event insertEvent(String bucketId, Event event) {
+        validateEvent(bucketId, event);
         String sql = """
             INSERT INTO events (bucket_id, timestamp, duration, datastr, app)
             VALUES (?, ?, ?, ?, ?)
@@ -49,6 +52,7 @@ public class EventStore {
     }
 
     public Event insertHeartbeat(String bucketId, Event event, int pulsetimeSeconds) {
+        validateEvent(bucketId, event);
         var last = findLastEvent(bucketId);
         if (last != null) {
             String dataJson;
@@ -70,6 +74,12 @@ public class EventStore {
             } catch (JsonProcessingException ignored) {}
         }
         return insertEvent(bucketId, event);
+    }
+
+    public void validateEvent(String bucketId, Event event) {
+        String client = bucketStore.get(bucketId).map(com.selfanalyst.aw.model.Bucket::client)
+                .orElse(null);
+        ContentEventPolicy.validate(bucketId, client, event != null ? event.data() : null);
     }
 
     private Event findLastEvent(String bucketId) {

@@ -90,7 +90,7 @@ public class FileSummarizer {
             String purpose = asString(map.get("estimatedPurpose"));
             return new FileSummaryResult(summary, topics, purpose);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to parse LLM response as JSON: " + e.getMessage(), e);
+            throw new RuntimeException("FILE_SUMMARY_RESPONSE_INVALID");
         }
     }
 

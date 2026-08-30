@@ -1,6 +1,7 @@
 package com.selfanalyst.content;
 
 import com.selfanalyst.content.capture.ContentResult;
+import com.selfanalyst.content.capture.TitleCaptureResult;
 import com.selfanalyst.content.platform.PlatformCapture;
 import com.selfanalyst.content.uia.UiaTreeWalker;
 import org.junit.jupiter.api.Test;
@@ -60,25 +61,37 @@ class ContentWatcherTest {
 
     @Test
     void heartbeatIncludesStructuredContextTitleWhenExtracted() {
-        ContentResult result = new ContentResult(
-                "text", "uia", 544, 0, "徐工3期小分队(3)", "sample-123");
+        ContentResult transientResult = new ContentResult(
+                "SELF_ANALYST_FORBIDDEN_BODY_7F3A", "uia", 544, 0,
+                "徐工3期小分队(3)", "sample-123");
 
         Map<String, Object> data = ContentWatcher.heartbeatData(
-                "Weixin.exe", "微信", result);
+                "Weixin.exe", "微信", TitleCaptureResult.from(transientResult));
 
+        assertEquals(2, data.get("schema_version"));
         assertEquals("微信", data.get("title"));
         assertEquals("徐工3期小分队(3)", data.get("context_title"));
-        assertEquals("sample-123", data.get("sample_id"));
+        assertFalse(data.containsKey("text_content"));
+        assertFalse(data.containsKey("sample_id"));
+        assertFalse(data.toString().contains("SELF_ANALYST_FORBIDDEN_BODY_7F3A"));
     }
 
     @Test
     void heartbeatOmitsContextTitleWhenItWasNotExtracted() {
-        ContentResult result = new ContentResult(
-                "text", "uia", 200, 0, null, null);
+        ContentResult transientResult = new ContentResult(
+                "text", "uia", 200, 0, (String) null);
 
         Map<String, Object> data = ContentWatcher.heartbeatData(
-                "editor.exe", "Document", result);
+                "editor.exe", "Document", TitleCaptureResult.from(transientResult));
 
         assertFalse(data.containsKey("context_title"));
+        assertEquals("window", data.get("title_source"));
+    }
+
+    @Test
+    void heartbeatFailureMakesRuntimeStatusDegraded() {
+        assertEquals("running", ContentWatcher.statusOf(true, true));
+        assertEquals("degraded", ContentWatcher.statusOf(true, false));
+        assertEquals("disabled", ContentWatcher.statusOf(false, false));
     }
 }

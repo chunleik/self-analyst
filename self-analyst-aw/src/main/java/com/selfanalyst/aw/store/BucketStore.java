@@ -18,6 +18,8 @@ public class BucketStore {
     }
 
     public Bucket create(Bucket bucket) {
+        if (bucket == null) throw new IllegalArgumentException("Bucket is required");
+        validateId(bucket.id());
         String sql = """
             INSERT OR IGNORE INTO buckets (id, name, type, client, hostname, created, last_updated)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -35,6 +37,10 @@ public class BucketStore {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to create bucket: " + bucket.id(), e);
         }
+    }
+
+    public static void validateId(String id) {
+        Database.validateBucketId(id);
     }
 
     public Optional<Bucket> get(String id) {

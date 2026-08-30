@@ -32,6 +32,8 @@ public class DesktopStatusController implements AutoCloseable {
     private final WatcherManager watcherManager;
     private final ContentWatcher contentWatcher;
     private final AudioCaptureManager audioCaptureManager;
+    private final boolean contentPersistenceReady;
+    private final String contentMigrationError;
 
     private final AtomicBoolean llmAvailableCache = new AtomicBoolean(false);
     private final AtomicLong llmCacheUpdatedAt = new AtomicLong(0);
@@ -46,10 +48,21 @@ public class DesktopStatusController implements AutoCloseable {
                                    WatcherManager watcherManager,
                                    ContentWatcher contentWatcher,
                                    AudioCaptureManager audioCaptureManager) {
+        this(config, watcherManager, contentWatcher, audioCaptureManager, true, null);
+    }
+
+    public DesktopStatusController(Config config,
+                                   WatcherManager watcherManager,
+                                   ContentWatcher contentWatcher,
+                                   AudioCaptureManager audioCaptureManager,
+                                   boolean contentPersistenceReady,
+                                   String contentMigrationError) {
         this.config = config;
         this.watcherManager = watcherManager;
         this.contentWatcher = contentWatcher;
         this.audioCaptureManager = audioCaptureManager;
+        this.contentPersistenceReady = contentPersistenceReady;
+        this.contentMigrationError = contentMigrationError;
         // Kick off first check immediately, then every 60 seconds
         llmChecker.scheduleAtFixedRate(this::refreshLlmAvailability, 0, 60, TimeUnit.SECONDS);
     }
@@ -87,9 +100,22 @@ public class DesktopStatusController implements AutoCloseable {
         Map<String, String> collectors = new LinkedHashMap<>();
         collectors.put("window", watcherStatus("window"));
         collectors.put("afk", watcherStatus("afk"));
-        collectors.put("content", contentStatus());
+        String contextTitleStatus = contentStatus();
+        collectors.put("contextTitle", contextTitleStatus);
+        collectors.put("content", contextTitleStatus); // compatibility for older desktop UI clients
         collectors.put("audio", audioStatus());
         status.put("collectors", collectors);
+
+        Map<String, Object> contentPersistence = new LinkedHashMap<>();
+        contentPersistence.put("schemaVersion", 2);
+        contentPersistence.put("ready", contentPersistenceReady);
+        if (!contentPersistenceReady) {
+            contentPersistence.put("status", "migration_failed");
+            contentPersistence.put("error", safeMigrationError());
+        } else {
+            contentPersistence.put("status", "ready");
+        }
+        status.put("contentPersistence", contentPersistence);
 
         // LLM section
         status.put("llm", buildLlmStatus(llmAvailableCache.get()));
@@ -124,8 +150,17 @@ public class DesktopStatusController implements AutoCloseable {
     }
 
     private String contentStatus() {
+        if (!contentPersistenceReady) return "degraded";
         if (contentWatcher == null) return "disabled";
-        return contentWatcher.isRunning() ? "running" : "degraded";
+        return contentWatcher.status();
+    }
+
+    private String safeMigrationError() {
+        if (contentMigrationError == null || contentMigrationError.isBlank()) {
+            return "Content event migration failed";
+        }
+        String singleLine = contentMigrationError.replaceAll("[\\r\\n]+", " ").strip();
+        return singleLine.length() <= 200 ? singleLine : singleLine.substring(0, 197) + "...";
     }
 
     private String audioStatus() {

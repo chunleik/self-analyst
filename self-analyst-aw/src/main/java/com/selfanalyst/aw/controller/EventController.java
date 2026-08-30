@@ -3,6 +3,7 @@ package com.selfanalyst.aw.controller;
 import com.selfanalyst.aw.model.Event;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
+import com.selfanalyst.aw.store.ContentEventPolicyViolationException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
@@ -48,6 +49,10 @@ public class EventController {
     public void insert(Context ctx) {
         try {
             String bucketId = ctx.pathParam("id");
+            if (bucketStore.get(bucketId).isEmpty()) {
+                ctx.status(404).json(Map.of("error", "Bucket not found: " + bucketId));
+                return;
+            }
 
             var bodyNode = MAPPER.readTree(ctx.body());
             List<Map<String, Object>> eventsList = new ArrayList<>();
@@ -60,6 +65,7 @@ public class EventController {
                 eventsList.add(MAPPER.convertValue(bodyNode, new TypeReference<Map<String, Object>>() {}));
             }
 
+            List<Event> parsedEvents = new ArrayList<>();
             for (Map<String, Object> eventData : eventsList) {
                 Instant timestamp = Instant.parse((String) eventData.get("timestamp"));
                 double duration = eventData.containsKey("duration")
@@ -70,12 +76,23 @@ public class EventController {
                         ? (Map<String, Object>) eventData.get("data")
                         : Map.of();
 
-                Event event = new Event(timestamp, duration, data);
+                parsedEvents.add(new Event(timestamp, duration, data));
+            }
+
+            // Validate the entire batch before the first write so policy failures are atomic.
+            for (Event event : parsedEvents) {
+                eventStore.validateEvent(bucketId, event);
+            }
+            for (Event event : parsedEvents) {
                 eventStore.insertEvent(bucketId, event);
             }
 
             bucketStore.updateLastUpdated(bucketId);
             ctx.status(201).json(Map.of("success", true, "count", eventsList.size()));
+        } catch (ContentEventPolicyViolationException e) {
+            ctx.status(422).json(Map.of(
+                    "error", "Content event violates persisted-field policy",
+                    "field", e.field()));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to insert events: " + e.getMessage()));
         }

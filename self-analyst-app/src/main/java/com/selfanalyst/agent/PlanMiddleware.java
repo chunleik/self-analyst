@@ -5,14 +5,12 @@ import com.selfanalyst.usage.UsageMeter;
 import io.agentscope.core.agent.Agent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
-import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.ModelCallEndEvent;
 import io.agentscope.core.event.RequestStopEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ThinkingBlockDeltaEvent;
 import io.agentscope.core.event.ToolCallDeltaEvent;
 import io.agentscope.core.middleware.ActingInput;
-import io.agentscope.core.middleware.AgentInput;
 import io.agentscope.core.middleware.MiddlewareBase;
 import io.agentscope.core.middleware.ModelCallInput;
 import io.agentscope.core.middleware.ReasoningInput;
@@ -39,19 +37,6 @@ public final class PlanMiddleware implements MiddlewareBase {
     }
 
     @Override
-    public Flux<AgentEvent> onAgent(
-            Agent agent,
-            RuntimeContext ctx,
-            AgentInput input,
-            Function<AgentInput, Flux<AgentEvent>> next) {
-        return next.apply(input).doOnNext(event -> {
-            if (event instanceof AgentResultEvent result && result.getResult() != null) {
-                log.info("Agent 回复:\n{}", result.getResult().getTextContent());
-            }
-        });
-    }
-
-    @Override
     public Flux<AgentEvent> onReasoning(
             Agent agent,
             RuntimeContext ctx,
@@ -59,15 +44,8 @@ public final class PlanMiddleware implements MiddlewareBase {
             Function<ReasoningInput, Flux<AgentEvent>> next) {
         return Flux.defer(() -> {
             log.debug("Agent 正在思考...");
-            StringBuilder text = new StringBuilder();
             return next.apply(input)
-                    .doOnNext(event -> {
-                        if (event instanceof TextBlockDeltaEvent delta
-                                && delta.getDelta() != null) {
-                            text.append(delta.getDelta());
-                        }
-                    })
-                    .concatWith(Flux.defer(() -> afterReasoning(text.toString())));
+                    .concatWith(Flux.defer(this::afterReasoning));
         });
     }
 
@@ -110,11 +88,7 @@ public final class PlanMiddleware implements MiddlewareBase {
         });
     }
 
-    private Flux<AgentEvent> afterReasoning(String text) {
-        if (text != null && !text.isBlank()) {
-            log.debug("  {}", text.lines().limit(3)
-                    .reduce("", (a, b) -> a + (a.isEmpty() ? "" : " ") + b));
-        }
+    private Flux<AgentEvent> afterReasoning() {
         if (usageMeter == null || !usageMeter.isBlocked()) return Flux.empty();
         log.warn("已达每日 token 预算，提前中止 Agent 循环");
         return Flux.just(new RequestStopEvent("Daily token budget reached"));

@@ -4,6 +4,7 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.usage.UsageMeter;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
+import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.ModelCallEndEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.message.Msg;
@@ -15,14 +16,81 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import reactor.core.publisher.Flux;
 
+import java.lang.reflect.Proxy;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlanMiddlewareTest {
+
+    @Test
+    void doesNotLogConversationContent() throws Exception {
+        PlanMiddleware middleware = new PlanMiddleware(null);
+        String privateContent = "private conversation content";
+        AgentResultEvent result = new AgentResultEvent(Msg.builder()
+                .role(MsgRole.ASSISTANT)
+                .textContent(privateContent)
+                .build());
+        TextBlockDeltaEvent delta = new TextBlockDeltaEvent(
+                "reply", "block", privateContent);
+        ReasoningInput reasoningInput = new ReasoningInput(List.of(), List.of(), null);
+        List<String> loggedMessages = new CopyOnWriteArrayList<>();
+
+        Class<?> appenderType = Class.forName("ch.qos.logback.core.Appender");
+        Object appender = Proxy.newProxyInstance(
+                appenderType.getClassLoader(),
+                new Class<?>[]{appenderType},
+                (proxy, method, args) -> {
+                    if ("equals".equals(method.getName())) {
+                        return proxy == args[0];
+                    } else if ("hashCode".equals(method.getName())) {
+                        return System.identityHashCode(proxy);
+                    } else if ("doAppend".equals(method.getName())) {
+                        Object event = args[0];
+                        loggedMessages.add((String) event.getClass()
+                                .getMethod("getFormattedMessage")
+                                .invoke(event));
+                    } else if ("isStarted".equals(method.getName())) {
+                        return true;
+                    }
+                    return null;
+                });
+        Object logger = org.slf4j.LoggerFactory.getLogger(PlanMiddleware.class);
+        Class<?> levelType = Class.forName("ch.qos.logback.classic.Level");
+        Object originalLevel = logger.getClass().getMethod("getLevel").invoke(logger);
+        Object debugLevel = levelType.getField("DEBUG").get(null);
+        logger.getClass().getMethod("setLevel", levelType).invoke(logger, debugLevel);
+        logger.getClass().getMethod("addAppender", appenderType).invoke(logger, appender);
+        try {
+            List<AgentEvent> agentEvents = middleware.onAgent(
+                            null,
+                            RuntimeContext.empty(),
+                            null,
+                            ignored -> Flux.just(result))
+                    .collectList()
+                    .block();
+            List<AgentEvent> reasoningEvents = middleware.onReasoning(
+                            null,
+                            RuntimeContext.empty(),
+                            reasoningInput,
+                            ignored -> Flux.just(delta))
+                    .collectList()
+                    .block();
+
+            assertEquals(List.of(result), agentEvents);
+            assertEquals(List.of(delta), reasoningEvents);
+            assertTrue(loggedMessages.stream()
+                    .noneMatch(message -> message.contains(privateContent)));
+        } finally {
+            logger.getClass().getMethod("detachAppender", appenderType).invoke(logger, appender);
+            logger.getClass().getMethod("setLevel", levelType)
+                    .invoke(logger, new Object[]{originalLevel});
+        }
+    }
 
     @Test
     void estimatesTokensWithCl100kInsteadOfCharacterHeuristic() {

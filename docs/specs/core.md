@@ -394,8 +394,8 @@ System Prompt 必须包含以下四部分（按顺序）：
 
 ### SPEC-BLD-001: Maven 构建
 
-根 POM 聚合 `self-analyst-aw`、`content`、`wiki`、`file`、`app` 和
-`self-analyst-integration-test`；Tauri 桌面壳与 Rust accessibility sidecar 单独构建：
+根 POM 聚合 `self-analyst-aw`、`content`、`wiki`、`file` 和 `app`；集成测试归属各生产模块的
+`src/test/java`。Tauri 桌面壳与 Rust accessibility sidecar 单独构建：
 
 - `mvn compile`: 编译全部 Java 模块，Java 21 target。
 - `mvn test`: 运行 JUnit 5 和桌面 UI Node 测试；测试数量不作为稳定契约。

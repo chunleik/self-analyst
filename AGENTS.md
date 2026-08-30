@@ -2,7 +2,7 @@
 
 ## 项目结构与模块组织
 
-SelfAnalyst 是一个使用 Java 21 的 Maven 多模块项目。`self-analyst-app` 包含后端、智能体以及桌面端 API/UI；其他同级模块负责实现各项功能服务。集成检查位于 `self-analyst-integration-test/`，Tauri 外壳位于 `self-analyst-desktop/`，Rust 边车程序位于 `self-analyst-axsidecar/`。
+SelfAnalyst 是一个使用 Java 21 的 Maven 多模块项目。`self-analyst-app` 包含后端、智能体以及桌面端 API/UI；其他同级模块负责实现各项功能服务。集成测试位于各模块的 `src/test/java`，Tauri 外壳位于 `self-analyst-desktop/`，Rust 边车程序位于 `self-analyst-axsidecar/`。
 
 Java 代码使用 `src/main/java` 和 `src/test/java` 目录。桌面端资源和 Node 测试分别位于 `self-analyst-app/src/main/resources/desktop-ui/` 和 `src/test/js/`。规范文档位于 `docs/specs/`；运行时目录和构建目录均为输出目录。
 

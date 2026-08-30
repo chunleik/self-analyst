@@ -1,90 +1,102 @@
-# 集成验证规格
+# 测试与集成验证规格
 
 > 状态：现行
 >
 > 规格前缀：`SPEC-ITEST-*`
 
-## 1. 结构
+## 1. 目标
 
-`self-analyst-integration-test` 是独立 Maven 聚合器，包含 AW、Content、Wiki 和 App 验证程序。
-每个子模块只依赖对应功能模块，并通过 `maven-assembly-plugin` 生成可直接执行的
-`jar-with-dependencies`。
+所有自动化验证必须由所属模块的标准测试生命周期执行。根目录 `mvn test` 是 Java 和桌面 Node
+测试的统一入口；不再维护独立的 `self-analyst-integration-test` 聚合模块或位于 `src/main/java`
+中的可执行验证器。
 
-```text
-self-analyst-integration-test/
-├── self-analyst-aw-test/
-├── self-analyst-content-test/
-├── self-analyst-wiki-test/
-└── self-analyst-app-test/
-```
+### SPEC-ITEST-001：测试归属
 
-声音集成模块已随声音功能移除，不得保留空壳或条件构建入口。
+- 单个类或纯逻辑组件使用所在模块的 JUnit 测试。
+- 真实 HTTP、SQLite、Lucene 等多组件场景仍放在所属模块的 `src/test/java` 中，以
+  `*IntegrationTest.java` 命名。
+- 桌面前端使用 Node 内置 test runner，并由 `self-analyst-app` 的 Maven `test` 阶段调用。
+- Rust accessibility sidecar 使用 Cargo 测试。
+- 需要真实桌面、前台窗口或操作系统权限的检查必须显式启用，不能在普通构建中自动探查用户界面。
 
-## 2. 通用约束
+## 2. 自动化集成场景
 
-### SPEC-ITEST-001：自包含
+### SPEC-ITEST-AW-001：ActivityWatch HTTP 链路
 
-验证优先使用嵌入式服务器、临时 SQLite 和可替换的外部依赖。不得要求真实 LLM 服务、用户数据库
-或桌面交互。所有临时文件使用独立临时目录，服务和数据库在退出前关闭。
+`AwServerIntegrationTest` 启动绑定临时端口的真实嵌入式服务，并使用临时 SQLite 目录验证：
 
-### SPEC-ITEST-002：可执行结果
+- bucket 创建与查询；
+- HTTP 批量事件写入；
+- `start/end` 闭区间过滤；
+- heartbeat 在 pulsetime 内合并；
+- AQL 查询及汇总元数据。
 
-每个验证程序至少执行四个有明确断言的步骤；失败返回非零退出码并指出步骤名，不输出密钥、UIA
-正文或数据库原始内容。
+内容事件隐私策略、Host/Origin 安全边界等独立契约继续由专门测试覆盖。
 
-## 3. 模块验证
+### SPEC-ITEST-APP-001：桌面 API 链路
 
-### SPEC-ITEST-AW-001
+`DesktopServerIntegrationTest` 使用临时配置、临时 ActivityWatch 数据库和随机端口启动真实 Javalin
+路由，验证：
 
-验证嵌入式服务启动、bucket 创建、heartbeat/events 写入、AQL 查询以及内容事件 v2 策略。正文键
-写入内容 bucket 必须返回拒绝，普通 bucket 的通用字段保持兼容。
+- 状态响应及已移除采集器不再出现；
+- 配置读取、保存和再次读取；
+- 任务创建、查询、更新、完成、归档和删除；
+- 未配置 Agent 时聊天端点返回明确错误。
 
-### SPEC-ITEST-CONTENT-001
+### SPEC-ITEST-CONTENT-001：标题投影
 
-`ContentVerification` 只验证 UIA 标题链路：
+微信对话、富文档文章、未验证 `Document.Name`、聊天消息防误判、敏感应用排除及正文秘密标记等
+场景，由 `TitleCaptureTest`、`ContextCapturePolicyTest`、`ContextTitleExtractorTest` 和
+`ContentWatcherTest` 在普通 `mvn test` 中执行。
 
-- 从微信 UIA 输入识别对话人；
-- 从已验证的微信 `Document.Name` 识别文章标题，并拒绝未验证应用的通用 Document 名称；
-- 过滤正文型、多行、URL 和超长候选；
-- `ContentEvent.toHeartbeatData()` 只产生标题白名单字段；
-- 输入中的秘密标记不得进入结果或事件。
+### SPEC-ITEST-WIKI-001：Wiki 存储与摘要
 
-验证不依赖真实桌面边车，可用构造的 `UiaNode` 或查询替身；不得引用截图、OCR 引擎或混合合并类。
+`WikiStoreTest`、`WikiSummarizerTest`、`WikiSemanticIndexTest` 等测试覆盖 SQLite CRUD、唯一周期、
+状态迁移、语义文档生命周期、假 LLM 摘要和持久化边界，不再重复打包一套验证程序。
 
-### SPEC-ITEST-WIKI-001
+## 3. 手动 UIA 冒烟测试
 
-验证小时/日聚合只消费标题事件和既有派生字段，不查询旧正文列；外部 LLM 使用替身。
+### SPEC-ITEST-UIA-001：显式启用
 
-### SPEC-ITEST-APP-001
-
-用随机端口启动 `DesktopServer`，验证健康、状态、配置和会话端点。构造 `AppSession`/服务器依赖时
-只包含现行 watcher，不应存在声音 watcher 参数。
-
-## 4. 构建和执行
+`ManualUiaSmokeTest` 默认由 JUnit 跳过。只有开发者在已知前台窗口可被读取、并确认当前桌面内容适合
+测试时，才可以显式执行：
 
 ```powershell
-mvn test
-mvn package -f self-analyst-integration-test/pom.xml -DskipTests
-java -jar self-analyst-integration-test/self-analyst-content-test/target/*-jar-with-dependencies.jar
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
+mvn -pl self-analyst-content -Dselfanalyst.manual.uia=true -Dtest=ManualUiaSmokeTest test
 ```
 
-### SPEC-ITEST-010：Reactor 一致性
+测试输出只包含应用名、系统标题是否存在、UIA 字符计数和是否识别到上下文标题，不输出 UIA 原文
+或标题内容。
 
-根 POM 与集成聚合 POM 的模块列表必须与磁盘目录一致。被移除模块不得出现在
-`dependencyManagement`、依赖树、测试启动器或文档命令中。
+## 4. 标准命令
 
-### SPEC-ITEST-011：原生边界
+```powershell
+# 全部 Java、模块集成和桌面 Node 测试
+mvn test
 
-Java 集成测试不要求真实 UIAutomation 窗口。Rust accessibility sidecar 使用自己的
-`cargo test --manifest-path self-analyst-axsidecar/Cargo.toml` 验证协议与平台逻辑。
+# 单独运行 AW HTTP 集成测试
+mvn -pl self-analyst-aw -Dtest=AwServerIntegrationTest test
 
-## 5. 追溯
+# 运行桌面 API 集成测试及其依赖（同时执行桌面 Node 测试）
+mvn -pl self-analyst-app -am -Dtest=DesktopServerIntegrationTest `
+  -Dsurefire.failIfNoSpecifiedTests=false test
 
-| 规格 | 验证 |
-|------|------|
-| `SPEC-ITEST-AW-001` | AW 可执行验证与内容事件策略单元测试 |
-| `SPEC-ITEST-CONTENT-001` | `ContentVerification`、`TitleCaptureTest`、`ContextCapturePolicyTest` |
-| `SPEC-ITEST-WIKI-001` | Wiki 可执行验证与聚合测试 |
-| `SPEC-ITEST-APP-001` | App 可执行验证、桌面控制器测试 |
-| `SPEC-ITEST-010` | Maven reactor 构建 |
-| `SPEC-ITEST-011` | Rust sidecar 测试 |
+# Rust accessibility sidecar
+cargo test --manifest-path self-analyst-axsidecar/Cargo.toml
+```
+
+## 5. 资源与隐私
+
+### SPEC-ITEST-010：隔离
+
+- 数据库、配置和索引使用 JUnit `@TempDir`。
+- HTTP 服务使用随机或临时端口，并在 `@AfterEach` 中关闭。
+- 测试不得访问用户真实数据目录、真实 LLM 服务或提交密钥。
+- 自动化测试不得读取真实前台窗口；只有 `ManualUiaSmokeTest` 的显式入口可以这样做。
+
+### SPEC-ITEST-011：构建一致性
+
+- 根 POM 只聚合生产模块。
+- `mvn test` 不得出现承载测试代码但报告 `No tests to run` 的测试专用子模块。
+- 修复缺陷时先运行针对性测试，再运行根项目全量测试。

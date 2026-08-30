@@ -329,7 +329,7 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 | SPEC-TOML-MIG-002 | `config/Config.java#overlayUserConfig`、`desktop/store/UserConfigStore.java#loadUser` | 单元测试 `ConfigTest`、`UserConfigStoreRawTest` |
 | SPEC-TOML-API-001 | `desktop/controller/DesktopConfigController.java`、`config/TomlSupport.java`、`desktop/store/UserConfigStore.java` | 单元测试 `DesktopConfigControllerTest` |
 | SPEC-TOML-API-001e | `desktop/controller/DesktopConfigController.java#supportedKeyInfos`、`config/TomlSupport.java#emitAssignment` | 单元测试 `DesktopConfigControllerTest` |
-| SPEC-TOML-API-002 | `desktop/controller/DesktopConfigController.java`、`desktop/store/UserConfigStore.java`、`ConfigTools`（`agent/tools`） | 单元测试 `DesktopConfigControllerTest` + 集成 `AppVerification`（config round trip） |
+| SPEC-TOML-API-002 | `desktop/controller/DesktopConfigController.java`、`desktop/store/UserConfigStore.java`、`ConfigTools`（`agent/tools`） | 单元测试 `DesktopConfigControllerTest` + `DesktopServerIntegrationTest.configRoundTripPersistsModel` |
 | SPEC-TOML-UI-001..003 | `desktop-ui/config.js`（`parseEditorToml`、标签）、`api.js`、`styles.css` | 静态检查 `check-desktop-config-editor.ps1` + 手动/验收测试 |
 | SPEC-TOML-UI-004 | `desktop-ui/config.js`、`events.js`、`state.js`、`ui.js`、`styles.css` | 静态检查 `check-desktop-config-editor.ps1` + 手动/验收测试 |
 | SPEC-TOML-NON-001..005 | 全特性（`SupportedKeys` 键集不变、`Config.java` 保留 classpath/legacy properties、结构化写入丢注释、无回滚工具） | 代码审查 |

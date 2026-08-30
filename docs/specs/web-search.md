@@ -119,7 +119,7 @@ agentscope-core 2.0.1 已传递引入官方 MCP Java SDK（`io.modelcontextproto
 - `self-analyst-app/src/main/java/com/selfanalyst/config/Config.java`
 - `self-analyst-app/src/main/java/com/selfanalyst/desktop/controller/DesktopConfigController.java`
 - `self-analyst-app/src/main/resources/desktop-ui/config.js`
-- `self-analyst-integration-test/self-analyst-app-test/src/main/java/com/selfanalyst/integration/app/AppVerification.java`
+- `self-analyst-app/src/test/java/com/selfanalyst/desktop/DesktopServerIntegrationTest.java`
 
 ### 11.2 不应修改
 

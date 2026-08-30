@@ -17,7 +17,6 @@
         <module>self-analyst-content</module>
         <module>self-analyst-wiki</module>
         <module>self-analyst-file</module>
-        <module>self-analyst-integration-test</module>
     </modules>
 
     <properties>

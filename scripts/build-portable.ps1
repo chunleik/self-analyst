@@ -10,22 +10,13 @@
 #     SelfAnalyst.exe            Tauri shell (launches the backend)
 #     self-analyst-app.jar       backend fat jar (embedded AW + agent + UI)
 #     runtime/                   jlink'd minimal JRE (java.exe under runtime/bin)
-#     tools/PaddleOCR-json/      optional OCR engine (only with -WithOcr)
-#     tools/whisper/             whisper.cpp + ggml-small.bin (audio, off by default)
 #     data/                      created on first run (aw-data, memory, ...)
 #
-# Prereqs: JDK 21 (jlink), Maven, Rust/cargo, and any selected optional tools.
+# Prereqs: JDK 21 (jlink), Maven, and Rust/cargo.
 
 param(
     [switch]$SkipBuild,   # reuse existing jar/exe instead of rebuilding
-    [switch]$NoZip,       # leave the folder, don't produce the .zip
-    [switch]$WithOcr,     # include the optional PaddleOCR pack
-    # Which package(s) to emit. The heavy work (mvn/cargo/jlink) runs
-    # once; the variants differ only by whether the whisper audio model is bundled.
-    #   both    -> SelfAnalyst-portable-minimal.zip (no audio) + SelfAnalyst-portable.zip (full)
-    #   minimal -> minimal only;  full -> full only
-    [ValidateSet('both', 'full', 'minimal')]
-    [string]$Variant = 'both'
+    [switch]$NoZip        # leave the folder, don't produce the .zip
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,24 +91,8 @@ $modules = "java.se,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.zipfs,
     --output $Runtime
 if ($LASTEXITCODE -ne 0) { throw "jlink failed" }
 
-# ── 5. Stage tools ─────────────────────────────────────────────────────────────
-Write-Host "=== 5/6 Staging tools ===" -ForegroundColor Cyan
-$DistTools = Join-Path $Dist "tools"
-New-Item -ItemType Directory -Force -Path $DistTools | Out-Null
-
-$paddleSrc = Join-Path $Root "tools/PaddleOCR-json"
-if ($WithOcr) {
-    if (-not (Test-Path -LiteralPath $paddleSrc)) {
-        throw "Missing tools/PaddleOCR-json. Run scripts/download-tools.ps1 -WithOcr first."
-    }
-    Copy-Item -Recurse -LiteralPath $paddleSrc -Destination $DistTools
-    Write-Host "  Optional PaddleOCR-json staged"
-} else {
-    Write-Host "  Optional PaddleOCR-json omitted (default)" -ForegroundColor DarkGray
-}
-
-# whisper is staged later (step 6) only for the full variant, so the minimal
-# zip can be produced from the same dist without re-running the heavy build.
+# ── 5. Prepare user config ─────────────────────────────────────────────────────
+Write-Host "=== 5/6 Preparing user config ===" -ForegroundColor Cyan
 
 # WebView2 is intentionally not bundled — the app uses the system (Evergreen)
 # WebView2 runtime, preinstalled on Windows 10/11.
@@ -134,27 +109,13 @@ if (-not (Test-Path -LiteralPath $seedCfg)) {
     ) | Set-Content -Path $seedCfg -Encoding UTF8
 }
 
-# ── 6. Package variant(s): minimal (no whisper) and/or full (with whisper) ──────
-Write-Host "=== 6/6 Packaging ($Variant) ===" -ForegroundColor Cyan
-
-$whisperSrc  = Join-Path $Root "tools/whisper"
-$distWhisper = Join-Path $DistTools "whisper"
-$hasWhisper  = Test-Path -LiteralPath $whisperSrc
-
-$wantMinimal = $Variant -in @('both', 'minimal')
-$wantFull    = $Variant -in @('both', 'full')
-$OcrSuffix   = if ($WithOcr) { "-ocr" } else { "" }
-if ($wantFull -and -not $hasWhisper) {
-    Write-Warning "tools/whisper missing — cannot build the full (audio) variant."
-    Write-Warning "Run scripts/download-tools.ps1 (without -SkipWhisper) first."
-    $wantFull = $false
-    if (-not $wantMinimal) { $wantMinimal = $true }  # still emit something usable
-}
+# ── 6. Package ─────────────────────────────────────────────────────────────────
+Write-Host "=== 6/6 Packaging ===" -ForegroundColor Cyan
 
 function Show-Sizes {
     $total = (Get-ChildItem -LiteralPath $Dist -Recurse -File | Measure-Object -Property Length -Sum).Sum
     Write-Host ("  dist-portable/  ({0:N1} MB)" -f ($total / 1MB))
-    foreach ($d in @("runtime", "tools/PaddleOCR-json", "tools/whisper")) {
+    foreach ($d in @("runtime")) {
         $p = Join-Path $Dist $d
         if (Test-Path -LiteralPath $p) {
             $s = (Get-ChildItem -LiteralPath $p -Recurse -File | Measure-Object -Property Length -Sum).Sum
@@ -174,25 +135,6 @@ function New-Zip([string]$name) {
     Write-Host ("Created {0} ({1:N1} MB)" -f $zip, $zsize) -ForegroundColor Green
 }
 
-# Start clean so the minimal package never contains whisper.
-Remove-Item -Recurse -Force -LiteralPath $distWhisper -ErrorAction SilentlyContinue
-
-# Minimal first (no whisper present yet), then add whisper once and do full.
-if ($wantMinimal) {
-    Write-Host "--- minimal variant (no audio model) ---" -ForegroundColor Green
-    Show-Sizes
-    New-Zip "SelfAnalyst-portable-minimal$OcrSuffix.zip"
-}
-if ($wantFull) {
-    Copy-Item -Recurse -LiteralPath $whisperSrc -Destination $DistTools
-    Write-Host "--- full variant (with whisper) ---" -ForegroundColor Green
-    Show-Sizes
-    New-Zip "SelfAnalyst-portable$OcrSuffix.zip"
-}
-
-if (Test-Path -LiteralPath $distWhisper) {
-    Write-Host "dist-portable/ left as: full (with whisper)" -ForegroundColor DarkGray
-} else {
-    Write-Host "dist-portable/ left as: minimal (no whisper)" -ForegroundColor DarkGray
-}
+Show-Sizes
+New-Zip "SelfAnalyst-portable.zip"
 Write-Host "Run: .\dist-portable\SelfAnalyst.exe" -ForegroundColor Green

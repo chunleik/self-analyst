@@ -3,7 +3,6 @@ package com.selfanalyst.config;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -27,10 +26,8 @@ class ConfigTest {
         assertEquals("false", props.getProperty("wiki.enabled"));
         assertEquals("false", props.getProperty("embedding.enabled"));
         assertEquals("false", props.getProperty("websearch.enabled"));
-        assertEquals("off", props.getProperty("aw.ocr.engine"));
-        assertEquals("false", props.getProperty("ocr.sample.enabled"));
-        assertEquals("1500", props.getProperty("ocr.stable-capture-interval-ms"));
-        assertEquals("60000", props.getProperty("ocr.force-refresh-ms"));
+        assertFalse(props.stringPropertyNames().stream()
+                .anyMatch(DeprecatedKeys::contains));
         assertEquals("true", props.getProperty("agent.compaction.enabled"));
         assertEquals("30", props.getProperty("agent.compaction.triggerMessages"));
         assertEquals("60000", props.getProperty("agent.compaction.triggerTokens"));
@@ -40,72 +37,6 @@ class ConfigTest {
     void testDefaultsDisableCompaction(@TempDir Path dir) {
         Config c = Config.testDefaults(dir);
         assertFalse(c.agentCompactionEnabled(), "unit tests opt in to compaction explicitly");
-        assertEquals("off", c.ocrEngine());
-        assertFalse(c.ocrSampleEnabled(), "OCR debug samples must be opt-in");
-    }
-
-    @Test
-    void loadsAndNormalizesOptionalOcrEngine(@TempDir Path dir) throws Exception {
-        Files.writeString(dir.resolve("config.toml"), """
-                [aw.ocr]
-                engine = "PADDLE"
-                """, StandardCharsets.UTF_8);
-
-        withMemoryDir(dir, () -> assertEquals("paddle", Config.load().ocrEngine()));
-
-        Files.writeString(dir.resolve("config.toml"), """
-                [aw.ocr]
-                engine = "unsupported"
-                """, StandardCharsets.UTF_8);
-
-        withMemoryDir(dir, () -> assertEquals("off", Config.load().ocrEngine()));
-    }
-
-    @Test
-    void systemPropertyCanExplicitlyEnableOcr(@TempDir Path dir) throws Exception {
-        String previous = System.getProperty("aw.ocr.engine");
-        System.setProperty("aw.ocr.engine", "tesseract");
-        try {
-            withMemoryDir(dir, () -> assertEquals("tesseract", Config.load().ocrEngine()));
-        } finally {
-            restoreSystemProperty("aw.ocr.engine", previous);
-        }
-    }
-
-    @Test
-    void loadsOcrDebugAndFullWindowSettings(@TempDir Path dir) throws Exception {
-        Files.writeString(dir.resolve("config.toml"), """
-                [ocr.sample]
-                enabled = true
-
-                [ocr]
-                title-strip-height = 0
-                stable-capture-interval-ms = 2000
-                force-refresh-ms = 45000
-                """, StandardCharsets.UTF_8);
-
-        withMemoryDir(dir, () -> {
-            Config config = Config.load();
-            assertTrue(config.ocrSampleEnabled());
-            assertEquals(0, config.ocrTitleStripHeight());
-            assertEquals(2000, config.ocrStableCaptureIntervalMs());
-            assertEquals(45000, config.ocrForceRefreshMs());
-        });
-    }
-
-    @Test
-    void rejectsOcrCadenceOutsideRequiredRanges(@TempDir Path dir) throws Exception {
-        Files.writeString(dir.resolve("config.toml"), """
-                [ocr]
-                stable-capture-interval-ms = 999
-                force-refresh-ms = 60001
-                """, StandardCharsets.UTF_8);
-
-        withMemoryDir(dir, () -> {
-            Config config = Config.load();
-            assertEquals(1500, config.ocrStableCaptureIntervalMs());
-            assertEquals(60000, config.ocrForceRefreshMs());
-        });
     }
 
     @Test
@@ -166,36 +97,24 @@ class ConfigTest {
     }
 
     @Test
-    void exposesAudioEnabledAsConfigValue(@TempDir Path dir) throws Exception {
-        Config cfg = Config.testDefaults(dir);
+    void removedFeatureKeysAreAcceptedButHaveNoRuntimeComponents(@TempDir Path dir)
+            throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [aw.ocr]
+                engine = "paddle"
+                [aw.audio]
+                enabled = true
+                """, StandardCharsets.UTF_8);
 
-        Method audioEnabled = Config.class.getMethod("audioEnabled");
-
-        assertEquals(false, audioEnabled.invoke(cfg));
-    }
-
-    @Test
-    void exposesAudioWhisperPathAsConfigValue(@TempDir Path dir) {
-        Config cfg = Config.testDefaults(dir);
-
-        assertEquals(Path.of("tools/whisper"), cfg.audioWhisperPath());
-    }
-
-    @Test
-    void exposesAudioVadThresholdAsConfigValue(@TempDir Path dir) {
-        Config cfg = Config.testDefaults(dir);
-
-        assertEquals(0.0001, cfg.audioVadThreshold(), 0.00001);
-    }
-
-    @Test
-    void exposesAudioAsrOptionsAsConfigValues(@TempDir Path dir) {
-        Config cfg = Config.testDefaults(dir);
-
-        assertEquals("mic", cfg.audioSource());
-        assertEquals("auto", cfg.audioEngine());
-        assertEquals("gpt-4o-transcribe", cfg.audioModel());
-        assertEquals(10, cfg.audioChunkSeconds());
+        withMemoryDir(dir, () -> {
+            Config config = Config.load();
+            assertNotNull(config);
+            var componentNames = java.util.Arrays.stream(Config.class.getRecordComponents())
+                    .map(java.lang.reflect.RecordComponent::getName)
+                    .toList();
+            assertFalse(componentNames.stream().anyMatch(name ->
+                    name.toLowerCase().contains("ocr") || name.toLowerCase().contains("audio")));
+        });
     }
 
     // ── TOML overlay load priority (SPEC-TOML-MIG-002a) ──────────────────

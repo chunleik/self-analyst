@@ -263,25 +263,11 @@ public class AppSession implements AutoCloseable {
             }
             watcherManager.startAll();
             try {
-                System.setProperty("aw.ocr.engine", config.ocrEngine());
-                System.setProperty("ocr.sample.enabled",
-                        String.valueOf(config.ocrSampleEnabled()));
-                System.setProperty("ocr.sample.dir",
-                        config.ocrSampleDir().toAbsolutePath().toString());
-                if (config.ocrExcludedApps() != null && !config.ocrExcludedApps().isBlank()) {
-                    System.setProperty("ocr.excluded.apps", config.ocrExcludedApps());
-                }
-                System.setProperty("ocr.title-strip-height",
-                        String.valueOf(config.ocrTitleStripHeight()));
-                System.setProperty("ocr.stable-capture-interval-ms",
-                        String.valueOf(config.ocrStableCaptureIntervalMs()));
-                System.setProperty("ocr.force-refresh-ms",
-                        String.valueOf(config.ocrForceRefreshMs()));
                 if (config.collectContent() && contentPersistenceReady) {
                     contentWatcher = new ContentWatcher("http://localhost:" + config.awPort(),
                             config.contentPollIntervalMs());
                     contentWatcher.start();
-                    log.info("上下文标题识别已启动 (UIA, OCR={})", config.ocrEngine());
+                    log.info("上下文标题识别已启动 (UIA)");
                 } else if (!contentPersistenceReady) {
                     log.warn("上下文标题识别因历史数据迁移失败而禁用");
                 } else {

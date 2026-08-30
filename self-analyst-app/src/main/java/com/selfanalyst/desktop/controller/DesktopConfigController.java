@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
@@ -40,7 +41,6 @@ public class DesktopConfigController {
             "agent.compaction.enabled", "agent.compaction.triggerMessages",
             "agent.compaction.triggerTokens", "agent.compaction.keepMessages",
             "agent.compaction.keepTokens",
-            "aw.ocr.engine",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key"
     );
 
@@ -70,7 +70,6 @@ public class DesktopConfigController {
         response.put("llm", buildLlmSection(defaults));
         response.put("aw", buildAwSection(defaults));
         response.put("collection", buildCollectionSection(defaults));
-        response.put("audio", buildAudioSection(defaults));
         response.put("agent", buildAgentSection(defaults));
         response.put("desktop", buildDesktopSection(defaults));
         response.put("embedding", buildEmbeddingSection(defaults));
@@ -123,6 +122,9 @@ public class DesktopConfigController {
             flattenStructuredSection("", (Map<String, Object>) sectionMap, flat);
             for (var kv : flat.entrySet()) {
                 String mappedKey = mapStructuredKey(section, kv.getKey(), prefix);
+                if (DeprecatedKeys.contains(mappedKey) || !SupportedKeys.contains(mappedKey)) {
+                    continue;
+                }
                 String value = kv.getValue() != null ? kv.getValue().toString() : "";
                 String oldEffective = effective.getProperty(mappedKey, "");
                 boolean hasUserOverride = user.containsKey(mappedKey);
@@ -152,7 +154,6 @@ public class DesktopConfigController {
         sectionToPrefix.put("llm", "llm.");
         sectionToPrefix.put("aw", "aw.");
         sectionToPrefix.put("collection", "aw.collection.");
-        sectionToPrefix.put("audio", "aw.audio.");
         sectionToPrefix.put("agent", "agent.");
         sectionToPrefix.put("desktop", "desktop.");
         sectionToPrefix.put("embedding", "embedding.");
@@ -196,17 +197,6 @@ public class DesktopConfigController {
                             "window", "window",
                             "afk", "afk",
                             "content", "content");
-            case "audio" -> mapKey(rawKey, prefix,
-                    "enabled", "enabled",
-                    "whisperPath", "whisperPath",
-                    "whisper_path", "whisperPath",
-                    "vadThreshold", "vadThreshold",
-                    "vad_threshold", "vadThreshold",
-                    "source", "source",
-                    "engine", "engine",
-                    "model", "model",
-                    "chunkSeconds", "chunkSeconds",
-                    "chunk_seconds", "chunkSeconds");
             case "agent" -> mapKey(rawKey, prefix,
                     "summaryRefreshMinutes", "summaryRefreshMinutes",
                     "refresh_interval", "summaryRefreshMinutes",
@@ -289,7 +279,7 @@ public class DesktopConfigController {
     static List<String> computeUnknownKeys(Properties newP) {
         List<String> result = new ArrayList<>();
         for (String key : newP.stringPropertyNames()) {
-            if (!SupportedKeys.contains(key)) {
+            if (!SupportedKeys.contains(key) && !DeprecatedKeys.contains(key)) {
                 result.add(key);
             }
         }
@@ -608,19 +598,6 @@ public class DesktopConfigController {
         m.put("window", field("window", eff.getProperty("aw.collection.window", "true")));
         m.put("afk", field("afk", eff.getProperty("aw.collection.afk", "true")));
         m.put("content", field("content", eff.getProperty("aw.collection.content", "true")));
-        m.put("ocrEngine", field("aw.ocr.engine", eff.getProperty("aw.ocr.engine", "off")));
-        return m;
-    }
-
-    private Map<String, Map<String, Object>> buildAudioSection(Properties eff) {
-        var m = new LinkedHashMap<String, Map<String, Object>>();
-        m.put("enabled", field("enabled", eff.getProperty("aw.audio.enabled", "false")));
-        m.put("whisperPath", field("whisperPath", eff.getProperty("aw.audio.whisperPath", "tools/whisper")));
-        m.put("vadThreshold", field("vadThreshold", eff.getProperty("aw.audio.vadThreshold", "0.0001")));
-        m.put("source", field("source", eff.getProperty("aw.audio.source", "mic")));
-        m.put("engine", field("engine", eff.getProperty("aw.audio.engine", "auto")));
-        m.put("model", field("model", eff.getProperty("aw.audio.model", "gpt-4o-transcribe")));
-        m.put("chunkSeconds", field("chunkSeconds", eff.getProperty("aw.audio.chunkSeconds", "10")));
         return m;
     }
 
@@ -711,7 +688,7 @@ public class DesktopConfigController {
      * Try to find user-saved value by searching common key prefixes.
      */
     private String findUserValue(Properties user, String name) {
-        String[] prefixes = {"llm.", "aw.", "aw.collection.", "aw.audio.", "agent.", "desktop.", "embedding.", "websearch."};
+        String[] prefixes = {"llm.", "aw.", "aw.collection.", "agent.", "desktop.", "embedding.", "websearch."};
         for (String prefix : prefixes) {
             String val = user.getProperty(prefix + name);
             if (val != null) return val;

@@ -71,30 +71,15 @@ public final class ContextTitleExtractor {
                 "high");
     }
 
-    /**
-     * Conservatively project OCR title-strip text to one title. Multiple distinct lines are
-     * ambiguous UI chrome and therefore produce no persisted candidate.
-     */
-    public static ContextTitleCandidate fromOcrTitle(String app, String ocrText) {
-        if (ocrText == null || ocrText.isBlank()) return null;
-        List<String> candidates = ocrText.lines()
-                .map(String::strip)
-                .filter(line -> !line.isEmpty())
-                .filter(line -> line.codePointCount(0, line.length()) > 1)
-                .filter(ContextTitleExtractor::isValidTitleCandidate)
-                .distinct()
-                .toList();
-        if (candidates.size() != 1) return null;
-        return new ContextTitleCandidate(
-                candidates.getFirst(),
-                supports(app) ? "article" : "page",
-                "ocr_title",
-                "medium");
-    }
-
     public static boolean supports(String app) {
         if (app == null || app.isBlank()) return false;
         return WEIXIN_PROCESSES.contains(app.strip().toLowerCase(Locale.ROOT));
+    }
+
+    public static boolean isChatSurface(String uiaText) {
+        return uiaText != null && uiaText.lines()
+                .map(String::strip)
+                .anyMatch(CHAT_HISTORY_ANCHORS::contains);
     }
 
     private static boolean hasHeaderCompanion(List<String> lines, int fromIndex) {

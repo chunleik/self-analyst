@@ -1,8 +1,6 @@
 package com.selfanalyst.content;
 
-import com.selfanalyst.content.capture.ContentCapture;
-import com.selfanalyst.content.capture.ContentResult;
-import com.selfanalyst.content.capture.ContextTitleExtractor;
+import com.selfanalyst.content.capture.TitleCapture;
 import com.selfanalyst.content.capture.TitleCaptureResult;
 import com.selfanalyst.content.platform.PlatformCapture;
 import com.selfanalyst.content.platform.WindowsCapture;
@@ -25,9 +23,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * Content watcher with decoupled capture and heartbeat.
  * <p>
- * A capture thread polls foreground-window metadata, captures immediately on
- * window changes, and throttles stable-window screenshots. OCR results are
- * fingerprint-cached by {@link ContentCapture}. The
+ * A capture thread polls foreground-window metadata, refreshes UIA immediately on
+ * window changes, and periodically refreshes stable application context. The
  * heartbeat thread posts on a strict {@code pollIntervalMs} timer,
  * independent of capture latency.
  * <p>
@@ -39,22 +36,22 @@ public class ContentWatcher extends Thread {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final PlatformCapture platform;
-    private final ContentCapture capture;
+    private final TitleCapture capture;
     private final UiaTreeWalker treeWalker;
     private final String serverUrl;
     private final String bucketId;
     private final String hostname;
     private final HttpClient httpClient;
     private final int pollIntervalMs;
-    private final int stableCaptureIntervalMs;
     private final long pollIntervalNanos;
-    private final long stableCaptureIntervalNanos;
+    private final long stableRefreshIntervalNanos;
     private volatile boolean running = true;
     private volatile boolean heartbeatHealthy = true;
     private volatile Thread captureThread;
 
     /** Minimum heartbeat duration (seconds) — must exceed vis-timeline's filterShortEvents threshold of 1s. */
     private static final double HEARTBEAT_DURATION_S = 2.0;
+    private static final int STABLE_CONTEXT_REFRESH_MS = 1_500;
 
     /** Latest capture snapshot — written by capture thread, read by heartbeat thread. */
     private volatile Snapshot latest;
@@ -64,11 +61,11 @@ public class ContentWatcher extends Thread {
     public ContentWatcher(String serverUrl, int pollIntervalMs) {
         this.serverUrl = serverUrl;
         this.pollIntervalMs = pollIntervalMs;
-        this.stableCaptureIntervalMs = Math.max(
-                pollIntervalMs, parseStableCaptureIntervalMs());
+        int stableRefreshIntervalMs = Math.max(
+                pollIntervalMs, STABLE_CONTEXT_REFRESH_MS);
         this.pollIntervalNanos = TimeUnit.MILLISECONDS.toNanos(pollIntervalMs);
-        this.stableCaptureIntervalNanos =
-                TimeUnit.MILLISECONDS.toNanos(stableCaptureIntervalMs);
+        this.stableRefreshIntervalNanos =
+                TimeUnit.MILLISECONDS.toNanos(stableRefreshIntervalMs);
         this.treeWalker = new UiaTreeWalker();
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -76,7 +73,7 @@ public class ContentWatcher extends Thread {
         this.hostname = getHostname();
         this.bucketId = "aw-watcher-content_" + hostname;
         this.platform = detectPlatform();
-        this.capture = platform.createCapture();
+        this.capture = new TitleCapture();
         setDaemon(true);
         setName("content-watcher");
     }
@@ -119,16 +116,10 @@ public class ContentWatcher extends Thread {
             running = false;
             Thread worker = captureThread;
             if (worker != null) worker.interrupt();
-            capture.close();
         }
     }
 
-    // ── Capture thread (metadata-polled, screenshot-throttled) ──────
-
-    /** Cached UIA result for the current foreground window handle. */
-    private volatile UiaTreeWalker.UiaWalkResult cachedWalk = new UiaTreeWalker.UiaWalkResult("", null);
-    private volatile long cachedHandle;
-    private volatile String cachedTitle;
+    // ── UIA title-capture thread ────────────────────────────────────
 
     private void captureLoop() {
         long observedHandle = 0L;
@@ -143,8 +134,6 @@ public class ContentWatcher extends Thread {
                         platform.getForegroundWindowInfo();
                 long handle = foreground.handle();
                 if (handle == 0) {
-                    cachedHandle = 0;
-                    cachedTitle = null;
                     observedHandle = 0;
                     observedApp = null;
                     observedTitle = null;
@@ -162,41 +151,30 @@ public class ContentWatcher extends Thread {
                 observedTitle = title;
                 if (windowChanged) latest = null;
 
-                // Excluded apps / credential windows: skip UIA walk, OCR, and heartbeat entirely
+                // Excluded apps / credential windows: keep OS window metadata but never query UIA.
                 if (capture.isExcluded(app, title)) {
-                    latest = null;
+                    latest = new Snapshot(handle, app, title, capture.windowOnly());
                     continue;
                 }
 
                 long nowNanos = System.nanoTime();
                 if (!captureIsDue(
                         windowChanged, nowNanos, lastCaptureAttemptNanos,
-                        stableCaptureIntervalNanos)) {
+                        stableRefreshIntervalNanos)) {
                     continue;
                 }
-                // Advance the monotonic schedule before starting potentially slow work so a
-                // failed or long-running OCR attempt cannot cause a 500ms retry storm.
+                // Advance the monotonic schedule before starting potentially slow UIA work.
                 lastCaptureAttemptNanos = nowNanos;
 
-                // Refresh UIA when the foreground window or its title changes.
                 UiaTreeWalker.UiaWalkResult walkResult;
-                if (canReuseCachedUia(
-                        app, handle, title, cachedHandle, cachedTitle, cachedWalk)) {
-                    walkResult = cachedWalk;
-                } else {
-                    try {
-                        walkResult = treeWalker.walk(handle);
-                        cachedWalk = walkResult;
-                        cachedHandle = handle;
-                        cachedTitle = title;
-                    } catch (Exception e) {
-                        walkResult = new UiaTreeWalker.UiaWalkResult("", null);
-                    }
+                try {
+                    walkResult = treeWalker.walk(handle);
+                } catch (Exception e) {
+                    walkResult = new UiaTreeWalker.UiaWalkResult("", null);
                 }
 
-                ContentResult result = capture.capture(
-                    handle, app, title, walkResult.root(), walkResult.text());
-                TitleCaptureResult titleResult = TitleCaptureResult.from(result);
+                TitleCaptureResult titleResult = capture.capture(
+                        app, walkResult.root(), walkResult.text());
 
                 PlatformCapture.ForegroundWindow confirmed =
                         platform.getForegroundWindowInfo();
@@ -226,10 +204,10 @@ public class ContentWatcher extends Thread {
 
     static boolean captureIsDue(boolean windowChanged, long nowNanos,
                                 long lastCaptureAttemptNanos,
-                                long stableCaptureIntervalNanos) {
+                                long stableRefreshIntervalNanos) {
         return windowChanged
                 || lastCaptureAttemptNanos == Long.MIN_VALUE
-                || nowNanos - lastCaptureAttemptNanos >= stableCaptureIntervalNanos;
+                || nowNanos - lastCaptureAttemptNanos >= stableRefreshIntervalNanos;
     }
 
     static boolean sameWindow(long handle, String app, String title,
@@ -240,31 +218,11 @@ public class ContentWatcher extends Thread {
                 && Objects.equals(title, current.title());
     }
 
-    static boolean canReuseCachedUia(String app, long handle, String title,
-                                     long cachedHandle, String cachedTitle,
-                                     UiaTreeWalker.UiaWalkResult cachedWalk) {
-        return !ContextTitleExtractor.supports(app)
-                && handle == cachedHandle
-                && Objects.equals(title, cachedTitle)
-                && cachedWalk != null;
-    }
-
-    private static int parseStableCaptureIntervalMs() {
-        try {
-            int value = Integer.parseInt(System.getProperty(
-                    "ocr.stable-capture-interval-ms", "1500"));
-            return value >= 1000 && value <= 2000 ? value : 1500;
-        } catch (NumberFormatException e) {
-            return 1500;
-        }
-    }
-
     public void shutdown() {
         running = false;
         this.interrupt();
         Thread worker = captureThread;
         if (worker != null) worker.interrupt();
-        capture.close();
     }
 
     // ── Helpers ────────────────────────────────────────────────────
@@ -317,7 +275,6 @@ public class ContentWatcher extends Thread {
         data.put("title_source", result != null && result.titleSource() != null
                 ? result.titleSource() : "window");
         data.put("uia_chars", result != null ? result.uiaChars() : 0);
-        data.put("ocr_chars", result != null ? result.ocrChars() : 0);
         return data;
     }
 

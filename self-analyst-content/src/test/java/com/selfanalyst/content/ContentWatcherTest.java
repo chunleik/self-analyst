@@ -1,9 +1,7 @@
 package com.selfanalyst.content;
 
-import com.selfanalyst.content.capture.ContentResult;
 import com.selfanalyst.content.capture.TitleCaptureResult;
 import com.selfanalyst.content.platform.PlatformCapture;
-import com.selfanalyst.content.uia.UiaTreeWalker;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -40,33 +38,12 @@ class ContentWatcherTest {
     }
 
     @Test
-    void weixinConversationChangeRefreshesUiaWithStableWindowIdentity() {
-        UiaTreeWalker.UiaWalkResult oldConversation =
-                new UiaTreeWalker.UiaWalkResult("旧会话\n聊天记录\n聊天信息", null);
-
-        assertFalse(ContentWatcher.canReuseCachedUia(
-                "Weixin.exe", 10L, "微信", 10L, "微信", oldConversation));
-        assertFalse(ContentWatcher.canReuseCachedUia(
-                "WeChat.exe", 10L, "微信", 10L, "微信", oldConversation));
-    }
-
-    @Test
-    void stableOrdinaryWindowCanReuseCachedUia() {
-        UiaTreeWalker.UiaWalkResult cached =
-                new UiaTreeWalker.UiaWalkResult("Document", null);
-
-        assertTrue(ContentWatcher.canReuseCachedUia(
-                "editor.exe", 10L, "Document", 10L, "Document", cached));
-    }
-
-    @Test
     void heartbeatIncludesStructuredContextTitleWhenExtracted() {
-        ContentResult transientResult = new ContentResult(
-                "SELF_ANALYST_FORBIDDEN_BODY_7F3A", "uia", 544, 0,
-                "徐工3期小分队(3)", "sample-123");
+        TitleCaptureResult titleResult = new TitleCaptureResult(
+                "徐工3期小分队(3)", "chat", "uia_context", "high", 544);
 
         Map<String, Object> data = ContentWatcher.heartbeatData(
-                "Weixin.exe", "微信", TitleCaptureResult.from(transientResult));
+                "Weixin.exe", "微信", titleResult);
 
         assertEquals(2, data.get("schema_version"));
         assertEquals("微信", data.get("title"));
@@ -78,11 +55,11 @@ class ContentWatcherTest {
 
     @Test
     void heartbeatOmitsContextTitleWhenItWasNotExtracted() {
-        ContentResult transientResult = new ContentResult(
-                "text", "uia", 200, 0, (String) null);
+        TitleCaptureResult titleResult = new TitleCaptureResult(
+                null, null, "window", null, 200);
 
         Map<String, Object> data = ContentWatcher.heartbeatData(
-                "editor.exe", "Document", TitleCaptureResult.from(transientResult));
+                "editor.exe", "Document", titleResult);
 
         assertFalse(data.containsKey("context_title"));
         assertEquals("window", data.get("title_source"));

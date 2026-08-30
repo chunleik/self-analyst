@@ -148,13 +148,13 @@ final class AgentPrompts {
     static final String CONFIG_BODY_ZH =
             "你可以使用 getConfig 工具查看 SelfAnalyst 当前所有配置项，"
             + "使用 setConfigValue 工具修改单个配置项并持久化到文件。\n"
-            + "当用户要求切换模型、更新 API Key、开关联网搜索/音频/采集等功能、"
+            + "当用户要求切换模型、更新 API Key、开关联网搜索或采集等功能、"
             + "调整刷新频率等时，直接调用这些工具完成操作。\n"
             + "修改后告知用户新值已保存，并明确说明是否需要重启 SelfAnalyst 才能生效。";
     static final String CONFIG_BODY_EN =
             "You can use the getConfig tool to view all current SelfAnalyst configuration items, "
             + "and the setConfigValue tool to modify a single item and persist it to file.\n"
-            + "When the user asks to switch models, update the API key, toggle web search/audio/collection "
+            + "When the user asks to switch models, update the API key, toggle web search or collection "
             + "features, adjust refresh frequency, etc., call these tools directly to complete the operation.\n"
             + "After modifying, tell the user the new value is saved and clearly state whether SelfAnalyst "
             + "needs to be restarted for it to take effect.";

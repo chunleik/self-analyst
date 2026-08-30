@@ -76,7 +76,7 @@ function renderFileDisabled() {
       escHtml(t("file.configure")) + "</button>" +
     '<div class="file-privacy-note"><strong>' + escHtml(t("file.privacyTitle")) + "</strong> " +
       escHtml(t("file.privacyBody")) + "</div>" +
-    '<div class="file-restart-note">' + escHtml(t("file.restartNote")) + "</div>" +
+    '<div class="file-restart-note">' + escHtml(t("file.liveApplyNote")) + "</div>" +
   "</section>";
 }
 
@@ -204,4 +204,113 @@ function fileCount(value, label) {
 function renderFileMessage(type, text, action) {
   return '<section class="file-message file-message-' + escHtml(type) + '"><span>' +
     escHtml(text) + '</span><div>' + (action || "") + "</div></section>";
+}
+
+function openFileSettingsModal() {
+  if (!state.filesOverview) {
+    return loadFiles().then(function () {
+      if (state.filesOverview) openFileSettingsModal();
+    });
+  }
+  var overview = state.filesOverview;
+  state.fileSettingsEnabled = Boolean(overview.enabled);
+  state.fileSettingsPaths = (overview.roots || []).map(function (root) {
+    return root && root.path ? root.path : "";
+  });
+  if (!state.fileSettingsPaths.length) state.fileSettingsPaths.push("");
+  state.fileSettingsError = null;
+  state.fileSettingsSaving = false;
+  state.fileSettingsOpen = true;
+  state.dom.fileSettingsModal.classList.remove("hidden");
+  renderFileSettingsModal();
+  var firstInput = state.dom.fileSettingsPaths.querySelector("input[data-file-path]");
+  if (firstInput) firstInput.focus();
+}
+
+function closeFileSettingsModal() {
+  if (state.fileSettingsSaving) return;
+  state.fileSettingsOpen = false;
+  state.fileSettingsError = null;
+  state.dom.fileSettingsModal.classList.add("hidden");
+}
+
+function syncFileSettingsDraft() {
+  state.fileSettingsEnabled = Boolean(state.dom.fileSettingsEnabled.checked);
+  state.fileSettingsPaths = Array.from(
+    state.dom.fileSettingsPaths.querySelectorAll("input[data-file-path]")
+  ).map(function (input) { return input.value; });
+}
+
+function renderFileSettingsModal() {
+  if (!state.dom.fileSettingsModal) return;
+  state.dom.fileSettingsEnabled.checked = Boolean(state.fileSettingsEnabled);
+  state.dom.fileSettingsEnabled.disabled = Boolean(state.fileSettingsSaving);
+  state.dom.fileSettingsPaths.innerHTML = renderFileSettingsPaths(
+    state.fileSettingsPaths || [], Boolean(state.fileSettingsSaving));
+  state.dom.fileSettingsAddBtn.disabled = Boolean(state.fileSettingsSaving);
+  state.dom.fileSettingsCancelBtn.disabled = Boolean(state.fileSettingsSaving);
+  state.dom.fileSettingsSaveBtn.disabled = Boolean(state.fileSettingsSaving);
+  state.dom.fileSettingsSaveBtn.textContent = state.fileSettingsSaving
+    ? t("file.savingSettings") : t("action.save");
+  state.dom.fileSettingsError.textContent = state.fileSettingsError || "";
+  state.dom.fileSettingsError.classList.toggle("hidden", !state.fileSettingsError);
+}
+
+function renderFileSettingsPaths(paths, disabled) {
+  if (!paths.length) {
+    return '<div class="file-settings-empty">' + escHtml(t("file.noFolderRows")) + "</div>";
+  }
+  return paths.map(function (path, index) {
+    return '<div class="file-settings-path-row">' +
+      '<input class="config-input" type="text" data-file-path data-file-path-index="' + index +
+        '"' + (disabled ? " disabled" : "") + ' value="' + escHtml(path) + '" placeholder="' +
+        escHtml(t("file.folderPlaceholder")) + '">' +
+      '<button class="btn btn-icon file-settings-remove-btn" type="button" data-file-settings-remove="' +
+        index + '" title="' + escHtml(t("file.removeFolder")) + '" aria-label="' +
+        escHtml(t("file.removeFolder")) + '"' + (disabled ? " disabled" : "") + '>×</button>' +
+    "</div>";
+  }).join("");
+}
+
+function addFileSettingsPath() {
+  syncFileSettingsDraft();
+  state.fileSettingsPaths.push("");
+  renderFileSettingsModal();
+  var inputs = state.dom.fileSettingsPaths.querySelectorAll("input[data-file-path]");
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+function removeFileSettingsPath(index) {
+  syncFileSettingsDraft();
+  state.fileSettingsPaths.splice(index, 1);
+  renderFileSettingsModal();
+}
+
+function saveFileSettings() {
+  if (state.fileSettingsSaving) return Promise.resolve();
+  syncFileSettingsDraft();
+  state.fileSettingsSaving = true;
+  state.fileSettingsError = null;
+  renderFileSettingsModal();
+  var paths = state.fileSettingsPaths.map(function (path) { return path.trim(); })
+    .filter(function (path) { return Boolean(path); });
+  return api.saveFileSettings({
+    enabled: state.fileSettingsEnabled,
+    paths: paths,
+  }).then(function (overview) {
+    state.filesOverview = overview || null;
+    state.fileSettingsSaving = false;
+    closeFileSettingsModal();
+    renderFilesTab();
+    return api.getStatus().then(function (status) {
+      state.status = status || state.status;
+      updateStatusBar();
+    }).catch(function () {});
+  }).catch(function (error) {
+    state.fileSettingsSaving = false;
+    state.fileSettingsError = t("file.saveSettingsFailed", {
+      msg: error && error.message ? error.message : t("common.unknownError"),
+    });
+    renderFileSettingsModal();
+  });
 }

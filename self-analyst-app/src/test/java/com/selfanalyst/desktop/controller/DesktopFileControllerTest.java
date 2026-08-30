@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.file.FileWatchStore;
+import com.selfanalyst.desktop.store.UserConfigStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -9,10 +10,16 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DesktopFileControllerTest {
@@ -72,8 +79,95 @@ class DesktopFileControllerTest {
         assertEquals("disabled_by_config", payload.get("reason"));
         assertEquals(List.of(), payload.get("roots"));
         assertEquals(List.of(), payload.get("files"));
-        assertTrue((Boolean) payload.get("restartRequiredOnChange"));
+        assertFalse((Boolean) payload.get("restartRequiredOnChange"));
         assertFalse((Boolean) ((Map<String, Object>) payload.get("semantic")).get("available"));
+    }
+
+    @Test
+    void settingsPersistMultipleRootsAndApplyWithoutRestart(@TempDir Path dir) throws Exception {
+        Path first = Files.createDirectories(dir.resolve("docs-a")).toAbsolutePath().normalize();
+        Path second = Files.createDirectories(dir.resolve("docs-b")).toAbsolutePath().normalize();
+        UserConfigStore configStore = new UserConfigStore(dir.resolve("memory"));
+        AtomicReference<DesktopFileController.CollectorState> state = new AtomicReference<>(
+                new DesktopFileController.CollectorState(false, List.of(), false, false,
+                        false, null, null));
+        try (FileWatchStore store = new FileWatchStore(dir.resolve("file-watch.db"))) {
+            DesktopFileController controller = new DesktopFileController(
+                    false, store, configStore, state::get,
+                    (enabled, roots) -> state.set(new DesktopFileController.CollectorState(
+                            enabled, roots, enabled, enabled, false, null, null)));
+
+            Map<String, Object> payload = controller.updateSettings(true,
+                    List.of(first.toString(), second.toString(), first.toString()));
+
+            assertEquals("true", configStore.loadUser().getProperty("file.watch.enabled"));
+            assertEquals(first + "," + second,
+                    configStore.loadUser().getProperty("file.watch.paths"));
+            assertEquals("running", payload.get("status"));
+            assertFalse((Boolean) payload.get("restartRequiredOnChange"));
+            assertEquals(List.of(first, second), state.get().watchRoots());
+        }
+    }
+
+    @Test
+    void invalidDirectoryIsRejectedBeforePersistenceOrRuntimeApply(@TempDir Path dir) throws Exception {
+        UserConfigStore configStore = new UserConfigStore(dir.resolve("memory"));
+        AtomicBoolean applied = new AtomicBoolean();
+        DesktopFileController controller = new DesktopFileController(
+                false, null, configStore,
+                () -> new DesktopFileController.CollectorState(false, List.of(), false, false,
+                        false, null, null),
+                (enabled, roots) -> applied.set(true));
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> controller.updateSettings(true, List.of(dir.resolve("missing").toString())));
+
+        assertTrue(error.getMessage().contains("不存在或不是目录"));
+        assertFalse(applied.get());
+        assertNull(configStore.loadUser().getProperty("file.watch.paths"));
+    }
+
+    @Test
+    void concurrentSettingsSavesKeepPersistenceAndRuntimeInTheSameOrder(@TempDir Path dir)
+            throws Exception {
+        Path first = Files.createDirectories(dir.resolve("first")).toAbsolutePath().normalize();
+        Path second = Files.createDirectories(dir.resolve("second")).toAbsolutePath().normalize();
+        UserConfigStore configStore = new UserConfigStore(dir.resolve("memory"));
+        AtomicReference<List<Path>> appliedRoots = new AtomicReference<>(List.of());
+        CountDownLatch firstApplyEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirstApply = new CountDownLatch(1);
+        AtomicBoolean firstCall = new AtomicBoolean(true);
+        DesktopFileController controller = new DesktopFileController(
+                false, null, configStore,
+                () -> new DesktopFileController.CollectorState(true, appliedRoots.get(), true, true,
+                        false, null, null),
+                (enabled, roots) -> {
+                    if (firstCall.compareAndSet(true, false)) {
+                        firstApplyEntered.countDown();
+                        try {
+                            releaseFirstApply.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(interrupted);
+                        }
+                    }
+                    appliedRoots.set(roots);
+                });
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var firstSave = executor.submit(() -> controller.updateSettings(
+                    true, List.of(first.toString())));
+            assertTrue(firstApplyEntered.await(5, TimeUnit.SECONDS));
+            var secondSave = executor.submit(() -> controller.updateSettings(
+                    true, List.of(second.toString())));
+            releaseFirstApply.countDown();
+            firstSave.get(5, TimeUnit.SECONDS);
+            secondSave.get(5, TimeUnit.SECONDS);
+        }
+
+        assertEquals(second.toString(),
+                configStore.loadUser().getProperty("file.watch.paths"));
+        assertEquals(List.of(second), appliedRoots.get());
     }
 
     @Test

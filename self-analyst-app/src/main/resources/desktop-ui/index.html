@@ -163,6 +163,45 @@
 
 </main>
 
+<!-- ======== FILE COLLECTION SETTINGS ======== -->
+<div id="file-settings-modal" class="config-modal file-settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="file-settings-title">
+  <div class="config-modal-overlay"></div>
+  <div class="config-modal-panel">
+    <div class="config-modal-header">
+      <div>
+        <h3 id="file-settings-title" data-i18n="file.settingsTitle">文件采集设置</h3>
+        <p class="file-settings-subtitle" data-i18n="file.settingsSubtitle">按目录管理监控范围，保存后立即生效</p>
+      </div>
+      <button id="file-settings-close-btn" class="btn btn-icon" type="button" title="关闭" data-i18n-title="action.close">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="file-settings-body">
+      <label class="file-settings-toggle">
+        <span><strong data-i18n="file.enableCollection">启用文件采集</strong><small data-i18n="file.enableCollectionHint">关闭后保留目录配置，但暂停监控和索引。</small></span>
+        <input id="file-settings-enabled" type="checkbox">
+      </label>
+      <div class="file-settings-section-header">
+        <div>
+          <strong data-i18n="file.watchedFolders">监控目录</strong>
+          <p data-i18n="file.watchedFoldersHint">每行填写一个已存在的本地目录绝对路径。</p>
+        </div>
+        <button id="file-settings-add-btn" class="btn btn-sm btn-outline" type="button" data-i18n="file.addFolder">+ 添加目录</button>
+      </div>
+      <div id="file-settings-paths" class="file-settings-paths"></div>
+      <div class="file-privacy-note"><strong data-i18n="file.privacyTitle">隐私提示：</strong> <span data-i18n="file.privacyBody">文件正文会发送给已配置的 LLM 生成摘要；敏感文件、构建目录和临时文件默认排除。</span></div>
+      <div id="file-settings-error" class="file-settings-error hidden" role="alert"></div>
+    </div>
+    <div class="file-settings-actions">
+      <span data-i18n="file.liveApplyNote">保存后无需重启，新的监控目录会立即生效。</span>
+      <div>
+        <button id="file-settings-cancel-btn" class="btn btn-outline" type="button" data-i18n="action.cancel">取消</button>
+        <button id="file-settings-save-btn" class="btn btn-primary" type="button" data-i18n="action.save">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ======== CONFIG MODAL ======== -->
 <div id="config-modal" class="config-modal hidden">
   <div class="config-modal-overlay"></div>

@@ -100,7 +100,7 @@ test("disabled file collector remains discoverable with a configuration action",
 
   assert.match(elements.content.innerHTML, /让 Agent 理解你的本地文档/);
   assert.match(elements.content.innerHTML, /data-file-action="settings"/);
-  assert.match(elements.content.innerHTML, /重启 SelfAnalyst/);
+  assert.match(elements.content.innerHTML, /无需重启/);
 });
 
 test("degraded reason and technical detail are escaped", () => {
@@ -197,9 +197,26 @@ test("desktop shell and API expose the file collector page", () => {
 
   assert.match(html, /data-tab="files"/);
   assert.match(html, /id="file-status-btn"/);
+  assert.match(html, /id="file-settings-modal"/);
   assert.match(html, /src="files\.js"/);
   assert.match(api, /\/desktop\/files\?limit=/);
+  assert.match(api, /\/desktop\/files\/settings/);
   assert.match(config, /focusConfigEditorKey/);
+});
+
+test("file settings render one editable row per watched folder", () => {
+  const { sandbox } = createSandbox(null);
+
+  const html = sandbox.renderFileSettingsPaths(["D:\\Docs", "E:\\Notes"]);
+
+  assert.equal((html.match(/data-file-path data-file-path-index=/g) || []).length, 2);
+  assert.match(html, /D:\\Docs/);
+  assert.match(html, /E:\\Notes/);
+  assert.match(html, /data-file-settings-remove="1"/);
+
+  const savingHtml = sandbox.renderFileSettingsPaths(["D:\\Docs"], true);
+  assert.match(savingHtml, /data-file-path-index="0" disabled/);
+  assert.match(savingHtml, /data-file-settings-remove="0"[^>]* disabled/);
 });
 
 test("file settings focus supports the generated parent-table template syntax", () => {

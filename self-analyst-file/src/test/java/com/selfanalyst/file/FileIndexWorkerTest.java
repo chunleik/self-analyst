@@ -49,8 +49,12 @@ class FileIndexWorkerTest {
     }
 
     private FileIndexWorker worker(int minReindexMinutes) {
+        return worker(List.of(root), minReindexMinutes);
+    }
+
+    private FileIndexWorker worker(List<Path> roots, int minReindexMinutes) {
         return new FileIndexWorker(store, pathFilter, factory, summarizer, null,
-                List.of(root), 60, 8000, minReindexMinutes);
+                roots, 60, 8000, minReindexMinutes);
     }
 
     private void upsert() {
@@ -77,6 +81,41 @@ class FileIndexWorkerTest {
         assertEquals(FileStatus.INDEXED, rec.status());
         assertEquals("S", rec.summary());
         assertNotNull(rec.fileHash());
+        assertEquals(1, llmCalls.get());
+    }
+
+    @Test
+    void ignoresQueuedFilesOutsideCurrentWatchRoots(@TempDir Path tmp) throws Exception {
+        Path removedRoot = Files.createDirectories(tmp.resolve("removed"));
+        Path removedFile = Files.writeString(removedRoot.resolve("private.txt"), "removed content");
+        store.upsertPending(removedFile.toAbsolutePath().toString(), "private.txt",
+                removedRoot.toAbsolutePath().toString(), "txt");
+        upsert();
+
+        worker(0).processOneRound();
+
+        assertEquals(FileStatus.PENDING,
+                store.findByPath(removedFile.toAbsolutePath().toString()).status());
+        assertEquals(FileStatus.INDEXED,
+                store.findByPath(file.toAbsolutePath().toString()).status());
+        assertEquals(1, llmCalls.get());
+    }
+
+    @Test
+    void reconcileReassignsExistingRecordWhenRootIsNarrowed() throws Exception {
+        Path projectRoot = Files.createDirectories(root.resolve("project"));
+        Path projectFile = Files.writeString(projectRoot.resolve("plan.txt"), "project plan");
+        store.upsertPending(projectFile.toAbsolutePath().toString(), "project/plan.txt",
+                root.toAbsolutePath().toString(), "txt");
+
+        FileIndexWorker narrowed = worker(List.of(projectRoot), 0);
+        narrowed.reconcileScan();
+        narrowed.processOneRound();
+
+        FileRecord record = store.findByPath(projectFile.toAbsolutePath().toString());
+        assertEquals(projectRoot.toAbsolutePath().normalize().toString(), record.watchRoot());
+        assertEquals("plan.txt", record.relativePath());
+        assertEquals(FileStatus.INDEXED, record.status());
         assertEquals(1, llmCalls.get());
     }
 

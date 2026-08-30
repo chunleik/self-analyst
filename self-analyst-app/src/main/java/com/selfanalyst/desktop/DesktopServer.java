@@ -15,9 +15,6 @@ import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.file.FileWatchStore;
-import com.selfanalyst.file.FileWatcher;
-import com.selfanalyst.file.FileIndexWorker;
-import com.selfanalyst.file.semantic.FileEmbeddingWorker;
 import com.selfanalyst.memory.LongTermMemoryService;
 import com.selfanalyst.memory.MemoryStore;
 import io.javalin.Javalin;
@@ -26,7 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
-import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Desktop dashboard API server.
@@ -94,7 +91,7 @@ public class DesktopServer {
                          String contentMigrationError) {
         this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
                 contentPersistenceReady, contentMigrationError,
-                null, null, null, null, List.of(), null, null);
+                null, null, null);
     }
 
     public DesktopServer(Javalin app,
@@ -107,12 +104,8 @@ public class DesktopServer {
                          boolean contentPersistenceReady,
                          String contentMigrationError,
                          FileWatchStore fileWatchStore,
-                         FileWatcher fileWatcher,
-                         FileIndexWorker fileIndexWorker,
-                         FileEmbeddingWorker fileEmbeddingWorker,
-                         List<Path> fileWatchRoots,
-                         String fileStartupReason,
-                         String fileStartupError) {
+                         Supplier<DesktopFileController.CollectorState> fileStateSupplier,
+                         DesktopFileController.SettingsApplier fileSettingsApplier) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
@@ -142,12 +135,8 @@ public class DesktopServer {
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.fileCtrl = new DesktopFileController(
-                config.fileWatchEnabled(), config.fileWatchSemanticEnabled(),
-                fileWatchRoots, fileWatchStore,
-                fileWatcher != null ? fileWatcher::isRunning : () -> false,
-                fileIndexWorker != null ? fileIndexWorker::isRunning : () -> false,
-                fileEmbeddingWorker != null ? fileEmbeddingWorker::isRunning : () -> false,
-                fileStartupReason, fileStartupError);
+                config.fileWatchSemanticEnabled(), fileWatchStore, userConfigStore,
+                fileStateSupplier, fileSettingsApplier);
         this.statusCtrl = new DesktopStatusController(
                 config, watcherManager, contentWatcher,
                 contentPersistenceReady, contentMigrationError,
@@ -235,6 +224,7 @@ public class DesktopServer {
 
         // ── File collector visibility ────────────────────────
         app.get("/desktop/files", fileCtrl::getOverview);
+        app.put("/desktop/files/settings", fileCtrl::putSettings);
 
         // Catch-all exception handler so no error returns an empty body
         app.exception(Exception.class, (e, ctx) -> {

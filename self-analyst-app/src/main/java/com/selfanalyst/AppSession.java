@@ -6,6 +6,7 @@ import com.selfanalyst.aw.watcher.WatcherManager;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.desktop.DesktopServer;
+import com.selfanalyst.desktop.controller.DesktopFileController;
 import com.selfanalyst.desktop.store.ConfigMigration;
 import com.selfanalyst.desktop.store.ContentEventV2Migration;
 import com.selfanalyst.desktop.store.UserConfigStore;
@@ -47,9 +48,14 @@ public class AppSession implements AutoCloseable {
     private FileEmbeddingWorker fileEmbeddingWorker;
     private FileIndexWorker fileIndexWorker;
     private FileWatcher fileWatcher;
+    private PathFilter filePathFilter;
+    private FileSummarizer fileSummarizer;
+    private FileContentExtractorFactory fileExtractorFactory;
+    private boolean fileWatchEnabled;
     private List<Path> fileWatchRoots = List.of();
     private String fileWatchStartupReason;
     private String fileWatchStartupError;
+    private String fileWatchInitializationError;
     private boolean contentPersistenceReady = true;
     private String contentMigrationError;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -113,39 +119,39 @@ public class AppSession implements AutoCloseable {
         // File watch: store + semantic index + embedding worker + tools (SPEC-FILE-001/016/017).
         // FileTools must exist before the agent so it can be registered; the watcher/index
         // worker (which need the agent's LLM client) are started after the agent below.
-        PathFilter filePathFilter = null;
         FileTools fileTools = null;
-        if (config.fileWatchEnabled()) {
-            try {
-                fileWatchRoots = parseWatchRoots(config.fileWatchPaths());
-                if (fileWatchRoots.isEmpty()) {
-                    fileWatchStartupReason = "paths_unavailable";
-                    log.warn("file.watch.enabled=true 但 file.watch.paths 为空，文件监控未启动");
-                } else {
-                    fileWatchStore = new FileWatchStore(config.memoryDir().resolve("file-watch.db"));
-                    filePathFilter = new PathFilter(config.fileWatchMaxFileSizeKb(),
-                            PathFilter.splitCsv(config.fileWatchExcludeDirs()),
-                            PathFilter.splitCsv(config.fileWatchExcludeGlobs()),
-                            PathFilter.splitCsv(config.fileWatchExtensions()));
-                    if (embeddingClient != null && config.fileWatchSemanticEnabled()) {
-                        fileSemanticIndex = new FileSemanticIndex(config.fileSemanticIndexDir());
-                        fileEmbeddingWorker = new FileEmbeddingWorker(fileWatchStore, fileSemanticIndex,
-                                embeddingClient, config.fileWatchWorkerIntervalSeconds());
-                    }
-                    fileTools = new FileTools(fileWatchStore, fileSemanticIndex,
-                            config.fileWatchSemanticEnabled() ? embeddingClient : null,
-                            config.wikiSemanticTopK());
-                    log.info("FileWatchStore 已初始化 ({} 个监控目录)", fileWatchRoots.size());
-                }
-            } catch (Exception e) {
-                fileWatchStartupReason = "initialization_failed";
-                fileWatchStartupError = e.getMessage();
-                log.warn("文件监控初始化失败，文件功能不可用: {}", e.getMessage());
-                fileWatchStore = null;
-                fileSemanticIndex = null;
-                fileEmbeddingWorker = null;
-                fileTools = null;
+        fileWatchEnabled = config.fileWatchEnabled();
+        fileWatchRoots = List.copyOf(parseWatchRoots(config.fileWatchPaths()));
+        try {
+            // The store and FileTools stay available while collection is disabled so the
+            // dedicated settings page can enable the complete pipeline without a restart.
+            fileWatchStore = new FileWatchStore(config.memoryDir().resolve("file-watch.db"));
+            filePathFilter = new PathFilter(config.fileWatchMaxFileSizeKb(),
+                    PathFilter.splitCsv(config.fileWatchExcludeDirs()),
+                    PathFilter.splitCsv(config.fileWatchExcludeGlobs()),
+                    PathFilter.splitCsv(config.fileWatchExtensions()));
+            if (embeddingClient != null && config.fileWatchSemanticEnabled()) {
+                fileSemanticIndex = new FileSemanticIndex(config.fileSemanticIndexDir());
+                fileEmbeddingWorker = new FileEmbeddingWorker(fileWatchStore, fileSemanticIndex,
+                        embeddingClient, config.fileWatchWorkerIntervalSeconds());
             }
+            fileTools = new FileTools(fileWatchStore, fileSemanticIndex,
+                    config.fileWatchSemanticEnabled() ? embeddingClient : null,
+                    config.wikiSemanticTopK());
+            log.info("FileWatchStore 已初始化 ({} 个已配置目录)", fileWatchRoots.size());
+        } catch (Exception e) {
+            fileWatchInitializationError = e.getMessage();
+            fileWatchStartupReason = "initialization_failed";
+            fileWatchStartupError = fileWatchInitializationError;
+            log.warn("文件监控初始化失败，文件功能不可用: {}", e.getMessage());
+            if (fileWatchStore != null) {
+                fileWatchStore.close();
+            }
+            fileWatchStore = null;
+            fileSemanticIndex = null;
+            fileEmbeddingWorker = null;
+            filePathFilter = null;
+            fileTools = null;
         }
 
         SelfAnalystAgent a = null;
@@ -202,51 +208,13 @@ public class AppSession implements AutoCloseable {
             }
         }
 
-        // File watch workers (SPEC-FILE-013/012/019). Started after the agent so the
-        // summarizer can use its LLM client; init order per spec §4.
-        if (fileWatchStore != null && a != null) {
-            try {
-                if (fileEmbeddingWorker != null) {
-                    fileEmbeddingWorker.start();
-                    log.info("FileEmbeddingWorker 已启动");
-                }
-                FileSummarizer fileSummarizer = new FileSummarizer(a.wikiLLMClient());
-                FileContentExtractorFactory extractorFactory = new FileContentExtractorFactory();
-                fileIndexWorker = new FileIndexWorker(fileWatchStore, filePathFilter,
-                        extractorFactory, fileSummarizer, fileEmbeddingWorker, fileWatchRoots,
-                        config.fileWatchWorkerIntervalSeconds(), config.fileWatchMaxContentChars(),
-                        config.fileWatchMinReindexIntervalMinutes());
-                fileIndexWorker.start();
-                log.info("FileIndexWorker 已启动");
-
-                String fileHeartbeatUrl = "http://localhost:" + config.awPort();
-                fileWatcher = new FileWatcher(fileWatchStore, filePathFilter, fileWatchRoots,
-                        fileHeartbeatUrl, config.fileWatchDebounceSeconds(),
-                        config.fileWatchHeartbeatThrottleSeconds());
-                fileWatcher.start();
-                fileWatchStartupReason = null;
-                fileWatchStartupError = null;
-                log.info("FileWatcher 已启动");
-            } catch (Exception e) {
-                fileWatchStartupReason = "worker_start_failed";
-                fileWatchStartupError = e.getMessage();
-                log.warn("文件监控 worker 启动失败: {}", e.getMessage());
-                if (fileWatcher != null) {
-                    fileWatcher.shutdown();
-                    fileWatcher = null;
-                }
-                if (fileIndexWorker != null) {
-                    fileIndexWorker.shutdown();
-                    fileIndexWorker = null;
-                }
-                if (fileEmbeddingWorker != null) {
-                    fileEmbeddingWorker.shutdown();
-                    fileEmbeddingWorker = null;
-                }
-            }
-        } else if (config.fileWatchEnabled() && fileWatchStore != null) {
-            fileWatchStartupReason = "agent_unavailable";
+        // File watch workers (SPEC-FILE-013/012/019). The worker instances are
+        // replaceable so enabled/paths can be applied by the desktop API at runtime.
+        if (a != null && fileWatchStore != null) {
+            fileSummarizer = new FileSummarizer(a.wikiLLMClient());
+            fileExtractorFactory = new FileContentExtractorFactory();
         }
+        applyFileWatchSettings(fileWatchEnabled, fileWatchRoots);
 
         if (awServer != null && awServer.app() != null) {
             var memoryStore = agent != null ? agent.memory() : null;
@@ -254,9 +222,7 @@ public class AppSession implements AutoCloseable {
                     awServer.eventStore(), memoryStore,
                     watcherManager, contentWatcher,
                     contentPersistenceReady, contentMigrationError,
-                    fileWatchStore, fileWatcher, fileIndexWorker, fileEmbeddingWorker,
-                    fileWatchRoots,
-                    fileWatchStartupReason, fileWatchStartupError);
+                    fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings);
             desktopServer.start();
             awServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));
@@ -351,6 +317,100 @@ public class AppSession implements AutoCloseable {
         });
     }
 
+    private synchronized void applyFileWatchSettings(boolean enabled, List<Path> requestedRoots) {
+        if (closed.get()) {
+            throw new IllegalStateException("SelfAnalyst 正在关闭，无法更新文件采集设置");
+        }
+        stopFileWatchWorkers();
+        fileWatchEnabled = enabled;
+        fileWatchRoots = requestedRoots == null ? List.of() : requestedRoots.stream()
+                .map(path -> path.toAbsolutePath().normalize())
+                .distinct()
+                .toList();
+        fileWatchStartupReason = null;
+        fileWatchStartupError = null;
+        if (fileEmbeddingWorker != null) {
+            if (fileEmbeddingWorker.isRunning()) fileEmbeddingWorker.pause();
+            fileEmbeddingWorker.updateWatchRoots(fileWatchRoots);
+        }
+
+        if (!enabled) {
+            log.info("文件采集已在运行时禁用");
+            return;
+        }
+        if (fileWatchRoots.isEmpty()) {
+            fileWatchStartupReason = "paths_unavailable";
+            log.warn("文件采集已启用，但没有可用的监控目录");
+            return;
+        }
+        if (fileWatchStore == null || filePathFilter == null) {
+            fileWatchStartupReason = "initialization_failed";
+            fileWatchStartupError = fileWatchInitializationError;
+            return;
+        }
+        if (fileSummarizer == null || fileExtractorFactory == null) {
+            fileWatchStartupReason = "agent_unavailable";
+            return;
+        }
+
+        try {
+            fileWatchStartupReason = "starting";
+            if (fileEmbeddingWorker != null && !fileEmbeddingWorker.isRunning()) {
+                fileEmbeddingWorker.start();
+                log.info("FileEmbeddingWorker 已启动");
+            }
+            fileIndexWorker = new FileIndexWorker(fileWatchStore, filePathFilter,
+                    fileExtractorFactory, fileSummarizer, fileEmbeddingWorker, fileWatchRoots,
+                    config.fileWatchWorkerIntervalSeconds(), config.fileWatchMaxContentChars(),
+                    config.fileWatchMinReindexIntervalMinutes());
+            fileIndexWorker.start();
+
+            String fileHeartbeatUrl = "http://localhost:" + config.awPort();
+            fileWatcher = new FileWatcher(fileWatchStore, filePathFilter, fileWatchRoots,
+                    fileHeartbeatUrl, config.fileWatchDebounceSeconds(),
+                    config.fileWatchHeartbeatThrottleSeconds());
+            fileWatcher.start();
+            log.info("文件采集配置已在运行时生效 ({} 个监控目录)", fileWatchRoots.size());
+        } catch (Exception e) {
+            fileWatchStartupReason = "worker_start_failed";
+            fileWatchStartupError = e.getMessage();
+            log.warn("文件监控 worker 启动失败: {}", e.getMessage());
+            stopFileWatchWorkers();
+        }
+    }
+
+    private synchronized DesktopFileController.CollectorState fileCollectorState() {
+        boolean watcherRunning = fileWatcher != null && fileWatcher.isRunning();
+        boolean indexWorkerRunning = fileIndexWorker != null && fileIndexWorker.isRunning();
+        if ("starting".equals(fileWatchStartupReason) && watcherRunning && indexWorkerRunning) {
+            fileWatchStartupReason = null;
+            fileWatchStartupError = null;
+        } else if ("starting".equals(fileWatchStartupReason)
+                && fileWatcher != null && fileWatcher.isRegistrationComplete() && !watcherRunning) {
+            fileWatchStartupReason = "worker_start_failed";
+            fileWatchStartupError = fileWatcher.registrationError();
+        }
+        return new DesktopFileController.CollectorState(
+                fileWatchEnabled,
+                fileWatchRoots,
+                watcherRunning,
+                indexWorkerRunning,
+                fileEmbeddingWorker != null && fileEmbeddingWorker.isRunning(),
+                fileWatchStartupReason,
+                fileWatchStartupError);
+    }
+
+    private void stopFileWatchWorkers() {
+        if (fileWatcher != null) {
+            fileWatcher.shutdown();
+            fileWatcher = null;
+        }
+        if (fileIndexWorker != null) {
+            fileIndexWorker.shutdown();
+            fileIndexWorker = null;
+        }
+    }
+
     public void saveAndShutdown() {
         if (!closed.compareAndSet(false, true)) {
             return;
@@ -366,20 +426,17 @@ public class AppSession implements AutoCloseable {
             if (usageMeter != null) {
                 usageMeter.flush();
             }
-            if (fileWatcher != null) {
-                fileWatcher.shutdown();
-            }
-            if (fileIndexWorker != null) {
-                fileIndexWorker.shutdown();
-            }
-            if (fileEmbeddingWorker != null) {
-                fileEmbeddingWorker.shutdown();
-            }
-            if (fileSemanticIndex != null) {
-                fileSemanticIndex.close();
-            }
-            if (fileWatchStore != null) {
-                fileWatchStore.close();
+            synchronized (this) {
+                stopFileWatchWorkers();
+                if (fileEmbeddingWorker != null) {
+                    fileEmbeddingWorker.shutdown();
+                }
+                if (fileSemanticIndex != null) {
+                    fileSemanticIndex.close();
+                }
+                if (fileWatchStore != null) {
+                    fileWatchStore.close();
+                }
             }
             if (wikiSummaryWatcher != null) {
                 wikiSummaryWatcher.shutdown();
@@ -420,16 +477,20 @@ public class AppSession implements AutoCloseable {
     }
 
     /** Parse comma-separated absolute watch paths into existing directories (SPEC-FILE-001). */
-    private static List<Path> parseWatchRoots(String csv) {
+    static List<Path> parseWatchRoots(String csv) {
         List<Path> roots = new ArrayList<>();
         if (csv == null || csv.isBlank()) return roots;
         for (String p : csv.split(",")) {
             String trimmed = p.trim();
             if (trimmed.isEmpty()) continue;
-            Path path = Path.of(trimmed).toAbsolutePath().normalize();
-            if (java.nio.file.Files.isDirectory(path)) {
-                roots.add(path);
-            } else {
+            try {
+                Path path = Path.of(trimmed).toAbsolutePath().normalize();
+                if (java.nio.file.Files.isDirectory(path)) {
+                    roots.add(path);
+                } else {
+                    log.warn("file.watch.paths 中的目录不存在或不是目录，已跳过: {}", trimmed);
+                }
+            } catch (java.nio.file.InvalidPathException invalidPath) {
                 log.warn("file.watch.paths 中的目录不存在或不是目录，已跳过: {}", trimmed);
             }
         }

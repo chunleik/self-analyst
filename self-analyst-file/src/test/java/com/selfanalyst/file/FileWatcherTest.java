@@ -31,7 +31,7 @@ class FileWatcherTest {
         PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
         watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1);
         watcher.start();
-        assertTrue(watcher.isRunning());
+        assertTrue(pollForAvailable(20_000));
 
         Path file = tmp.resolve("hello.txt");
         Files.writeString(file, "content");
@@ -68,12 +68,28 @@ class FileWatcherTest {
         PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
         watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
         watcher.start();
-        assertTrue(watcher.isRunning());
+        assertTrue(pollForAvailable(20_000));
 
         Files.delete(root);
 
         assertTrue(pollForUnavailable(20_000),
                 "watcher health should turn false after its only WatchKey is invalidated");
+    }
+
+    @Test
+    void reportsTerminalRegistrationFailureWhenConfiguredRootDisappears(@TempDir Path tmp)
+            throws Exception {
+        Path root = Files.createDirectory(tmp.resolve("vanished"));
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
+        Files.delete(root);
+
+        watcher.start();
+
+        assertTrue(pollForRegistrationComplete(20_000));
+        assertFalse(watcher.isRunning());
+        assertNotNull(watcher.registrationError());
     }
 
     private FileRecord pollForPending(String absPath, long timeoutMs) throws InterruptedException {
@@ -93,5 +109,23 @@ class FileWatcherTest {
             Thread.sleep(50);
         }
         return !watcher.isRunning();
+    }
+
+    private boolean pollForAvailable(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (watcher.isRunning()) return true;
+            Thread.sleep(50);
+        }
+        return watcher.isRunning();
+    }
+
+    private boolean pollForRegistrationComplete(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (watcher.isRegistrationComplete()) return true;
+            Thread.sleep(50);
+        }
+        return watcher.isRegistrationComplete();
     }
 }

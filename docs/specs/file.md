@@ -230,7 +230,10 @@ LLM prompt（中文）输入文件路径/类型/最后修改时间/截取内容�
   `pending/indexed/failed/skipped/deleted`。
 - `files` 只返回当前配置监控目录内最近完成索引的记录，按
   `last_indexed_at` 倒序；不得返回原始文件正文或完整提示词。
-- 启动失败原因使用稳定代码：`paths_unavailable`、
+- `PUT /desktop/files/settings` 接收 `enabled` 和 `paths[]`。服务端必须校验每个路径为
+  已存在目录、规范化并去重，持久化 `file.watch.enabled/file.watch.paths` 后立即重建
+  `FileWatcher` 与 `FileIndexWorker`；响应返回更新后的文件采集概览，不要求重启应用。
+- 后台启动过程使用稳定代码 `starting`；启动失败原因使用稳定代码：`paths_unavailable`、
   `initialization_failed`、`agent_unavailable`、`worker_start_failed`；
   存储查询失败使用 `store_unavailable`，运行时 worker 停止使用
   `index_worker_unavailable` 或 `watcher_unavailable`。异常详情必须压成单行且最长 200 字符。
@@ -242,7 +245,9 @@ LLM prompt（中文）输入文件路径/类型/最后修改时间/截取内容�
 - 运行状态展示监控目录、已索引/待处理/失败计数、最近完成索引的文件摘要和主题。
 - 降级状态展示本地化原因和可用的技术详情，目录文案使用“已配置”而非“正在监控”，
   并同时提供进入配置和重新加载的操作。
-- 从文件页进入配置时，编辑器应定位到 `file.watch.enabled`。
+- 从文件页进入设置时，必须打开文件页专用的目录配置弹窗，不得跳转到通用配置文件编辑器。
+- 目录配置以一行一个目录的形式展示，支持新增和移除多个目录，并可单独启用或暂停文件采集。
+- 保存时必须显示后端路径校验错误；保存成功后立即刷新文件页和顶部采集状态，并明确提示无需重启。
 - 界面必须明确说明：文件正文会发送给已配置的 LLM 生成摘要；敏感文件、构建目录和临时文件默认排除。
 
 ---
@@ -265,13 +270,21 @@ file.watch.excludeGlobs=
 file.watch.semantic.enabled=true
 ```
 
-AppSession 在 `file.watch.enabled=true` 时按序初始化并启动
-FileWatchStore → PathFilter → FileSemanticIndex → FileEmbeddingWorker →
-FileSummarizer → FileIndexWorker → FileWatcher → FileTools；`SelfAnalystAgent`
-构造器接收可空 `FileTools` 并条件注册。配置统一经 `Config` 读取（单一来源）。
+AppSession 启动时初始化 FileWatchStore、PathFilter、可选 FileSemanticIndex/FileEmbeddingWorker
+与 FileTools，使文件采集从关闭状态启用时 Agent 不需要重建。`file.watch.enabled=true`
+且存在有效目录时，再按序启动 FileEmbeddingWorker → FileIndexWorker → FileWatcher；
+`SelfAnalystAgent` 构造器接收可空 `FileTools` 并条件注册。配置统一经 `Config` 和
+UserConfigStore 读取、持久化。
 
-所有 `file.watch.*` 键在启动阶段读取，桌面配置 API 修改这些键时必须返回
-`restartRequired`；界面提示用户重启 SelfAnalyst 后生效。
+`file.watch.enabled` 与 `file.watch.paths` 可通过 `PUT /desktop/files/settings` 在运行时更新：
+旧 FileWatcher/FileIndexWorker 必须有序关闭，新实例按新目录启动，FileWatchStore、
+FileTools 和语义索引保持复用。待处理、失败重试和 embedding 队列必须按当前目录过滤；
+被移除目录的历史记录可以保留，但不得再读取正文、调用摘要或 embedding 服务。禁用采集时
+FileEmbeddingWorker 必须暂停，重新启用时只对当前目录执行 reconcile。首次扫描和 WatchService
+递归注册在后台 worker 中执行，不得阻塞设置保存请求。目录由父级收窄为子级或规范化名称变化时，
+reconcile 必须更新现有记录和语义文档的 watchRoot/relativePath，不得丢失已有摘要；异步注册失败
+必须从 `starting` 进入可诊断的降级状态。其他 `file.watch.*` 参数仍在启动阶段
+读取，通过通用配置 API 修改时继续返回 `restartRequired`。
 
 ---
 
@@ -292,7 +305,9 @@ FileSummarizer → FileIndexWorker → FileWatcher → FileTools；`SelfAnalystA
 | `searchFiles` 无 embedding | 降级不抛异常 |
 | `DesktopFileController` | disabled/running/degraded、目录计数、最近文件和错误清理正确 |
 | 桌面端文件页 | 入口常驻；关闭、运行、降级三种状态均可理解并可操作 |
-| 文件配置保存 | 修改任一 `file.watch.*` 键返回 `restartRequired` |
+| 文件目录配置保存 | 多目录规范化、去重并持久化；无效目录不保存；enabled/paths 保存后立即应用且不要求重启 |
+| 运行时目录收缩/禁用 | 被移除目录的 PENDING/FAILED/embedding 不再处理；禁用时 watcher、索引和 embedding 均暂停 |
+| 其他文件配置保存 | 修改 enabled/paths 之外的 `file.watch.*` 键返回 `restartRequired` |
 
 ---
 

@@ -120,6 +120,25 @@ public class FileWatchStore implements AutoCloseable {
         }
     }
 
+    /** Reassign a record to a newly configured root without discarding index state or summary. */
+    public synchronized void updateWatchLocation(String absolutePath, String relativePath,
+                                                 String watchRoot, String extension) {
+        String sql = """
+            UPDATE file_index SET relative_path=?, watch_root=?, extension=?, updated_at=?
+            WHERE absolute_path=?
+            """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, relativePath);
+            ps.setString(2, watchRoot);
+            ps.setString(3, extension != null ? extension.toLowerCase() : null);
+            ps.setString(4, Instant.now().toString());
+            ps.setString(5, absolutePath);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to update watch location " + absolutePath, e);
+        }
+    }
+
     /** ENTRY_DELETE → mark terminal DELETED (SPEC-FILE-004). No-op if unknown. */
     public synchronized void markDeleted(String absolutePath) {
         String sql = "UPDATE file_index SET status='DELETED', updated_at=? WHERE absolute_path=?";
@@ -242,6 +261,11 @@ public class FileWatchStore implements AutoCloseable {
         return queryList(sql, ps -> ps.setInt(1, limit));
     }
 
+    /** Oldest PENDING rows restricted to the active watch roots. */
+    public synchronized List<FileRecord> findPending(List<String> watchRoots, int limit) {
+        return findByStatusAndRoots("PENDING", watchRoots, null, "updated_at ASC", limit);
+    }
+
     /** FAILED rows whose backoff has elapsed (SPEC-FILE-010e). */
     public synchronized List<FileRecord> findRetryable(int limit) {
         String sql = """
@@ -253,10 +277,22 @@ public class FileWatchStore implements AutoCloseable {
         return queryList(sql, ps -> { ps.setString(1, now); ps.setInt(2, limit); });
     }
 
+    /** Retryable FAILED rows restricted to the active watch roots. */
+    public synchronized List<FileRecord> findRetryable(List<String> watchRoots, int limit) {
+        return findByStatusAndRoots("FAILED", watchRoots, Instant.now().toString(),
+                "retry_count ASC", limit);
+    }
+
     /** All INDEXED rows (used by FileEmbeddingWorker startup reconcile). */
     public synchronized List<FileRecord> findIndexed(int limit) {
         String sql = "SELECT * FROM file_index WHERE status='INDEXED' ORDER BY last_indexed_at ASC LIMIT ?";
         return queryList(sql, ps -> ps.setInt(1, limit));
+    }
+
+    /** INDEXED rows restricted to the active watch roots. */
+    public synchronized List<FileRecord> findIndexed(List<String> watchRoots, int limit) {
+        return findByStatusAndRoots("INDEXED", watchRoots, null,
+                "last_indexed_at ASC", limit);
     }
 
     /** Most recently completed indexes first, for desktop visibility. */
@@ -329,6 +365,23 @@ public class FileWatchStore implements AutoCloseable {
     // ── helpers ──
 
     private interface Binder { void bind(PreparedStatement ps) throws SQLException; }
+
+    private List<FileRecord> findByStatusAndRoots(String status, List<String> watchRoots,
+                                                   String retryBefore, String orderBy, int limit) {
+        if (watchRoots == null || watchRoots.isEmpty()) return List.of();
+        String placeholders = String.join(",", watchRoots.stream().map(ignored -> "?").toList());
+        String retryClause = retryBefore == null ? ""
+                : " AND (next_retry_at IS NULL OR next_retry_at <= ?)";
+        String sql = "SELECT * FROM file_index WHERE status=? AND watch_root IN ("
+                + placeholders + ")" + retryClause + " ORDER BY " + orderBy + " LIMIT ?";
+        return queryList(sql, ps -> {
+            int index = 1;
+            ps.setString(index++, status);
+            for (String root : watchRoots) ps.setString(index++, root);
+            if (retryBefore != null) ps.setString(index++, retryBefore);
+            ps.setInt(index, Math.max(1, limit));
+        });
+    }
 
     private List<FileRecord> queryList(String sql, Binder binder) {
         List<FileRecord> results = new ArrayList<>();

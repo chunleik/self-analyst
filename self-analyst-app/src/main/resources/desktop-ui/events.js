@@ -247,17 +247,27 @@ function setupEvents() {
 
   // File collector entry and page actions.
   state.dom.fileStatusBtn.addEventListener("click", function () { switchTab("files"); });
-  state.dom.fileSettingsBtn.addEventListener("click", function () {
-    openConfigModal("file.watch.enabled");
-  });
+  state.dom.fileSettingsBtn.addEventListener("click", openFileSettingsModal);
   state.dom.fileContent.addEventListener("click", function (e) {
     var action = e.target && e.target.closest ? e.target.closest("[data-file-action]") : null;
     if (!action) return;
     if (action.dataset.fileAction === "settings") {
-      openConfigModal("file.watch.enabled");
+      openFileSettingsModal();
     } else if (action.dataset.fileAction === "retry") {
       loadFiles();
     }
+  });
+  state.dom.fileSettingsCloseBtn.addEventListener("click", closeFileSettingsModal);
+  state.dom.fileSettingsCancelBtn.addEventListener("click", closeFileSettingsModal);
+  state.dom.fileSettingsSaveBtn.addEventListener("click", saveFileSettings);
+  state.dom.fileSettingsAddBtn.addEventListener("click", addFileSettingsPath);
+  state.dom.fileSettingsModal.querySelector(".config-modal-overlay")
+    .addEventListener("click", closeFileSettingsModal);
+  state.dom.fileSettingsPaths.addEventListener("click", function (e) {
+    var remove = e.target && e.target.closest
+      ? e.target.closest("[data-file-settings-remove]") : null;
+    if (!remove) return;
+    removeFileSettingsPath(parseInt(remove.dataset.fileSettingsRemove, 10));
   });
 
   // Chat drawer
@@ -341,6 +351,8 @@ function setupEvents() {
     if (e.key !== "Escape") return;
     if (state.chatOpen) {
       closeChat();
+    } else if (state.fileSettingsOpen) {
+      closeFileSettingsModal();
     } else if (state.configOpen) {
       closeConfigModal();
     }

@@ -14,7 +14,9 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -39,12 +41,15 @@ public class FileIndexWorker {
     private final FileSummarizer summarizer;
     private final FileEmbeddingWorker embeddingWorker; // nullable
     private final List<Path> watchRoots;
+    private final List<String> activeWatchRoots;
+    private final Set<String> activeWatchRootSet;
     private final int intervalSeconds;
     private final int maxContentChars;
     private final Duration minReindexInterval;
 
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean cancelled = new AtomicBoolean(false);
 
     public FileIndexWorker(FileWatchStore store, PathFilter pathFilter,
                            FileContentExtractorFactory extractorFactory, FileSummarizer summarizer,
@@ -55,7 +60,12 @@ public class FileIndexWorker {
         this.extractorFactory = extractorFactory;
         this.summarizer = summarizer;
         this.embeddingWorker = embeddingWorker;
-        this.watchRoots = watchRoots;
+        this.watchRoots = watchRoots == null ? List.of() : watchRoots.stream()
+                .map(path -> path.toAbsolutePath().normalize())
+                .distinct()
+                .toList();
+        this.activeWatchRoots = this.watchRoots.stream().map(Path::toString).toList();
+        this.activeWatchRootSet = Set.copyOf(new LinkedHashSet<>(activeWatchRoots));
         this.intervalSeconds = Math.max(5, intervalSeconds);
         this.maxContentChars = Math.max(500, maxContentChars);
         this.minReindexInterval = Duration.ofMinutes(Math.max(0, minReindexIntervalMinutes));
@@ -68,11 +78,15 @@ public class FileIndexWorker {
 
     public void start() {
         if (!running.compareAndSet(false, true)) return;
-        try {
-            reconcileScan();
-        } catch (Exception e) {
-            log.warn("File reconcile scan failed ({})", errorType(e));
-        }
+        executor.execute(() -> {
+            try {
+                reconcileScan();
+            } catch (Exception e) {
+                if (!cancelled.get()) {
+                    log.warn("File reconcile scan failed ({})", errorType(e));
+                }
+            }
+        });
         executor.scheduleWithFixedDelay(this::tick,
                 intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
         log.info("FileIndexWorker started (interval={}s, maxContentChars={})",
@@ -80,6 +94,7 @@ public class FileIndexWorker {
     }
 
     public void shutdown() {
+        cancelled.set(true);
         running.set(false);
         executor.shutdown();
         try {
@@ -98,18 +113,21 @@ public class FileIndexWorker {
 
     // ── reconcile scan (SPEC-FILE-013, SPEC-FILE-003a) ──
 
-    private void reconcileScan() throws IOException {
+    void reconcileScan() throws IOException {
         for (Path root : watchRoots) {
+            if (cancelled.get()) return;
             if (!Files.isDirectory(root)) continue;
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (cancelled.get()) return FileVisitResult.TERMINATE;
                     return pathFilter.isExcludedDir(dir)
                             ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (cancelled.get()) return FileVisitResult.TERMINATE;
                     try {
                         if (!attrs.isRegularFile() || pathFilter.isExcludedFile(file)) {
                             return FileVisitResult.CONTINUE;
@@ -133,6 +151,15 @@ public class FileIndexWorker {
     private void maybeEnqueue(Path root, Path file, BasicFileAttributes attrs) {
         String abs = file.toAbsolutePath().toString();
         FileRecord existing = store.findByPath(abs);
+        String currentRoot = root.toAbsolutePath().normalize().toString();
+        String currentRelativePath = relativize(root, file);
+        String currentExtension = PathFilter.extensionOf(file.getFileName().toString());
+        boolean locationChanged = existing != null
+                && (!currentRoot.equals(existing.watchRoot())
+                || !currentRelativePath.equals(existing.relativePath()));
+        if (locationChanged) {
+            store.updateWatchLocation(abs, currentRelativePath, currentRoot, currentExtension);
+        }
         boolean changed = existing == null
                 || existing.status() == FileStatus.DELETED
                 || existing.lastModified() == null
@@ -145,6 +172,8 @@ public class FileIndexWorker {
         }
         if (changed) {
             upsert(root, file);
+        } else if (locationChanged && embeddingWorker != null) {
+            embeddingWorker.enqueueMetadataRefresh(abs);
         }
     }
 
@@ -172,13 +201,14 @@ public class FileIndexWorker {
 
     /** Process at most one PENDING (else one retryable FAILED) row. Package-visible for tests. */
     void processOneRound() {
+        if (cancelled.get()) return;
         try {
-            List<FileRecord> pending = store.findPending(1);
+            List<FileRecord> pending = store.findPending(activeWatchRoots, 1);
             for (FileRecord rec : pending) {
                 processOne(rec);
                 return;
             }
-            List<FileRecord> retryable = store.findRetryable(1);
+            List<FileRecord> retryable = store.findRetryable(activeWatchRoots, 1);
             for (FileRecord rec : retryable) {
                 processOne(rec);
                 return;
@@ -190,8 +220,10 @@ public class FileIndexWorker {
 
     private void processOne(FileRecord rec) {
         String abs = rec.absolutePath();
+        if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
         Path file = Path.of(abs);
         try {
+            if (cancelled.get()) return;
             if (!Files.isRegularFile(file)) {
                 store.markDeleted(abs);
                 return;
@@ -208,6 +240,7 @@ public class FileIndexWorker {
                     && curMtime.equals(rec.lastModified());
             if (cheapUnchanged) {
                 store.updateChecksum(abs, curSize, curMtime, rec.fileHash());
+                if (embeddingWorker != null) embeddingWorker.enqueue(abs);
                 return;
             }
 
@@ -215,6 +248,7 @@ public class FileIndexWorker {
             if (rec.fileHash() != null && rec.fileHash().equals(hash)) {
                 // content identical (touch / metadata-only change) → no re-summary.
                 store.updateChecksum(abs, curSize, curMtime, hash);
+                if (embeddingWorker != null) embeddingWorker.enqueue(abs);
                 return;
             }
 
@@ -227,9 +261,11 @@ public class FileIndexWorker {
 
             String content = extractWithFallback(rec.extension(), file);
             String truncated = truncateByCodepoint(content, maxContentChars);
+            if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
 
             FileSummarizer.FileSummaryResult result =
                     summarizer.summarize(rec.relativePath(), rec.extension(), curMtime, truncated);
+            if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
 
             store.updateIndexed(abs, curSize, curMtime, hash, result.summary(),
                     result.mainTopics(), "llm", summarizer.promptVersion());
@@ -242,11 +278,21 @@ public class FileIndexWorker {
             // 达到每日 token 预算：保持 PENDING，下个周期/次日重试，不计入失败重试次数
             log.debug("File {} 因 token 预算暂停，保持 PENDING 稍后重试", abs);
         } catch (Exception e) {
+            if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
             log.warn("File index failed for {} ({})", abs, errorType(e));
             int retryCount = rec.retryCount() + 1;
             long delayMinutes = (long) Math.min(1440, Math.pow(2, retryCount));
             store.markFailed(abs, "FILE_INDEX_FAILED:" + errorType(e),
                     Instant.now().plus(Duration.ofMinutes(delayMinutes)));
+        }
+    }
+
+    private boolean isActiveRoot(String watchRoot) {
+        if (watchRoot == null) return false;
+        try {
+            return activeWatchRootSet.contains(Path.of(watchRoot).toAbsolutePath().normalize().toString());
+        } catch (InvalidPathException ignored) {
+            return false;
         }
     }
 

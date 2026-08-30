@@ -64,6 +64,8 @@ public class FileWatcher {
     private Thread watchThread;
     private ScheduledExecutorService debounceExecutor;
     private volatile boolean running = false;
+    private volatile boolean registrationComplete;
+    private volatile String registrationError;
 
     private record Pending(long lastEventMs, String eventType) {}
 
@@ -88,26 +90,53 @@ public class FileWatcher {
         } catch (IOException e) {
             throw new RuntimeException("Failed to create WatchService", e);
         }
-        ensureBucket();
-        for (Path root : watchRoots) {
-            if (Files.isDirectory(root)) {
-                registerRecursive(root);
-            } else {
-                log.warn("Watch root not a directory, skipping: {}", root);
-            }
-        }
-
-        watchThread = new Thread(this::watchLoop, "file-watcher");
-        watchThread.setDaemon(true);
-        watchThread.start();
-
         debounceExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "file-watcher-debounce");
             t.setDaemon(true);
             return t;
         });
         debounceExecutor.scheduleWithFixedDelay(this::flushDebounced, 1, 1, TimeUnit.SECONDS);
+        watchThread = new Thread(this::registerAndWatch, "file-watcher");
+        watchThread.setDaemon(true);
+        watchThread.start();
         log.info("FileWatcher started ({} roots, debounce={}s)", watchRoots.size(), debounceMs / 1000);
+    }
+
+    private void registerAndWatch() {
+        try {
+            ensureBucket();
+            for (Path root : watchRoots) {
+                if (!running) return;
+                if (Files.isDirectory(root)) {
+                    registerRecursive(root);
+                } else {
+                    log.warn("Watch root not a directory, skipping: {}", root);
+                }
+            }
+            registrationComplete = true;
+            if (keyToDir.keySet().stream().noneMatch(WatchKey::isValid)) {
+                failRegistration("没有成功注册任何监控目录");
+                return;
+            }
+            if (running) watchLoop();
+        } catch (RuntimeException registrationFailure) {
+            if (running) {
+                failRegistration(registrationFailure.getMessage());
+                log.warn("FileWatcher registration failed: {}", registrationFailure.getMessage());
+            }
+        } finally {
+            registrationComplete = true;
+        }
+    }
+
+    private void failRegistration(String error) {
+        registrationError = error;
+        running = false;
+        ScheduledExecutorService executor = debounceExecutor;
+        if (executor != null) executor.shutdownNow();
+        try {
+            if (watchService != null) watchService.close();
+        } catch (IOException ignored) {}
     }
 
     public void shutdown() {
@@ -132,6 +161,14 @@ public class FileWatcher {
                 && keyToDir.keySet().stream().anyMatch(WatchKey::isValid);
     }
 
+    public boolean isRegistrationComplete() {
+        return registrationComplete;
+    }
+
+    public String registrationError() {
+        return registrationError;
+    }
+
     // ── registration ──
 
     private void registerRecursive(Path start) {
@@ -139,6 +176,7 @@ public class FileWatcher {
             Files.walkFileTree(start, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    if (!running) return FileVisitResult.TERMINATE;
                     if (pathFilter.isExcludedDir(dir)) return FileVisitResult.SKIP_SUBTREE;
                     registerDir(dir);
                     return FileVisitResult.CONTINUE;

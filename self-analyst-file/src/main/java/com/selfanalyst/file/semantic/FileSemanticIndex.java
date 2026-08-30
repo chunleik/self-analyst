@@ -69,15 +69,23 @@ public class FileSemanticIndex implements AutoCloseable {
 
     /** True if a document for {@code path} with the same {@code fileHash} is already indexed. */
     public boolean isIndexed(String path, String fileHash) throws IOException {
+        return isIndexed(path, fileHash, null);
+    }
+
+    /** True if path, content hash, and (when provided) watch-root metadata are current. */
+    public boolean isIndexed(String path, String fileHash, String watchRoot) throws IOException {
         if (!DirectoryReader.indexExists(dir)) return false;
         try (DirectoryReader reader = DirectoryReader.open(dir)) {
             IndexSearcher searcher = new IndexSearcher(reader);
-            BooleanQuery query = new BooleanQuery.Builder()
+            BooleanQuery.Builder query = new BooleanQuery.Builder()
                     .add(new TermQuery(new Term(FIELD_PATH, path)), BooleanClause.Occur.MUST)
                     .add(new TermQuery(new Term(FIELD_FILE_HASH, fileHash != null ? fileHash : "")),
-                            BooleanClause.Occur.MUST)
-                    .build();
-            return searcher.count(query) > 0;
+                            BooleanClause.Occur.MUST);
+            if (watchRoot != null) {
+                query.add(new TermQuery(new Term(FIELD_WATCH_ROOT, watchRoot)),
+                        BooleanClause.Occur.MUST);
+            }
+            return searcher.count(query.build()) > 0;
         }
     }
 

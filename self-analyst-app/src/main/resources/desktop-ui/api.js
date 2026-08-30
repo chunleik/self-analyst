@@ -108,6 +108,13 @@ var api = {
       return r.json();
     });
   },
+  saveFileSettings: function (settings) {
+    return fetch(API_BASE + "/desktop/files/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings || {}),
+      headers: { "Content-Type": "application/json" },
+    }).then(function (r) { return chatJsonResponse(r, "Save file settings failed"); });
+  },
   getSummary: function () {
     return fetch(API_BASE + "/desktop/summary").then(function (r) {
       if (!r.ok) throw new Error("Summary fetch failed: " + r.status);

@@ -89,13 +89,16 @@ function renderFileOverview(overview) {
     html += renderFileMessage(
       "warning", fileReasonMessage(overview),
       '<button class="btn btn-sm btn-outline" type="button" data-file-action="settings">' +
-        escHtml(t("file.checkSettings")) + "</button>");
+        escHtml(t("file.checkSettings")) + "</button>" +
+      '<button class="btn btn-sm btn-outline" type="button" data-file-action="retry">' +
+        escHtml(t("file.retry")) + "</button>");
   }
 
   html += '<section class="file-status-strip ' +
     (overview.status === "degraded" ? "is-degraded" : "") + '">' +
     '<div><div class="file-status-title">' +
-      escHtml(t("file.monitoringRoots", { n: roots.length })) + "</div>" +
+      escHtml(t(overview.status === "degraded" ? "file.configuredRoots" : "file.monitoringRoots",
+        { n: roots.length })) + "</div>" +
     '<div class="file-status-detail">' + escHtml(fileLatestDetail(overview)) + "</div></div>" +
     '<div class="file-counts">' +
       fileCount(totals.indexed, t("file.indexed")) +
@@ -131,7 +134,7 @@ function renderRecentFiles(files) {
       '<p>' + escHtml(t("file.emptyBody")) + "</p></div>";
   }
   return files.map(function (file) {
-    var topics = (file.mainTopics || []).map(function (topic) {
+    var topics = (file.mainTopics || []).slice(0, 4).map(function (topic) {
       return '<span class="file-topic">' + escHtml(topic) + "</span>";
     }).join("");
     return '<article class="file-item">' +

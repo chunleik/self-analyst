@@ -46,7 +46,7 @@ function priorityBadge(p) {
 }
 
 function statusBadge(s) {
-  var cls = "status-" + (s === "running" || s === "online" ? "running" : s === "degraded" ? "degraded" : "error");
+  var cls = s === "running" || s === "online" ? "running" : s === "degraded" ? "degraded" : "error";
   var label =
     s === "running" || s === "online" ? t("status.running") : s === "degraded" ? t("status.degraded") : t("status.disabled");
   return '<span class="tag tag-' + cls + '">' + escHtml(label) + "</span>";

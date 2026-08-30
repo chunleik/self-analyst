@@ -254,8 +254,8 @@ public class AppSession implements AutoCloseable {
                     awServer.eventStore(), memoryStore,
                     watcherManager, contentWatcher,
                     contentPersistenceReady, contentMigrationError,
-                    fileWatchStore, fileWatcher, fileWatchRoots,
-                    fileSemanticIndex != null && fileEmbeddingWorker != null,
+                    fileWatchStore, fileWatcher, fileIndexWorker, fileEmbeddingWorker,
+                    fileWatchRoots,
                     fileWatchStartupReason, fileWatchStartupError);
             desktopServer.start();
             awServer.registerWebUi();

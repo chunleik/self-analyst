@@ -50,6 +50,7 @@ var MESSAGES = {
   "file.restartNote": { zh: "保存文件采集配置后需要重启 SelfAnalyst 生效。", en: "Restart SelfAnalyst after saving file collection settings." },
   "file.checkSettings": { zh: "检查设置", en: "Check settings" },
   "file.monitoringRoots": { zh: "正在监控 {n} 个目录", en: "Watching {n} folders" },
+  "file.configuredRoots": { zh: "已配置 {n} 个目录", en: "{n} folders configured" },
   "file.indexed": { zh: "已索引", en: "Indexed" },
   "file.pending": { zh: "待处理", en: "Pending" },
   "file.failed": { zh: "失败", en: "Failed" },
@@ -80,6 +81,8 @@ var MESSAGES = {
   "file.reason.agent_unavailable": { zh: "Agent 未就绪，文件索引无法启动", en: "The Agent is unavailable, so file indexing cannot start" },
   "file.reason.worker_start_failed": { zh: "文件采集后台任务启动失败", en: "The file collection worker failed to start" },
   "file.reason.store_unavailable": { zh: "文件索引数据库暂时不可用", en: "The file index database is unavailable" },
+  "file.reason.index_worker_unavailable": { zh: "文件索引后台任务未运行", en: "The file indexing worker is not running" },
+  "file.reason.watcher_unavailable": { zh: "文件目录监控任务未运行", en: "The file watcher is not running" },
   "file.reason.runtime_unavailable": { zh: "文件采集器当前不可用", en: "The file collector is unavailable" },
 
   // ── Common ──

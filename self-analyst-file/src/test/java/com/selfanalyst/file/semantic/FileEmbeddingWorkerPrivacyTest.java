@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FileEmbeddingWorkerPrivacyTest {
 
@@ -39,12 +40,15 @@ class FileEmbeddingWorkerPrivacyTest {
                     "hash", "safe summary", List.of("safe-topic"), "llm", "file-v1");
             FileEmbeddingWorker worker = new FileEmbeddingWorker(
                     store, index, embedding, 60);
+            assertFalse(worker.isRunning());
             worker.start();
+            assertTrue(worker.isRunning());
             try {
                 worker.processOneRound();
             } finally {
                 worker.shutdown();
             }
+            assertFalse(worker.isRunning());
 
             assertEquals("secret.txt safe summary safe-topic", embeddedText.get());
             assertFalse(embeddedText.get().contains(forbidden));

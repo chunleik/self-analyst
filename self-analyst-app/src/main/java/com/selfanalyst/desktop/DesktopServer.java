@@ -16,6 +16,8 @@ import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.file.FileWatchStore;
 import com.selfanalyst.file.FileWatcher;
+import com.selfanalyst.file.FileIndexWorker;
+import com.selfanalyst.file.semantic.FileEmbeddingWorker;
 import com.selfanalyst.memory.LongTermMemoryService;
 import com.selfanalyst.memory.MemoryStore;
 import io.javalin.Javalin;
@@ -92,7 +94,7 @@ public class DesktopServer {
                          String contentMigrationError) {
         this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
                 contentPersistenceReady, contentMigrationError,
-                null, null, List.of(), false, null, null);
+                null, null, null, null, List.of(), null, null);
     }
 
     public DesktopServer(Javalin app,
@@ -106,8 +108,9 @@ public class DesktopServer {
                          String contentMigrationError,
                          FileWatchStore fileWatchStore,
                          FileWatcher fileWatcher,
+                         FileIndexWorker fileIndexWorker,
+                         FileEmbeddingWorker fileEmbeddingWorker,
                          List<Path> fileWatchRoots,
-                         boolean fileSemanticAvailable,
                          String fileStartupReason,
                          String fileStartupError) {
         this.app = app;
@@ -140,8 +143,10 @@ public class DesktopServer {
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.fileCtrl = new DesktopFileController(
                 config.fileWatchEnabled(), config.fileWatchSemanticEnabled(),
-                fileSemanticAvailable, fileWatchRoots, fileWatchStore,
+                fileWatchRoots, fileWatchStore,
                 fileWatcher != null ? fileWatcher::isRunning : () -> false,
+                fileIndexWorker != null ? fileIndexWorker::isRunning : () -> false,
+                fileEmbeddingWorker != null ? fileEmbeddingWorker::isRunning : () -> false,
                 fileStartupReason, fileStartupError);
         this.statusCtrl = new DesktopStatusController(
                 config, watcherManager, contentWatcher,

@@ -35,7 +35,8 @@ class DesktopFileControllerTest {
                     "old-hash", "旧目录记录", List.of(), "test-model", "file-v1");
 
             DesktopFileController controller = new DesktopFileController(
-                    true, true, true, List.of(root), store, () -> true, null, null);
+                    true, true, List.of(root), store,
+                    () -> true, () -> true, () -> true, null, null);
 
             Map<String, Object> payload = controller.overviewPayload(20);
             Map<String, Long> totals = (Map<String, Long>) payload.get("totals");
@@ -62,7 +63,8 @@ class DesktopFileControllerTest {
     @SuppressWarnings("unchecked")
     void disabledOverviewRemainsDiscoverableWithoutAStore() {
         DesktopFileController controller = new DesktopFileController(
-                false, true, false, List.of(), null, () -> false, null, null);
+                false, true, List.of(), null,
+                () -> false, () -> false, () -> false, null, null);
 
         Map<String, Object> payload = controller.overviewPayload(20);
 
@@ -77,7 +79,8 @@ class DesktopFileControllerTest {
     @Test
     void degradedOverviewSanitizesStartupError(@TempDir Path dir) {
         DesktopFileController controller = new DesktopFileController(
-                true, false, false, List.of(dir), null, () -> false,
+                true, false, List.of(dir), null,
+                () -> false, () -> false, () -> false,
                 "worker_start_failed", "first line\r\nsecond line");
 
         Map<String, Object> payload = controller.overviewPayload(20);
@@ -85,5 +88,44 @@ class DesktopFileControllerTest {
         assertEquals("degraded", payload.get("status"));
         assertEquals("worker_start_failed", payload.get("reason"));
         assertEquals("first line second line", payload.get("error"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void pipelineHealthIsSharedByCoarseAndDetailedStatus(@TempDir Path dir) throws Exception {
+        Path root = Files.createDirectories(dir.resolve("docs")).toAbsolutePath().normalize();
+        FileWatchStore store = new FileWatchStore(dir.resolve("file-watch.db"));
+        DesktopFileController controller = new DesktopFileController(
+                true, true, List.of(root), store,
+                () -> true, () -> true, () -> false, null, null);
+        try {
+            assertEquals("running", controller.collectorStatus());
+            Map<String, Object> running = controller.overviewPayload(20);
+            assertEquals("running", running.get("status"));
+            assertFalse((Boolean) ((Map<String, Object>) running.get("semantic")).get("available"),
+                    "an unstarted semantic worker must not be reported available");
+
+            store.close();
+            assertEquals("degraded", controller.collectorStatus());
+            Map<String, Object> degraded = controller.overviewPayload(20);
+            assertEquals("degraded", degraded.get("status"));
+            assertEquals("store_unavailable", degraded.get("reason"));
+        } finally {
+            store.close();
+        }
+    }
+
+    @Test
+    void stoppedIndexWorkerDegradesPipeline(@TempDir Path dir) throws Exception {
+        Path root = Files.createDirectories(dir.resolve("docs")).toAbsolutePath().normalize();
+        try (FileWatchStore store = new FileWatchStore(dir.resolve("file-watch.db"))) {
+            DesktopFileController controller = new DesktopFileController(
+                    true, false, List.of(root), store,
+                    () -> true, () -> false, () -> false, null, null);
+
+            assertEquals("degraded", controller.collectorStatus());
+            assertEquals("index_worker_unavailable",
+                    controller.overviewPayload(20).get("reason"));
+        }
     }
 }

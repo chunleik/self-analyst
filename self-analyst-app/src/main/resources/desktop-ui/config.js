@@ -69,30 +69,33 @@ function currentEditorText() {
 function focusConfigEditorKey(key) {
   var editor = document.getElementById("config-raw-editor");
   if (!editor || !key) return;
-  var index = editor.value.indexOf(key);
-  var selectedKey = key;
-  if (index < 0 && key.indexOf(".") > 0) {
-    var split = key.lastIndexOf(".");
-    var table = key.slice(0, split);
-    var leaf = key.slice(split + 1);
-    var marker = "[" + table + "]";
-    var tableIndex = editor.value.indexOf(marker);
-    if (tableIndex >= 0) {
-      var sectionStart = tableIndex + marker.length;
-      var nextSection = editor.value.indexOf("\n[", sectionStart);
-      var sectionEnd = nextSection >= 0 ? nextSection : editor.value.length;
-      var escapedLeaf = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      var match = new RegExp("(^|\\n)(\\s*)" + escapedLeaf + "\\s*=", "m")
-        .exec(editor.value.slice(sectionStart, sectionEnd));
-      if (match) {
-        index = sectionStart + match.index + match[1].length + match[2].length;
-        selectedKey = leaf;
+  var table = "";
+  var lineStart = 0;
+  while (lineStart <= editor.value.length) {
+    var newline = editor.value.indexOf("\n", lineStart);
+    var lineEnd = newline >= 0 ? newline : editor.value.length;
+    var line = editor.value.slice(lineStart, lineEnd).replace(/\r$/, "");
+    var tableMatch = /^\s*\[([^\]]+)]\s*(?:#.*)?$/.exec(line);
+    if (tableMatch) {
+      table = stripTomlKey(tableMatch[1].trim());
+    } else {
+      // Generated templates comment assignments, for example:
+      // [file] + "# watch.enabled = false".
+      var assignment = /^(\s*#?\s*)([A-Za-z0-9_.-]+)\s*=/.exec(line);
+      if (assignment) {
+        var assignmentKey = stripTomlKey(assignment[2]);
+        var fullKey = table ? table + "." + assignmentKey : assignmentKey;
+        if (fullKey === key) {
+          var index = lineStart + assignment[1].length;
+          editor.focus();
+          editor.setSelectionRange(index, index + assignment[2].length);
+          return;
+        }
       }
     }
+    if (newline < 0) break;
+    lineStart = newline + 1;
   }
-  if (index < 0) return;
-  editor.focus();
-  editor.setSelectionRange(index, index + selectedKey.length);
 }
 
 // Lightweight TOML line parser for the test buttons. Tracks the current `[table]`

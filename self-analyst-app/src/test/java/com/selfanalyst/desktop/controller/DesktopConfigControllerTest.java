@@ -41,6 +41,9 @@ class DesktopConfigControllerTest {
         assertFalse(resp.exists());
         assertTrue(resp.text().contains("[llm]"), resp.text());
         assertTrue(resp.text().contains("[embedding]"), resp.text());
+        assertTrue(resp.text().contains("[file]"), resp.text());
+        assertTrue(resp.text().lines().anyMatch(line ->
+                line.strip().startsWith("# watch.enabled = false")), resp.text());
         assertTrue(resp.text().contains("# base-url"), resp.text());
         assertTrue(resp.text().contains("D:\\docs"), resp.text()); // path guidance comment
         assertTrue(resp.text().contains("# 中文："), resp.text());

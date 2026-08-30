@@ -1932,19 +1932,23 @@ input:checked + .toggle-switch::after {
 .file-item-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 7px;
   min-width: 0;
   margin-top: 8px;
 }
 .file-topic {
+  max-width: 100%;
   flex-shrink: 0;
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 11px;
+  overflow-wrap: anywhere;
 }
 .file-item-path {
+  flex: 1 1 180px;
   min-width: 0;
   overflow: hidden;
   color: var(--text-muted);
@@ -2012,6 +2016,10 @@ input:checked + .toggle-switch::after {
   padding: 11px 13px;
   border-radius: var(--radius-sm);
 }
+.file-message > div {
+  display: flex;
+  gap: 8px;
+}
 .file-message-warning {
   background: var(--orange-dim);
   color: var(--orange);
@@ -2064,6 +2072,7 @@ input:checked + .toggle-switch::after {
   .file-status-strip { grid-template-columns: 1fr; }
   .file-counts { justify-content: space-between; }
   .file-message { align-items: flex-start; flex-direction: column; }
+  .file-message > div { width: 100%; flex-direction: column; }
   .file-message .btn { width: 100%; justify-content: center; }
   .file-empty-state { margin-top: 20px; padding: 24px 18px; }
 }

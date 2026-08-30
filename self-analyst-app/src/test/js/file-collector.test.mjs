@@ -108,6 +108,8 @@ test("degraded reason and technical detail are escaped", () => {
   assert.match(elements.content.innerHTML, /文件采集后台任务启动失败/);
   assert.match(elements.content.innerHTML, /&lt;worker failed&gt;/);
   assert.doesNotMatch(elements.content.innerHTML, /<worker failed>/);
+  assert.match(elements.content.innerHTML, /data-file-action="retry"/);
+  assert.match(elements.content.innerHTML, /已配置 0 个目录/);
 });
 
 test("desktop shell and API expose the file collector page", () => {
@@ -122,9 +124,9 @@ test("desktop shell and API expose the file collector page", () => {
   assert.match(config, /focusConfigEditorKey/);
 });
 
-test("file settings focus supports TOML table syntax", () => {
+test("file settings focus supports the generated parent-table template syntax", () => {
   const editor = {
-    value: '[file.watch]\nenabled = false\npaths = ""\n',
+    value: '[file]\n# watch.enabled = false\n# watch.paths = ""\n',
     selectionStart: 0,
     selectionEnd: 0,
     focused: false,
@@ -146,6 +148,32 @@ test("file settings focus supports TOML table syntax", () => {
 
   sandbox.focusConfigEditorKey("file.watch.enabled");
 
-  assert.equal(editor.value.slice(editor.selectionStart, editor.selectionEnd), "enabled");
+  assert.equal(editor.value.slice(editor.selectionStart, editor.selectionEnd), "watch.enabled");
   assert.equal(editor.focused, true);
+});
+
+test("file settings focus also supports an explicit nested table", () => {
+  const editor = {
+    value: '[file.watch]\nenabled = true\npaths = "D:/Docs"\n',
+    selectionStart: 0,
+    selectionEnd: 0,
+    focus() {},
+    setSelectionRange(start, end) {
+      this.selectionStart = start;
+      this.selectionEnd = end;
+    },
+  };
+  const sandbox = {
+    document: { getElementById() { return editor; } },
+    state: {},
+    t(key) { return key; },
+    escHtml(value) { return String(value || ""); },
+    console,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(read("config.js"), sandbox);
+
+  sandbox.focusConfigEditorKey("file.watch.enabled");
+
+  assert.equal(editor.value.slice(editor.selectionStart, editor.selectionEnd), "enabled");
 });

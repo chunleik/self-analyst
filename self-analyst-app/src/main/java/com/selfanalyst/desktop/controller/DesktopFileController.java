@@ -23,27 +23,30 @@ public class DesktopFileController {
 
     private final boolean enabled;
     private final boolean semanticConfigured;
-    private final boolean semanticAvailable;
     private final List<Path> watchRoots;
     private final FileWatchStore store;
-    private final BooleanSupplier running;
+    private final BooleanSupplier watcherRunning;
+    private final BooleanSupplier indexWorkerRunning;
+    private final BooleanSupplier semanticWorkerRunning;
     private final String startupReason;
     private final String startupError;
 
     public DesktopFileController(boolean enabled,
                                  boolean semanticConfigured,
-                                 boolean semanticAvailable,
                                  List<Path> watchRoots,
                                  FileWatchStore store,
-                                 BooleanSupplier running,
+                                 BooleanSupplier watcherRunning,
+                                 BooleanSupplier indexWorkerRunning,
+                                 BooleanSupplier semanticWorkerRunning,
                                  String startupReason,
                                  String startupError) {
         this.enabled = enabled;
         this.semanticConfigured = semanticConfigured;
-        this.semanticAvailable = semanticAvailable;
         this.watchRoots = watchRoots == null ? List.of() : List.copyOf(watchRoots);
         this.store = store;
-        this.running = running != null ? running : () -> false;
+        this.watcherRunning = orFalse(watcherRunning);
+        this.indexWorkerRunning = orFalse(indexWorkerRunning);
+        this.semanticWorkerRunning = orFalse(semanticWorkerRunning);
         this.startupReason = startupReason;
         this.startupError = startupError;
     }
@@ -55,14 +58,14 @@ public class DesktopFileController {
 
     /** Coarse collector state shared with GET /desktop/status. */
     public String collectorStatus() {
-        if (!enabled) return "disabled";
-        return running.getAsBoolean() ? "running" : "degraded";
+        return runtimeStatus().status();
     }
 
     Map<String, Object> overviewPayload(int requestedLimit) {
         int limit = Math.max(1, Math.min(MAX_LIMIT, requestedLimit));
-        String status = collectorStatus();
-        String reason = reasonFor(status);
+        RuntimeStatus runtime = runtimeStatus();
+        String status = runtime.status();
+        String reason = runtime.reason();
         String error = safeError(startupError);
         Map<String, Map<String, Long>> rawCounts = Map.of();
         List<FileRecord> recent = List.of();
@@ -71,7 +74,7 @@ public class DesktopFileController {
             configuredRoots.add(root.toAbsolutePath().normalize().toString());
         }
 
-        if (store != null) {
+        if (store != null && store.isHealthy()) {
             try {
                 rawCounts = store.statusCountsByWatchRoot();
                 recent = store.findRecentlyIndexed(new ArrayList<>(configuredRoots), limit);
@@ -105,7 +108,7 @@ public class DesktopFileController {
         payload.put("restartRequiredOnChange", true);
         payload.put("semantic", Map.of(
                 "configured", semanticConfigured,
-                "available", semanticAvailable));
+                "available", semanticConfigured && safeBoolean(semanticWorkerRunning)));
         payload.put("roots", roots);
         payload.put("totals", totals);
         payload.put("files", files);
@@ -117,14 +120,34 @@ public class DesktopFileController {
         return payload;
     }
 
-    private String reasonFor(String status) {
-        if ("disabled".equals(status)) return "disabled_by_config";
-        if ("degraded".equals(status)) {
-            return startupReason == null || startupReason.isBlank()
-                    ? "runtime_unavailable"
-                    : startupReason;
+    private RuntimeStatus runtimeStatus() {
+        if (!enabled) return new RuntimeStatus("disabled", "disabled_by_config");
+        if (startupReason != null && !startupReason.isBlank()) {
+            return new RuntimeStatus("degraded", startupReason);
         }
-        return null;
+        if (watchRoots.isEmpty()) return new RuntimeStatus("degraded", "paths_unavailable");
+        if (store == null || !store.isHealthy()) {
+            return new RuntimeStatus("degraded", "store_unavailable");
+        }
+        if (!safeBoolean(indexWorkerRunning)) {
+            return new RuntimeStatus("degraded", "index_worker_unavailable");
+        }
+        if (!safeBoolean(watcherRunning)) {
+            return new RuntimeStatus("degraded", "watcher_unavailable");
+        }
+        return new RuntimeStatus("running", null);
+    }
+
+    private static BooleanSupplier orFalse(BooleanSupplier supplier) {
+        return supplier != null ? supplier : () -> false;
+    }
+
+    private static boolean safeBoolean(BooleanSupplier supplier) {
+        try {
+            return supplier.getAsBoolean();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     private static Map<String, Object> filePayload(FileRecord record) {
@@ -176,4 +199,6 @@ public class DesktopFileController {
         String singleLine = raw.replaceAll("[\\r\\n]+", " ").strip();
         return singleLine.length() <= 200 ? singleLine : singleLine.substring(0, 197) + "...";
     }
+
+    private record RuntimeStatus(String status, String reason) {}
 }

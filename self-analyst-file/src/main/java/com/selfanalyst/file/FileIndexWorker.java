@@ -91,6 +91,11 @@ public class FileIndexWorker {
         log.info("FileIndexWorker shut down");
     }
 
+    /** Runtime health used by the desktop collector status. */
+    public boolean isRunning() {
+        return running.get() && !executor.isShutdown() && !executor.isTerminated();
+    }
+
     // ── reconcile scan (SPEC-FILE-013, SPEC-FILE-003a) ──
 
     private void reconcileScan() throws IOException {

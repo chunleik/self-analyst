@@ -59,6 +59,16 @@ class FileIndexWorkerTest {
     }
 
     @Test
+    void runtimeHealthFollowsLifecycle() {
+        FileIndexWorker worker = worker(0);
+        assertFalse(worker.isRunning());
+        worker.start();
+        assertTrue(worker.isRunning());
+        worker.shutdown();
+        assertFalse(worker.isRunning());
+    }
+
+    @Test
     void indexesPendingFile() {
         upsert();
         worker(0).processOneRound();

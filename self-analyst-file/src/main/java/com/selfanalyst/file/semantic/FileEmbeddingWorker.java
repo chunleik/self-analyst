@@ -111,4 +111,9 @@ public class FileEmbeddingWorker {
         }
         log.info("FileEmbeddingWorker shut down");
     }
+
+    /** Runtime health used by the desktop collector status. */
+    public boolean isRunning() {
+        return running.get() && !executor.isShutdown() && !executor.isTerminated();
+    }
 }

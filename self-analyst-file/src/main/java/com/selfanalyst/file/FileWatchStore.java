@@ -227,6 +227,15 @@ public class FileWatchStore implements AutoCloseable {
         }
     }
 
+    /** Lightweight runtime probe used by the desktop collector health view. */
+    public synchronized boolean isHealthy() {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1")) {
+            return !conn.isClosed() && ps.executeQuery().next();
+        } catch (SQLException ignored) {
+            return false;
+        }
+    }
+
     /** Oldest PENDING rows first (SPEC-FILE-013, worker takes one per round). */
     public synchronized List<FileRecord> findPending(int limit) {
         String sql = "SELECT * FROM file_index WHERE status='PENDING' ORDER BY updated_at ASC LIMIT ?";

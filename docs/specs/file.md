@@ -219,6 +219,10 @@ LLM prompt（中文）输入文件路径/类型/最后修改时间/截取内容�
 
 - `GET /desktop/status` 的 `collectors.file` 返回粗粒度状态：
   `disabled`、`running` 或 `degraded`，供顶部状态栏持续展示。
+- 粗粒度状态与详情 API 必须复用同一运行管线健康判断；只有存储可查询、
+  `FileWatcher` 与 `FileIndexWorker` 均在运行时，核心文件采集状态才是 `running`。
+- `semantic.available=true` 仅表示已配置且 `FileEmbeddingWorker` 实际运行；
+  对象已构造但 worker 未启动时必须为 `false`，且不影响核心采集状态。
 - `GET /desktop/files?limit=20` 返回文件采集概览，包含：
   `enabled`、`status`、可选 `reason/error`、`semantic`、`roots`、
   `totals`、`files`、`latestIndexedAt` 与 `latestPath`。
@@ -228,14 +232,16 @@ LLM prompt（中文）输入文件路径/类型/最后修改时间/截取内容�
   `last_indexed_at` 倒序；不得返回原始文件正文或完整提示词。
 - 启动失败原因使用稳定代码：`paths_unavailable`、
   `initialization_failed`、`agent_unavailable`、`worker_start_failed`；
-  存储查询失败使用 `store_unavailable`。异常详情必须压成单行且最长 200 字符。
+  存储查询失败使用 `store_unavailable`，运行时 worker 停止使用
+  `index_worker_unavailable` 或 `watcher_unavailable`。异常详情必须压成单行且最长 200 字符。
 
 #### SPEC-FILE-020a：桌面界面
 
 - 顶部状态栏必须有独立的“文件”状态入口，点击进入“文件”页签。
 - “文件”页签始终可见；关闭状态不得隐藏入口，而应展示功能说明、隐私提示和配置操作。
 - 运行状态展示监控目录、已索引/待处理/失败计数、最近完成索引的文件摘要和主题。
-- 降级状态展示本地化原因和可用的技术详情，并提供进入配置和重新加载的操作。
+- 降级状态展示本地化原因和可用的技术详情，目录文案使用“已配置”而非“正在监控”，
+  并同时提供进入配置和重新加载的操作。
 - 从文件页进入配置时，编辑器应定位到 `file.watch.enabled`。
 - 界面必须明确说明：文件正文会发送给已配置的 LLM 生成摘要；敏感文件、构建目录和临时文件默认排除。
 

@@ -28,11 +28,20 @@ class FileWatchStoreTest {
 
     @Test
     void upsertCreatesPending() {
+        assertTrue(store.isHealthy());
         store.upsertPending("/a/b.txt", "b.txt", "/a", "txt");
         FileRecord rec = store.findByPath("/a/b.txt");
         assertNotNull(rec);
         assertEquals(FileStatus.PENDING, rec.status());
         assertEquals("txt", rec.extension());
+    }
+
+    @Test
+    void healthProbeTurnsFalseAfterClose() {
+        assertTrue(store.isHealthy());
+        store.close();
+        assertFalse(store.isHealthy());
+        store = null;
     }
 
     @Test

@@ -127,6 +127,8 @@ ENTRY_DELETE → markDeleted(path)  // status=DELETED，不摘要
 - 处理：`extract → truncate（按 codepoint）→ summarize → updateIndexed → enqueueEmbedding`
 - **SPEC-FILE-013a**：失败按指数退避写 `next_retry_at`（与 `WikiWorker` 一致）
 - **SPEC-FILE-013b**：单个文件提取失败不拖垮 worker，走 `MetadataOnlyExtractor` 兜底
+- **SPEC-FILE-013c**：失败日志不得输出异常 message；`last_error` 只能保存固定错误码和异常类型，
+  防止 LLM、解析器或提取器把 prompt/文件正文回显到持久化介质
 
 ### SPEC-FILE-019: 变更去抖与频率控制
 
@@ -192,6 +194,9 @@ LLM prompt（中文）输入文件路径/类型/最后修改时间/截取内容�
 - **SPEC-FILE-015a**：`prompt_version` 随 prompt 结构变化递增，便于后续按版本重摘
 
 ### SPEC-FILE-016: FileSemanticIndex + FileEmbeddingWorker
+
+- Embedding 输入只能由相对路径、摘要和主题组成。
+- Lucene 文档不得包含原始文件正文或完整摘要 prompt。
 
 - Lucene `FSDirectory`：`{memory.dir}/file-semantic-index/`
 - 字段：`path`(StringField)、`extension`(StringField)、`last_modified_ms`(LongPoint 范围)、`summary`(TextField stored)、`main_topics`(TextField stored)、`embedding`(KnnFloatVectorField cosine)

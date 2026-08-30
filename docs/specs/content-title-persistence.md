@@ -58,7 +58,10 @@
 - 应用专用上下文标题优先于 UIA Document 标题，UIA Document 标题优先于系统窗口标题。
 - 微信上下文标题可以通过完整 UIA 文本识别，但最终只输出一个结构化候选。
 - 微信聊天标题使用 `context_kind=chat`；微信 Document 标题使用 `context_kind=article`。
-- 空值、通用应用名、控件名、超过 200 个 code point 的值不得成为候选。
+- 空值、通用应用名、中英文通用控件、纯 URI/URL、多句正文、换行文本及超过 200 个
+  code point 的值不得成为候选。
+- OCR 只有在标题条模式且识别结果唯一、明确时才能产生 `ocr_title` 候选；
+  `ocr.title-strip-height=0` 的完整窗口 OCR 结果不得成为持久化标题候选。
 - 无可靠候选时省略 `context_title`，不得把正文前缀作为回退标题。
 
 ### SPEC-CTP-013：内存边界
@@ -66,6 +69,7 @@
 - 原始 `ContentResult` 只能在采集调用内临时存在。
 - `ContentWatcher.Snapshot` 必须保存不含正文的标题投影。
 - heartbeat 数据必须从固定字段逐项构造，不能透传通用 Map 或 OCR 样本 ID。
+- heartbeat 返回非 2xx 或发生网络错误后，采集器运行状态必须变为 `degraded`；后续成功可恢复。
 
 ## 3. 服务端写入策略
 
@@ -106,6 +110,8 @@
 - 默认迁移不得创建包含原始正文的普通备份。
 - 旧版内容 bucket 独立数据库、`aw.db.pre-legacy-migration-*` 明文备份和已完成后的
   `aw.db.migrating*` 工作文件必须删除，不能作为正文副本长期保留。
+- 旧库删除目标必须同时通过安全 bucket ID、规范化父目录和主库保留文件校验；任何校验失败
+  必须终止迁移并降级，不能尝试目录外删除。
 - 迁移标记为 `content-events-title-only-v2`，只有完成逻辑和物理净化后才能写入。
 
 ### SPEC-CTP-032：失败降级
@@ -115,6 +121,8 @@
 - 上下文标题 watcher 和 Wiki worker 必须禁用。
 - `/desktop/status` 必须把 `collectors.contextTitle` 报告为 `degraded`，并在
   `contentPersistence` 中提供不含原文的失败状态。
+- 桌面状态栏必须显式读取 `contentPersistence`；即使窗口/AFK 正常，迁移失败也必须显示橙色
+  降级状态和安全错误摘要。
 
 ## 5. Wiki 和文件消费者
 
@@ -131,6 +139,9 @@
 - `file-watch.db` 不得新增原始文件正文、截断正文或完整 prompt 字段。
 - 文件语义索引只允许相对路径、摘要、主题及必要元数据。
 - 测试必须使用唯一秘密标记证明原始文件正文没有进入数据库、WAL 或 SHM。
+- 文件处理失败时，`last_error` 只能保存固定错误码和异常类型；日志不得输出异常 message，
+  防止 LLM 或解析器回显 prompt/正文。
+- Embedding 输入和 Lucene 存储必须分别验证只包含相对路径、摘要和主题。
 
 ## 6. 配置和状态兼容
 
@@ -167,12 +178,16 @@
 - 非标准 ID、但 client 为内容采集器的 bucket 同样必须迁移。
 - 重复执行迁移时 `sanitized=0`。
 - 关闭数据库后，DB/WAL/SHM 的字节扫描中不得存在秘密标记。
+- 模拟逻辑净化提交后物理压缩失败；重启必须保留脏状态、再次执行物理净化并在成功后推进水位。
+- 大量非内容事件位于尾部时，成功扫描水位必须推进到事务快照的全局最大事件 ID。
 
 ### SPEC-CTP-T04：Wiki 和文件
 
 - Wiki 标题样本不得包含历史 `text_content`。
 - Wiki prompt 不得出现正文秘密标记。
 - 文件索引完成后，`file-watch.db`、WAL 和 SHM 不得包含原始文件秘密标记。
+- 文件摘要失败回显 prompt 时，`last_error`、数据库和日志不得包含秘密标记。
+- File Embedding 请求文本与 Lucene 文件不得包含原始文件秘密标记。
 
 ## 8. 追溯矩阵
 
@@ -181,7 +196,7 @@
 | `SPEC-CTP-001..003` | `ContentResult`、`TitleCaptureResult`、`FileWatchStore` | 模块测试、字节扫描 |
 | `SPEC-CTP-010..013` | `ContextTitleCandidate`、`ContextTitleExtractor`、`ContentWatcher`、`ContentEvent` | `ContentWatcherTest`、`ContextTitleExtractorTest` |
 | `SPEC-CTP-020..021` | `ContentEventPolicy`、`EventStore`、`HeartbeatController`、`EventController`、`DataImporter` | `ContentEventPolicyTest`、`DataImporterContentPolicyTest` |
-| `SPEC-CTP-030..032` | `ContentEventV2Migration`、`AppSession`、`DesktopStatusController` | `ContentEventV2MigrationTest`、`DesktopStatusControllerTest` |
+| `SPEC-CTP-030..032` | `ContentEventV2Migration`、`AppSession`、`DesktopStatusController` | `ContentEventV2MigrationTest`（增量水位、脏压缩恢复、路径边界）、`DesktopStatusControllerTest` |
 | `SPEC-CTP-040` | `WikiFactBuilder`、`WikiSummarizer`、`WikiWorker` | `WikiFactBuilderTest`、`WikiSummarizerTest` |
-| `SPEC-CTP-041` | `FileWatchStore`、`FileEmbeddingWorker` | `FileIndexWorkerTest` |
+| `SPEC-CTP-041` | `FileWatchStore`、`FileIndexWorker`、`FileEmbeddingWorker`、`FileSemanticIndex` | `FileIndexWorkerTest`、`FileEmbeddingWorkerPrivacyTest` |
 | `SPEC-CTP-050..051` | `SupportedKeys`、`DesktopStatusController`、`desktop-ui/ui.js` | 配置测试、状态测试、Node UI 测试 |

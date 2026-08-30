@@ -5,9 +5,25 @@
 > 适用范围：窗口/UIA 内容采集、ActivityWatch 内容事件、Wiki 消费链路、文件索引持久化约束
 > 本期非目标：OCR 子系统、音频采集与转写子系统
 
+## 实施结果
+
+本方案已在提交 `b67f8d3` 中完成，并在其后补充文档一致性更新。最终实现包括：
+
+- 内容事件 v2 字段白名单以及 heartbeat、events、导入、内部写入的统一服务端校验。
+- 微信聊天、UIA Document/文章和保守标题条 OCR 候选；完整窗口 OCR 不产生持久化候选。
+- 历史事件逻辑净化、`secure_delete`、WAL 截断、`VACUUM`、旧明文副本清理。
+- `last_event_id/pending_event_id/needs_compaction` 两阶段迁移状态和全局事件扫描水位。
+- 安全 bucket ID、规范化目录边界、主库保护和空事件导入预检。
+- Wiki 标题事实、共享字符预算以及持久化 `wiki-v3` prompt provenance。
+- 文件失败固定错误码、数据库/Embedding/Lucene 原文秘密标记回归测试。
+- 状态 API 与桌面状态栏的迁移失败和 heartbeat 失败降级展示。
+
+最终验证：完整 `mvn test` 的 13 个 Maven 模块全部成功；应用模块 Java 测试 277 项、
+桌面 Node 测试 66 项通过；独立代码审查结论为 Critical 0、Important 0、Ready to merge。
+
 ## 1. 背景
 
-SelfAnalyst 当前把窗口内容采集定义为 UIA/OCR 文本采集。采集器会查询活动窗口的可访问性树，将递归拼接后的文本写入 ActivityWatch 内容事件的 `text_content` 字段；Wiki 再从这些事件中选取屏幕内容片段生成摘要。
+改造前，SelfAnalyst 把窗口内容采集定义为 UIA/OCR 文本采集。采集器会查询活动窗口的可访问性树，将递归拼接后的文本写入 ActivityWatch 内容事件的 `text_content` 字段；Wiki 再从这些事件中选取屏幕内容片段生成摘要。
 
 新的隐私边界允许采集器在识别阶段临时查询完整内容，但禁止把原始完整内容写入数据库、索引、日志、缓存文件或其他持久化介质。持久化层应以标题为核心，只保存系统窗口标题、应用内上下文标题以及不包含原文的派生结果。
 
@@ -65,11 +81,11 @@ SelfAnalyst 当前把窗口内容采集定义为 UIA/OCR 文本采集。采集�
 
 说明：移除内容 heartbeat 的 `text_content` 会使 OCR 识别出的原始文本不再通过该字段进入 AW，但这只是统一持久化边界的结果，不代表本期修改 OCR 内部行为。OCR 原始样本和音频转写的持久化风险继续存在，必须在后续独立方案中处理。
 
-## 4. 当前实现与问题定位
+## 4. 改造前实现与问题定位
 
 ### 4.1 内容采集链路
 
-当前链路如下：
+改造前链路如下：
 
 ```text
 AxSidecar → UiaTreeWalker.walk
@@ -85,14 +101,14 @@ AxSidecar → UiaTreeWalker.walk
 
 ### 4.2 微信上下文标题
 
-现有 `ContextTitleExtractor` 能从完整 UIA 文本中识别部分微信对话标题，这是允许的读取行为。但它存在两个问题：
+改造前的 `ContextTitleExtractor` 能从完整 UIA 文本中识别部分微信对话标题，这是允许的读取行为。但它存在两个问题：
 
 1. 提取成功后，调用方仍同时保存完整 `text_content`。
 2. 目前只定义了聊天标题锚点，未形成微信文章标题、公众号文章、内置阅读页等上下文类型的稳定契约。
 
 ### 4.3 Wiki 链路
 
-`WikiFactBuilder` 当前从内容事件读取 `text_content`，按应用和窗口分组后选择最长片段；`WikiSummarizer` 把这些片段放入“屏幕内容片段” prompt。新内容事件不再提供该字段，因此 Wiki 必须改为使用系统窗口标题和上下文标题。
+改造前，`WikiFactBuilder` 从内容事件读取 `text_content`，按应用和窗口分组后选择最长片段；`WikiSummarizer` 把这些片段放入“屏幕内容片段” prompt。内容事件 v2 不再提供该字段，当前 Wiki 已改为使用系统窗口标题和上下文标题。
 
 ### 4.4 文件链路
 
@@ -249,7 +265,8 @@ AxSidecar → UiaTreeWalker.walk
 - 删除“屏幕内容片段” prompt 段落。
 - 新增“应用内标题样本”或“活动标题样本”段落。
 - 删除针对屏幕正文、密码和 Token 的 prompt 级补救规则；隐私边界应在入库前保证，不能依赖 LLM 脱敏。
-- bump prompt version，例如从 `wiki-v2` 更新为 `wiki-v3`，避免缓存或重试混用旧语义。
+- prompt version 已更新为 `wiki-v3`，并由 `WikiSummarizer.promptVersion()` 统一传给持久化层，
+  避免 worker 常量和摘要器版本漂移。
 - Wiki 最终仍可保存摘要、主要任务、任务片段和脱敏证据；这些属于派生结果。
 
 #### 6.3.3 Wiki 历史数据
@@ -261,25 +278,26 @@ AxSidecar → UiaTreeWalker.walk
 
 ### 6.4 `self-analyst-file`
 
-本期不修改生产逻辑，但必须固化以下契约：
+文件正文读取、摘要和索引主流程保持不变；本期增加失败路径与持久化边界加固：
 
 - `file-watch.db` 不得新增原始正文列。
 - `FileRecord` 不得新增正文、截断正文或 prompt 字段。
 - `FileSemanticIndex` 只能索引路径、摘要、主题和其他派生字段。
-- 日志不得输出文件正文或完整 LLM prompt。
-- 失败信息不得包含正文片段。
+- 日志不得输出文件正文、异常 message 或完整 LLM prompt。
+- `last_error` 只保存固定错误码和异常类型，不得包含正文片段。
+- Embedding 输入与 Lucene 文件分别通过秘密标记测试，确认只包含路径、摘要和主题。
 
-建议增加 schema 和字节级测试，证明唯一正文副本只存在于当前处理调用的内存中。
+数据库、WAL、SHM、Embedding 和 Lucene 字节级测试已证明唯一正文副本只存在于当前处理调用的内存中。
 
 ### 6.5 配置和桌面状态
 
-当前 `aw.collection.content` 名称容易让用户理解为正文采集。实现最终选择保留旧键以避免破坏
-现有用户配置，并把语义改为“上下文标题识别”；未引入第二套配置键。下表中的新键方案不再采用：
+当前 `aw.collection.content` 名称容易让用户理解为正文采集。最终实现保留旧键以避免破坏
+现有用户配置，并把语义改为“上下文标题识别”；未引入第二套配置键：
 
-| 当前键 | 目标键 | 策略 |
-|--------|--------|------|
-| `aw.collection.content` | `aw.collection.contextTitle` | 读取旧键作为一次性兼容输入，写回新键并标记旧键废弃 |
-| `aw.collection.content.pollMs` | `aw.collection.contextTitle.pollMs` | 同上 |
+| 保留键 | 当前语义 |
+|--------|----------|
+| `aw.collection.content` | 是否识别并保存上下文标题，不保存 UIA/OCR 原始正文 |
+| `aw.collection.content.pollMs` | 上下文标题元数据检查和 heartbeat 间隔 |
 
 要求：
 
@@ -337,12 +355,16 @@ AxSidecar → UiaTreeWalker.walk
 
 如果必须提供恢复能力，应在产品层另行设计由用户明确授权的加密备份；本次迁移默认不复制原始数据库。
 
-### 7.4 迁移标记
+### 7.4 迁移状态与扫描水位
 
 - 为迁移定义独立、可查询的版本标记，例如 `content_event_schema=2`。
 - 标记只能在所有内容 bucket 完成净化、checkpoint 和重写后提交。
-- 已完成迁移的数据库再次启动时不得重复重写。
-- 新发现的旧格式 bucket 仍必须单独净化，不能只依赖全局标记跳过。
+- 迁移状态使用 `last_event_id`、`pending_event_id` 和 `needs_compaction`：逻辑净化先写入待压缩状态，
+  物理净化和旧副本清理成功后才能推进成功水位并清除脏标记。
+- 成功水位推进到同一事务快照的全局 `MAX(events.id)`，后续启动只过滤新增尾部，
+  不得重复扫描大量窗口/音频历史事件。
+- 物理压缩失败后，即使下一次扫描的 `sanitized=0`，也必须依据脏标记再次压缩。
+- 新发现的旧格式内容事件仍必须净化，不能只依赖全局标记跳过。
 
 ### 7.5 降级和回滚
 
@@ -463,11 +485,11 @@ AxSidecar → UiaTreeWalker.walk
 
 不建议先修改 Wiki 再修改采集端，因为旧采集端仍会继续向数据库写入正文；也不建议先执行历史净化再部署新写入策略，否则旧 watcher 会立即重新产生 `text_content`。
 
-## 11. 预计文件影响清单
+## 11. 实际文件影响清单
 
 ### 11.1 生产代码
 
-| 模块 | 文件 | 预期修改 |
+| 模块 | 文件 | 实际修改 |
 |------|------|----------|
 | content | `ContentEvent.java` | 删除正文属性，改为 v2 标题事件 |
 | content | `ContentWatcher.java` | heartbeat 白名单、schema version、上下文标题变化处理 |
@@ -478,15 +500,16 @@ AxSidecar → UiaTreeWalker.walk
 | aw | `EventController.java` | 批量事件写入使用同一内容策略并保持原子性 |
 | aw | `EventStore.java` | 在共享写入边界按 bucket 条件执行内容事件策略 |
 | aw | `DataImporter.java` | 旧内容事件只能进入显式迁移，不得直接绕过策略 |
-| aw | 新增迁移组件 | 净化历史内容事件和 SQLite 物理残留 |
 | app | `AppSession.java` | 迁移早于 watcher/Wiki 启动，处理失败降级 |
+| app | `ContentEventV2Migration.java` | 增量净化历史事件、两阶段压缩恢复及旧明文副本清理 |
 | app | `DesktopStatusController.java` | 上下文标题识别及迁移状态 |
-| app | `SupportedKeys.java`、`Config.java` | 配置语义和可选键迁移 |
+| app | `SupportedKeys.java` | 保留旧配置键并更新为上下文标题语义 |
 | wiki | `WikiFactBuilder.java` | 内容片段改为上下文标题样本 |
 | wiki | `WikiSummarizer.java` | 标题型 prompt、prompt version bump |
 | wiki | `WikiWorker.java` | 空事实判断适配新字段 |
 
-建议新增一个无正文状态的 `ContentEventPolicy`（名称可调整），由 `EventStore.insertEvent` 和 `EventStore.insertHeartbeat` 统一调用。该策略按 bucket ID/元数据选择性启用，因此可以覆盖 HTTP、导入和内部调用，又不会误伤本期排除的音频 bucket。
+已新增 `ContentEventPolicy`，由 `EventStore.insertEvent` 和 `EventStore.insertHeartbeat` 统一调用。
+该策略按 bucket ID/元数据选择性启用，覆盖 HTTP、批量导入和内部调用，不会误伤本期排除的音频 bucket。
 
 ### 11.2 测试与文档
 

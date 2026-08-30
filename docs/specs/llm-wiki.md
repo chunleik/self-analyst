@@ -433,7 +433,9 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 - **SPEC-WIKI-GEN-010**: JSON 解析失败必须标记为 `FAILED`。
 - **SPEC-WIKI-GEN-011**: 缺失 `summary` 或 `primaryTask` 时必须标记为 `FAILED`。
 - **SPEC-WIKI-GEN-012**: `metrics` 中的本地计算字段以本地聚合结果为准，LLM 不得覆盖原始统计值。
-- **SPEC-WIKI-GEN-013**: `prompt_version` 第一版固定为 `wiki-v1`。
+- **SPEC-WIKI-GEN-013（已废弃）**: 第一版 `prompt_version` 曾固定为 `wiki-v1`；
+  标题型 prompt 当前使用 `wiki-v3`，并由 `WikiSummarizer.promptVersion()` 作为唯一持久化来源，
+  见 `SPEC-CTP-040`。
 
 ### 10.4 语义索引文本生成
 

@@ -2,7 +2,6 @@ package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
-import com.selfanalyst.audio.AudioCaptureManager;
 import com.selfanalyst.aw.watcher.Watcher;
 import com.selfanalyst.aw.watcher.WatcherManager;
 import io.javalin.http.Context;
@@ -31,7 +30,6 @@ public class DesktopStatusController implements AutoCloseable {
     private final Config config;
     private final WatcherManager watcherManager;
     private final ContentWatcher contentWatcher;
-    private final AudioCaptureManager audioCaptureManager;
     private final boolean contentPersistenceReady;
     private final String contentMigrationError;
 
@@ -46,21 +44,18 @@ public class DesktopStatusController implements AutoCloseable {
 
     public DesktopStatusController(Config config,
                                    WatcherManager watcherManager,
-                                   ContentWatcher contentWatcher,
-                                   AudioCaptureManager audioCaptureManager) {
-        this(config, watcherManager, contentWatcher, audioCaptureManager, true, null);
+                                   ContentWatcher contentWatcher) {
+        this(config, watcherManager, contentWatcher, true, null);
     }
 
     public DesktopStatusController(Config config,
                                    WatcherManager watcherManager,
                                    ContentWatcher contentWatcher,
-                                   AudioCaptureManager audioCaptureManager,
                                    boolean contentPersistenceReady,
                                    String contentMigrationError) {
         this.config = config;
         this.watcherManager = watcherManager;
         this.contentWatcher = contentWatcher;
-        this.audioCaptureManager = audioCaptureManager;
         this.contentPersistenceReady = contentPersistenceReady;
         this.contentMigrationError = contentMigrationError;
         // Kick off first check immediately, then every 60 seconds
@@ -93,7 +88,6 @@ public class DesktopStatusController implements AutoCloseable {
         aw.put("mode", config.awEmbedded() ? "embedded" : "external");
         aw.put("port", config.awPort());
         aw.put("webUrl", "http://localhost:" + config.awPort() + "/");
-        aw.put("audioEnabled", config.audioEnabled());
         status.put("aw", aw);
 
         // Collectors section
@@ -103,7 +97,6 @@ public class DesktopStatusController implements AutoCloseable {
         String contextTitleStatus = contentStatus();
         collectors.put("contextTitle", contextTitleStatus);
         collectors.put("content", contextTitleStatus); // compatibility for older desktop UI clients
-        collectors.put("audio", audioStatus());
         status.put("collectors", collectors);
 
         Map<String, Object> contentPersistence = new LinkedHashMap<>();
@@ -161,11 +154,6 @@ public class DesktopStatusController implements AutoCloseable {
         }
         String singleLine = contentMigrationError.replaceAll("[\\r\\n]+", " ").strip();
         return singleLine.length() <= 200 ? singleLine : singleLine.substring(0, 197) + "...";
-    }
-
-    private String audioStatus() {
-        if (audioCaptureManager == null) return "disabled";
-        return audioCaptureManager.status().status();
     }
 
     private boolean doCheckLlmAvailability() {

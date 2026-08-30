@@ -31,8 +31,7 @@ function updateStatusBar() {
   var collectorsOk = !contentPersistenceFailed && (
     st.collectors === "running" || st.collectors_status === "running" ||
     collectors.window === "running" || collectors.afk === "running" ||
-    collectors.contextTitle === "running" || collectors.content === "running" ||
-    collectors.audio === "running");
+    collectors.contextTitle === "running" || collectors.content === "running");
   setStatusDot(state.dom.collectorsDot, collectorsOk, t("status.capture"));
   state.dom.collectorsText.textContent = t("status.capture");
   if (contentPersistenceFailed) {
@@ -52,8 +51,6 @@ function updateStatusBar() {
   state.dom.llmText.textContent = t("status.llm");
   state.dom.llmText.title = llmTitle;
 
-  updateAudioToggle();
-  updateAudioAvailability();
 }
 
 function setStatusDot(el, ok, label) {
@@ -61,52 +58,15 @@ function setStatusDot(el, ok, label) {
   el.title = label + " " + (ok ? t("status.ok") : t("status.notReady"));
 }
 
-function audioCaptureRunning() {
-  var st = state.status || {};
-  var collectors = st.collectors || {};
-  return collectors.audio === "running";
-}
-
-function audioConfigured() {
-  var st = state.status || {};
-  var aw = st.aw || {};
-  // Keep the audio UI visible when talking to an older backend that does not
-  // expose the configuration flag yet.
-  return aw.audioEnabled !== false;
-}
-
-function updateAudioAvailability() {
-  var available = audioConfigured();
-  var audioNav = state.dom.tabs && Array.prototype.find.call(state.dom.tabs, function (tab) {
-    return tab.dataset.tab === "audio";
-  });
-  if (audioNav) audioNav.classList.toggle("hidden", !available);
-  if (state.dom.audioToggleBtn) state.dom.audioToggleBtn.classList.toggle("hidden", !available);
-  if (state.dom.tabAudio) state.dom.tabAudio.classList.toggle("hidden", !available);
-  if (!available && state.tab === "audio") switchTab("agent");
-}
-
-function updateAudioToggle() {
-  var btn = state.dom.audioToggleBtn || document.getElementById("audio-toggle-btn");
-  if (!btn) return;
-  var running = audioCaptureRunning();
-  var title = t(running ? "audio.stop" : "audio.start");
-  btn.classList.toggle("active", running);
-  btn.setAttribute("title", title);
-  btn.setAttribute("aria-label", title);
-}
-
 // ---- Tab Switching ----
 
 function switchTab(tab) {
-  if (tab === "audio" && !audioConfigured()) tab = "agent";
   state.tab = tab;
   state.dom.tabs.forEach(function (t) {
     t.classList.toggle("active", t.dataset.tab === tab);
   });
   state.dom.tabAgent.classList.toggle("active", tab === "agent");
   state.dom.tabChat.classList.toggle("active", tab === "chat");
-  state.dom.tabAudio.classList.toggle("active", tab === "audio");
 
   if (tab === "chat") {
     // ensureActiveChatSession may create a session asynchronously; re-render
@@ -116,135 +76,7 @@ function switchTab(tab) {
     setTimeout(function () {
       focusChatComposer();
     }, 100);
-  } else if (tab === "audio") {
-    renderAudioTab();
-    loadAudioEvents();
   }
-}
-
-function loadAudioEvents() {
-  state.audioEventsLoading = true;
-  state.audioEventsError = null;
-  renderAudioTab();
-  return api.getAudioEvents(50)
-    .then(function (resp) {
-      state.audioEvents = (resp && resp.events) || [];
-      state.audioEventsStatus = (resp && resp.status) || "disabled";
-      state.audioEventsLatestAt = (resp && resp.latestEventAt) ||
-        (state.audioEvents[0] && state.audioEvents[0].timestamp) || null;
-      state.audioEventsCount = (resp && typeof resp.eventCount === "number")
-        ? resp.eventCount
-        : state.audioEvents.length;
-      state.audioDiagnostics = (resp && resp.diagnostics) || null;
-      state.audioEventsUpdatedAt = new Date().toISOString();
-    })
-    .catch(function (err) {
-      state.audioEventsError = err.message || t("common.unknownError");
-    })
-    .then(function () {
-      state.audioEventsLoading = false;
-      renderAudioTab();
-    });
-}
-
-function renderAudioTab() {
-  var list = state.dom.audioTranscriptList;
-  if (!list) return;
-
-  if (state.dom.audioTabStatus) {
-    state.dom.audioTabStatus.innerHTML = statusBadge(state.audioEventsStatus || "disabled");
-  }
-  if (state.dom.audioTabSubtitle) {
-    var diagnosis = audioDiagnosisMessage();
-    if (diagnosis) {
-      state.dom.audioTabSubtitle.textContent = diagnosis;
-    } else if (state.audioEventsLatestAt) {
-      state.dom.audioTabSubtitle.textContent = t("audio.latest", {
-        time: formatRelativeTime(state.audioEventsLatestAt)
-      });
-    } else if (state.audioEventsStatus === "running") {
-      state.dom.audioTabSubtitle.textContent = t("audio.listening");
-    } else {
-      state.dom.audioTabSubtitle.textContent = t("audio.subtitle");
-    }
-  }
-
-  if (state.audioEventsLoading && (!state.audioEvents || state.audioEvents.length === 0)) {
-    list.innerHTML = '<div class="loading-placeholder">' + escHtml(t("common.loading")) + "</div>";
-    return;
-  }
-  if (state.audioEventsError) {
-    list.innerHTML = '<div class="audio-empty audio-error">' +
-      escHtml(t("audio.loadFailed", { msg: state.audioEventsError })) + "</div>";
-    return;
-  }
-
-  var events = state.audioEvents || [];
-  if (events.length === 0) {
-    list.innerHTML = '<div class="audio-empty">' + escHtml(t("audio.empty")) + "</div>";
-    return;
-  }
-
-  list.innerHTML = events.map(function (ev) {
-    var duration = ev.duration ? Math.round(ev.duration) + "s" : "";
-    var sourceLabel = audioSourceLabel(ev.source);
-    return '<article class="audio-transcript-item">' +
-      '<div class="audio-transcript-meta">' +
-        '<span>' + escHtml(formatDateTime(ev.timestamp)) + "</span>" +
-        (sourceLabel ? '<span>' + escHtml(sourceLabel) + "</span>" : "") +
-        (duration ? '<span>' + escHtml(duration) + "</span>" : "") +
-        (ev.engine ? '<span>' + escHtml(ev.engine) + "</span>" : "") +
-      "</div>" +
-      '<div class="audio-transcript-text">' + escHtml(ev.text) + "</div>" +
-    "</article>";
-  }).join("");
-}
-
-function audioSourceLabel(source) {
-  if (source === "system") return t("audio.source.system");
-  if (source === "both") return t("audio.source.both");
-  return t("audio.source.mic");
-}
-
-function audioDiagnosisMessage() {
-  var d = state.audioDiagnostics;
-  if (!d || state.audioEventsStatus !== "running") return "";
-  var latestTranscriptMs = audioDiagnosticMs(state.audioEventsLatestAt);
-  var diagnostics = [
-    { type: "error", at: d.lastErrorAt, msg: d.lastError },
-    { type: "emptyTranscript", at: d.lastEmptyTranscriptAt },
-    { type: "silent", at: d.lastSilentAt },
-  ].map(function (item) {
-    item.ms = audioDiagnosticMs(item.at);
-    return item;
-  }).filter(function (item) {
-    return item.ms != null && (latestTranscriptMs == null || item.ms > latestTranscriptMs);
-  }).sort(function (a, b) {
-    return b.ms - a.ms;
-  });
-
-  var latest = diagnostics[0];
-  if (!latest) return "";
-  if (latest.type === "error") {
-    return t("audio.diagnostics.error", { msg: latest.msg || t("common.unknownError") });
-  }
-  if (latest.type === "emptyTranscript") {
-    return t("audio.diagnostics.emptyTranscript", {
-      time: formatRelativeTime(latest.at)
-    });
-  }
-  if (latest.type === "silent") {
-    return t("audio.diagnostics.silent", {
-      time: formatRelativeTime(latest.at)
-    });
-  }
-  return "";
-}
-
-function audioDiagnosticMs(value) {
-  if (!value) return null;
-  var ms = new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : null;
 }
 
 // ---- Config Modal ----

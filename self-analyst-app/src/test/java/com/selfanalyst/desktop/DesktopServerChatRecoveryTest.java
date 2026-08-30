@@ -32,7 +32,7 @@ class DesktopServerChatRecoveryTest {
         setup.close();
 
         DesktopServer server = new DesktopServer(
-                Javalin.create(), config, null, null, null, null, null, null);
+                Javalin.create(), config, null, null, null, null, null);
         try {
             assertFalse(Files.exists(config.memoryDir().resolve("chat-sessions")
                     .resolve(session.id + ".json")));

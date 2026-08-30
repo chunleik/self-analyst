@@ -14,15 +14,9 @@ function cacheDom() {
     collectorsText: $("#collectors-text"),
     llmDot: $("#llm-dot"),
     llmText: $("#llm-text"),
-    audioToggleBtn: $("#audio-toggle-btn"),
     // Agent tab
     timelineBody: $("#timeline-body"),
     tasksBody: $("#tasks-body"),
-    // Audio tab
-    tabAudio: $("#tab-audio"),
-    audioTranscriptList: $("#audio-transcript-list"),
-    audioTabStatus: $("#audio-tab-status"),
-    audioTabSubtitle: $("#audio-tab-subtitle"),
     // Config modal
     configGrid: $("#config-grid"),
     configModal: $("#config-modal"),

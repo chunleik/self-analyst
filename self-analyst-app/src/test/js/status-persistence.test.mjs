@@ -21,7 +21,7 @@ const context = {
         error: "simulated safe migration error",
       },
       llm: { configured: false },
-      aw: { audioEnabled: false },
+      aw: {},
     },
     dom: {
       backendDot: element(),
@@ -30,7 +30,6 @@ const context = {
       collectorsText: element(),
       llmDot: element(),
       llmText: element(),
-      audioToggleBtn: null,
       tabs: [],
     },
   },

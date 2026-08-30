@@ -3,7 +3,6 @@ package com.selfanalyst.integration.app;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.selfanalyst.aw.store.Database;
 import com.selfanalyst.aw.store.EventStore;
-import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.PulseTimeConfig;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.desktop.DesktopServer;
@@ -38,11 +37,10 @@ public class AppVerification {
 
         Database db = new Database(awDataDir);
         EventStore eventStore = new EventStore(db, PulseTimeConfig.DEFAULT);
-        BucketStore bucketStore = new BucketStore(db);
         Javalin javalin = Javalin.create();
 
         DesktopServer desktop = new DesktopServer(javalin, config, null, eventStore,
-                bucketStore, null, null, null, null);
+                null, null, null);
         desktop.start();
         javalin.start(port);
 
@@ -59,7 +57,7 @@ public class AppVerification {
                 check("disabled".equals(collectors.get("content")), "content collector should be disabled");
                 check("disabled".equals(collectors.get("contextTitle")),
                         "context title collector should be disabled");
-                check("disabled".equals(collectors.get("audio")), "audio collector should be disabled");
+                check(!collectors.containsKey("audio"), "audio collector should be removed");
             });
 
             step("config GET/PUT round trip", () -> {

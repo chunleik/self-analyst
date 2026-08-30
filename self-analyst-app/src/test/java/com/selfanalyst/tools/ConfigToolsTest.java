@@ -16,9 +16,10 @@ class ConfigToolsTest {
         UserConfigStore store = new UserConfigStore(dir);
         store.saveRaw("[headroom]\nenabled = true\nproxy-url = \"http://127.0.0.1:8787/v1\"\n");
 
-        String config = new ConfigTools(store, () -> "disabled").getConfig();
+        String config = new ConfigTools(store).getConfig();
 
         assertFalse(config.toLowerCase().contains("headroom"), config);
+        assertFalse(config.contains("aw.audio"), config);
     }
 
     @Test

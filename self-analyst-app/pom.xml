@@ -27,10 +27,6 @@
         </dependency>
         <dependency>
             <groupId>com.selfanalyst</groupId>
-            <artifactId>self-analyst-audio</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.selfanalyst</groupId>
             <artifactId>self-analyst-wiki</artifactId>
         </dependency>
         <dependency>

@@ -102,13 +102,6 @@ public class SelfAnalystAgent implements AutoCloseable {
     public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter) throws IOException {
-        this(config, wikiStore, wikiTools, userConfigStore, fileTools, usageMeter, null);
-    }
-
-    public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
-                             UserConfigStore userConfigStore, FileTools fileTools,
-                             UsageMeter usageMeter,
-                             Supplier<String> audioRuntimeStatusSupplier) throws IOException {
         this.usageMeter = usageMeter;
         this.lang = config.effectiveLanguage();
         this.wikiStore = wikiStore;
@@ -129,7 +122,7 @@ public class SelfAnalystAgent implements AutoCloseable {
             toolkit.registerTool(fileTools);
         }
         if (userConfigStore != null) {
-            toolkit.registerTool(new ConfigTools(userConfigStore, audioRuntimeStatusSupplier));
+            toolkit.registerTool(new ConfigTools(userConfigStore));
         }
         Path stateRoot = chatStateRoot(config.memoryDir());
         AgentStateStore builtStateStore = new JsonFileAgentStateStore(stateRoot);

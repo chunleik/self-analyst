@@ -22,7 +22,6 @@
 
     <modules>
         <module>self-analyst-app-test</module>
-        <module>self-analyst-audio-test</module>
         <module>self-analyst-aw-test</module>
         <module>self-analyst-content-test</module>
         <module>self-analyst-wiki-test</module>

@@ -17,7 +17,7 @@ class DesktopStatusControllerTest {
     void llmStatusUsesConfiguredBaseUrlDirectly(@TempDir Path dir) {
         Config config = Config.testDefaults(dir);
         DesktopStatusController controller = new DesktopStatusController(
-                config, null, null, null);
+                config, null, null);
 
         try {
             assertEquals(config.llmBaseUrl(),
@@ -33,7 +33,7 @@ class DesktopStatusControllerTest {
     @Test
     void closeShutsDownLlmCheckerAndIsIdempotent(@TempDir Path dir) {
         DesktopStatusController controller = new DesktopStatusController(
-                Config.testDefaults(dir), null, null, null);
+                Config.testDefaults(dir), null, null);
 
         controller.close();
         controller.close();
@@ -45,7 +45,7 @@ class DesktopStatusControllerTest {
     @SuppressWarnings("unchecked")
     void reportsContextTitleMigrationFailureAsDegraded(@TempDir Path dir) {
         DesktopStatusController controller = new DesktopStatusController(
-                Config.testDefaults(dir), null, null, null,
+                Config.testDefaults(dir), null, null,
                 false, "simulated migration failure");
 
         try {

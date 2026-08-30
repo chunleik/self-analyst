@@ -11,26 +11,6 @@ function setupEvents() {
     });
   });
 
-  state.dom.audioToggleBtn.addEventListener("click", function () {
-    var btn = state.dom.audioToggleBtn;
-    btn.disabled = true;
-    api.setAudioCapture(!audioCaptureRunning())
-      .then(function (resp) {
-        if (!state.status) state.status = {};
-        if (!state.status.collectors || typeof state.status.collectors !== "object") {
-          state.status.collectors = {};
-        }
-        state.status.collectors.audio = resp.status || (resp.enabled ? "running" : "disabled");
-        updateStatusBar();
-      })
-      .catch(function (err) {
-        alert(t("audio.toggleFailed", { msg: err.message || t("common.unknownError") }));
-      })
-      .then(function () {
-        btn.disabled = false;
-      });
-  });
-
   // Task list click delegation (from tasksBody)
   state.dom.tasksBody.addEventListener("click", function (e) {
     var target = e.target;

@@ -14,6 +14,8 @@ import com.selfanalyst.desktop.store.ChatSessionDeletionCoordinator;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
 import com.selfanalyst.desktop.store.UserConfigStore;
+import com.selfanalyst.file.FileWatchStore;
+import com.selfanalyst.file.FileWatcher;
 import com.selfanalyst.memory.LongTermMemoryService;
 import com.selfanalyst.memory.MemoryStore;
 import io.javalin.Javalin;
@@ -22,6 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Desktop dashboard API server.
@@ -51,6 +54,7 @@ public class DesktopServer {
     private final DesktopConfigController configCtrl;
     private final DesktopTaskController taskCtrl;
     private final DesktopStatusController statusCtrl;
+    private final DesktopFileController fileCtrl;
     private final DesktopChatSessionController chatSessionCtrl;
     private final DesktopMemoryController memoryCtrl;
     private final ChatSessionStore chatSessionStore;
@@ -86,6 +90,26 @@ public class DesktopServer {
                          ContentWatcher contentWatcher,
                          boolean contentPersistenceReady,
                          String contentMigrationError) {
+        this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
+                contentPersistenceReady, contentMigrationError,
+                null, null, List.of(), false, null, null);
+    }
+
+    public DesktopServer(Javalin app,
+                         Config config,
+                         SelfAnalystAgent agent,
+                         EventStore eventStore,
+                         MemoryStore memoryStore,
+                         WatcherManager watcherManager,
+                         ContentWatcher contentWatcher,
+                         boolean contentPersistenceReady,
+                         String contentMigrationError,
+                         FileWatchStore fileWatchStore,
+                         FileWatcher fileWatcher,
+                         List<Path> fileWatchRoots,
+                         boolean fileSemanticAvailable,
+                         String fileStartupReason,
+                         String fileStartupError) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
@@ -114,9 +138,15 @@ public class DesktopServer {
                 config, chatSessionStore);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
+        this.fileCtrl = new DesktopFileController(
+                config.fileWatchEnabled(), config.fileWatchSemanticEnabled(),
+                fileSemanticAvailable, fileWatchRoots, fileWatchStore,
+                fileWatcher != null ? fileWatcher::isRunning : () -> false,
+                fileStartupReason, fileStartupError);
         this.statusCtrl = new DesktopStatusController(
                 config, watcherManager, contentWatcher,
-                contentPersistenceReady, contentMigrationError);
+                contentPersistenceReady, contentMigrationError,
+                fileCtrl::collectorStatus);
         this.memoryCtrl = longTermMemoryService != null
                 ? new DesktopMemoryController(longTermMemoryService)
                 : null;
@@ -197,6 +227,9 @@ public class DesktopServer {
 
         // ── Status ───────────────────────────────────────────
         app.get("/desktop/status", statusCtrl::getStatus);
+
+        // ── File collector visibility ────────────────────────
+        app.get("/desktop/files", fileCtrl::getOverview);
 
         // Catch-all exception handler so no error returns an empty body
         app.exception(Exception.class, (e, ctx) -> {

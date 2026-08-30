@@ -21,7 +21,7 @@ function element() {
 const context = {
   state: {
     status: {
-      collectors: { window: "running", contextTitle: "degraded" },
+      collectors: { window: "running", contextTitle: "degraded", file: "running" },
       contentPersistence: {
         ready: false,
         status: "migration_failed",
@@ -35,6 +35,9 @@ const context = {
       backendText: element(),
       collectorsDot: element(),
       collectorsText: element(),
+      fileStatusBtn: element(),
+      fileDot: element(),
+      fileText: element(),
       llmDot: element(),
       llmText: element(),
       tabs: [],
@@ -54,3 +57,5 @@ assert.equal(
   context.state.dom.collectorsText.title,
   context.state.dom.collectorsDot.title,
 );
+assert.match(context.state.dom.fileDot.className, /green/);
+assert.match(context.state.dom.fileStatusBtn.title, /status\.running/);

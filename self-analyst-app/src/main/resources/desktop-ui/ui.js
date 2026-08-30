@@ -43,6 +43,12 @@ function updateStatusBar() {
     state.dom.collectorsText.title = state.dom.collectorsDot.title;
   }
 
+  // File collector has its own persistent entry so it remains discoverable.
+  var fileStatus = collectors.file || "disabled";
+  setStatusDotByState(state.dom.fileDot, fileStatus, t("status.file"));
+  state.dom.fileText.textContent = t("status.file");
+  state.dom.fileStatusBtn.title = state.dom.fileDot.title;
+
   // LLM
   var llmOk = st.llm && st.llm.configured;
   var llmTitle = t("status.llm") + " " + (llmOk ? t("status.ok") : t("status.notReady"));
@@ -58,6 +64,14 @@ function setStatusDot(el, ok, label) {
   el.title = label + " " + (ok ? t("status.ok") : t("status.notReady"));
 }
 
+function setStatusDotByState(el, status, label) {
+  var css = status === "running" ? "green" : status === "degraded" ? "red" : "gray";
+  var key = status === "running" ? "status.running" :
+    status === "degraded" ? "status.degraded" : "status.disabled";
+  el.className = "status-dot " + css;
+  el.title = label + " " + t(key);
+}
+
 // ---- Tab Switching ----
 
 function switchTab(tab) {
@@ -67,6 +81,7 @@ function switchTab(tab) {
   });
   state.dom.tabAgent.classList.toggle("active", tab === "agent");
   state.dom.tabChat.classList.toggle("active", tab === "chat");
+  state.dom.tabFiles.classList.toggle("active", tab === "files");
 
   if (tab === "chat") {
     // ensureActiveChatSession may create a session asynchronously; re-render
@@ -76,17 +91,23 @@ function switchTab(tab) {
     setTimeout(function () {
       focusChatComposer();
     }, 100);
+  } else if (tab === "files") {
+    renderFilesTab();
+    loadFiles();
   }
 }
 
 // ---- Config Modal ----
 
-function openConfigModal() {
+function openConfigModal(focusKey) {
+  if (typeof focusKey !== "string") focusKey = null;
   state.configOpen = true;
   state.dom.configModal.classList.remove("hidden");
   // Always reload so the editor reflects the on-disk file, which may have been
   // changed by the Agent or externally. SPEC-CFGUI-UI-002a.
-  loadConfig();
+  return loadConfig().then(function () {
+    if (focusKey) focusConfigEditorKey(focusKey);
+  });
 }
 
 function closeConfigModal() {
@@ -146,7 +167,7 @@ function loadAll() {
 }
 
 function loadConfig() {
-  api.getRawConfig()
+  return api.getRawConfig()
     .then(function (resp) {
       state.configRawText = resp.text || "";
       state.configRawBaseline = resp.text || "";
@@ -188,6 +209,14 @@ var refreshTimer = null;
 function startAutoRefresh() {
   stopAutoRefresh();
   refreshTimer = setInterval(function () {
+    if (state.tab === "files") {
+      api.getStatus().catch(function () { return state.status; }).then(function (status) {
+        state.status = status || state.status;
+        updateStatusBar();
+      });
+      loadFiles();
+      return;
+    }
     if (state.tab !== "agent") return;
     // Status + tasks refresh fast
     Promise.all([
@@ -208,7 +237,6 @@ function startAutoRefresh() {
       renderTimeline();
     });
   }, 30000);
-
 }
 
 function stopAutoRefresh() {

@@ -215,6 +215,30 @@ LLM prompt（中文）输入文件路径/类型/最后修改时间/截取内容�
 - **SPEC-FILE-017a**：返回 JSON 字符串，格式与 `WikiTools` 一致
 - **SPEC-FILE-017b**：embedding 不可用时 `searchFiles` 降级到关键词/时间查询，不抛异常
 
+### SPEC-FILE-020：桌面端可见性与状态 API
+
+- `GET /desktop/status` 的 `collectors.file` 返回粗粒度状态：
+  `disabled`、`running` 或 `degraded`，供顶部状态栏持续展示。
+- `GET /desktop/files?limit=20` 返回文件采集概览，包含：
+  `enabled`、`status`、可选 `reason/error`、`semantic`、`roots`、
+  `totals`、`files`、`latestIndexedAt` 与 `latestPath`。
+- `roots[].counts` 和 `totals` 使用小写状态键：
+  `pending/indexed/failed/skipped/deleted`。
+- `files` 只返回当前配置监控目录内最近完成索引的记录，按
+  `last_indexed_at` 倒序；不得返回原始文件正文或完整提示词。
+- 启动失败原因使用稳定代码：`paths_unavailable`、
+  `initialization_failed`、`agent_unavailable`、`worker_start_failed`；
+  存储查询失败使用 `store_unavailable`。异常详情必须压成单行且最长 200 字符。
+
+#### SPEC-FILE-020a：桌面界面
+
+- 顶部状态栏必须有独立的“文件”状态入口，点击进入“文件”页签。
+- “文件”页签始终可见；关闭状态不得隐藏入口，而应展示功能说明、隐私提示和配置操作。
+- 运行状态展示监控目录、已索引/待处理/失败计数、最近完成索引的文件摘要和主题。
+- 降级状态展示本地化原因和可用的技术详情，并提供进入配置和重新加载的操作。
+- 从文件页进入配置时，编辑器应定位到 `file.watch.enabled`。
+- 界面必须明确说明：文件正文会发送给已配置的 LLM 生成摘要；敏感文件、构建目录和临时文件默认排除。
+
 ---
 
 ## 4. 配置
@@ -240,6 +264,9 @@ FileWatchStore → PathFilter → FileSemanticIndex → FileEmbeddingWorker →
 FileSummarizer → FileIndexWorker → FileWatcher → FileTools；`SelfAnalystAgent`
 构造器接收可空 `FileTools` 并条件注册。配置统一经 `Config` 读取（单一来源）。
 
+所有 `file.watch.*` 键在启动阶段读取，桌面配置 API 修改这些键时必须返回
+`restartRequired`；界面提示用户重启 SelfAnalyst 后生效。
+
 ---
 
 ## 5. 测试规格
@@ -257,6 +284,9 @@ FileSummarizer → FileIndexWorker → FileWatcher → FileTools；`SelfAnalystA
 | 去抖（debounce） | 静默期内持续变更不入队；静默后只入队一次 |
 | 最小重摘间隔 | 间隔内重复变更被 worker 跳过，不重复摘要 |
 | `searchFiles` 无 embedding | 降级不抛异常 |
+| `DesktopFileController` | disabled/running/degraded、目录计数、最近文件和错误清理正确 |
+| 桌面端文件页 | 入口常驻；关闭、运行、降级三种状态均可理解并可操作 |
+| 文件配置保存 | 修改任一 `file.watch.*` 键返回 `restartRequired` |
 
 ---
 

@@ -47,6 +47,9 @@ public class AppSession implements AutoCloseable {
     private FileEmbeddingWorker fileEmbeddingWorker;
     private FileIndexWorker fileIndexWorker;
     private FileWatcher fileWatcher;
+    private List<Path> fileWatchRoots = List.of();
+    private String fileWatchStartupReason;
+    private String fileWatchStartupError;
     private boolean contentPersistenceReady = true;
     private String contentMigrationError;
     private final AtomicBoolean closed = new AtomicBoolean();
@@ -112,11 +115,11 @@ public class AppSession implements AutoCloseable {
         // worker (which need the agent's LLM client) are started after the agent below.
         PathFilter filePathFilter = null;
         FileTools fileTools = null;
-        List<Path> fileWatchRoots = List.of();
         if (config.fileWatchEnabled()) {
             try {
                 fileWatchRoots = parseWatchRoots(config.fileWatchPaths());
                 if (fileWatchRoots.isEmpty()) {
+                    fileWatchStartupReason = "paths_unavailable";
                     log.warn("file.watch.enabled=true 但 file.watch.paths 为空，文件监控未启动");
                 } else {
                     fileWatchStore = new FileWatchStore(config.memoryDir().resolve("file-watch.db"));
@@ -135,6 +138,8 @@ public class AppSession implements AutoCloseable {
                     log.info("FileWatchStore 已初始化 ({} 个监控目录)", fileWatchRoots.size());
                 }
             } catch (Exception e) {
+                fileWatchStartupReason = "initialization_failed";
+                fileWatchStartupError = e.getMessage();
                 log.warn("文件监控初始化失败，文件功能不可用: {}", e.getMessage());
                 fileWatchStore = null;
                 fileSemanticIndex = null;
@@ -219,10 +224,28 @@ public class AppSession implements AutoCloseable {
                         fileHeartbeatUrl, config.fileWatchDebounceSeconds(),
                         config.fileWatchHeartbeatThrottleSeconds());
                 fileWatcher.start();
+                fileWatchStartupReason = null;
+                fileWatchStartupError = null;
                 log.info("FileWatcher 已启动");
             } catch (Exception e) {
+                fileWatchStartupReason = "worker_start_failed";
+                fileWatchStartupError = e.getMessage();
                 log.warn("文件监控 worker 启动失败: {}", e.getMessage());
+                if (fileWatcher != null) {
+                    fileWatcher.shutdown();
+                    fileWatcher = null;
+                }
+                if (fileIndexWorker != null) {
+                    fileIndexWorker.shutdown();
+                    fileIndexWorker = null;
+                }
+                if (fileEmbeddingWorker != null) {
+                    fileEmbeddingWorker.shutdown();
+                    fileEmbeddingWorker = null;
+                }
             }
+        } else if (config.fileWatchEnabled() && fileWatchStore != null) {
+            fileWatchStartupReason = "agent_unavailable";
         }
 
         if (awServer != null && awServer.app() != null) {
@@ -230,7 +253,10 @@ public class AppSession implements AutoCloseable {
             desktopServer = new DesktopServer(awServer.app(), config, agent,
                     awServer.eventStore(), memoryStore,
                     watcherManager, contentWatcher,
-                    contentPersistenceReady, contentMigrationError);
+                    contentPersistenceReady, contentMigrationError,
+                    fileWatchStore, fileWatcher, fileWatchRoots,
+                    fileSemanticIndex != null && fileEmbeddingWorker != null,
+                    fileWatchStartupReason, fileWatchStartupError);
             desktopServer.start();
             awServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));
@@ -400,7 +426,7 @@ public class AppSession implements AutoCloseable {
         for (String p : csv.split(",")) {
             String trimmed = p.trim();
             if (trimmed.isEmpty()) continue;
-            Path path = Path.of(trimmed);
+            Path path = Path.of(trimmed).toAbsolutePath().normalize();
             if (java.nio.file.Files.isDirectory(path)) {
                 roots.add(path);
             } else {

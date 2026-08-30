@@ -63,4 +63,20 @@ class DesktopStatusControllerTest {
             controller.close();
         }
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void reportsFileCollectorStatus(@TempDir Path dir) {
+        DesktopStatusController controller = new DesktopStatusController(
+                Config.testDefaults(dir), null, null,
+                true, null, () -> "running");
+
+        try {
+            Map<String, String> collectors = (Map<String, String>)
+                    controller.statusPayload().get("collectors");
+            assertEquals("running", collectors.get("file"));
+        } finally {
+            controller.close();
+        }
+    }
 }

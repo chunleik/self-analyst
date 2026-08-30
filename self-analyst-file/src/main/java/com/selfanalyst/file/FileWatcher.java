@@ -120,6 +120,17 @@ public class FileWatcher {
         log.info("FileWatcher shut down");
     }
 
+    /** Runtime health used by the desktop status API. */
+    public boolean isRunning() {
+        Thread thread = watchThread;
+        ScheduledExecutorService executor = debounceExecutor;
+        return running
+                && thread != null
+                && thread.isAlive()
+                && executor != null
+                && !executor.isShutdown();
+    }
+
     // ── registration ──
 
     private void registerRecursive(Path start) {

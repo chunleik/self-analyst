@@ -250,6 +250,14 @@ class DesktopConfigControllerTest {
                 """);
         assertFalse(r4.restartRequired().contains("aw.ocr.engine"));
         assertTrue(r4.unknownKeys().isEmpty());
+
+        var r5 = ctrl.applyRawSave("""
+                [file.watch]
+                enabled = true
+                paths = "D:/Documents"
+                """);
+        assertTrue(r5.restartRequired().contains("file.watch.enabled"));
+        assertTrue(r5.restartRequired().contains("file.watch.paths"));
     }
 
     @Test

@@ -101,6 +101,13 @@ var api = {
       return r.json();
     });
   },
+  getFiles: function (limit) {
+    var value = limit || 20;
+    return fetch(API_BASE + "/desktop/files?limit=" + encodeURIComponent(value)).then(function (r) {
+      if (!r.ok) throw new Error("File overview fetch failed: " + r.status);
+      return r.json();
+    });
+  },
   getSummary: function () {
     return fetch(API_BASE + "/desktop/summary").then(function (r) {
       if (!r.ok) throw new Error("Summary fetch failed: " + r.status);

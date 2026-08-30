@@ -157,7 +157,7 @@ function setupEvents() {
   });
 
   // Config modal open/close
-  state.dom.configOpenBtn.addEventListener("click", openConfigModal);
+  state.dom.configOpenBtn.addEventListener("click", function () { openConfigModal(); });
   state.dom.configCloseBtn.addEventListener("click", closeConfigModal);
   state.dom.configModal
     .querySelector(".config-modal-overlay")
@@ -244,6 +244,21 @@ function setupEvents() {
 
   state.dom.configGrid.addEventListener("input", handleConfigFieldChange);
   state.dom.configGrid.addEventListener("change", handleConfigFieldChange);
+
+  // File collector entry and page actions.
+  state.dom.fileStatusBtn.addEventListener("click", function () { switchTab("files"); });
+  state.dom.fileSettingsBtn.addEventListener("click", function () {
+    openConfigModal("file.watch.enabled");
+  });
+  state.dom.fileContent.addEventListener("click", function (e) {
+    var action = e.target && e.target.closest ? e.target.closest("[data-file-action]") : null;
+    if (!action) return;
+    if (action.dataset.fileAction === "settings") {
+      openConfigModal("file.watch.enabled");
+    } else if (action.dataset.fileAction === "retry") {
+      loadFiles();
+    }
+  });
 
   // Chat drawer
   state.dom.chatCloseBtn.addEventListener("click", closeChat);

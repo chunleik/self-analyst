@@ -12,6 +12,9 @@ function cacheDom() {
     backendText: $("#backend-text"),
     collectorsDot: $("#collectors-dot"),
     collectorsText: $("#collectors-text"),
+    fileStatusBtn: $("#file-status-btn"),
+    fileDot: $("#file-dot"),
+    fileText: $("#file-text"),
     llmDot: $("#llm-dot"),
     llmText: $("#llm-text"),
     // Agent tab
@@ -33,6 +36,12 @@ function cacheDom() {
     chatSendBtn: $("#chat-send-btn"),
     // Chat Tab
     tabChat: $("#tab-chat"),
+    // Files tab
+    tabFiles: $("#tab-files"),
+    fileTabStatus: $("#file-tab-status"),
+    fileTabSubtitle: $("#file-tab-subtitle"),
+    fileContent: $("#file-content"),
+    fileSettingsBtn: $("#file-settings-btn"),
     chatSessionList: $("#chat-session-list"),
     chatSessionSearchInput: $("#chat-session-search-input"),
     newChatSessionBtn: $("#new-chat-session-btn"),

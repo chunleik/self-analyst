@@ -17,6 +17,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * System status endpoint.
@@ -32,6 +33,7 @@ public class DesktopStatusController implements AutoCloseable {
     private final ContentWatcher contentWatcher;
     private final boolean contentPersistenceReady;
     private final String contentMigrationError;
+    private final Supplier<String> fileCollectorStatus;
 
     private final AtomicBoolean llmAvailableCache = new AtomicBoolean(false);
     private final AtomicLong llmCacheUpdatedAt = new AtomicLong(0);
@@ -53,11 +55,24 @@ public class DesktopStatusController implements AutoCloseable {
                                    ContentWatcher contentWatcher,
                                    boolean contentPersistenceReady,
                                    String contentMigrationError) {
+        this(config, watcherManager, contentWatcher,
+                contentPersistenceReady, contentMigrationError, null);
+    }
+
+    public DesktopStatusController(Config config,
+                                   WatcherManager watcherManager,
+                                   ContentWatcher contentWatcher,
+                                   boolean contentPersistenceReady,
+                                   String contentMigrationError,
+                                   Supplier<String> fileCollectorStatus) {
         this.config = config;
         this.watcherManager = watcherManager;
         this.contentWatcher = contentWatcher;
         this.contentPersistenceReady = contentPersistenceReady;
         this.contentMigrationError = contentMigrationError;
+        this.fileCollectorStatus = fileCollectorStatus != null
+                ? fileCollectorStatus
+                : () -> config.fileWatchEnabled() ? "degraded" : "disabled";
         // Kick off first check immediately, then every 60 seconds
         llmChecker.scheduleAtFixedRate(this::refreshLlmAvailability, 0, 60, TimeUnit.SECONDS);
     }
@@ -97,6 +112,7 @@ public class DesktopStatusController implements AutoCloseable {
         String contextTitleStatus = contentStatus();
         collectors.put("contextTitle", contextTitleStatus);
         collectors.put("content", contextTitleStatus); // compatibility for older desktop UI clients
+        collectors.put("file", safeFileCollectorStatus());
         status.put("collectors", collectors);
 
         Map<String, Object> contentPersistence = new LinkedHashMap<>();
@@ -146,6 +162,15 @@ public class DesktopStatusController implements AutoCloseable {
         if (!contentPersistenceReady) return "degraded";
         if (contentWatcher == null) return "disabled";
         return contentWatcher.status();
+    }
+
+    private String safeFileCollectorStatus() {
+        try {
+            String status = fileCollectorStatus.get();
+            return status == null || status.isBlank() ? "degraded" : status;
+        } catch (RuntimeException ignored) {
+            return "degraded";
+        }
     }
 
     private String safeMigrationError() {

@@ -250,6 +250,27 @@ public class FileWatchStore implements AutoCloseable {
         return queryList(sql, ps -> ps.setInt(1, limit));
     }
 
+    /** Most recently completed indexes first, for desktop visibility. */
+    public synchronized List<FileRecord> findRecentlyIndexed(int limit) {
+        String sql = "SELECT * FROM file_index WHERE status='INDEXED' "
+                + "AND last_indexed_at IS NOT NULL ORDER BY last_indexed_at DESC LIMIT ?";
+        return queryList(sql, ps -> ps.setInt(1, Math.max(1, limit)));
+    }
+
+    /** Most recently completed indexes restricted to the currently configured roots. */
+    public synchronized List<FileRecord> findRecentlyIndexed(List<String> watchRoots, int limit) {
+        if (watchRoots == null || watchRoots.isEmpty()) return List.of();
+        String placeholders = String.join(",", watchRoots.stream().map(ignored -> "?").toList());
+        String sql = "SELECT * FROM file_index WHERE status='INDEXED' "
+                + "AND last_indexed_at IS NOT NULL AND watch_root IN (" + placeholders + ") "
+                + "ORDER BY last_indexed_at DESC LIMIT ?";
+        return queryList(sql, ps -> {
+            int index = 1;
+            for (String root : watchRoots) ps.setString(index++, root);
+            ps.setInt(index, Math.max(1, limit));
+        });
+    }
+
     /**
      * Time-axis / recent-files query (SPEC-FILE-010c, SPEC-FILE-017 listRecentFiles).
      * Only INDEXED rows are returned; null filters are ignored.

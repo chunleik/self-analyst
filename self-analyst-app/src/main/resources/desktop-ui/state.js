@@ -7,6 +7,9 @@ var state = {
   tab: "agent",
   lang: "zh",  // effective language; overwritten from /desktop/status in init() (SPEC-I18N-UI-004)
   status: null,
+  filesOverview: null,
+  filesLoading: false,
+  filesError: null,
   summary: null,
   usage: null,
   tasks: [],

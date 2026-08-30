@@ -117,4 +117,20 @@ class FileWatchStoreTest {
         assertEquals(1L, a.get("PENDING"));
         assertEquals(1L, a.get("INDEXED"));
     }
+
+    @Test
+    void findRecentlyIndexedReturnsNewestCompletionFirst() throws Exception {
+        store.upsertPending("/a/first.txt", "first.txt", "/a", "txt");
+        store.updateIndexed("/a/first.txt", 1, Instant.parse("2026-06-20T00:00:00Z"),
+                "h1", "first", List.of(), "llm", "file-v1");
+        Thread.sleep(5);
+        store.upsertPending("/a/second.txt", "second.txt", "/a", "txt");
+        store.updateIndexed("/a/second.txt", 1, Instant.parse("2026-06-10T00:00:00Z"),
+                "h2", "second", List.of(), "llm", "file-v1");
+
+        List<FileRecord> recent = store.findRecentlyIndexed(10);
+
+        assertEquals(List.of("/a/second.txt", "/a/first.txt"),
+                recent.stream().map(FileRecord::absolutePath).toList());
+    }
 }

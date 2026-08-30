@@ -16,6 +16,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="agent" data-i18n="tab.agent">Agent</button>
       <button class="tab" data-tab="chat" data-i18n="tab.chat">会话</button>
+      <button class="tab" data-tab="files" data-i18n="tab.files">文件</button>
     </nav>
   </div>
   <div class="nav-right status-bar" id="status-bar">
@@ -23,6 +24,10 @@
     <span id="backend-text" data-i18n="status.service">服务</span>
     <span class="status-dot" id="collectors-dot"></span>
     <span id="collectors-text" data-i18n="status.capture">采集</span>
+    <button id="file-status-btn" class="status-action" type="button" title="文件采集">
+      <span class="status-dot" id="file-dot"></span>
+      <span id="file-text" data-i18n="status.file">文件</span>
+    </button>
     <span class="status-dot" id="llm-dot"></span>
     <span id="llm-text" data-i18n="status.llm">LLM</span>
     <button id="config-open-btn" class="btn btn-icon" title="配置" data-i18n-title="action.settings">
@@ -70,6 +75,25 @@
         </div>
       </div>
 
+    </div>
+  </section>
+
+  <!-- ===== FILES TAB ===== -->
+  <section id="tab-files" class="tab-content">
+    <div class="file-page">
+      <div class="file-page-header">
+        <div>
+          <div class="file-title-row">
+            <h2 class="file-page-title" data-i18n="file.title">文件采集</h2>
+            <div id="file-tab-status"></div>
+          </div>
+          <p id="file-tab-subtitle" class="file-page-subtitle" data-i18n="file.subtitle">自动发现文件变更，生成摘要，并供 Agent 检索</p>
+        </div>
+        <button id="file-settings-btn" class="btn btn-outline" type="button" data-i18n="file.settings">采集设置</button>
+      </div>
+      <div id="file-content" class="file-content" aria-live="polite">
+        <div class="loading-placeholder" data-i18n="common.loading">加载中...</div>
+      </div>
     </div>
   </section>
 
@@ -200,6 +224,7 @@
 <script src="chat.js"></script>
 <script src="chat-drawer.js"></script>
 <script src="config.js"></script>
+<script src="files.js"></script>
 <script src="ui.js"></script>
 <script src="events.js"></script>
 <script src="init.js"></script>

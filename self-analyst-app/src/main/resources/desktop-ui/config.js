@@ -66,6 +66,35 @@ function currentEditorText() {
   return el ? el.value : "";
 }
 
+function focusConfigEditorKey(key) {
+  var editor = document.getElementById("config-raw-editor");
+  if (!editor || !key) return;
+  var index = editor.value.indexOf(key);
+  var selectedKey = key;
+  if (index < 0 && key.indexOf(".") > 0) {
+    var split = key.lastIndexOf(".");
+    var table = key.slice(0, split);
+    var leaf = key.slice(split + 1);
+    var marker = "[" + table + "]";
+    var tableIndex = editor.value.indexOf(marker);
+    if (tableIndex >= 0) {
+      var sectionStart = tableIndex + marker.length;
+      var nextSection = editor.value.indexOf("\n[", sectionStart);
+      var sectionEnd = nextSection >= 0 ? nextSection : editor.value.length;
+      var escapedLeaf = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      var match = new RegExp("(^|\\n)(\\s*)" + escapedLeaf + "\\s*=", "m")
+        .exec(editor.value.slice(sectionStart, sectionEnd));
+      if (match) {
+        index = sectionStart + match.index + match[1].length + match[2].length;
+        selectedKey = leaf;
+      }
+    }
+  }
+  if (index < 0) return;
+  editor.focus();
+  editor.setSelectionRange(index, index + selectedKey.length);
+}
+
 // Lightweight TOML line parser for the test buttons. Tracks the current `[table]`
 // header, skips blank/`#` lines, splits `key = value` on the first `=`, strips
 // surrounding quotes from keys and values, and composes `table.key` dotted names.

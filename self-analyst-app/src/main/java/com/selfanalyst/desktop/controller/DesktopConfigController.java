@@ -41,6 +41,13 @@ public class DesktopConfigController {
             "agent.compaction.enabled", "agent.compaction.triggerMessages",
             "agent.compaction.triggerTokens", "agent.compaction.keepMessages",
             "agent.compaction.keepTokens",
+            "file.watch.enabled", "file.watch.paths",
+            "file.watch.maxFileSizeKb", "file.watch.maxContentChars",
+            "file.watch.worker.intervalSeconds", "file.watch.debounceSeconds",
+            "file.watch.minReindexIntervalMinutes",
+            "file.watch.heartbeatThrottleSeconds", "file.watch.extensions",
+            "file.watch.excludeDirs", "file.watch.excludeGlobs",
+            "file.watch.semantic.enabled", "file.watch.semantic.index-dir",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key"
     );
 

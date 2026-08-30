@@ -31,6 +31,7 @@ class FileWatcherTest {
         PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
         watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1);
         watcher.start();
+        assertTrue(watcher.isRunning());
 
         Path file = tmp.resolve("hello.txt");
         Files.writeString(file, "content");
@@ -38,6 +39,9 @@ class FileWatcherTest {
         FileRecord rec = pollForPending(file.toAbsolutePath().toString(), 20_000);
         assertNotNull(rec, "file should be upserted PENDING after the debounce window");
         assertEquals(FileStatus.PENDING, rec.status());
+
+        watcher.shutdown();
+        assertFalse(watcher.isRunning());
     }
 
     @Test

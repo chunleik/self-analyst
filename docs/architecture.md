@@ -11,7 +11,7 @@ SelfAnalyst 通过窗口/AFK、可选屏幕内容、音频和文件数据构建�
 ```text
 self-analyst/
 ├── self-analyst-aw/           ActivityWatch-compatible API、窗口/AFK watcher、aw.db
-├── self-analyst-content/      无障碍树客户端、OCR、截图与内容合并
+├── self-analyst-content/      无障碍树客户端与可选 OCR/截图增强
 ├── self-analyst-axsidecar/    常驻 Rust 无障碍树进程（Windows UIAutomation）
 ├── self-analyst-audio/        mic/system 音频输入、VAD、本地 whisper/云端 ASR
 ├── self-analyst-wiki/         多级时间摘要、Embedding 客户端与 Lucene 索引
@@ -31,7 +31,7 @@ Maven 根 POM 聚合 6 个 Java 功能模块和集成测试模块组。`self-ana
 WindowWatcher ──────────────┐
 AfkWatcher ─────────────────┤
 Accessibility sidecar → UIA ┤
-截图 → OCR ─────────────────┤
+可选截图 → OCR ─────────────┤
 mic/system → VAD → ASR ─────┼→ AW HTTP heartbeat → aw.db
 FileWatcher ────────────────┘                         │
                                                       ├→ Summary/Advice
@@ -45,9 +45,9 @@ Desktop UI → /desktop/* → Desktop controllers → chat.db / AgentState / mem
 
 Windows 内容采集先把前台窗口句柄交给进程级共享的 `AxSidecarClient`。Rust 边车通过 JSONL 协议
 返回 OS 中性的无障碍树；`UiaTreeWalker` 在 Java 侧执行文本提取和密码字段脱敏。边车不存在、
-超时或失败时返回空树并降级到 OCR，不再启动 PowerShell one-shot 进程。
+超时或失败时返回空树；仅当用户显式启用 OCR 时才截图降级，不再启动 PowerShell one-shot 进程。
 
-OCR 默认裁剪窗口顶部标题条，并对稳定画面复用指纹缓存；具体刷新和隐私边界见
+OCR 默认关闭。启用后裁剪窗口顶部标题条，并对稳定画面复用指纹缓存；具体刷新和隐私边界见
 [specs/content.md](specs/content.md) 与 [specs/accessibility-sidecar.md](specs/accessibility-sidecar.md)。
 
 ### 音频采集
@@ -107,7 +107,7 @@ AW-compatible `/api/0`、`/0` 路由不使用桌面 token，但全部受回环�
 ## 构建与发布
 
 ```powershell
-# 下载 PaddleOCR、whisper.cpp 和模型
+# 按需下载 whisper.cpp；增加 -WithOcr 才下载 PaddleOCR
 .\scripts\download-tools.ps1
 
 # 构建 Java、桌面壳、accessibility sidecar 并组装 dist/
@@ -133,7 +133,9 @@ dist-portable/
 
 artifacts/
 ├── SelfAnalyst-portable-minimal.zip
-└── SelfAnalyst-portable.zip
+├── SelfAnalyst-portable.zip
+├── SelfAnalyst-portable-minimal-ocr.zip  # 仅 -WithOcr
+└── SelfAnalyst-portable-ocr.zip          # 仅 -WithOcr
 ```
 
 ## 技术栈
@@ -144,7 +146,7 @@ artifacts/
 | HTTP | Javalin / Jetty |
 | 数据 | SQLite、JDBC、WAL、FTS5、Lucene KNN |
 | 原生采集 | JNA、Rust `uiautomation`、WASAPI |
-| 内容 | PaddleOCR-json、Tess4J、PDFBox、Apache POI |
+| 内容 | Rust UIAutomation、可选 PaddleOCR-json/Tess4J、PDFBox、Apache POI |
 | 音频 | Java Sound、whisper.cpp、OpenAI-compatible ASR |
 | 桌面 | Tauri 2.x、WebView2、Deep Chat |
 | 配置 | TOML v1.0（tomlj） |

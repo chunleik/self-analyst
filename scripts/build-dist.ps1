@@ -1,5 +1,7 @@
-# SelfAnalyst dist build script
-param()
+# SelfAnalyst dist build script. OCR is optional and excluded unless -WithOcr is set.
+param(
+    [switch]$WithOcr
+)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -101,9 +103,15 @@ Copy-Item -LiteralPath (Join-Path $Root "self-analyst-app/target/self-analyst-ap
     -Destination (Join-Path $Dist "self-analyst-app.jar") -Force
 
 Remove-PathIfExists -Path (Join-Path $DistTools "PaddleOCR-json") -Parent $DistTools
-if (Test-Path -LiteralPath (Join-Path $Root "tools/PaddleOCR-json")) {
-    Copy-Item -Recurse -LiteralPath (Join-Path $Root "tools/PaddleOCR-json") -Destination $DistTools
-    Write-Host "  PaddleOCR copied"
+$paddleSource = Join-Path $Root "tools/PaddleOCR-json"
+if ($WithOcr) {
+    if (-not (Test-Path -LiteralPath $paddleSource)) {
+        throw "Missing tools/PaddleOCR-json. Run scripts/download-tools.ps1 -WithOcr first."
+    }
+    Copy-Item -Recurse -LiteralPath $paddleSource -Destination $DistTools
+    Write-Host "  Optional PaddleOCR copied"
+} else {
+    Write-Host "  Optional PaddleOCR omitted (default)" -ForegroundColor DarkGray
 }
 
 Remove-PathIfExists -Path (Join-Path $DistTools "whisper") -Parent $DistTools

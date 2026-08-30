@@ -18,14 +18,13 @@
 - Java 21+
 - Maven 3.x (仅从源码构建时需要)
 - Node.js 20+（从源码运行 `mvn test` 时需要；仅使用内置 test runner，无需 npm install）
-- 7-Zip (运行 `download-tools.ps1` 解压 PaddleOCR 时需要)
+- 7-Zip（仅下载可选 PaddleOCR 增强包时需要）
 - 桌面端额外需要：Rust stable、Node.js、MSVC + Windows SDK（详见下方“桌面端开发”）
 
 嵌入式 AW 模式下无需安装 Python 或 ActivityWatch，所有组件由 Java 实现。
 
-> **注意**：OCR / 音频转写依赖的二进制（PaddleOCR、whisper.cpp 及模型，约 700MB）
-> 不随仓库分发。clone 后请先运行 `download-tools.ps1` 拉取到 `tools/`，
-> 否则相关功能不可用、`build-dist.ps1` 也不会打包这些工具。
+> **注意**：核心版不依赖 OCR 或音频二进制。PaddleOCR 屏幕识别增强包和
+> whisper.cpp 音频转写工具均按需下载，默认发布包不包含 PaddleOCR。
 
 ## 快速开始
 
@@ -34,10 +33,7 @@
 export OPENAI_API_KEY=sk-your-key
 # 也可在首次启动后通过桌面配置编辑器写入用户级 config.toml
 
-# 首次构建前：下载外部工具（PaddleOCR + whisper.cpp + 模型，约 700MB）
-powershell -File scripts/download-tools.ps1
-
-# 构建完整 dist/
+# 构建核心 dist/（UIA 内容采集，不包含 PaddleOCR）
 powershell -File scripts/build-dist.ps1
 
 # 启动后台服务（在 http://localhost:5700 提供 REST API 与桌面页）
@@ -96,7 +92,7 @@ java -jar dist/self-analyst-app.jar
 | `aw.port` | — | `5700` | AW 服务端口；桌面壳与 Java 后端统一从 `config.toml` 获取，修改后需重启 |
 | `aw.data-dir` | `AW_DATA_DIR` | `./data/aw-data` | 活动数据存储目录（相对启动目录；可改为 `${user.home}/.self-analyst/aw-data`） |
 | `memory.dir` | `MEMORY_DIR` | `./data/memory` | 目标/模式/记忆存储目录（相对启动目录；可改为 `${user.home}/.self-analyst`） |
-| `aw.ocr.engine` | `AW_OCR_ENGINE` | `auto` | OCR 引擎：`auto`、`paddle`、`tesseract` |
+| `aw.ocr.engine` | `AW_OCR_ENGINE` | `off` | 可选屏幕 OCR：`off`、`auto`、`paddle`、`tesseract` |
 | `aw.audio.enabled` | `AW_AUDIO_ENABLED` | `false` | 音频采集总开关 |
 | `aw.audio.source` | `AW_AUDIO_SOURCE` | `mic` | `mic`、Windows `system` 或 `both` |
 | `aw.audio.engine` | `AW_AUDIO_ENGINE` | `auto` | `auto`、`local-whisper` 或 `cloud-asr`；`auto` 优先可用云端 ASR |
@@ -139,21 +135,28 @@ semantic.enabled = false
 
 ### 内容采集
 
-启动时自动开启三层窗口内容识别：
+窗口内容采集默认仅使用 UIA；OCR 是需要截图权限的可选增强：
 
 | 层 | 机制 | 说明 |
 |----|------|------|
-| 无障碍树 | 常驻 Rust accessibility sidecar（Windows UIAutomation） | 读取控件文本，失败时降级到 OCR |
-| OCR 兜底 | PaddleOCR-json / Tesseract | UIA 内容不足时截屏识别 |
-| 混合判断 | ThinDetector 启发式 | 自动决定是否需要 OCR |
+| 无障碍树 | 常驻 Rust accessibility sidecar（Windows UIAutomation） | 默认路径，读取可访问控件文本 |
+| OCR 增强（可选） | PaddleOCR-json / Tesseract | 显式启用后，仅在 UIA 内容不足时截屏识别 |
+| 混合判断 | ThinDetector 启发式 | OCR 启用时决定是否需要截图 |
 
 ```toml
 [aw.ocr]
-engine = "auto" # auto = PaddleOCR 优先，不可用时回退 Tesseract
+engine = "off" # 默认关闭，不截图
 ```
 
-PaddleOCR-json (v1.4.1) 不随仓库分发：运行 `scripts/download-tools.ps1`
-后会下载到 `tools/PaddleOCR-json/`（详见「快速开始」）。
+启用 PaddleOCR 增强时，先显式下载可选包并修改配置：
+
+```powershell
+powershell -File scripts/download-tools.ps1 -SkipWhisper -WithOcr
+```
+
+然后将 `engine` 设置为 `paddle` 或 `auto`。PaddleOCR-json v1.4.1 会下载到
+`tools/PaddleOCR-json/`；默认 `build-dist.ps1` 仍不会携带它，发布含 OCR 的包需传
+`-WithOcr`。
 
 ## Memory 系统
 
@@ -195,7 +198,7 @@ self-analyst/
 │   └── src/main/java/.../content/
 │       ├── ContentWatcher.java  三层内容采集器
 │       ├── uia/                 accessibility sidecar 客户端 + 文本提取
-│       ├── ocr/                 PaddleOCR + Tesseract 引擎
+│       ├── ocr/                 可选 PaddleOCR + Tesseract 引擎
 │       ├── thin/                ThinDetector 内容密度启发式
 │       └── capture/             截屏 + OCR + 混合合并
 │
@@ -220,7 +223,7 @@ self-analyst/
 │   └── src/main/java/.../file/
 │       ├── FileWatcher.java     NIO 监控 + 去抖 + heartbeat
 │       ├── FileIndexWorker.java 内容提取 → LLM 摘要 → 索引
-│       ├── extractor/           PDF/Office/图片 OCR/文本 提取器
+│       ├── extractor/           PDF/Office/文本与元数据提取器
 │       ├── semantic/            Lucene KNN 语义索引
 │       └── FileTools.java       Agent 文件检索工具
 │
@@ -290,15 +293,17 @@ powershell -File scripts/check-desktop-tray.ps1
 
 ### Windows 免安装版
 
-免安装版会将桌面程序、Java 后端、精简 Java 21 运行时和本地工具一起打包，
-目标机器无需另外安装 Java。首次构建前，先下载 PaddleOCR 和 whisper.cpp：
+免安装版会将桌面程序、Java 后端和精简 Java 21 运行时打包，目标机器无需另外安装 Java。
+核心精简版无需下载外部 OCR/音频工具：
 
 ```powershell
-powershell -File scripts/download-tools.ps1
-
-# 同时生成精简版和完整版（默认）
-.\scripts\build-portable.ps1
+# 核心版：无音频模型、无 PaddleOCR
+.\scripts\build-portable.ps1 -Variant minimal
 ```
+
+如需可选能力，先运行 `download-tools.ps1`（Whisper）或增加 `-WithOcr`（PaddleOCR），
+构建含 OCR 的包时同样向 `build-portable.ps1` 传入 `-WithOcr`。带 OCR 的 ZIP 文件名包含
+`-ocr` 后缀。
 
 也可以只生成指定版本：
 
@@ -317,10 +322,11 @@ powershell -File scripts/download-tools.ps1
 
 - `artifacts/SelfAnalyst-portable-minimal.zip`：精简版，不含 Whisper 语音模型
 - `artifacts/SelfAnalyst-portable.zip`：完整版，包含 Whisper 语音模型
+- `artifacts/SelfAnalyst-portable-minimal-ocr.zip` / `SelfAnalyst-portable-ocr.zip`：显式 `-WithOcr` 构建的可选 OCR 版本
 - `dist-portable/`：当前打包内容的未压缩目录
 
 使用时解压整个 ZIP，然后运行 `SelfAnalyst.exe`。不要只复制 EXE；同目录下的
-`self-analyst-app.jar`、`runtime/` 和 `tools/` 都是运行所需内容。应用数据保存在
+`self-analyst-app.jar` 和 `runtime/` 是运行所需内容，`tools/` 仅承载已选的可选能力。应用数据保存在
 解压目录下的 `data/` 中，因此移动或覆盖目录前请先备份该目录。
 
 > 免安装包不内置 WebView2 Runtime，目标 Windows 系统需要已经安装 WebView2。
@@ -378,8 +384,8 @@ java -jar self-analyst-app/target/self-analyst-app-1.0.0.jar
 - SQLite + JDBC — 活动数据存储
 - JNA — 原生窗口/AFK、截屏与 Windows 音频输入
 - Rust `uiautomation` — 常驻 accessibility sidecar 的 Windows UIAutomation 客户端
-- PaddleOCR-json — 中文 OCR 识别引擎
-- Tess4J — Tesseract OCR 引擎 (回退方案)
+- PaddleOCR-json — 可选中文屏幕 OCR 识别引擎
+- Tess4J — 可选 Tesseract 屏幕 OCR 回退引擎
 - whisper.cpp / OpenAI-compatible ASR — 本地或云端语音转文字
 - Tauri 2.x — 桌面应用壳 (WebView2 + 系统托盘)
 - Jackson — JSON 序列化

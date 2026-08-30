@@ -65,13 +65,13 @@ PowerShell 入口，并保留 Java 侧文本提取与 Thin/OCR 合并逻辑。
 - 把单次 UIA 查询延迟从 1–3 秒降到**常驻态典型 < 100ms**。
 - 建立 OS 中性契约，使**接入 macOS 无需改动 Java 业务逻辑**——只增加一个同语言二进制。
 - **行为不回归**：对相同窗口，最终 `textContent` 输出与现状一致（`SPEC-UIA-005/006` 语义保留）。
-- 保持降级语义：边车任何失败 → 查询返回 `null` → `ContentWatcher` 退化为纯 OCR（`SPEC-WCH-003`/`SPEC-NFR-102` 不变）。
+- 保持降级语义：边车任何失败 → 查询返回 `null`；可选 OCR 已启用时由 `ContentWatcher` 退化为 OCR，否则保留空 UIA 结果（`SPEC-WCH-003`/`SPEC-NFR-102`）。
 - 顺手修正 `PlatformCapture` 的 `HWND` 泄漏。
 
 ### 4.2 非目标
 
 - **不实现 macOS 边车**本身（§7 仅为设计预留；其落地是后续独立工程）。
-- 不改动 OCR（`SPEC-OCR-*`）、Thin 检测（`SPEC-THN-*`）、混合合并（`SPEC-HYB-*`）逻辑。
+- 不改动已启用 OCR 时的识别（`SPEC-OCR-*`）、Thin 检测（`SPEC-THN-*`）、混合合并（`SPEC-HYB-*`）逻辑。
 - 不改动 heartbeat / `ContentEvent` 对外契约。
 - 不实现流式 / 增量树更新；仍是「一次请求一棵完整树」。
 - 不保留 PowerShell 实现作为运行时回退（`SPEC-UIA-001` 删除；失败即降级为无 UIA，与现状 COM 失败降级一致）。
@@ -199,7 +199,7 @@ Unknown
 
 ### SPEC-AXS-023：降级容错
 
-- 下列任一情况，`query(handle)` 返回 `null`，由 `ContentWatcher` 退化为纯 OCR：二进制缺失 / 启动失败 / 崩溃 / 超时 / 响应解析失败 / `status != ok`。
+- 下列任一情况，`query(handle)` 返回 `null`；只有显式启用 OCR 时，`ContentWatcher` 才退化为 OCR：二进制缺失 / 启动失败 / 崩溃 / 超时 / 响应解析失败 / `status != ok`。
 - 等价保留 `SPEC-WCH-003`、`SPEC-NFR-102`。
 
 ### SPEC-AXS-030：Java 客户端
@@ -227,7 +227,8 @@ Unknown
 | system property `content.axsidecar.timeout-ms` | `1500` | 单次查询超时；超时后终止当前边车并在下次查询重启 |
 
 未指定路径时，Java 先尝试从 classpath `/axsidecar/<binary>` 释放到临时文件，再尝试开发目录
-`self-analyst-axsidecar/target/release/`；均不存在时 UIA 返回空并降级 OCR。当前没有
+`self-analyst-axsidecar/target/release/`；均不存在时 UIA 返回空，可选 OCR 是否接管由
+`aw.ocr.engine` 决定。当前没有
 `content.axsidecar.enabled` 配置键；禁用全部内容采集使用 `aw.collection.content=false`。
 
 ---
@@ -272,7 +273,7 @@ Unknown
 |------|------|
 | 边车进程被杀 | 下次查询自动重启并成功，或降级返回 `null` |
 | 查询超时 | 在 `timeout-ms` 内返回 `null`，边车被重启 |
-| 二进制缺失 | `query` 返回 `null`，`ContentWatcher` 走纯 OCR |
+| 二进制缺失 | `query` 返回 `null`；OCR 启用时走 OCR，否则保持 UIA-only 降级 |
 | JVM 退出 | 无残留边车进程 |
 
 ### SPEC-AXS-T05：行为等价
@@ -288,7 +289,7 @@ Unknown
 ### SPEC-AXS-060：边车构建产物
 
 - 新增 `self-analyst-axsidecar`（Cargo 项目）。`scripts/` 构建脚本编译当前 OS 的边车二进制并随包分发；运行时按 OS 选择。
-- 二进制随 `self-analyst-content` 资源打包，运行时释放到临时目录或安装目录（沿用 `.ps1` / PaddleOCR-json 的释放套路）。
+- 二进制随 `self-analyst-content` 资源打包，运行时释放到临时目录或安装目录；该边车始终属于核心内容采集，不依赖可选 PaddleOCR 包。
 
 ### SPEC-AXS-061：模块接线
 

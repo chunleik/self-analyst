@@ -10,17 +10,17 @@
 #     SelfAnalyst.exe            Tauri shell (launches the backend)
 #     self-analyst-app.jar       backend fat jar (embedded AW + agent + UI)
 #     runtime/                   jlink'd minimal JRE (java.exe under runtime/bin)
-#     tools/PaddleOCR-json/      OCR engine
+#     tools/PaddleOCR-json/      optional OCR engine (only with -WithOcr)
 #     tools/whisper/             whisper.cpp + ggml-small.bin (audio, off by default)
 #     data/                      created on first run (aw-data, memory, ...)
 #
-# Prereqs: JDK 21 (jlink), Maven, Rust/cargo, and `scripts/download-tools.ps1`
-# already run so tools/ is populated.
+# Prereqs: JDK 21 (jlink), Maven, Rust/cargo, and any selected optional tools.
 
 param(
     [switch]$SkipBuild,   # reuse existing jar/exe instead of rebuilding
     [switch]$NoZip,       # leave the folder, don't produce the .zip
-    # Which package(s) to emit. The heavy work (mvn/cargo/jlink/PaddleOCR) runs
+    [switch]$WithOcr,     # include the optional PaddleOCR pack
+    # Which package(s) to emit. The heavy work (mvn/cargo/jlink) runs
     # once; the variants differ only by whether the whisper audio model is bundled.
     #   both    -> SelfAnalyst-portable-minimal.zip (no audio) + SelfAnalyst-portable.zip (full)
     #   minimal -> minimal only;  full -> full only
@@ -106,11 +106,14 @@ $DistTools = Join-Path $Dist "tools"
 New-Item -ItemType Directory -Force -Path $DistTools | Out-Null
 
 $paddleSrc = Join-Path $Root "tools/PaddleOCR-json"
-if (Test-Path -LiteralPath $paddleSrc) {
+if ($WithOcr) {
+    if (-not (Test-Path -LiteralPath $paddleSrc)) {
+        throw "Missing tools/PaddleOCR-json. Run scripts/download-tools.ps1 -WithOcr first."
+    }
     Copy-Item -Recurse -LiteralPath $paddleSrc -Destination $DistTools
-    Write-Host "  PaddleOCR-json staged"
+    Write-Host "  Optional PaddleOCR-json staged"
 } else {
-    Write-Warning "  tools/PaddleOCR-json missing — run scripts/download-tools.ps1 first (OCR will be unavailable)."
+    Write-Host "  Optional PaddleOCR-json omitted (default)" -ForegroundColor DarkGray
 }
 
 # whisper is staged later (step 6) only for the full variant, so the minimal
@@ -140,6 +143,7 @@ $hasWhisper  = Test-Path -LiteralPath $whisperSrc
 
 $wantMinimal = $Variant -in @('both', 'minimal')
 $wantFull    = $Variant -in @('both', 'full')
+$OcrSuffix   = if ($WithOcr) { "-ocr" } else { "" }
 if ($wantFull -and -not $hasWhisper) {
     Write-Warning "tools/whisper missing — cannot build the full (audio) variant."
     Write-Warning "Run scripts/download-tools.ps1 (without -SkipWhisper) first."
@@ -177,13 +181,13 @@ Remove-Item -Recurse -Force -LiteralPath $distWhisper -ErrorAction SilentlyConti
 if ($wantMinimal) {
     Write-Host "--- minimal variant (no audio model) ---" -ForegroundColor Green
     Show-Sizes
-    New-Zip "SelfAnalyst-portable-minimal.zip"
+    New-Zip "SelfAnalyst-portable-minimal$OcrSuffix.zip"
 }
 if ($wantFull) {
     Copy-Item -Recurse -LiteralPath $whisperSrc -Destination $DistTools
     Write-Host "--- full variant (with whisper) ---" -ForegroundColor Green
     Show-Sizes
-    New-Zip "SelfAnalyst-portable.zip"
+    New-Zip "SelfAnalyst-portable$OcrSuffix.zip"
 }
 
 if (Test-Path -LiteralPath $distWhisper) {

@@ -57,7 +57,8 @@ SelfAnalyst 是在本机运行的个人活动分析工具。它可能接触窗�
 
 - 窗口活动记录包含进程名和窗口标题，不记录键盘输入。
 - UIA 通过本地 Rust accessibility sidecar 读取可访问性树；密码字段以安全标记处理并脱敏。
-- OCR 默认只识别窗口顶部 `ocr.title-strip-height=80` 像素；设为 `0` 会扩大到完整窗口。
+- 屏幕 OCR 默认关闭（`aw.ocr.engine=off`），此时内容采集不会为 OCR 截图。
+- 显式启用 OCR 后，默认只识别窗口顶部 `ocr.title-strip-height=80` 像素；设为 `0` 会扩大到完整窗口。
 - OCR 调试样本默认关闭；启用 `ocr.sample.enabled` 后会在本地保留截图，可能包含敏感正文。
 - `ocr.excluded.apps` 可按进程名排除不应采集的应用。
 - 音频可来自麦克风、Windows 系统回放或两者；总开关默认关闭。
@@ -83,6 +84,9 @@ enabled = false
 
 [websearch]
 enabled = false
+
+[aw.ocr]
+engine = "off"
 
 [ocr.sample]
 enabled = false

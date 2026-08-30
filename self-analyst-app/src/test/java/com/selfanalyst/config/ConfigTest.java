@@ -27,6 +27,7 @@ class ConfigTest {
         assertEquals("false", props.getProperty("wiki.enabled"));
         assertEquals("false", props.getProperty("embedding.enabled"));
         assertEquals("false", props.getProperty("websearch.enabled"));
+        assertEquals("off", props.getProperty("aw.ocr.engine"));
         assertEquals("false", props.getProperty("ocr.sample.enabled"));
         assertEquals("1500", props.getProperty("ocr.stable-capture-interval-ms"));
         assertEquals("60000", props.getProperty("ocr.force-refresh-ms"));
@@ -39,7 +40,36 @@ class ConfigTest {
     void testDefaultsDisableCompaction(@TempDir Path dir) {
         Config c = Config.testDefaults(dir);
         assertFalse(c.agentCompactionEnabled(), "unit tests opt in to compaction explicitly");
+        assertEquals("off", c.ocrEngine());
         assertFalse(c.ocrSampleEnabled(), "OCR debug samples must be opt-in");
+    }
+
+    @Test
+    void loadsAndNormalizesOptionalOcrEngine(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [aw.ocr]
+                engine = "PADDLE"
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> assertEquals("paddle", Config.load().ocrEngine()));
+
+        Files.writeString(dir.resolve("config.toml"), """
+                [aw.ocr]
+                engine = "unsupported"
+                """, StandardCharsets.UTF_8);
+
+        withMemoryDir(dir, () -> assertEquals("off", Config.load().ocrEngine()));
+    }
+
+    @Test
+    void systemPropertyCanExplicitlyEnableOcr(@TempDir Path dir) throws Exception {
+        String previous = System.getProperty("aw.ocr.engine");
+        System.setProperty("aw.ocr.engine", "tesseract");
+        try {
+            withMemoryDir(dir, () -> assertEquals("tesseract", Config.load().ocrEngine()));
+        } finally {
+            restoreSystemProperty("aw.ocr.engine", previous);
+        }
     }
 
     @Test

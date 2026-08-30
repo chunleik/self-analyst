@@ -22,7 +22,7 @@
 
 - 复用 wiki 模块的 `EmbeddingClient` 接口；LLM client / EmbeddingClient 由 app 层注入
 - 新增 `org.apache.pdfbox:pdfbox`（PDF）、`org.apache.poi:poi-ooxml`（Office）
-- 复用父 BOM 的 `tess4j`（图片 OCR）、`lucene-*`（向量索引）、`sqlite-jdbc`、`jackson`
+- 复用父 BOM 的 `lucene-*`（向量索引）、`sqlite-jdbc`、`jackson`
 - **不依赖** `self-analyst-aw`：时间轴 heartbeat 走 HTTP（与 content/audio 一致），非 `EventStore` 直连
 - **SPEC-FILE-001a**：`poi-ooxml` 传递引入 `log4j-api`（POI 用 log4j2 API）。本仓库日志栈为 slf4j+logback；仅 `log4j-api`（无 `log4j-core`）不冲突，POI 日志默认 no-op，需要并入 logback 时可加 `log4j-to-slf4j` 桥接（可选）
 
@@ -147,12 +147,12 @@ ENTRY_DELETE → markDeleted(path)  // status=DELETED，不摘要
 | `SourceCodeExtractor` | .java/.py/.js/.ts/.go/.rs/.kt… | JDK |
 | `PdfExtractor` | .pdf | Apache PDFBox |
 | `OfficeExtractor` | .docx/.xlsx/.pptx | Apache POI |
-| `ImageExtractor` | .png/.jpg… | Tess4j |
 | `MetadataOnlyExtractor` | 二进制兜底 | — |
 
 - **SPEC-FILE-014a**：`OfficeExtractor` 仅现代 OOXML，用 `org.apache.poi.extractor.ExtractorFactory.createExtractor(File).getText()` 统一识别三格式，try-with-resources 关闭（POI 5.x 中 `ExtractorFactory` 位于 `org.apache.poi.extractor` 包，由 `poi-ooxml` 提供）
 - **SPEC-FILE-014b**：不支持旧二进制 .doc/.xls/.ppt
 - **SPEC-FILE-014c**：合法大文件被 POI zip-bomb 检测误伤时，可在 `OfficeExtractor` 静态初始化调 `ZipSecureFile.setMinInflateRatio(...)` 放宽
+- **SPEC-FILE-014d**：文件索引不执行图片 OCR；.png/.jpg 等图片与其他二进制文件统一落到 `MetadataOnlyExtractor`
 
 ### SPEC-FILE-018: OfficeExtractor 详细规格
 
@@ -224,7 +224,7 @@ file.watch.worker.intervalSeconds=60
 file.watch.debounceSeconds=5              # 文件静默≥此值才入队（去抖）
 file.watch.minReindexIntervalMinutes=5   # 同一文件两次摘要的最小间隔
 file.watch.heartbeatThrottleSeconds=5    # 同一文件 heartbeat 最小发送间隔
-file.watch.extensions=            # 空=全部可提取类型
+file.watch.extensions=            # 空=不限制扩展名；不支持正文提取的文件仅记录元数据
 file.watch.excludeDirs=
 file.watch.excludeGlobs=
 file.watch.semantic.enabled=true
@@ -241,7 +241,7 @@ FileSummarizer → FileIndexWorker → FileWatcher → FileTools；`SelfAnalystA
 
 | 测试 | 预期 |
 |------|------|
-| `FileContentExtractorFactory` | .docx/.xlsx/.pptx → `OfficeExtractor`；.doc/.xls/.ppt → `MetadataOnlyExtractor` |
+| `FileContentExtractorFactory` | .docx/.xlsx/.pptx → `OfficeExtractor`；旧版 Office 与图片 → `MetadataOnlyExtractor` |
 | `OfficeExtractor` .docx | POI 程序化生成含已知段落+表格的 .docx，提取出对应文字 |
 | `OfficeExtractor` .xlsx | 生成含已知单元格（多 sheet）的 .xlsx，提取出对应文字 |
 | `OfficeExtractor` .pptx | 生成含已知幻灯片文本的 .pptx，提取出对应文字 |

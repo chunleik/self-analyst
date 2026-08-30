@@ -29,10 +29,10 @@
 
 | 脚本 | 用途 |
 |------|------|
-| `download-tools.ps1` | 下载 PaddleOCR-json、whisper.cpp 和模型 |
+| `download-tools.ps1` | 默认下载 whisper.cpp 和模型；传 `-WithOcr` 才下载可选 PaddleOCR-json |
 | `build-axsidecar.ps1` | 构建 Rust accessibility sidecar 并暂存到 Java 资源目录 |
-| `build-dist.ps1` | 构建 Java、桌面壳、sidecar，并组装 `dist/` |
-| `build-portable.ps1` | 生成 minimal/full Windows 免安装 ZIP 到 `artifacts/` |
+| `build-dist.ps1` | 构建 Java、桌面壳、sidecar，并组装默认无 OCR 的 `dist/`；`-WithOcr` 显式携带 OCR |
+| `build-portable.ps1` | 生成默认无 OCR 的 minimal/full Windows 免安装 ZIP；`-WithOcr` 生成带 `-ocr` 后缀的包 |
 
 ## 验收检查
 

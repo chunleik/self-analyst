@@ -29,7 +29,7 @@
 | 1. 应用/标题排除 | `ThinDetector.isExcluded` / `isTitleExcluded` | 命中排除列表或密码标题 | 无心跳（跳过） |
 | 2. UIA 树 | Windows UIAutomation COM | 始终执行（未排除） | `source: "uia"` |
 | 3. UIA Document 标题 | `ThinDetector.extractDocumentTitle` | thin 且 UIA Document.Name 非空 | `source: "uia"` |
-| 4. OCR 标题条 | PaddleOCR/Tesseract，仅截取顶部 N 像素 | thin 且第3层未命中 | `source: "ocr"/"hybrid"` |
+| 4. OCR 标题条（可选） | PaddleOCR/Tesseract，仅截取顶部 N 像素 | `aw.ocr.engine != off`、thin 且第3层未命中 | `source: "ocr"/"hybrid"` |
 
 ### SPEC-CTX-003: 模块边界
 
@@ -200,9 +200,10 @@ public interface OcrEngine {
 - **SPEC-OCR-001c**: 图片为 null 或尺寸为 0 时返回 `""`
 - **SPEC-OCR-001d**: `isAvailable()` 返回引擎是否可用，不可用时 `recognize()` 直接返回 `""`
 
-### SPEC-OCR-002: PaddleOcrEngine (默认首选)
+### SPEC-OCR-002: PaddleOcrEngine（可选）
 
 - 使用 PaddleOCR-json v1.4.1 独立可执行文件 (`tools/PaddleOCR-json/PaddleOCR-json.exe`)
+- 不进入默认分发包；只有构建命令显式传入 `-WithOcr` 时才随包分发
 - 通过 `ProcessBuilder` 启动常驻子进程，并使用 stdin/stdout 管道调用
   - 输入：包含临时 PNG 绝对路径的单行 JSON (`{"image_path":"..."}`)
   - 输出：JSON 格式识别结果 (`{"code":100,"data":[{"text":"...","box":[...], "score":0.98}]}`)
@@ -224,11 +225,12 @@ public interface OcrEngine {
 ### SPEC-OCR-004: OCR 引擎选择
 
 - 通过系统属性 `aw.ocr.engine` 或环境变量 `AW_OCR_ENGINE` 配置
-- 支持值: `auto`（默认）、`paddle`、`tesseract`
+- 支持值: `off`（默认）、`auto`、`paddle`、`tesseract`
+- `off`: 不创建 OCR 引擎，不执行用于 OCR 的窗口截图，仅保留 UIA 内容采集
 - `auto`: PaddleOCR 存在则用，否则回退 Tesseract
-- `paddle`: 强制 PaddleOCR，不存在时报错
+- `paddle`: 强制 PaddleOCR，不存在时记录警告并继续使用 UIA
 - `tesseract`: 强制 Tesseract
-- 所有引擎都不可用时使用空引擎（`image -> ""`）
+- 所有引擎都不可用时等价于 `off`，不得用“可用但总返回空串”的伪引擎触发无效截图
 
 ---
 
@@ -345,7 +347,7 @@ public class HybridMerger {
 - 前台窗口句柄、应用名和标题按 `aw.collection.content.pollMs` 轮询，默认 500ms
 - 句柄、应用名和标题必须从同一个前台 HWND 快照解析，禁止分次读取不同前台窗口
 - 窗口句柄、应用名或标题发生变化时，必须立即执行一次 `capture()`
-- 稳定窗口按 `ocr.stable-capture-interval-ms` 重新截图，默认 1500ms
+- 稳定窗口按 `ocr.stable-capture-interval-ms` 重新采集，默认 1500ms；只有 OCR 启用且 thin 时才截图
 - `Weixin.exe`/`WeChat.exe` 在 HWND 与 Win32 标题不变时仍可能切换会话，因此每次稳定窗口
   捕获都必须重新遍历 UIA，不得复用上一会话的 UIA 文本；刷新失败时省略
   `context_title`，不得回退到旧会话标题
@@ -369,10 +371,12 @@ public class HybridMerger {
 8. IF thin:
    a. ThinDetector.extractDocumentTitle(tree) → docTitle?
       → 非 null: textContent = docTitle, source = "uia"（无截图）
-   b. ELSE: ScreenCapturer.captureWindow(hwnd) → 截图顶部 N px (SPEC-OCR-005)
+   b. ELSE IF OCR 已启用:
+            ScreenCapturer.captureWindow(hwnd) → 截图顶部 N px (SPEC-OCR-005)
             OcrEngine.recognize(cropped) → OCR 文本
             HybridMerger.merge(uiaText, ocrText) → 最终文本
             source = "ocr" | "hybrid"
+   c. ELSE: textContent = uiaText, source = "uia"（无截图）
    ELSE:
    textContent = uiaText, source = "uia"
 9. ContentEvent 构造；contextTitle 非空时写入 context_title
@@ -385,7 +389,7 @@ public class HybridMerger {
 
 ### SPEC-WCH-003: 错误处理
 
-- UIA 树遍历异常：返回空 UIA 文本，标记 source 为 "ocr"
+- UIA 树遍历异常：返回空 UIA 文本；OCR 已启用时尝试 OCR，否则保留空 UIA 结果
 - OCR 异常：使用 UIA 文本，标记 source 为 "uia"
 - 两者都异常：跳过本次采集
 - 不得因单次采集失败而终止循环
@@ -444,6 +448,9 @@ public class HybridMerger {
 
 - `self-analyst-app` 的 pom.xml 添加对 `self-analyst-content` 的依赖（可选，当前通过 HTTP 通信）
 - `AppSession` 中可选用 `ContentWatcher` 启动内容采集
+- `AppSession` 必须把 `Config.ocrEngine()` 传入 `aw.ocr.engine` 运行时属性，保证用户配置真实生效
+- 默认 `build-dist.ps1` / `build-portable.ps1` 不复制 PaddleOCR；仅 `-WithOcr` 显式打包
+- `download-tools.ps1` 仅在传入 `-WithOcr` 时下载 PaddleOCR
 
 ---
 
@@ -459,7 +466,8 @@ public class HybridMerger {
 
 ### SPEC-OCR-005: 隐私标题条策略（Privacy Title Strip）
 
-OCR 截图**必须**仅对窗口顶部 N 像素（`ocr.title-strip-height`，默认 80）进行识别：
+OCR 默认关闭。显式启用后，截图**必须**仅对窗口顶部 N 像素
+（`ocr.title-strip-height`，默认 80）进行识别：
 
 - 仅捕获应用标题栏/选项卡行，不捕获正文内容
 - 默认不保存截图；常规内容存储仅接收识别后的标题条文本
@@ -500,8 +508,9 @@ trimBlackBorders(image)
 
 ### SPEC-NFR-102: 降级容错
 
+- `aw.ocr.engine=off`：不创建 OCR 引擎、不为 OCR 截图，只使用 UIA
 - Tesseract 未安装：跳过 OCR，只使用 UIA
-- UIA COM 调用失败：降级为纯 OCR
+- UIA COM 调用失败：仅在 OCR 已启用且可用时降级为纯 OCR
 - 两者都不可用：模块静默跳过，不抛异常
 
 ---
@@ -513,7 +522,7 @@ trimBlackBorders(image)
 | SPEC-CTX-001..003 | ContentWatcher.java | — |
 | SPEC-MDL-100..101 | ContentEvent.java, UiaNode.java | — |
 | SPEC-UIA-001..007 | UiaCom.java, UiaTreeWalker.java, ContextTitleExtractor.java | UiaTreeWalkerTest, ContextTitleExtractorTest |
-| SPEC-OCR-001..007 | OcrEngine.java, TesseractOcrEngine.java, ContentCapture.java, OcrSampleStore.java | ContentCaptureTest, OcrSampleStoreTest |
+| SPEC-OCR-001..007 | OcrEngine.java, WindowsCapture.java, TesseractOcrEngine.java, ContentCapture.java, OcrSampleStore.java | WindowsCaptureTest, ContentCaptureTest, OcrSampleStoreTest |
 | SPEC-CAP-001 | ScreenCapturer.java | — |
 | SPEC-THN-001..007 | ThinDetector.java | ThinDetectorTest |
 | SPEC-HYB-001 | HybridMerger.java | HybridMergerTest |

@@ -103,6 +103,7 @@ class DesktopConfigControllerTest {
         assertEquals("false", defaults.get("wiki.enabled"));
         assertEquals("false", defaults.get("embedding.enabled"));
         assertEquals("false", defaults.get("websearch.enabled"));
+        assertEquals("off", defaults.get("aw.ocr.engine"));
         assertTrue(defaults.containsKey("memory.dir"));
         assertTrue(defaults.containsKey("aw.base-url"));
         assertTrue(defaults.containsKey("wiki.prompt.maxContentChars"));
@@ -120,6 +121,25 @@ class DesktopConfigControllerTest {
         Map<String, Object> payload = controller(dir, store).configPayload();
 
         assertFalse(payload.containsKey("headroom"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void configPayloadReportsOcrOverrideAndRestartMetadata(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("""
+                [aw.ocr]
+                engine = "paddle"
+                """);
+
+        Map<String, Object> payload = controller(dir, store).configPayload();
+        Map<String, Object> collection = (Map<String, Object>) payload.get("collection");
+        Map<String, Object> ocr = (Map<String, Object>) collection.get("ocrEngine");
+
+        assertEquals("paddle", ocr.get("effectiveValue"));
+        assertEquals("paddle", ocr.get("savedValue"));
+        assertEquals("user_config", ocr.get("source"));
+        assertEquals(true, ocr.get("restartRequiredOnChange"));
     }
 
     @Test
@@ -220,6 +240,12 @@ class DesktopConfigControllerTest {
                 triggerMessages = 24
                 """);
         assertTrue(r3.restartRequired().contains("agent.compaction.triggerMessages"));
+
+        var r4 = ctrl.applyRawSave("""
+                [aw.ocr]
+                engine = "paddle"
+                """);
+        assertTrue(r4.restartRequired().contains("aw.ocr.engine"));
     }
 
     @Test

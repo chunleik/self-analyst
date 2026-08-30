@@ -310,7 +310,7 @@ fn start_java(app: AppHandle) {
     let mut child = Command::new(java)
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
         // Run with CWD = exe dir so the backend resolves its relative paths
-        // (tools/PaddleOCR-json, tools/whisper, ./data, ./config) next to the exe.
+        // (optional tools/PaddleOCR-json, tools/whisper, ./data, ./config) next to the exe.
         .current_dir(&exe_dir)
         .env("SELF_ANALYST_DESKTOP_TOKEN", &token)
         .env("SELF_ANALYST_DESKTOP_PORT_FILE", &port_file)

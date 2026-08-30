@@ -36,6 +36,14 @@ class FileContentExtractorFactoryTest {
     }
 
     @Test
+    void imagesFallBackToMetadataWithoutOcr() {
+        assertInstanceOf(MetadataOnlyExtractor.class, factory.forExtension("png"));
+        assertInstanceOf(MetadataOnlyExtractor.class, factory.forExtension("JPEG"));
+        assertFalse(factory.isExtractable("png"));
+        assertFalse(factory.supported().containsKey("image"));
+    }
+
+    @Test
     void extensionCaseInsensitive() {
         assertInstanceOf(OfficeExtractor.class, factory.forExtension("DOCX"));
     }

@@ -73,7 +73,7 @@ public final class SupportedKeys {
         put("aw.collection.afk", "true", KeyType.BOOLEAN);
         put("aw.collection.content", "true", KeyType.BOOLEAN);
         put("aw.collection.content.pollMs", "500", KeyType.INTEGER);
-        put("aw.ocr.engine", "auto", KeyType.STRING);
+        put("aw.ocr.engine", "off", KeyType.STRING);
         put("aw.audio.enabled", "false", KeyType.BOOLEAN);
         put("aw.audio.whisperPath", "tools/whisper", KeyType.STRING);
         put("aw.audio.vadThreshold", "0.0001", KeyType.FLOAT);
@@ -160,7 +160,7 @@ public final class SupportedKeys {
         describe("aw.collection.afk", "是否采集用户离开/活跃状态。", "Whether to collect user AFK/active status.");
         describe("aw.collection.content", "是否采集窗口内容用于本地分析。", "Whether to collect window content for local analysis.");
         describe("aw.collection.content.pollMs", "前台窗口元数据检查与内容心跳间隔（毫秒）。", "Interval for foreground-window metadata checks and content heartbeats, in milliseconds.");
-        describe("aw.ocr.engine", "OCR 引擎：auto 或受支持的具体引擎名称。", "OCR engine: auto or a specific supported engine name.");
+        describe("aw.ocr.engine", "可选屏幕 OCR：off、auto、paddle 或 tesseract；默认 off。", "Optional screen OCR: off, auto, paddle, or tesseract; defaults to off.");
         describe("aw.audio.enabled", "是否启用音频采集与转写。", "Whether to enable audio capture and transcription.");
         describe("aw.audio.whisperPath", "本地 Whisper 可执行文件或目录路径。", "Path to the local Whisper executable or directory.");
         describe("aw.audio.vadThreshold", "语音活动检测阈值（0–1）。", "Voice-activity detection threshold (0–1).");

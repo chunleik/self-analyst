@@ -40,6 +40,7 @@ public record Config(
         int embeddingDimensions,
         boolean embeddingSendEncodingFormat,
         int contentPollIntervalMs,
+        String ocrEngine,
         boolean ocrSampleEnabled,
         Path ocrSampleDir,
         String ocrExcludedApps,
@@ -192,6 +193,14 @@ public record Config(
             contentPollIntervalMs = 500;
         }
 
+        String configuredOcrEngine = System.getProperty("aw.ocr.engine");
+        if (configuredOcrEngine == null || configuredOcrEngine.isBlank()) {
+            configuredOcrEngine = envOrProp(
+                    props, "aw.ocr.engine", "AW_OCR_ENGINE", "off");
+        }
+        String ocrEngine = normalizeChoice(
+                configuredOcrEngine,
+                "off", "off", "auto", "paddle", "tesseract");
         boolean ocrSampleEnabled = Boolean.parseBoolean(
                 envOrProp(props, "ocr.sample.enabled", "OCR_SAMPLE_ENABLED", "false"));
         String ocrSampleDirStr = envOrProp(props, "ocr.sample.dir", "OCR_SAMPLE_DIR", "");
@@ -362,7 +371,8 @@ public record Config(
                 wikiSemanticEnabled, wikiSemanticIndexDir, wikiSemanticTopK,
                 embeddingEnabled, embeddingBaseUrl, embeddingApiKey,
                 embeddingModel, embeddingDimensions,
-                embeddingSendEncodingFormat, contentPollIntervalMs, ocrSampleEnabled, ocrSampleDir,
+                embeddingSendEncodingFormat, contentPollIntervalMs, ocrEngine,
+                ocrSampleEnabled, ocrSampleDir,
                 ocrExcludedApps, ocrTitleStripHeight,
                 ocrStableCaptureIntervalMs, ocrForceRefreshMs,
                 webSearchEnabled, webSearchMcpUrl, webSearchApiKey,
@@ -409,7 +419,7 @@ public record Config(
                 false, false, 60, 12000, 10,
                 false, baseDir.resolve("wiki-semantic-index"), 8,
                 false, "", "", "", 1024, true, 500,
-                false, baseDir.resolve("ocr-samples"), "", 80, 1500, 60000,
+                "off", false, baseDir.resolve("ocr-samples"), "", 80, 1500, 60000,
                 false, "https://search.parallel.ai/mcp", "",
                 0.7, false, false, false, false,
                 Path.of("tools/whisper"), 0.0001,

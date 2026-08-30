@@ -53,11 +53,6 @@
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-analysis-common</artifactId>
         </dependency>
-        <!-- Image OCR (SPEC-FILE-014 ImageExtractor) -->
-        <dependency>
-            <groupId>net.sourceforge.tess4j</groupId>
-            <artifactId>tess4j</artifactId>
-        </dependency>
         <!-- PDF (SPEC-FILE-014 PdfExtractor) -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>

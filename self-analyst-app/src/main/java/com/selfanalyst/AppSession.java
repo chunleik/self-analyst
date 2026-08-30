@@ -255,6 +255,7 @@ public class AppSession implements AutoCloseable {
             }
             watcherManager.startAll();
             try {
+                System.setProperty("aw.ocr.engine", config.ocrEngine());
                 System.setProperty("ocr.sample.enabled",
                         String.valueOf(config.ocrSampleEnabled()));
                 System.setProperty("ocr.sample.dir",
@@ -272,7 +273,7 @@ public class AppSession implements AutoCloseable {
                     contentWatcher = new ContentWatcher("http://localhost:" + config.awPort(),
                             config.contentPollIntervalMs());
                     contentWatcher.start();
-                    log.info("内容采集已启动 (UIA + OCR)");
+                    log.info("内容采集已启动 (UIA, OCR={})", config.ocrEngine());
                 } else {
                     log.info("内容采集已按配置禁用 (aw.collection.content=false)");
                 }

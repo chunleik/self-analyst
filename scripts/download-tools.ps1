@@ -1,9 +1,11 @@
-# Download external tools (PaddleOCR + whisper.cpp)
+# Download optional external tools.
 # WebView2 is NOT downloaded — the app uses the system-provided (Evergreen) runtime.
 #   -SkipWhisper   Don't download whisper.cpp + the 466MB model (for the minimal,
-#                  no-audio build). PaddleOCR is always downloaded.
+#                  no-audio build).
+#   -WithOcr       Download the optional PaddleOCR screen-recognition pack.
 param(
-    [switch]$SkipWhisper
+    [switch]$SkipWhisper,
+    [switch]$WithOcr
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,16 +21,19 @@ function Resolve-SevenZip {
     }
     throw "未找到 7-Zip。请安装 7-Zip 并确保 7z 在 PATH 中（https://www.7-zip.org/）。"
 }
-$SevenZip = Resolve-SevenZip
+if ($WithOcr) {
+    $SevenZip = Resolve-SevenZip
+    Write-Host "=== Downloading optional PaddleOCR-json ===" -ForegroundColor Cyan
+    $paddleUrl = "https://github.com/hiroi-sora/PaddleOCR-json/releases/download/v1.4.1/PaddleOCR-json_v1.4.1_windows_x64.7z"
+    $paddleZip = "$env:TEMP\paddleocr.7z"
 
-Write-Host "=== Downloading PaddleOCR-json ===" -ForegroundColor Cyan
-$paddleUrl = "https://github.com/hiroi-sora/PaddleOCR-json/releases/download/v1.4.1/PaddleOCR-json_v1.4.1_windows_x64.7z"
-$paddleZip = "$env:TEMP\paddleocr.7z"
-
-Invoke-WebRequest -Uri $paddleUrl -OutFile $paddleZip
-New-Item -ItemType Directory -Force -Path tools/PaddleOCR-json | Out-Null
-& $SevenZip x $paddleZip -o"$Root\tools\PaddleOCR-json" -y | Out-Null
-Remove-Item $paddleZip
+    Invoke-WebRequest -Uri $paddleUrl -OutFile $paddleZip
+    New-Item -ItemType Directory -Force -Path tools/PaddleOCR-json | Out-Null
+    & $SevenZip x $paddleZip -o"$Root\tools\PaddleOCR-json" -y | Out-Null
+    Remove-Item $paddleZip
+} else {
+    Write-Host "=== Skipping optional PaddleOCR-json (use -WithOcr to download) ===" -ForegroundColor Yellow
+}
 
 if ($SkipWhisper) {
     Write-Host "=== Skipping whisper.cpp (-SkipWhisper) ===" -ForegroundColor Yellow
@@ -47,4 +52,4 @@ if ($SkipWhisper) {
     Invoke-WebRequest -Uri $modelUrl -OutFile tools/whisper/ggml-small.bin
 }
 
-Write-Host "Done. tools/ ready." -ForegroundColor Green
+Write-Host "Done. Selected tools are ready." -ForegroundColor Green

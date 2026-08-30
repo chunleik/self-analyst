@@ -70,19 +70,14 @@ public class ContentCapture implements AutoCloseable {
     }
 
     /**
-     * Create a ContentCapture with default ScreenCapturer, TesseractOcrEngine,
-     * and OcrSampleStore (path from OCR_SAMPLE_DIR env / ocr.sample.dir property).
+     * Create a UIA-only ContentCapture with the default ScreenCapturer.
+     * Optional OCR is selected by the platform integration, not by this convenience
+     * constructor, so the privacy-safe default cannot be bypassed.
      */
     public ContentCapture() {
         this.screen = new ScreenCapturer();
-        OcrEngine engine;
-        try {
-            engine = new com.selfanalyst.content.ocr.TesseractOcrEngine();
-        } catch (Exception e) {
-            engine = null; // Tesseract not installed — OCR unavailable
-        }
-        this.ocr = engine;
-        this.sampleStore = OcrSampleStore.createDefault();
+        this.ocr = null;
+        this.sampleStore = null;
         this.nanoTime = System::nanoTime;
         this.forceRefreshNanos = parseForceRefreshMs() * 1_000_000L;
     }

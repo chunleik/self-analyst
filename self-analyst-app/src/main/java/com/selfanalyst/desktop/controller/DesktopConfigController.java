@@ -40,6 +40,7 @@ public class DesktopConfigController {
             "agent.compaction.enabled", "agent.compaction.triggerMessages",
             "agent.compaction.triggerTokens", "agent.compaction.keepMessages",
             "agent.compaction.keepTokens",
+            "aw.ocr.engine",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key"
     );
 
@@ -607,7 +608,7 @@ public class DesktopConfigController {
         m.put("window", field("window", eff.getProperty("aw.collection.window", "true")));
         m.put("afk", field("afk", eff.getProperty("aw.collection.afk", "true")));
         m.put("content", field("content", eff.getProperty("aw.collection.content", "true")));
-        m.put("ocrEngine", field("ocrEngine", eff.getProperty("aw.ocr.engine", "auto")));
+        m.put("ocrEngine", field("aw.ocr.engine", eff.getProperty("aw.ocr.engine", "off")));
         return m;
     }
 

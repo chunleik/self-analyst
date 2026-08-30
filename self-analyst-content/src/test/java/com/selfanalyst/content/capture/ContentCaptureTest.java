@@ -90,6 +90,25 @@ class ContentCaptureTest {
     }
 
     @Test
+    void disabledOcrDoesNotCaptureThinWindowScreenshot() {
+        AtomicInteger screenshots = new AtomicInteger();
+        ScreenCapturer screen = new ScreenCapturer() {
+            @Override
+            public BufferedImage captureWindow(HWND hwnd) {
+                screenshots.incrementAndGet();
+                return solidImage(800, 200, Color.WHITE);
+            }
+        };
+        ContentCapture capture = new ContentCapture(screen, null);
+
+        ContentResult result = capture.capture(1L, "Weixin.exe", "Weixin", null, "");
+
+        assertEquals(0, screenshots.get());
+        assertEquals("", result.textContent());
+        assertEquals("uia", result.source());
+    }
+
+    @Test
     void fullWindowModeKeepsSingleCharacterText() {
         System.setProperty("ocr.title-strip-height", "0");
         BufferedImage screenshot = solidImage(1200, 100, Color.WHITE);

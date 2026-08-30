@@ -270,6 +270,9 @@ llm.max-tokens, llm.agent.maxIters, desktop.summary.maxTimelineLlm
 llm.budget.mode, llm.budget.dailyTokens, llm.budget.warnRatio
 ```
 
+`aw.ocr.engine` 默认值为 `off`，可选值为 `off`、`auto`、`paddle`、`tesseract`；
+只有非 `off` 值才允许内容采集执行 OCR 截图。
+
 ### SPEC-CFG-TOOL-003: 重启提示键集合
 
 以下键修改后，工具返回信息中须注明"需重启 SelfAnalyst 后才能生效"：

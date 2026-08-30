@@ -73,6 +73,15 @@ class FileToolsTest {
     }
 
     @Test
+    void getFileMetadataDoesNotExposeDeletedRecord() throws Exception {
+        store.markDeleted(trackedPath);
+
+        Map<?, ?> out = MAPPER.readValue(tools.getFileMetadata(trackedPath), Map.class);
+
+        assertTrue(out.containsKey("error"));
+    }
+
+    @Test
     void listRecentFilesReturnsCollected() throws Exception {
         Map<?, ?> out = MAPPER.readValue(
                 tools.listRecentFiles(null, null, null, 10), Map.class);

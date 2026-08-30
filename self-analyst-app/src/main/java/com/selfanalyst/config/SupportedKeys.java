@@ -1,5 +1,7 @@
 package com.selfanalyst.config;
 
+import com.selfanalyst.file.FileFilterConfig;
+
 import com.selfanalyst.config.TomlSupport.KeyType;
 
 import java.util.LinkedHashMap;
@@ -92,13 +94,14 @@ public final class SupportedKeys {
 
         put("file.watch.enabled", "false", KeyType.BOOLEAN);
         put("file.watch.paths", "", KeyType.STRING);
-        put("file.watch.maxFileSizeKb", "512", KeyType.INTEGER);
+        put("file.watch.maxFileSizeKb", "0", KeyType.INTEGER);
         put("file.watch.worker.intervalSeconds", "60", KeyType.INTEGER);
         put("file.watch.debounceSeconds", "5", KeyType.INTEGER);
         put("file.watch.heartbeatThrottleSeconds", "5", KeyType.INTEGER);
-        put("file.watch.extensions", "", KeyType.LIST);
+        put("file.watch.extensions", FileFilterConfig.DEFAULT_EXTENSIONS_CSV, KeyType.LIST);
         put("file.watch.excludeDirs", "", KeyType.LIST);
         put("file.watch.excludeGlobs", "", KeyType.LIST);
+        put("file.watch.respectGitIgnore", "true", KeyType.BOOLEAN);
 
         put("websearch.enabled", "false", KeyType.BOOLEAN);
         put("websearch.mcp-url", "https://search.parallel.ai/mcp", KeyType.STRING);
@@ -161,13 +164,14 @@ public final class SupportedKeys {
 
         describe("file.watch.enabled", "是否监控本地文件并采集文件系统元数据。", "Whether to watch local files and collect filesystem metadata.");
         describe("file.watch.paths", "要监控的文件或目录路径，以逗号分隔。", "Comma-separated files or directories to watch.");
-        describe("file.watch.maxFileSizeKb", "允许采集的单个文件最大大小（KB）。", "Maximum size of one collected file, in KB.");
+        describe("file.watch.maxFileSizeKb", "允许采集的单个文件最大大小（KB）；0 表示不限制。", "Maximum size of one collected file in KB; 0 disables the size limit.");
         describe("file.watch.worker.intervalSeconds", "文件监控后台扫描间隔（秒）。", "Background file-watch scan interval, in seconds.");
         describe("file.watch.debounceSeconds", "文件变更后的防抖等待时间（秒）。", "Debounce delay after a file change, in seconds.");
         describe("file.watch.heartbeatThrottleSeconds", "文件监控心跳事件的最小间隔（秒）。", "Minimum interval between file-watch heartbeat events, in seconds.");
-        describe("file.watch.extensions", "允许采集的文件扩展名列表。", "List of file extensions allowed for collection.");
-        describe("file.watch.excludeDirs", "扫描时排除的目录名列表。", "List of directory names excluded from scanning.");
-        describe("file.watch.excludeGlobs", "扫描时排除的 glob 模式列表。", "List of glob patterns excluded from scanning.");
+        describe("file.watch.extensions", "允许采集的扩展名；空列表不采集，* 显式允许全部。", "Allowed extensions; an empty list collects nothing and * explicitly allows all.");
+        describe("file.watch.excludeDirs", "任意层级要整棵跳过的目录名列表（不区分大小写）。", "Case-insensitive directory names whose subtrees are skipped at any depth.");
+        describe("file.watch.excludeGlobs", "相对监控根目录匹配的排除 glob 列表。", "Exclusion globs matched against paths relative to each watch root.");
+        describe("file.watch.respectGitIgnore", "是否读取监控目录内的 .gitignore 规则。", "Whether to apply .gitignore rules inside watched folders.");
 
         describe("websearch.enabled", "是否允许 Agent 使用网络搜索。", "Whether to allow the agent to use web search.");
         describe("websearch.mcp-url", "网络搜索 MCP 服务地址。", "URL of the web-search MCP service.");

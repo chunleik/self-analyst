@@ -21,6 +21,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
+import java.util.Set;
+import java.util.function.BiConsumer;
 
 /**
  * Real-time metadata capture path (SPEC-FILE-030..034).
@@ -52,6 +54,7 @@ public class FileWatcher {
     private final String serverUrl;
     private final long debounceMs;
     private final long heartbeatThrottleMs;
+    private final BiConsumer<Path, Path> reconcileRequester;
 
     private final HttpClient httpClient;
     private final String hostname;
@@ -59,6 +62,7 @@ public class FileWatcher {
 
     private WatchService watchService;
     private final Map<WatchKey, Path> keyToDir = new ConcurrentHashMap<>();
+    private final Set<Path> registeredDirs = ConcurrentHashMap.newKeySet();
     private final Map<Path, Pending> pending = new ConcurrentHashMap<>();
     private final Map<String, Long> lastHeartbeat = new ConcurrentHashMap<>();
 
@@ -72,12 +76,21 @@ public class FileWatcher {
 
     public FileWatcher(FileWatchStore store, PathFilter pathFilter, List<Path> watchRoots,
                        String serverUrl, int debounceSeconds, int heartbeatThrottleSeconds) {
+        this(store, pathFilter, watchRoots, serverUrl, debounceSeconds,
+                heartbeatThrottleSeconds, (root, subtree) -> {});
+    }
+
+    public FileWatcher(FileWatchStore store, PathFilter pathFilter, List<Path> watchRoots,
+                       String serverUrl, int debounceSeconds, int heartbeatThrottleSeconds,
+                       BiConsumer<Path, Path> reconcileRequester) {
         this.store = store;
         this.pathFilter = pathFilter;
         this.watchRoots = watchRoots;
         this.serverUrl = serverUrl;
         this.debounceMs = Math.max(0, debounceSeconds) * 1000L;
         this.heartbeatThrottleMs = Math.max(0, heartbeatThrottleSeconds) * 1000L;
+        this.reconcileRequester = reconcileRequester != null
+                ? reconcileRequester : (root, subtree) -> {};
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         this.hostname = getHostname();
         this.bucketId = "aw-watcher-file_" + hostname;
@@ -109,7 +122,9 @@ public class FileWatcher {
             for (Path root : watchRoots) {
                 if (!running) return;
                 if (Files.isDirectory(root)) {
-                    registerRecursive(root);
+                    registerRecursive(root, root);
+                    reconcileRequester.accept(root.toAbsolutePath().normalize(),
+                            root.toAbsolutePath().normalize());
                 } else {
                     log.warn("Watch root not a directory, skipping: {}", root);
                 }
@@ -172,13 +187,16 @@ public class FileWatcher {
 
     // ── registration ──
 
-    private void registerRecursive(Path start) {
+    private void registerRecursive(Path root, Path start) {
         try {
-            Files.walkFileTree(start, new SimpleFileVisitor<>() {
+            Files.walkFileTree(start, Set.of(), Integer.MAX_VALUE, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
                     if (!running) return FileVisitResult.TERMINATE;
-                    if (pathFilter.isExcludedDir(dir)) return FileVisitResult.SKIP_SUBTREE;
+                    if (isNestedWatchRoot(root, dir)) return FileVisitResult.SKIP_SUBTREE;
+                    if (pathFilter.evaluateDirectory(root, dir, attrs).excluded()) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
                     registerDir(dir);
                     return FileVisitResult.CONTINUE;
                 }
@@ -194,13 +212,16 @@ public class FileWatcher {
     }
 
     private void registerDir(Path dir) {
+        Path normalized = dir.toAbsolutePath().normalize();
+        if (!registeredDirs.add(normalized)) return;
         try {
-            WatchKey key = dir.register(watchService,
+            WatchKey key = normalized.register(watchService,
                     StandardWatchEventKinds.ENTRY_CREATE,
                     StandardWatchEventKinds.ENTRY_MODIFY,
                     StandardWatchEventKinds.ENTRY_DELETE);
-            keyToDir.put(key, dir);
+            keyToDir.put(key, normalized);
         } catch (IOException e) {
+            registeredDirs.remove(normalized);
             log.debug("Failed to register dir {}: {}", dir, e.getMessage());
         }
     }
@@ -221,7 +242,10 @@ public class FileWatcher {
             Path dir = keyToDir.get(key);
             if (dir != null) {
                 for (WatchEvent<?> event : key.pollEvents()) {
-                    if (event.kind() == StandardWatchEventKinds.OVERFLOW) continue;
+                    if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                        handleOverflow(dir);
+                        continue;
+                    }
                     @SuppressWarnings("unchecked")
                     WatchEvent<Path> ev = (WatchEvent<Path>) event;
                     Path child = dir.resolve(ev.context());
@@ -231,6 +255,8 @@ public class FileWatcher {
             boolean valid = key.reset();
             if (!valid) {
                 Path invalidDir = keyToDir.remove(key);
+                if (invalidDir != null) registeredDirs.remove(invalidDir);
+                if (invalidDir != null) pathFilter.invalidateIgnoreRules(invalidDir);
                 if (invalidDir != null && Files.notExists(invalidDir)) {
                     try {
                         store.markDeletedTree(invalidDir.toAbsolutePath().toString());
@@ -243,20 +269,53 @@ public class FileWatcher {
         }
     }
 
+    void handleOverflow(Path directory) {
+        Path root = matchRoot(directory);
+        if (root == null) return;
+        pathFilter.invalidateIgnoreRules(directory);
+        registerRecursive(root, directory);
+        reconcileRequester.accept(root, directory);
+    }
+
     private void handleEvent(WatchEvent.Kind<Path> kind, Path child) {
-        if (kind == StandardWatchEventKinds.ENTRY_CREATE && Files.isDirectory(child)) {
-            // New subdirectory: register recursively (PathFilter applied inside).
-            if (!pathFilter.isExcludedDir(child)) registerRecursive(child);
+        Path root = matchRoot(child);
+        if (root == null) return;
+        if (GitIgnoreResolver.isRuleFile(child)) {
+            Path directory = child.getParent() != null ? child.getParent() : root;
+            pathFilter.invalidateIgnoreRules(directory);
+            registerRecursive(root, directory);
+            reconcileRequester.accept(root, directory);
             return;
         }
         if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
             pending.remove(child);
+            // The deleted node can no longer be stat'ed. Registered paths are
+            // known directories; ordinary file deletion must not flush the
+            // global ignore generation in high-churn repositories.
+            if (registeredDirs.contains(child.toAbsolutePath().normalize())) {
+                pathFilter.invalidateIgnoreRules(child);
+            }
             String abs = child.toAbsolutePath().toString();
             store.markDeletedTree(abs);
             return;
         }
+        final BasicFileAttributes attrs;
+        try {
+            attrs = Files.readAttributes(
+                    child, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException missingOrInaccessible) {
+            return;
+        }
+        if (kind == StandardWatchEventKinds.ENTRY_CREATE && attrs.isDirectory()) {
+            pathFilter.invalidateIgnoreRules(child);
+            if (!pathFilter.evaluateDirectory(root, child, attrs).excluded()) {
+                registerRecursive(root, child);
+                reconcileRequester.accept(root, child);
+            }
+            return;
+        }
         // CREATE / MODIFY of a file → debounce; only metadata is read later.
-        if (pathFilter.isExcludedFile(child)) return;
+        if (pathFilter.evaluateFile(root, child, attrs).excluded()) return;
         String type = kind == StandardWatchEventKinds.ENTRY_CREATE ? "create" : "modify";
         pending.put(child, new Pending(System.currentTimeMillis(), type));
     }
@@ -280,55 +339,66 @@ public class FileWatcher {
     }
 
     private void flushOne(Path file, String eventType) {
-        if (!Files.isRegularFile(file) || pathFilter.isExcludedFile(file)) return;
         Path root = matchRoot(file);
         if (root == null) return;
+        final BasicFileAttributes attrs;
+        try {
+            attrs = Files.readAttributes(
+                    file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException missingOrInaccessible) {
+            return;
+        }
+        if (pathFilter.evaluateFile(root, file, attrs).excluded()) return;
         String abs = file.toAbsolutePath().toString();
         String rel = FileIndexWorker.relativize(root, file);
         String ext = PathFilter.extensionOf(file.getFileName().toString());
 
         store.upsertPending(abs, rel, root.toAbsolutePath().toString(), ext);
-        sendHeartbeatThrottled(abs, rel, root, eventType, ext);
+        sendHeartbeatThrottled(abs, rel, root, eventType, ext, attrs);
     }
 
     private Path matchRoot(Path file) {
-        Path absFile = file.toAbsolutePath();
+        Path absFile = file.toAbsolutePath().normalize();
+        Path best = null;
         for (Path root : watchRoots) {
-            if (absFile.startsWith(root.toAbsolutePath())) return root;
+            Path normalizedRoot = root.toAbsolutePath().normalize();
+            if (absFile.startsWith(normalizedRoot)
+                    && (best == null || normalizedRoot.getNameCount() > best.getNameCount())) {
+                best = normalizedRoot;
+            }
         }
-        return null;
+        return best;
+    }
+
+    private boolean isNestedWatchRoot(Path currentRoot, Path directory) {
+        Path root = currentRoot.toAbsolutePath().normalize();
+        Path dir = directory.toAbsolutePath().normalize();
+        if (dir.equals(root)) return false;
+        return watchRoots.stream()
+                .map(path -> path.toAbsolutePath().normalize())
+                .anyMatch(dir::equals);
     }
 
     // ── metadata heartbeat (SPEC-FILE-033/034) ──
 
     private void sendHeartbeatThrottled(String abs, String rel, Path root,
-                                        String eventType, String ext) {
+                                        String eventType, String ext,
+                                        BasicFileAttributes attrs) {
         long now = System.currentTimeMillis();
         Long last = lastHeartbeat.get(abs);
         if (last != null && now - last < heartbeatThrottleMs) return;
         lastHeartbeat.put(abs, now);
 
         try {
-            long size = 0;
-            String fileCreatedAt = null;
-            String lastModified = null;
-            try {
-                BasicFileAttributes attrs = Files.readAttributes(
-                        Path.of(abs), BasicFileAttributes.class);
-                size = attrs.size();
-                fileCreatedAt = attrs.creationTime().toInstant().toString();
-                lastModified = attrs.lastModifiedTime().toInstant().toString();
-            } catch (IOException ignored) {}
-
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("path", abs);
             data.put("relative_path", rel);
             data.put("watch_root", root.toAbsolutePath().toString());
             data.put("event_type", eventType);
             data.put("extension", ext);
-            data.put("size_bytes", size);
-            data.put("file_created_at", fileCreatedAt);
-            data.put("last_modified", lastModified);
+            data.put("size_bytes", attrs.size());
+            data.put("file_created_at", attrs.creationTime().toInstant().toString());
+            data.put("last_modified", attrs.lastModifiedTime().toInstant().toString());
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("timestamp", Instant.now().toString());

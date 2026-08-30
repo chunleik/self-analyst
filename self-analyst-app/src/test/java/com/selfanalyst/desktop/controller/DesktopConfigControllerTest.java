@@ -112,6 +112,9 @@ class DesktopConfigControllerTest {
         assertTrue(defaults.containsKey("aw.base-url"));
         assertTrue(defaults.containsKey("wiki.prompt.maxContentChars"));
         assertTrue(defaults.containsKey("file.watch.paths"));
+        assertEquals("0", defaults.get("file.watch.maxFileSizeKb"));
+        assertTrue(defaults.get("file.watch.extensions").contains("docx"));
+        assertEquals("true", defaults.get("file.watch.respectGitIgnore"));
         assertFalse(defaults.containsKey("file.watch.maxContentChars"));
         assertFalse(defaults.containsKey("file.watch.minReindexIntervalMinutes"));
         assertFalse(defaults.containsKey("file.watch.semantic.enabled"));
@@ -223,6 +226,21 @@ class DesktopConfigControllerTest {
     }
 
     @Test
+    void invalidFileFilterSettingsAreRejectedWithoutWriting(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("[file.watch]\nextensions = [\"md\"]\n");
+        var ctrl = controller(dir, store);
+
+        assertThrows(TomlValidationException.class, () -> ctrl.applyRawSave("""
+                [file.watch]
+                extensions = ["md", "*"]
+                excludeGlobs = ["[broken"]
+                """));
+
+        assertEquals("[file.watch]\nextensions = [\"md\"]\n", store.readRaw());
+    }
+
+    @Test
     void validTomlSaveIsVerbatimRoundTrip(@TempDir Path dir) throws Exception {
         // SPEC-TOML-TST-006: valid text saved char-for-char.
         UserConfigStore store = new UserConfigStore(dir);
@@ -267,6 +285,14 @@ class DesktopConfigControllerTest {
                 """);
         assertTrue(r5.restartRequired().contains("file.watch.enabled"));
         assertTrue(r5.restartRequired().contains("file.watch.paths"));
+
+        var r6 = ctrl.applyRawSave("""
+                [file.watch]
+                extensions = ["md", "docx"]
+                respectGitIgnore = false
+                """);
+        assertTrue(r6.restartRequired().contains("file.watch.extensions"));
+        assertTrue(r6.restartRequired().contains("file.watch.respectGitIgnore"));
     }
 
     @Test

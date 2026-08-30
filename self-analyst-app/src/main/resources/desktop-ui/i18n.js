@@ -88,6 +88,7 @@ var MESSAGES = {
   "file.reason.disabled_by_config": { zh: "文件采集尚未启用", en: "File collection is not enabled" },
   "file.reason.starting": { zh: "正在应用监控目录并启动首次扫描", en: "Applying watched folders and starting the initial scan" },
   "file.reason.paths_unavailable": { zh: "配置的监控目录为空、无效或不存在", en: "The configured watched folders are empty, invalid, or missing" },
+  "file.reason.extensions_required": { zh: "扩展名白名单为空；请配置后缀或用 * 显式允许全部", en: "The extension allowlist is empty; configure extensions or use * to explicitly allow all" },
   "file.reason.initialization_failed": { zh: "文件元数据存储初始化失败", en: "File metadata storage failed to initialize" },
   "file.reason.worker_start_failed": { zh: "文件采集后台任务启动失败", en: "The file collection worker failed to start" },
   "file.reason.store_unavailable": { zh: "文件元数据数据库暂时不可用", en: "The file metadata database is unavailable" },

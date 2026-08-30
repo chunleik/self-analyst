@@ -1,5 +1,7 @@
 package com.selfanalyst.config;
 
+import com.selfanalyst.file.FileFilterConfig;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -11,6 +13,7 @@ import java.util.Properties;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigTest {
@@ -26,6 +29,10 @@ class ConfigTest {
         assertEquals("false", props.getProperty("wiki.enabled"));
         assertEquals("false", props.getProperty("embedding.enabled"));
         assertEquals("false", props.getProperty("websearch.enabled"));
+        assertEquals("0", props.getProperty("file.watch.maxFileSizeKb"));
+        assertEquals(FileFilterConfig.DEFAULT_EXTENSIONS_CSV,
+                props.getProperty("file.watch.extensions"));
+        assertEquals("true", props.getProperty("file.watch.respectGitIgnore"));
         assertFalse(props.stringPropertyNames().stream()
                 .anyMatch(DeprecatedKeys::contains));
         assertEquals("true", props.getProperty("agent.compaction.enabled"));
@@ -37,6 +44,42 @@ class ConfigTest {
     void testDefaultsDisableCompaction(@TempDir Path dir) {
         Config c = Config.testDefaults(dir);
         assertFalse(c.agentCompactionEnabled(), "unit tests opt in to compaction explicitly");
+    }
+
+    @Test
+    void explicitEmptyFileExtensionListRemainsFailClosed(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [file.watch]
+                extensions = []
+                respectGitIgnore = false
+                """, StandardCharsets.UTF_8);
+
+        Config config = Config.load(dir);
+
+        assertEquals("", config.fileWatchExtensions());
+        assertFalse(config.fileWatchRespectGitIgnore());
+        assertNull(config.fileWatchConfigurationError());
+    }
+
+    @Test
+    void fileFilterStartupParsingMatchesRawValidationRangeAndBooleanRules(@TempDir Path dir)
+            throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [file.watch]
+                maxFileSizeKb = 3000000000
+                respectGitIgnore = true
+                """, StandardCharsets.UTF_8);
+        Config large = Config.load(dir);
+        assertEquals(3_000_000_000L, large.fileWatchMaxFileSizeKb());
+        assertNull(large.fileWatchConfigurationError());
+
+        Files.writeString(dir.resolve("config.toml"), """
+                [file.watch]
+                respectGitIgnore = "maybe"
+                """, StandardCharsets.UTF_8);
+        Config invalid = Config.load(dir);
+        assertNotNull(invalid.fileWatchConfigurationError());
+        assertTrue(invalid.fileWatchConfigurationError().contains("true 或 false"));
     }
 
     @Test

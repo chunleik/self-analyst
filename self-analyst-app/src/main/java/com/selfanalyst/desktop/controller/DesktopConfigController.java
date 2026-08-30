@@ -6,6 +6,7 @@ import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
 import com.selfanalyst.desktop.store.UserConfigStore;
+import com.selfanalyst.file.FileFilterConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
@@ -46,6 +47,7 @@ public class DesktopConfigController {
             "file.watch.worker.intervalSeconds", "file.watch.debounceSeconds",
             "file.watch.heartbeatThrottleSeconds", "file.watch.extensions",
             "file.watch.excludeDirs", "file.watch.excludeGlobs",
+            "file.watch.respectGitIgnore",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key"
     );
 
@@ -358,11 +360,29 @@ public class DesktopConfigController {
             throw new TomlValidationException(typeViolations);
         }
         Properties newP = toProperties(flat);
+        validateFileFilterSettings(newP);
         Properties oldP = userStore.loadUser();
         List<String> restart = computeRestartRequired(oldP, newP);
         List<String> unknown = computeUnknownKeys(newP);
         userStore.saveRaw(text);
         return new RawSaveResult(restart, unknown);
+    }
+
+    static void validateFileFilterSettings(Properties userProperties) {
+        Properties effective = new Properties();
+        SupportedKeys.defaults().forEach(effective::setProperty);
+        if (userProperties != null) effective.putAll(userProperties);
+        try {
+            long maxKb = Long.parseLong(effective.getProperty("file.watch.maxFileSizeKb", "0"));
+            FileFilterConfig.parse(maxKb,
+                    FileFilterConfig.splitCsv(effective.getProperty("file.watch.excludeDirs", "")),
+                    FileFilterConfig.splitCsv(effective.getProperty("file.watch.excludeGlobs", "")),
+                    FileFilterConfig.splitCsv(effective.getProperty("file.watch.extensions", "")),
+                    Boolean.parseBoolean(effective.getProperty(
+                            "file.watch.respectGitIgnore", "true")));
+        } catch (IllegalArgumentException invalidFilter) {
+            throw new TomlValidationException(List.of(invalidFilter.getMessage()));
+        }
     }
 
     /**

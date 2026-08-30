@@ -85,7 +85,8 @@ public class FileTools {
             @ToolParam(name = "path", description = "文件绝对路径") String path) {
         try {
             FileRecord rec = store.findByPath(path);
-            return rec == null || !isActiveRoot(rec.watchRoot())
+            return rec == null || rec.status() != FileStatus.COLLECTED
+                    || !isActiveRoot(rec.watchRoot())
                     ? error("File not tracked in active roots: " + safe(path))
                     : writeJson(formatRecord(rec, true));
         } catch (Exception e) {

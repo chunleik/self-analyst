@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import com.selfanalyst.i18n.Lang;
 import com.selfanalyst.i18n.LangResolver;
+import com.selfanalyst.file.FileFilterConfig;
 
 public record Config(
         String llmApiKey,
@@ -48,13 +49,15 @@ public record Config(
         boolean collectContent,
         boolean fileWatchEnabled,
         String fileWatchPaths,
-        int fileWatchMaxFileSizeKb,
+        long fileWatchMaxFileSizeKb,
         int fileWatchWorkerIntervalSeconds,
         int fileWatchDebounceSeconds,
         int fileWatchHeartbeatThrottleSeconds,
         String fileWatchExtensions,
         String fileWatchExcludeDirs,
         String fileWatchExcludeGlobs,
+        boolean fileWatchRespectGitIgnore,
+        String fileWatchConfigurationError,
         /** Legacy content-index path retained only so startup can purge old artifacts. */
         Path legacyFileSemanticIndexDir,
         int llmMaxTokens,
@@ -173,17 +176,35 @@ public record Config(
         boolean fileWatchEnabled = Boolean.parseBoolean(
                 envOrProp(props, "file.watch.enabled", "FILE_WATCH_ENABLED", "false"));
         String fileWatchPaths = envOrProp(props, "file.watch.paths", "FILE_WATCH_PATHS", "");
-        int fileWatchMaxFileSizeKb = parseIntOr(props,
-                envOrProp(props, "file.watch.maxFileSizeKb", "FILE_WATCH_MAX_FILE_SIZE_KB", "512"), 512);
+        String fileWatchMaxFileSizeRaw = envOrPropAllowBlank(props,
+                "file.watch.maxFileSizeKb", "FILE_WATCH_MAX_FILE_SIZE_KB", "0");
         int fileWatchWorkerIntervalSeconds = parseIntOr(props,
                 envOrProp(props, "file.watch.worker.intervalSeconds", "FILE_WATCH_WORKER_INTERVAL_SECONDS", "60"), 60);
         int fileWatchDebounceSeconds = parseIntOr(props,
                 envOrProp(props, "file.watch.debounceSeconds", "FILE_WATCH_DEBOUNCE_SECONDS", "5"), 5);
         int fileWatchHeartbeatThrottleSeconds = parseIntOr(props,
                 envOrProp(props, "file.watch.heartbeatThrottleSeconds", "FILE_WATCH_HEARTBEAT_THROTTLE_SECONDS", "5"), 5);
-        String fileWatchExtensions = envOrProp(props, "file.watch.extensions", "FILE_WATCH_EXTENSIONS", "");
+        String fileWatchExtensions = envOrPropAllowBlank(props, "file.watch.extensions",
+                "FILE_WATCH_EXTENSIONS", FileFilterConfig.DEFAULT_EXTENSIONS_CSV);
         String fileWatchExcludeDirs = envOrProp(props, "file.watch.excludeDirs", "FILE_WATCH_EXCLUDE_DIRS", "");
         String fileWatchExcludeGlobs = envOrProp(props, "file.watch.excludeGlobs", "FILE_WATCH_EXCLUDE_GLOBS", "");
+        String fileWatchRespectGitIgnoreRaw = envOrPropAllowBlank(props,
+                "file.watch.respectGitIgnore", "FILE_WATCH_RESPECT_GITIGNORE", "true");
+        long fileWatchMaxFileSizeKb = 0;
+        boolean fileWatchRespectGitIgnore = true;
+        String fileWatchConfigurationError = null;
+        try {
+            fileWatchMaxFileSizeKb = Long.parseLong(fileWatchMaxFileSizeRaw.trim());
+            fileWatchRespectGitIgnore = parseBooleanStrict(
+                    fileWatchRespectGitIgnoreRaw, "file.watch.respectGitIgnore");
+            FileFilterConfig.parse(fileWatchMaxFileSizeKb,
+                    FileFilterConfig.splitCsv(fileWatchExcludeDirs),
+                    FileFilterConfig.splitCsv(fileWatchExcludeGlobs),
+                    FileFilterConfig.splitCsv(fileWatchExtensions),
+                    fileWatchRespectGitIgnore);
+        } catch (RuntimeException invalidFileFilter) {
+            fileWatchConfigurationError = invalidFileFilter.getMessage();
+        }
         Path legacyFileSemanticIndexDir = Path.of(envOrProp(props, "file.watch.semantic.index-dir",
                 "FILE_WATCH_SEMANTIC_INDEX_DIR", memDir + "/file-semantic-index"));
 
@@ -286,7 +307,8 @@ public record Config(
                 fileWatchEnabled, fileWatchPaths, fileWatchMaxFileSizeKb,
                 fileWatchWorkerIntervalSeconds, fileWatchDebounceSeconds,
                 fileWatchHeartbeatThrottleSeconds, fileWatchExtensions,
-                fileWatchExcludeDirs, fileWatchExcludeGlobs,
+                fileWatchExcludeDirs, fileWatchExcludeGlobs, fileWatchRespectGitIgnore,
+                fileWatchConfigurationError,
                 legacyFileSemanticIndexDir,
                 llmMaxTokens, agentMaxIters,
                 agentCompactionEnabled, agentCompactionTriggerMessages,
@@ -324,7 +346,8 @@ public record Config(
                 false, "", "", "", 1024, true, 500,
                 false, "https://search.parallel.ai/mcp", "",
                 0.7, false, false, false,
-                false, "", 512, 60, 5, 5, "", "", "",
+                false, "", 0, 60, 5, 5, FileFilterConfig.DEFAULT_EXTENSIONS_CSV,
+                "", "", true, null,
                 baseDir.resolve("file-semantic-index"),
                 2048, 8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,
@@ -387,6 +410,15 @@ public record Config(
         return defaultValue;
     }
 
+    /** Variant used by fail-closed settings where an explicit blank is meaningful. */
+    private static String envOrPropAllowBlank(Properties props, String propKey,
+                                               String envKey, String defaultValue) {
+        String env = System.getenv(envKey);
+        if (env != null) return env;
+        if (props.containsKey(propKey)) return props.getProperty(propKey, "");
+        return defaultValue;
+    }
+
     private static int parseIntOr(Properties props, String value, int defaultValue) {
         try {
             return Integer.parseInt(value);
@@ -409,6 +441,12 @@ public record Config(
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    private static boolean parseBooleanStrict(String value, String key) {
+        if ("true".equalsIgnoreCase(value)) return true;
+        if ("false".equalsIgnoreCase(value)) return false;
+        throw new IllegalArgumentException(key + " 必须是 true 或 false");
     }
 
     public void validate() {

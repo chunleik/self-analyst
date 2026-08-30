@@ -151,7 +151,7 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
   整数/浮点 → 十进制字符串表示。归一化结果进入既有字符串属性管道（SPEC-TOML-DEC-003）。
 - **SPEC-TOML-FMT-003b**：**基本类型数组**（元素全为字符串/整数/浮点/布尔）归一化为
   逗号拼接字符串（如 `extensions = ["md", "txt"]` → `"md,txt"`），与既有逗号列表键
-  （`file.watch.extensions`、`file.watch.exclude-globs` 等）语义对接。
+  （`file.watch.extensions`、`file.watch.excludeGlobs` 等）语义对接。
 - **SPEC-TOML-FMT-003c**：以下 TOML 结构不受支持，出现即校验失败（400，不落盘）：
   内联表/子表作为值嵌入数组、日期时间类型、混合类型数组。
 - **SPEC-TOML-FMT-003d**：已知键（受支持键白名单 `SPEC-CFG-TOOL-002` 及模板列出的键）带有
@@ -159,6 +159,9 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
   或为可无损解析到声明类型的字符串（如 `port = "5600"`）均通过；不可解析（如
   `aw.port = "abc"`、`llm.temperature = true`）则整体校验失败。未知键不做类型校验，
   仅按既有 `unknownKeys` 警告语义返回。
+- **SPEC-TOML-FMT-003e**：文件过滤配置还必须执行语义校验：扩展名只允许规范 token 或单独 `*`，
+  空列表表示不采集；目录名不得含路径分隔符；排除 glob 必须是非否定的 root-relative 有效模式；
+  `maxFileSizeKb` 不得为负。任一失败均整体拒绝保存，不得静默忽略后放宽采集范围。
 
 ### SPEC-TOML-FMT-004：模板文本
 

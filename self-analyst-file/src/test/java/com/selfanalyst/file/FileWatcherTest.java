@@ -7,6 +7,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -28,7 +31,7 @@ class FileWatcherTest {
     @Test
     void createdFileBecomesPendingAfterDebounce(@TempDir Path tmp) throws Exception {
         store = new FileWatchStore(tmp.resolve("file-watch.db"));
-        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1);
         watcher.start();
         assertTrue(pollForAvailable(20_000));
@@ -47,7 +50,7 @@ class FileWatcherTest {
     @Test
     void excludedFileNeverEnqueued(@TempDir Path tmp) throws Exception {
         store = new FileWatchStore(tmp.resolve("file-watch.db"));
-        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1);
         watcher.start();
 
@@ -70,7 +73,7 @@ class FileWatcherTest {
                 root.toAbsolutePath().toString(), "txt");
         store.updateCollected(historicalFile.toString(), 7,
                 java.time.Instant.now(), java.time.Instant.now());
-        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
         watcher.start();
         assertTrue(pollForAvailable(20_000));
@@ -88,7 +91,7 @@ class FileWatcherTest {
             throws Exception {
         Path root = Files.createDirectory(tmp.resolve("vanished"));
         store = new FileWatchStore(tmp.resolve("file-watch.db"));
-        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
         Files.delete(root);
 
@@ -109,7 +112,7 @@ class FileWatcherTest {
                 root.toAbsolutePath().toString(), "txt");
         store.updateCollected(historicalFile.toString(), 7,
                 java.time.Instant.now(), java.time.Instant.now());
-        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
         watcher.start();
         assertTrue(pollForAvailable(20_000));
@@ -117,6 +120,133 @@ class FileWatcherTest {
         Files.delete(childDir);
 
         assertTrue(pollForStatus(historicalFile.toString(), FileStatus.DELETED, 20_000));
+    }
+
+    @Test
+    void gitIgnoreChangeInvalidatesRulesAndRequestsSubtreeReconcile(@TempDir Path tmp)
+            throws Exception {
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        PathFilter filter = txtFilter();
+        Path seed = Files.writeString(tmp.resolve("seed.txt"), "x");
+        filter.evaluateFile(tmp, seed, Files.readAttributes(
+                seed, java.nio.file.attribute.BasicFileAttributes.class));
+        CountDownLatch reconcileRequested = new CountDownLatch(2);
+        watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1,
+                (root, subtree) -> reconcileRequested.countDown());
+        watcher.start();
+        assertTrue(pollForAvailable(20_000));
+
+        Path ignore = Files.writeString(tmp.resolve(".gitignore"), "ignored.txt\n");
+        assertTrue(reconcileRequested.await(20, TimeUnit.SECONDS));
+        Path ignored = Files.writeString(tmp.resolve("ignored.txt"), "private");
+        Thread.sleep(3_000);
+
+        assertNull(store.findByPath(ignore.toAbsolutePath().toString()));
+        assertNull(store.findByPath(ignored.toAbsolutePath().toString()));
+    }
+
+    @Test
+    void gitIgnoreChangeRegistersNewlyIncludedDirectory(@TempDir Path tmp) throws Exception {
+        Path ignore = Files.writeString(tmp.resolve(".gitignore"), "generated/\n");
+        Path generated = Files.createDirectory(tmp.resolve("generated"));
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        CountDownLatch reconciled = new CountDownLatch(2);
+        watcher = new FileWatcher(store, txtFilter(), List.of(tmp),
+                "http://127.0.0.1:9", 1, 1,
+                (root, subtree) -> reconciled.countDown());
+        watcher.start();
+        assertTrue(pollForAvailable(20_000));
+
+        Files.writeString(ignore, "");
+        assertTrue(reconciled.await(20, TimeUnit.SECONDS));
+        Path included = Files.writeString(generated.resolve("included.txt"), "metadata only");
+
+        assertNotNull(pollForPending(included.toAbsolutePath().toString(), 20_000));
+    }
+
+    @Test
+    void populatedDirectoryCreateRequestsSubtreeReconcile(@TempDir Path tmp) throws Exception {
+        Path root = Files.createDirectory(tmp.resolve("watched"));
+        Path incoming = Files.createDirectory(tmp.resolve("incoming"));
+        Files.writeString(incoming.resolve("existing.txt"), "metadata only");
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        CountDownLatch childReconcile = new CountDownLatch(1);
+        AtomicReference<Path> expectedChild = new AtomicReference<>();
+        watcher = new FileWatcher(store, txtFilter(), List.of(root),
+                "http://127.0.0.1:9", 1, 1, (watchRoot, subtree) -> {
+                    Path expected = expectedChild.get();
+                    if (expected != null && subtree.equals(expected)) childReconcile.countDown();
+                });
+        watcher.start();
+        assertTrue(pollForAvailable(20_000));
+
+        Path moved = root.resolve("incoming").toAbsolutePath().normalize();
+        expectedChild.set(moved);
+        Files.move(incoming, moved);
+
+        assertTrue(childReconcile.await(20, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void overflowInvalidatesRulesAndRequestsReconcile(@TempDir Path tmp) throws Exception {
+        Path ignore = Files.writeString(tmp.resolve(".gitignore"), "old.txt\n");
+        Path oldFile = Files.writeString(tmp.resolve("old.txt"), "x");
+        PathFilter filter = txtFilter();
+        assertTrue(filter.evaluateFile(tmp, oldFile, Files.readAttributes(
+                oldFile, java.nio.file.attribute.BasicFileAttributes.class)).excluded());
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        CountDownLatch reconcile = new CountDownLatch(2);
+        watcher = new FileWatcher(store, filter, List.of(tmp),
+                "http://127.0.0.1:9", 1, 1, (root, subtree) -> reconcile.countDown());
+        watcher.start();
+        assertTrue(pollForAvailable(20_000));
+
+        Files.writeString(ignore, "new.txt\n");
+        watcher.handleOverflow(tmp);
+
+        assertTrue(reconcile.await(20, TimeUnit.SECONDS));
+        assertFalse(filter.evaluateFile(tmp, oldFile, Files.readAttributes(
+                oldFile, java.nio.file.attribute.BasicFileAttributes.class)).excluded());
+    }
+
+    @Test
+    void excludedAndGitIgnoredDirectorySubtreesAreNeverRegistered(@TempDir Path tmp)
+            throws Exception {
+        Path nodeModules = Files.createDirectory(tmp.resolve("NODE_MODULES"));
+        Files.writeString(tmp.resolve(".gitignore"), "generated/\n");
+        Path generated = Files.createDirectory(tmp.resolve("generated"));
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        watcher = new FileWatcher(store, txtFilter(), List.of(tmp),
+                "http://127.0.0.1:9", 1, 1);
+        watcher.start();
+        assertTrue(pollForAvailable(20_000));
+
+        Path dependency = Files.writeString(nodeModules.resolve("dependency.txt"), "private");
+        Path generatedFile = Files.writeString(generated.resolve("generated.txt"), "private");
+        Thread.sleep(3_000);
+
+        assertNull(store.findByPath(dependency.toAbsolutePath().toString()));
+        assertNull(store.findByPath(generatedFile.toAbsolutePath().toString()));
+    }
+
+    @Test
+    void nestedWatchRootsUseMostSpecificRootForRelativeFiltering(@TempDir Path tmp)
+            throws Exception {
+        Path parent = Files.createDirectory(tmp.resolve("parent"));
+        Path child = Files.createDirectory(parent.resolve("project"));
+        Files.writeString(parent.resolve(".gitignore"), "project/\n");
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        watcher = new FileWatcher(store, txtFilter(), List.of(parent, child),
+                "http://127.0.0.1:9", 1, 1);
+        watcher.start();
+        assertTrue(pollForAvailable(20_000));
+
+        Path file = Files.writeString(child.resolve("notes.txt"), "private");
+        FileRecord record = pollForPending(file.toAbsolutePath().toString(), 20_000);
+
+        assertNotNull(record);
+        assertEquals(child.toAbsolutePath().normalize().toString(), record.watchRoot());
+        assertEquals("notes.txt", record.relativePath());
     }
 
     private FileRecord pollForPending(String absPath, long timeoutMs) throws InterruptedException {
@@ -127,6 +257,11 @@ class FileWatcherTest {
             Thread.sleep(200);
         }
         return store.findByPath(absPath);
+    }
+
+    private static PathFilter txtFilter() {
+        return new PathFilter(FileFilterConfig.parse(
+                0, List.of(), List.of(), List.of("txt"), true));
     }
 
     private boolean pollForUnavailable(long timeoutMs) throws InterruptedException {

@@ -110,6 +110,9 @@ public class AppSession implements AutoCloseable {
         fileWatchEnabled = config.fileWatchEnabled();
         fileWatchRoots = List.copyOf(parseWatchRoots(config.fileWatchPaths()));
         try {
+            if (config.fileWatchConfigurationError() != null) {
+                throw new IllegalArgumentException(config.fileWatchConfigurationError());
+            }
             int purgedLegacyIndexFiles = LegacyFileSemanticIndexPurger.purge(
                     config.legacyFileSemanticIndexDir());
             if (purgedLegacyIndexFiles > 0) {
@@ -118,12 +121,15 @@ public class AppSession implements AutoCloseable {
             // The store and FileTools stay available while collection is disabled so the
             // dedicated settings page can enable the complete pipeline without a restart.
             fileWatchStore = new FileWatchStore(config.memoryDir().resolve("file-watch.db"));
-            filePathFilter = new PathFilter(config.fileWatchMaxFileSizeKb(),
-                    PathFilter.splitCsv(config.fileWatchExcludeDirs()),
-                    PathFilter.splitCsv(config.fileWatchExcludeGlobs()),
-                    PathFilter.splitCsv(config.fileWatchExtensions()));
+            FileFilterConfig filterConfig = FileFilterConfig.parse(
+                    config.fileWatchMaxFileSizeKb(),
+                    FileFilterConfig.splitCsv(config.fileWatchExcludeDirs()),
+                    FileFilterConfig.splitCsv(config.fileWatchExcludeGlobs()),
+                    FileFilterConfig.splitCsv(config.fileWatchExtensions()),
+                    config.fileWatchRespectGitIgnore());
+            filePathFilter = new PathFilter(filterConfig);
             fileTools = new FileTools(fileWatchStore);
-            fileTools.updateWatchRoots(fileWatchEnabled ? fileWatchRoots : List.of());
+            fileTools.updateWatchRoots(List.of());
             log.info("FileWatchStore 已初始化 ({} 个已配置目录)", fileWatchRoots.size());
         } catch (Exception e) {
             fileWatchInitializationError = e.getMessage();
@@ -309,9 +315,7 @@ public class AppSession implements AutoCloseable {
                 .toList();
         fileWatchStartupReason = null;
         fileWatchStartupError = null;
-        if (fileTools != null) {
-            fileTools.updateWatchRoots(enabled ? fileWatchRoots : List.of());
-        }
+        if (fileTools != null) fileTools.updateWatchRoots(List.of());
         if (!enabled) {
             log.info("文件采集已在运行时禁用");
             return;
@@ -326,6 +330,12 @@ public class AppSession implements AutoCloseable {
             fileWatchStartupError = fileWatchInitializationError;
             return;
         }
+        if (!filePathFilter.hasAllowedExtensions()) {
+            fileWatchStartupReason = "extensions_required";
+            log.warn("文件采集已启用，但扩展名白名单为空；使用 * 可显式允许全部类型");
+            return;
+        }
+        if (fileTools != null) fileTools.updateWatchRoots(fileWatchRoots);
         try {
             fileWatchStartupReason = "starting";
             fileIndexWorker = new FileIndexWorker(fileWatchStore, filePathFilter,
@@ -335,7 +345,8 @@ public class AppSession implements AutoCloseable {
             String fileHeartbeatUrl = "http://localhost:" + config.awPort();
             fileWatcher = new FileWatcher(fileWatchStore, filePathFilter, fileWatchRoots,
                     fileHeartbeatUrl, config.fileWatchDebounceSeconds(),
-                    config.fileWatchHeartbeatThrottleSeconds());
+                    config.fileWatchHeartbeatThrottleSeconds(),
+                    fileIndexWorker::requestReconcile);
             fileWatcher.start();
             log.info("文件采集配置已在运行时生效 ({} 个监控目录)", fileWatchRoots.size());
         } catch (Exception e) {
@@ -343,6 +354,7 @@ public class AppSession implements AutoCloseable {
             fileWatchStartupError = e.getMessage();
             log.warn("文件监控 worker 启动失败: {}", e.getMessage());
             stopFileWatchWorkers();
+            if (fileTools != null) fileTools.updateWatchRoots(List.of());
         }
     }
 

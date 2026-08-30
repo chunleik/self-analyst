@@ -29,7 +29,8 @@ class FileIndexWorkerTest {
         store = new FileWatchStore(dbPath);
         root = Files.createDirectories(tmp.resolve("root"));
         file = Files.writeString(root.resolve("notes.txt"), "private body must never be read");
-        pathFilter = new PathFilter(1024, List.of(), List.of(), List.of());
+        pathFilter = new PathFilter(FileFilterConfig.parse(
+                0, List.of(), List.of(), List.of("txt"), true));
     }
 
     @AfterEach
@@ -75,17 +76,43 @@ class FileIndexWorkerTest {
     }
 
     @Test
-    void workerBytecodeHasNoContentReaderHashSummarizerOrEmbeddingDependency() throws Exception {
-        byte[] classBytes;
-        try (var in = FileIndexWorker.class.getResourceAsStream("FileIndexWorker.class")) {
-            assertNotNull(in);
-            classBytes = in.readAllBytes();
-        }
-        String symbols = new String(classBytes, StandardCharsets.ISO_8859_1);
-        for (String forbidden : List.of(
-                "newInputStream", "readAllBytes", "sha256", "MessageDigest",
-                "FileSummarizer", "FileContentExtractor", "FileEmbeddingWorker")) {
-            assertFalse(symbols.contains(forbidden), "worker references forbidden symbol " + forbidden);
+    void hiddenAttributeFailureDoesNotRetireCollectedMetadata() throws Exception {
+        upsert();
+        store.updateCollected(file.toAbsolutePath().toString(), Files.size(file),
+                Files.readAttributes(file, BasicFileAttributes.class).creationTime().toInstant(),
+                Files.getLastModifiedTime(file).toInstant());
+        pathFilter = new PathFilter(
+                FileFilterConfig.parse(0, List.of(), List.of(), List.of("txt"), false),
+                path -> {
+                    if (path.equals(file)) throw new java.io.IOException("simulated hidden error");
+                    return false;
+                });
+
+        worker().reconcileScan();
+
+        assertEquals(FileStatus.COLLECTED,
+                store.findByPath(file.toAbsolutePath().toString()).status());
+    }
+
+    @Test
+    void collectionPipelineBytecodeHasNoOrdinaryFileContentReaderHashSummarizerOrEmbeddingDependency()
+            throws Exception {
+        for (Class<?> pipelineClass : List.of(
+                FileIndexWorker.class, FileWatcher.class, PathFilter.class, FileTools.class)) {
+            byte[] classBytes;
+            try (var in = pipelineClass.getResourceAsStream(
+                    pipelineClass.getSimpleName() + ".class")) {
+                assertNotNull(in);
+                classBytes = in.readAllBytes();
+            }
+            String symbols = new String(classBytes, StandardCharsets.ISO_8859_1);
+            for (String forbidden : List.of(
+                    "newInputStream", "newBufferedReader", "readString", "readAllBytes",
+                    "FileInputStream", "sha256", "MessageDigest", "FileSummarizer",
+                    "FileContentExtractor", "FileEmbeddingWorker")) {
+                assertFalse(symbols.contains(forbidden),
+                        pipelineClass.getSimpleName() + " references forbidden symbol " + forbidden);
+            }
         }
     }
 
@@ -191,6 +218,57 @@ class FileIndexWorkerTest {
     }
 
     @Test
+    void changedGitIgnoreRulesRetireAndReincludeMetadata() throws Exception {
+        Path markdown = Files.writeString(root.resolve("draft.md"), "private body");
+        String absolute = markdown.toAbsolutePath().toString();
+        store.upsertPending(absolute, "draft.md", root.toAbsolutePath().toString(), "md");
+        store.updateCollected(absolute, 12, Instant.now(), Instant.now());
+        PathFilter filter = new PathFilter(FileFilterConfig.parse(
+                0, List.of(), List.of(), List.of("md"), true));
+        FileIndexWorker worker = new FileIndexWorker(store, filter, List.of(root), 60);
+        Path ignore = Files.writeString(root.resolve(".gitignore"), "draft.md\n");
+
+        worker.reconcileScan();
+        assertEquals(FileStatus.DELETED, store.findByPath(absolute).status());
+
+        Files.writeString(ignore, "");
+        filter.invalidateIgnoreRules(root);
+        worker.reconcileScan();
+        worker.processOneRound();
+        assertEquals(FileStatus.COLLECTED, store.findByPath(absolute).status());
+    }
+
+    @Test
+    void requestedSubtreeReconcileAppliesRuntimeIgnoreChange() throws Exception {
+        upsert();
+        worker().processOneRound();
+        FileIndexWorker active = worker();
+        active.start();
+        try {
+            Files.writeString(root.resolve(".gitignore"), "notes.txt\n");
+            pathFilter.invalidateIgnoreRules(root);
+            active.requestReconcile(root, root);
+
+            assertTrue(pollForStatus(file.toAbsolutePath().toString(), FileStatus.DELETED, 10_000));
+        } finally {
+            active.shutdown();
+        }
+    }
+
+    @Test
+    void transientGitIgnoreReadFailureNeverRetiresCollectedMetadata() throws Exception {
+        upsert();
+        worker().processOneRound();
+        Files.write(root.resolve(".gitignore"), new byte[1024 * 1024 + 1]);
+        pathFilter.invalidateIgnoreRules(root);
+
+        worker().reconcileScan();
+
+        assertEquals(FileStatus.COLLECTED,
+                store.findByPath(file.toAbsolutePath().toString()).status());
+    }
+
+    @Test
     void rawFileBodyNeverAppearsInDatabaseWalOrShm() throws Exception {
         String forbidden = "SELF_ANALYST_FORBIDDEN_FILE_BODY_9C2E";
         Files.writeString(file, forbidden);
@@ -204,5 +282,17 @@ class FileIndexWorkerTest {
             String bytes = new String(Files.readAllBytes(path), StandardCharsets.ISO_8859_1);
             assertFalse(bytes.contains(forbidden), "raw file body leaked into " + path);
         }
+    }
+
+    private boolean pollForStatus(String absolutePath, FileStatus status, long timeoutMs)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            FileRecord record = store.findByPath(absolutePath);
+            if (record != null && record.status() == status) return true;
+            Thread.sleep(50);
+        }
+        FileRecord record = store.findByPath(absolutePath);
+        return record != null && record.status() == status;
     }
 }

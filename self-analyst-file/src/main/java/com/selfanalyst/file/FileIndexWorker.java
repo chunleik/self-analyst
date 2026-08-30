@@ -9,8 +9,10 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -36,6 +38,8 @@ public class FileIndexWorker {
     private final Set<String> activeWatchRootSet;
     private final int intervalSeconds;
     private final Runnable beforeRetireMissing;
+    private final Map<Path, Path> pendingReconciles = new LinkedHashMap<>();
+    private final AtomicBoolean reconcileDrainScheduled = new AtomicBoolean(false);
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
@@ -97,18 +101,47 @@ public class FileIndexWorker {
         return running.get() && !executor.isShutdown() && !executor.isTerminated();
     }
 
+    /** Queue one coalesced subtree reconcile per active root. */
+    public void requestReconcile(Path watchRoot, Path subtree) {
+        if (!running.get() || cancelled.get() || watchRoot == null || subtree == null) return;
+        Path root = watchRoot.toAbsolutePath().normalize();
+        Path child = subtree.toAbsolutePath().normalize();
+        if (!activeWatchRootSet.contains(root.toString()) || !child.startsWith(root)) return;
+        synchronized (pendingReconciles) {
+            pendingReconciles.merge(root, child, FileIndexWorker::commonAncestor);
+        }
+        if (reconcileDrainScheduled.compareAndSet(false, true)) {
+            executor.execute(this::drainReconcileRequests);
+        }
+    }
+
     void reconcileScan() throws IOException {
         for (Path root : watchRoots) {
             if (cancelled.get()) return;
-            if (!Files.isDirectory(root)) continue;
-            Instant scanStartedAt = Instant.now();
-            Set<String> seen = new HashSet<>();
-            boolean[] traversalComplete = {true};
-            Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            reconcileSubtree(root, root);
+        }
+    }
+
+    private void reconcileSubtree(Path root, Path subtree) throws IOException {
+        if (cancelled.get()) return;
+        if (!Files.isDirectory(subtree, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.notExists(subtree, LinkOption.NOFOLLOW_LINKS)) {
+                store.markDeletedTree(subtree.toAbsolutePath().normalize().toString());
+            }
+            return;
+        }
+        Instant scanStartedAt = Instant.now();
+        Set<String> seen = new HashSet<>();
+        boolean[] traversalComplete = {true};
+        Files.walkFileTree(subtree, Set.of(), Integer.MAX_VALUE, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
                     if (cancelled.get()) return FileVisitResult.TERMINATE;
-                    return pathFilter.isExcludedDir(dir)
+                    if (isNestedWatchRoot(root, dir)) return FileVisitResult.SKIP_SUBTREE;
+                    PathFilter.FilterDecision decision =
+                            pathFilter.evaluateDirectory(root, dir, attrs);
+                    if (!decision.determinate()) traversalComplete[0] = false;
+                    return decision.excluded()
                             ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
                 }
 
@@ -116,7 +149,9 @@ public class FileIndexWorker {
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                     if (cancelled.get()) return FileVisitResult.TERMINATE;
                     try {
-                        if (attrs.isRegularFile() && !pathFilter.isExcludedFile(file)) {
+                        PathFilter.FilterDecision decision = pathFilter.evaluateFile(root, file, attrs);
+                        if (!decision.determinate()) traversalComplete[0] = false;
+                        if (!decision.excluded()) {
                             seen.add(file.toAbsolutePath().toString());
                             maybeEnqueue(root, file, attrs);
                         }
@@ -131,30 +166,40 @@ public class FileIndexWorker {
                     traversalComplete[0] = false;
                     return FileVisitResult.CONTINUE;
                 }
-            });
-            if (!cancelled.get() && traversalComplete[0]) {
-                beforeRetireMissing.run();
-                retireMissingFiles(root, seen, scanStartedAt);
-            }
+        });
+        if (!cancelled.get() && traversalComplete[0]) {
+            beforeRetireMissing.run();
+            retireMissingFiles(root, subtree, seen, scanStartedAt);
         }
     }
 
-    private void retireMissingFiles(Path root, Set<String> seen, Instant scanStartedAt) {
+    private void retireMissingFiles(Path root, Path subtree, Set<String> seen, Instant scanStartedAt) {
         String watchRoot = root.toAbsolutePath().normalize().toString();
+        Path normalizedSubtree = subtree.toAbsolutePath().normalize();
         for (FileRecord record : store.findActiveByWatchRoot(watchRoot)) {
+            Path recordPath;
+            try {
+                recordPath = Path.of(record.absolutePath()).toAbsolutePath().normalize();
+            } catch (InvalidPathException invalidPath) {
+                store.markDeleted(record.absolutePath());
+                continue;
+            }
+            if (!recordPath.startsWith(normalizedSubtree)) continue;
             if (seen.contains(record.absolutePath())) continue;
             if (record.updatedAt() != null && record.updatedAt().isAfter(scanStartedAt)) continue;
             try {
-                Path path = Path.of(record.absolutePath());
-                boolean confirmedMissing = Files.notExists(path);
-                boolean exists = Files.exists(path);
-                boolean noLongerRegular = exists && !Files.isRegularFile(path);
-                boolean nowExcluded = exists && !noLongerRegular && pathFilter.isExcludedFile(path);
-                if (confirmedMissing || noLongerRegular || nowExcluded) {
+                if (Files.notExists(recordPath, LinkOption.NOFOLLOW_LINKS)) {
+                    store.markDeleted(record.absolutePath());
+                    continue;
+                }
+                BasicFileAttributes attrs = Files.readAttributes(
+                        recordPath, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                PathFilter.FilterDecision decision = pathFilter.evaluateFile(root, recordPath, attrs);
+                if (decision.determinate() && decision.excluded()) {
                     store.markDeleted(record.absolutePath());
                 }
-            } catch (InvalidPathException invalidPath) {
-                store.markDeleted(record.absolutePath());
+            } catch (IOException accessError) {
+                // Fail closed for collection, but do not retire on ambiguous access errors.
             }
         }
     }
@@ -205,6 +250,34 @@ public class FileIndexWorker {
         if (running.get()) processOneRound();
     }
 
+    private void drainReconcileRequests() {
+        try {
+            while (running.get() && !cancelled.get()) {
+                Map.Entry<Path, Path> request;
+                synchronized (pendingReconciles) {
+                    var iterator = pendingReconciles.entrySet().iterator();
+                    if (!iterator.hasNext()) break;
+                    request = iterator.next();
+                    iterator.remove();
+                }
+                try {
+                    reconcileSubtree(request.getKey(), request.getValue());
+                    processOneRound();
+                } catch (IOException error) {
+                    log.warn("File metadata subtree reconcile failed ({})", errorType(error));
+                }
+            }
+        } finally {
+            reconcileDrainScheduled.set(false);
+            synchronized (pendingReconciles) {
+                if (!pendingReconciles.isEmpty()
+                        && running.get() && reconcileDrainScheduled.compareAndSet(false, true)) {
+                    executor.execute(this::drainReconcileRequests);
+                }
+            }
+        }
+    }
+
     /** Process a bounded metadata batch without opening any file content stream. */
     void processOneRound() {
         if (cancelled.get()) return;
@@ -230,11 +303,21 @@ public class FileIndexWorker {
         if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
         Path file = Path.of(abs);
         try {
-            if (!Files.isRegularFile(file)) {
+            if (Files.notExists(file, LinkOption.NOFOLLOW_LINKS)) {
                 store.markDeleted(abs);
                 return;
             }
-            BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class);
+            BasicFileAttributes attrs = Files.readAttributes(
+                    file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            Path root = Path.of(rec.watchRoot()).toAbsolutePath().normalize();
+            PathFilter.FilterDecision decision = pathFilter.evaluateFile(root, file, attrs);
+            if (!decision.determinate()) {
+                throw new IOException("File filter decision is indeterminate");
+            }
+            if (decision.excluded()) {
+                store.markDeleted(abs);
+                return;
+            }
             store.updateCollected(abs, attrs.size(), attrs.creationTime().toInstant(),
                     attrs.lastModifiedTime().toInstant());
             log.debug("Collected file metadata {}", abs);
@@ -257,7 +340,19 @@ public class FileIndexWorker {
         }
     }
 
+    private boolean isNestedWatchRoot(Path currentRoot, Path directory) {
+        Path root = currentRoot.toAbsolutePath().normalize();
+        Path dir = directory.toAbsolutePath().normalize();
+        return !dir.equals(root) && activeWatchRootSet.contains(dir.toString());
+    }
+
     private static String errorType(Throwable error) {
         return error == null ? "Unknown" : error.getClass().getSimpleName();
+    }
+
+    private static Path commonAncestor(Path left, Path right) {
+        Path candidate = left;
+        while (candidate != null && !right.startsWith(candidate)) candidate = candidate.getParent();
+        return candidate != null ? candidate : left;
     }
 }

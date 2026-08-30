@@ -125,6 +125,21 @@ test("degraded reason and technical detail are escaped", () => {
   assert.match(elements.content.innerHTML, /已配置 0 个目录/);
 });
 
+test("empty extension allowlist has a diagnostic degraded message", () => {
+  const { sandbox, elements } = createSandbox({
+    status: "degraded",
+    reason: "extensions_required",
+    totals: {},
+    roots: [{ path: "D:\\Docs", counts: {} }],
+    files: [],
+  });
+
+  sandbox.renderFilesTab();
+
+  assert.match(elements.content.innerHTML, /扩展名白名单为空/);
+  assert.match(elements.content.innerHTML, /\*/);
+});
+
 test("newer file overview wins when requests resolve out of order", async () => {
   const first = deferred();
   const second = deferred();

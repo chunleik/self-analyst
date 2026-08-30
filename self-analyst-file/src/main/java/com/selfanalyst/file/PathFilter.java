@@ -1,179 +1,216 @@
 package com.selfanalyst.file;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.eclipse.jgit.ignore.FastIgnoreRule;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.PathMatcher;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedHashSet;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
-/**
- * Single source of exclusion rules (SPEC-FILE-020..024). Called consistently at
- * FileWatcher registration, FileIndexWorker scan, and before enqueue.
- */
+/** Root-aware, fail-closed metadata filter shared by scanning and WatchService events. */
 public class PathFilter {
 
-    private static final Logger log = LoggerFactory.getLogger(PathFilter.class);
-
-    /** SPEC-FILE-020: built-in blacklisted directory names. */
-    private static final Set<String> BLACKLIST_DIRS = Set.of(
-            ".git", "node_modules", "target", "build", "dist", ".gradle",
-            ".idea", ".vscode", "out", "bin", ".mvn", "__pycache__", "venv", ".venv");
-
-    /** SPEC-FILE-022: default-excluded sensitive file globs. */
-    private static final List<String> SENSITIVE_GLOBS = List.of(
+    private static final List<FastIgnoreRule> SENSITIVE_RULES = rules(
             ".env", ".env.*", "*.pem", "*.key", "id_rsa*", "*.p12", "*.keystore");
+    private static final List<FastIgnoreRule> VOLATILE_RULES = rules(
+            "*.log", "*.tmp", "*.temp", "*.lock", "*.swp", "*~",
+            "~$*", "*.autosave", "*.bak");
 
-    /** High-churn / volatile files that must never be collected. */
-    private static final List<String> VOLATILE_GLOBS = List.of(
-            "*.log", "*.tmp", "*.temp", "*.lock", "*.swp", "*~");
+    private final FileFilterConfig config;
+    private final List<FastIgnoreRule> excludeGlobRules;
+    private final GitIgnoreResolver gitIgnoreResolver;
+    private final HiddenProbe hiddenProbe;
 
-    private final long maxFileSizeBytes;
-    private final Set<String> excludeDirs;
-    private final List<PathMatcher> excludeGlobs;
-    private final List<PathMatcher> sensitiveMatchers;
-    private final List<PathMatcher> volatileMatchers;
-    private final Set<String> allowedExtensions;   // empty = all non-excluded file types
+    public PathFilter(FileFilterConfig config) {
+        this(config, Files::isHidden);
+    }
 
-    public PathFilter(long maxFileSizeKb, List<String> excludeDirs,
-                      List<String> excludeGlobs, List<String> extensions) {
-        this.maxFileSizeBytes = Math.max(0, maxFileSizeKb) * 1024L;
-        this.excludeDirs = new LinkedHashSet<>();
-        if (excludeDirs != null) {
-            for (String d : excludeDirs) {
-                if (d != null && !d.isBlank()) this.excludeDirs.add(d.trim());
-            }
+    PathFilter(FileFilterConfig config, HiddenProbe hiddenProbe) {
+        this.config = config;
+        this.excludeGlobRules = config.excludedGlobs().stream().map(FastIgnoreRule::new).toList();
+        this.gitIgnoreResolver = new GitIgnoreResolver(config.respectGitIgnore());
+        this.hiddenProbe = hiddenProbe;
+    }
+
+    public FilterDecision evaluateDirectory(Path watchRoot, Path directory,
+                                            BasicFileAttributes attrs) {
+        FilterDecision boundary = boundaryDecision(watchRoot, directory, attrs);
+        if (boundary.excluded()) return boundary;
+
+        String name = fileName(directory);
+        FilterDecision hidden = hiddenDecision(directory, name);
+        if (hidden.excluded()) return hidden;
+        if (config.excludedDirectoryNames().contains(normalizeName(name))) {
+            return excluded("excluded_directory");
         }
-        this.excludeGlobs = compileGlobs(excludeGlobs);
-        this.sensitiveMatchers = compileGlobs(SENSITIVE_GLOBS);
-        this.volatileMatchers = compileGlobs(VOLATILE_GLOBS);
-        this.allowedExtensions = new LinkedHashSet<>();
-        if (extensions != null) {
-            for (String e : extensions) {
-                if (e != null && !e.isBlank()) {
-                    this.allowedExtensions.add(normalizeExt(e.trim()));
-                }
-            }
-        }
+        if (matchesCustomGlob(watchRoot, directory, true)) return excluded("excluded_glob");
+        return gitIgnoreDecision(watchRoot, directory, true);
     }
 
-    /** True if the directory should NOT be descended into / registered. */
-    public boolean isExcludedDir(Path dir) {
-        if (dir == null) return false;
-        String name = fileName(dir);
-        if (name.isEmpty()) return false;
-        if (isNameBlacklistedDir(name)) return true;
-        if (isHidden(dir, name)) return true;
-        return false;
-    }
+    public FilterDecision evaluateFile(Path watchRoot, Path file, BasicFileAttributes attrs) {
+        FilterDecision boundary = boundaryDecision(watchRoot, file, attrs);
+        if (boundary.excluded()) return boundary;
+        if (!attrs.isRegularFile()) return excluded("invalid_path");
 
-    /** Name-only blacklist check, excluding the hidden test. */
-    private boolean isNameBlacklistedDir(String name) {
-        return BLACKLIST_DIRS.contains(name) || excludeDirs.contains(name);
-    }
-
-    /**
-     * True if the file should NOT be collected. Checks (in order): containment in
-     * an excluded dir, hidden, sensitive, volatile, extension allow-list, custom
-     * globs, and size cap (last, since it touches the filesystem).
-     */
-    public boolean isExcludedFile(Path file) {
-        if (file == null) return true;
         String name = fileName(file);
-        if (name.isEmpty()) return true;
+        if (name.startsWith(".")) return excluded("hidden");
+        if (matchesNameRule(SENSITIVE_RULES, name)) return excluded("sensitive_name");
+        if (matchesNameRule(VOLATILE_RULES, name)) return excluded("volatile_name");
+        if (!config.allowsExtension(extensionOf(name))) return excluded("extension_not_allowed");
 
-        // Any ancestor directory blacklisted by name → file excluded. (Name-only:
-        // a hidden ancestor outside the watch tree — e.g. Windows AppData — must
-        // not disqualify the file; hidden applies to the file and to traversal.)
-        for (Path p = file.getParent(); p != null; p = p.getParent()) {
-            if (isNameBlacklistedDir(fileName(p))) return true;
+        // Unsupported extensions are rejected using only the already supplied
+        // attributes and filename. Expensive ancestor/link checks are reserved
+        // for files that could otherwise be collected.
+        FilterDecision ancestor = excludedAncestorDecision(watchRoot, file);
+        if (ancestor.excluded()) return ancestor;
+        FilterDecision hidden = filesystemHiddenDecision(file);
+        if (hidden.excluded()) return hidden;
+        if (matchesCustomGlob(watchRoot, file, false)) return excluded("excluded_glob");
+        if (config.maxFileSizeBytes() > 0 && attrs.size() > config.maxFileSizeBytes()) {
+            return excluded("oversized");
         }
+        return gitIgnoreDecision(watchRoot, file, false);
+    }
 
-        if (isHidden(file, name)) return true;
-        if (matchesAny(sensitiveMatchers, file, name)) return true;
-        if (matchesAny(volatileMatchers, file, name)) return true;
+    public boolean hasAllowedExtensions() {
+        return config.hasAllowedExtensions();
+    }
 
-        if (!allowedExtensions.isEmpty()
-                && !allowedExtensions.contains(extensionOf(name))) {
-            return true;
-        }
-        if (matchesAny(excludeGlobs, file, name)) return true;
+    public void invalidateIgnoreRules(Path directory) {
+        gitIgnoreResolver.invalidate(directory);
+    }
 
-        // SPEC-FILE-021: oversized files are filtered by filesystem metadata.
-        if (maxFileSizeBytes > 0) {
+    public boolean respectsGitIgnore() {
+        return gitIgnoreResolver.enabled();
+    }
+
+    private FilterDecision excludedAncestorDecision(Path watchRoot, Path file) {
+        Path root = normalize(watchRoot);
+        for (Path parent = normalize(file).getParent(); parent != null && parent.startsWith(root);
+             parent = parent.equals(root) ? null : parent.getParent()) {
             try {
-                if (Files.isRegularFile(file) && Files.size(file) > maxFileSizeBytes) {
-                    return true;
+                BasicFileAttributes attrs = Files.readAttributes(
+                        parent, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                if (attrs.isSymbolicLink() || attrs.isOther() || Files.isSymbolicLink(parent)) {
+                    return excluded("symbolic_link");
                 }
-            } catch (IOException e) {
-                return true; // can't stat → treat as excluded
+                if (!attrs.isDirectory()) return excluded("invalid_path");
+            } catch (IOException accessError) {
+                return indeterminate("path_access_error");
+            }
+            if (parent.equals(root)) continue;
+            String name = fileName(parent);
+            FilterDecision hidden = hiddenDecision(parent, name);
+            if (hidden.excluded()) return hidden;
+            if (config.excludedDirectoryNames().contains(normalizeName(name))) {
+                return excluded("excluded_directory");
+            }
+            if (matchesCustomGlob(root, parent, true)) return excluded("excluded_glob");
+        }
+        return included();
+    }
+
+    private FilterDecision boundaryDecision(Path watchRoot, Path candidate,
+                                            BasicFileAttributes attrs) {
+        if (watchRoot == null || candidate == null || attrs == null) return excluded("invalid_path");
+        Path root = normalize(watchRoot);
+        Path path = normalize(candidate);
+        if (!path.startsWith(root)) return excluded("outside_watch_root");
+        if (attrs.isSymbolicLink() || attrs.isOther() || Files.isSymbolicLink(path)) {
+            return excluded("symbolic_link");
+        }
+        return included();
+    }
+
+    private FilterDecision gitIgnoreDecision(Path watchRoot, Path candidate, boolean directory) {
+        try {
+            return gitIgnoreResolver.isIgnored(watchRoot, candidate, directory)
+                    ? excluded("gitignore") : included();
+        } catch (IOException | RuntimeException error) {
+            return indeterminate("gitignore_error");
+        }
+    }
+
+    private boolean matchesCustomGlob(Path watchRoot, Path candidate, boolean directory) {
+        Path root = normalize(watchRoot);
+        Path path = normalize(candidate);
+        if (!path.startsWith(root) || path.equals(root)) return false;
+        String relative = root.relativize(path).toString().replace('\\', '/');
+        String basename = fileName(path);
+        for (FastIgnoreRule rule : excludeGlobRules) {
+            boolean directoryTreeMatch = directory
+                    && rule.isMatch(relative + "/__selfanalyst_descendant__", false);
+            if ((rule.isMatch(relative, directory) || rule.isMatch(basename, directory)
+                    || directoryTreeMatch)
+                    && rule.getResult()) {
+                return true;
             }
         }
         return false;
     }
 
-    /** Lower-cased extension without the dot, or "" if none. */
+    private static boolean matchesNameRule(List<FastIgnoreRule> rules, String name) {
+        for (FastIgnoreRule rule : rules) {
+            if (rule.isMatch(name, false) && rule.getResult()) return true;
+        }
+        return false;
+    }
+
+    private FilterDecision hiddenDecision(Path path, String name) {
+        if (name.startsWith(".")) return excluded("hidden");
+        return filesystemHiddenDecision(path);
+    }
+
+    private FilterDecision filesystemHiddenDecision(Path path) {
+        try {
+            return hiddenProbe.isHidden(path) ? excluded("hidden") : included();
+        } catch (IOException | RuntimeException error) {
+            return indeterminate("path_access_error");
+        }
+    }
+
+    private static List<FastIgnoreRule> rules(String... patterns) {
+        return java.util.Arrays.stream(patterns).map(FastIgnoreRule::new).toList();
+    }
+
+    private static Path normalize(Path path) {
+        return path.toAbsolutePath().normalize();
+    }
+
+    private static String normalizeName(String name) {
+        return name.toLowerCase(Locale.ROOT);
+    }
+
+    private static String fileName(Path path) {
+        Path name = path.getFileName();
+        return name != null ? name.toString() : "";
+    }
+
     public static String extensionOf(String fileName) {
         int dot = fileName.lastIndexOf('.');
         if (dot <= 0 || dot == fileName.length() - 1) return "";
         return fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
-    private static String normalizeExt(String ext) {
-        String e = ext.toLowerCase(Locale.ROOT);
-        return e.startsWith(".") ? e.substring(1) : e;
+    private static FilterDecision included() {
+        return new FilterDecision(false, "included", true);
     }
 
-    private static boolean matchesAny(List<PathMatcher> matchers, Path file, String name) {
-        Path nameOnly = Path.of(name);
-        for (PathMatcher m : matchers) {
-            if (m.matches(nameOnly) || m.matches(file.getFileName())) return true;
-        }
-        return false;
+    private static FilterDecision excluded(String reason) {
+        return new FilterDecision(true, reason, true);
     }
 
-    private static boolean isHidden(Path path, String name) {
-        if (name.startsWith(".")) return true;
-        try {
-            return Files.exists(path) && Files.isHidden(path);
-        } catch (IOException e) {
-            return false;
-        }
+    private static FilterDecision indeterminate(String reason) {
+        return new FilterDecision(true, reason, false);
     }
 
-    private static List<PathMatcher> compileGlobs(List<String> globs) {
-        List<PathMatcher> out = new ArrayList<>();
-        if (globs == null) return out;
-        var fs = java.nio.file.FileSystems.getDefault();
-        for (String g : globs) {
-            if (g == null || g.isBlank()) continue;
-            try {
-                out.add(fs.getPathMatcher("glob:" + g.trim()));
-            } catch (Exception e) {
-                log.warn("Ignoring invalid glob '{}': {}", g, e.getMessage());
-            }
-        }
-        return out;
-    }
+    public record FilterDecision(boolean excluded, String reason, boolean determinate) {}
 
-    private static String fileName(Path p) {
-        Path n = p.getFileName();
-        return n != null ? n.toString() : "";
-    }
-
-    /** Parse a comma-separated config value into a trimmed list (skips blanks). */
-    public static List<String> splitCsv(String csv) {
-        if (csv == null || csv.isBlank()) return List.of();
-        return Arrays.stream(csv.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .toList();
+    @FunctionalInterface
+    interface HiddenProbe {
+        boolean isHidden(Path path) throws IOException;
     }
 }

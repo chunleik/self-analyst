@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
@@ -103,7 +104,7 @@ class DesktopConfigControllerTest {
         assertEquals("false", defaults.get("wiki.enabled"));
         assertEquals("false", defaults.get("embedding.enabled"));
         assertEquals("false", defaults.get("websearch.enabled"));
-        assertEquals("off", defaults.get("aw.ocr.engine"));
+        assertFalse(defaults.keySet().stream().anyMatch(DeprecatedKeys::contains));
         assertTrue(defaults.containsKey("memory.dir"));
         assertTrue(defaults.containsKey("aw.base-url"));
         assertTrue(defaults.containsKey("wiki.prompt.maxContentChars"));
@@ -124,22 +125,24 @@ class DesktopConfigControllerTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void configPayloadReportsOcrOverrideAndRestartMetadata(@TempDir Path dir) throws Exception {
+    void configPayloadOmitsRemovedFeatureSectionsButAcceptsLegacyKeys(@TempDir Path dir)
+            throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         store.saveRaw("""
                 [aw.ocr]
                 engine = "paddle"
+                [aw.audio]
+                enabled = true
+                legacyOption = "ignored"
                 """);
 
         Map<String, Object> payload = controller(dir, store).configPayload();
-        Map<String, Object> collection = (Map<String, Object>) payload.get("collection");
-        Map<String, Object> ocr = (Map<String, Object>) collection.get("ocrEngine");
+        assertFalse(payload.containsKey("audio"));
+        Map<?, ?> collection = (Map<?, ?>) payload.get("collection");
+        assertFalse(collection.containsKey("ocrEngine"));
 
-        assertEquals("paddle", ocr.get("effectiveValue"));
-        assertEquals("paddle", ocr.get("savedValue"));
-        assertEquals("user_config", ocr.get("source"));
-        assertEquals(true, ocr.get("restartRequiredOnChange"));
+        var raw = controller(dir, store).applyRawSave(store.readRaw());
+        assertTrue(raw.unknownKeys().isEmpty());
     }
 
     @Test
@@ -245,7 +248,8 @@ class DesktopConfigControllerTest {
                 [aw.ocr]
                 engine = "paddle"
                 """);
-        assertTrue(r4.restartRequired().contains("aw.ocr.engine"));
+        assertFalse(r4.restartRequired().contains("aw.ocr.engine"));
+        assertTrue(r4.unknownKeys().isEmpty());
     }
 
     @Test

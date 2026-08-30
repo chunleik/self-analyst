@@ -1,44 +1,25 @@
-# SelfAnalyst dist build script. OCR is optional and excluded unless -WithOcr is set.
-param(
-    [switch]$WithOcr
-)
+# SelfAnalyst dist build script.
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
 
 $Dist = Join-Path $Root "dist"
-$DistTools = Join-Path $Dist "tools"
 
-function Assert-PathUnder {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Parent
-    )
+function Remove-LegacyToolDirectory {
+    param([Parameter(Mandatory = $true)][string]$Name)
 
-    $fullPath = [System.IO.Path]::GetFullPath($Path)
-    $fullParent = [System.IO.Path]::GetFullPath($Parent).TrimEnd('\')
-    if (-not ($fullPath.Equals($fullParent, [System.StringComparison]::OrdinalIgnoreCase) -or
-              $fullPath.StartsWith($fullParent + '\', [System.StringComparison]::OrdinalIgnoreCase))) {
-        throw "Refusing to modify path outside expected directory: $fullPath"
+    $toolsRoot = [System.IO.Path]::GetFullPath((Join-Path $Dist "tools")).TrimEnd('\')
+    $target = Join-Path $toolsRoot $Name
+    if (-not (Test-Path -LiteralPath $target)) { return }
+
+    $resolved = [System.IO.Path]::GetFullPath((Resolve-Path -LiteralPath $target).Path)
+    if (-not $resolved.StartsWith($toolsRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove legacy tool outside dist/tools: $resolved"
     }
-}
-
-function Remove-PathIfExists {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string]$Parent
-    )
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return
-    }
-
-    $resolved = (Resolve-Path -LiteralPath $Path).Path
-    Assert-PathUnder -Path $resolved -Parent $Parent
     Remove-Item -LiteralPath $resolved -Recurse -Force
+    Write-Host "  Removed legacy tool directory: $Name" -ForegroundColor DarkGray
 }
-
 function Stop-SelfAnalystProcesses {
     Write-Host "=== 1/5 Stopping running SelfAnalyst processes ===" -ForegroundColor Cyan
 
@@ -97,28 +78,12 @@ if ($LASTEXITCODE -ne 0) { throw "Cargo build failed" }
 Set-Location $Root
 
 Write-Host "=== 4/5 Updating dist/ (preserving data) ===" -ForegroundColor Cyan
-New-Item -ItemType Directory -Force -Path $DistTools | Out-Null
+New-Item -ItemType Directory -Force -Path $Dist | Out-Null
+Remove-LegacyToolDirectory -Name "PaddleOCR-json"
+Remove-LegacyToolDirectory -Name "whisper"
 
 Copy-Item -LiteralPath (Join-Path $Root "self-analyst-app/target/self-analyst-app-1.0.0.jar") `
     -Destination (Join-Path $Dist "self-analyst-app.jar") -Force
-
-Remove-PathIfExists -Path (Join-Path $DistTools "PaddleOCR-json") -Parent $DistTools
-$paddleSource = Join-Path $Root "tools/PaddleOCR-json"
-if ($WithOcr) {
-    if (-not (Test-Path -LiteralPath $paddleSource)) {
-        throw "Missing tools/PaddleOCR-json. Run scripts/download-tools.ps1 -WithOcr first."
-    }
-    Copy-Item -Recurse -LiteralPath $paddleSource -Destination $DistTools
-    Write-Host "  Optional PaddleOCR copied"
-} else {
-    Write-Host "  Optional PaddleOCR omitted (default)" -ForegroundColor DarkGray
-}
-
-Remove-PathIfExists -Path (Join-Path $DistTools "whisper") -Parent $DistTools
-if (Test-Path -LiteralPath (Join-Path $Root "tools/whisper")) {
-    Copy-Item -Recurse -LiteralPath (Join-Path $Root "tools/whisper") -Destination $DistTools
-    Write-Host "  whisper.cpp copied"
-}
 
 Copy-Item -LiteralPath (Join-Path $Root "self-analyst-desktop/src-tauri/target/release/self-analyst-desktop.exe") `
     -Destination (Join-Path $Dist "SelfAnalyst.exe") -Force

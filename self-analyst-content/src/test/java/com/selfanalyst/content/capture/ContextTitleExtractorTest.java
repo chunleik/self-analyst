@@ -109,18 +109,6 @@ class ContextTitleExtractorTest {
     }
 
     @Test
-    void persistsOnlyUnambiguousOcrTitleCandidate() {
-        ContextTitleCandidate candidate = ContextTitleExtractor.fromOcrTitle(
-                "Weixin.exe", "一篇文章的标题");
-
-        assertEquals("一篇文章的标题", candidate.value());
-        assertEquals("article", candidate.kind());
-        assertEquals("ocr_title", candidate.source());
-        assertNull(ContextTitleExtractor.fromOcrTitle(
-                "Weixin.exe", "文章标题\n工具栏按钮"));
-    }
-
-    @Test
     void rejectsMultilineUrlGenericControlAndParagraphCandidates() {
         assertNull(ContextTitleExtractor.fromDocumentTitle(
                 "Weixin.exe", "文章标题\n这里是正文"));

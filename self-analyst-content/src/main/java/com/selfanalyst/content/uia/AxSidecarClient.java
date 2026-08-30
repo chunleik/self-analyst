@@ -86,7 +86,7 @@ public final class AxSidecarClient {
      * Query the accessibility tree for a native window handle.
      *
      * @param handle neutral window handle (Windows: HWND numeric value)
-     * @return the root node, or {@code null} on any failure (degrade to OCR)
+     * @return the root node, or {@code null} on any failure
      */
     public UiaNode query(long handle) {
         if (binaryPath == null) return null;
@@ -219,7 +219,7 @@ public final class AxSidecarClient {
         if (Files.exists(dev)) {
             return dev.toAbsolutePath().toString();
         }
-        return null;   // degrade: query() returns null, callers fall back to OCR
+        return null;
     }
 
     private static String binaryName() {

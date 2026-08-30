@@ -107,7 +107,7 @@ agentscope-core 2.0.1 已传递引入官方 MCP Java SDK（`io.modelcontextproto
 
 - **SPEC-WS-PRV-001**: 日志与错误信息不得输出 `websearch.api-key`。
 - **SPEC-WS-PRV-002**: 桌面配置 UI 不得明文回显已保存的 API key 给非必要场景（密码框）。
-- **SPEC-WS-PRV-003**: 发送给搜索 MCP 的查询不得附带用户屏幕原文/OCR/UIA 原始内容，只发送用户问题或必要关键词。
+- **SPEC-WS-PRV-003**: 发送给搜索 MCP 的查询不得附带用户屏幕原文或 UIA 原始内容，只发送用户问题或必要关键词。
 
 ---
 
@@ -123,7 +123,7 @@ agentscope-core 2.0.1 已传递引入官方 MCP Java SDK（`io.modelcontextproto
 
 ### 11.2 不应修改
 
-- `self-analyst-content`、`self-analyst-audio`、`self-analyst-wiki` 模块逻辑
+- `self-analyst-content`、`self-analyst-wiki` 模块逻辑
 - `self-analyst-desktop/src-tauri/*`
 
 ---

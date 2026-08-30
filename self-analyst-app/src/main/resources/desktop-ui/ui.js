@@ -184,7 +184,6 @@ function loadTasks() {
 // ---- Auto-refresh ----
 
 var refreshTimer = null;
-var audioRefreshTimer = null;
 
 function startAutoRefresh() {
   stopAutoRefresh();
@@ -210,24 +209,11 @@ function startAutoRefresh() {
     });
   }, 30000);
 
-  audioRefreshTimer = setInterval(function () {
-    if (state.tab === "audio") {
-      api.getStatus().catch(function () { return state.status; }).then(function (status) {
-        state.status = status || state.status;
-        updateStatusBar();
-      });
-      loadAudioEvents();
-    }
-  }, 2000);
 }
 
 function stopAutoRefresh() {
   if (refreshTimer) {
     clearInterval(refreshTimer);
     refreshTimer = null;
-  }
-  if (audioRefreshTimer) {
-    clearInterval(audioRefreshTimer);
-    audioRefreshTimer = null;
   }
 }

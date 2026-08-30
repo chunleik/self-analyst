@@ -6,6 +6,13 @@ const source = fs.readFileSync(
   new URL("../../main/resources/desktop-ui/ui.js", import.meta.url),
   "utf8",
 );
+const initSource = fs.readFileSync(
+  new URL("../../main/resources/desktop-ui/init.js", import.meta.url),
+  "utf8",
+);
+
+assert.doesNotMatch(source, /audioRefreshTimer|loadAudioEvents|updateAudio/);
+assert.doesNotMatch(initSource, /updateAudio|loadAudioEvents/);
 
 function element() {
   return { className: "", title: "", textContent: "", classList: { toggle() {} } };
@@ -38,9 +45,6 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(source, context);
-context.updateAudioToggle = () => {};
-context.updateAudioAvailability = () => {};
-
 context.updateStatusBar();
 
 assert.match(context.state.dom.collectorsDot.className, /orange/);

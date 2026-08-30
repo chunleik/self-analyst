@@ -14,8 +14,7 @@ public record ContentEvent(
         String contextKind,
         String titleSource,
         String titleConfidence,
-        int uiaChars,
-        int ocrChars) {
+        int uiaChars) {
 
     public Map<String, Object> toHeartbeatData() {
         Map<String, Object> data = new LinkedHashMap<>();
@@ -31,7 +30,6 @@ public record ContentEvent(
         }
         data.put("title_source", titleSource != null ? titleSource : "window");
         data.put("uia_chars", uiaChars);
-        data.put("ocr_chars", ocrChars);
         return Collections.unmodifiableMap(data);
     }
 }

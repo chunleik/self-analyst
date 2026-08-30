@@ -16,7 +16,7 @@ SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本
 
 | 类型 | 放置 | 对象 | 示例 |
 |------|------|------|------|
-| **Module Spec** | `docs/specs/<module>.md` | 一个 `self-analyst-*` 子模块 | `core.md`、`audio.md`、`file.md` |
+| **Module Spec** | `docs/specs/<module>.md` | 一个 `self-analyst-*` 子模块 | `core.md`、`content.md`、`file.md` |
 | **Feature Spec** | `docs/specs/<feature>.md` | 跨模块的特性 | `desktop-chat-tab.md`、`llm-wiki.md` |
 | **Archive** | `docs/archive/design-proposals/` | 被正式 spec 取代的旧设计提案 | — |
 
@@ -31,7 +31,7 @@ SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本
 
 ## 4. 标准结构（Module Spec 骨架）
 
-以 `audio.md` / `file.md` 为范式：
+以 `content.md` / `file.md` 为范式：
 
 ```
 # <模块名> SDD 规格说明书

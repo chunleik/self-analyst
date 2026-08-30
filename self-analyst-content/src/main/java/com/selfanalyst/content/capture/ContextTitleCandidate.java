@@ -3,7 +3,7 @@ package com.selfanalyst.content.capture;
 /**
  * A single persistable title derived from transient window content.
  *
- * <p>This type deliberately carries no source text. Raw UIA/OCR content must stay inside
+ * <p>This type deliberately carries no source text. Raw UIA content must stay inside
  * the capture call and must never cross the persistence boundary.</p>
  */
 public record ContextTitleCandidate(

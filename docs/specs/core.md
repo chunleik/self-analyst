@@ -58,13 +58,11 @@ App (入口) → AppSession (生命周期管理)
 配置项按以下优先级解析（高到低）：
 
 1. 支持该入口的环境变量（如 `OPENAI_API_KEY`）
-2. `{memoryDir}/config.toml`
-3. 尚未迁移的 `{memoryDir}/config.properties`
-4. legacy 用户配置
-5. classpath `application.properties` 默认值
-6. 硬编码默认值
+2. `./data/config/config.toml`
+3. classpath `application.properties` 默认值
+4. 硬编码默认值
 
-`aw.port` 不接受环境变量覆盖，只读取用户 TOML 或默认值。详细迁移和拍平规则见
+`aw.port` 不接受环境变量覆盖，只读取用户 TOML 或默认值。详细加载和拍平规则见
 [`config-toml.md`](config-toml.md)。
 
 ### SPEC-CFG-002: 配置项清单

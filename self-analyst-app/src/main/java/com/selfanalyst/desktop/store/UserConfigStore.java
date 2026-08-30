@@ -17,7 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Reads/writes user-level config overrides at {@code {memoryDir}/config.toml}
+ * Reads/writes portable user config overrides at {@code ./data/config/config.toml}
  * (SPEC-TOML-FMT-001a). The internal namespace stays flat dotted keys; TOML
  * tables are flattened on load and regenerated on structured save via
  * {@link TomlSupport}.
@@ -36,8 +36,8 @@ public class UserConfigStore {
     private final Path filePath;
     private final Properties defaults;
 
-    public UserConfigStore(Path memoryDir) {
-        this.filePath = memoryDir.resolve("config.toml");
+    public UserConfigStore(Path configDir) {
+        this.filePath = configDir.resolve("config.toml");
         this.defaults = loadClasspathDefaults();
     }
 
@@ -56,7 +56,7 @@ public class UserConfigStore {
     /**
      * Returns only the user-saved properties (no defaults mixed in), parsed from
      * TOML and flattened to dotted keys. A missing/unreadable/invalid file yields
-     * an empty set (same forgiving posture as before). SPEC-TOML-MIG-002b.
+     * an empty set (same forgiving posture as before). SPEC-TOML-LOAD-002b.
      */
     public Properties loadUser() {
         Properties props = new Properties();

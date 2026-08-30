@@ -29,8 +29,8 @@
 
 ## 密钥与敏感配置
 
-- API key 可以来自环境变量或 `{memory.dir}/config.toml`。推荐优先使用环境变量；用户配置、
-  迁移生成的 `config.properties.bak` 和本地日志都不应提交到仓库。
+- API key 可以来自环境变量或 `./data/config/config.toml`。推荐优先使用环境变量；
+  用户配置和本地日志都不应提交到仓库。
 - raw 配置编辑接口必须返回真实密钥才能避免保存脱敏占位符；因此它属于受保护的本地敏感接口。
 - UI、日志、聊天正文、AgentState 和上下文快照不得记录配置密钥。
 - 文件监控、聊天、Embedding 和搜索的外发边界见 [PRIVACY.md](PRIVACY.md)。OCR 与声音采集当前已移除。

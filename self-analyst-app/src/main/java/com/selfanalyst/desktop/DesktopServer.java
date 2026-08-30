@@ -106,11 +106,29 @@ public class DesktopServer {
                          FileWatchStore fileWatchStore,
                          Supplier<DesktopFileController.CollectorState> fileStateSupplier,
                          DesktopFileController.SettingsApplier fileSettingsApplier) {
+        this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
+                contentPersistenceReady, contentMigrationError, fileWatchStore,
+                fileStateSupplier, fileSettingsApplier,
+                new UserConfigStore(Config.resolveConfigDir()));
+    }
+
+    public DesktopServer(Javalin app,
+                         Config config,
+                         SelfAnalystAgent agent,
+                         EventStore eventStore,
+                         MemoryStore memoryStore,
+                         WatcherManager watcherManager,
+                         ContentWatcher contentWatcher,
+                         boolean contentPersistenceReady,
+                         String contentMigrationError,
+                         FileWatchStore fileWatchStore,
+                         Supplier<DesktopFileController.CollectorState> fileStateSupplier,
+                         DesktopFileController.SettingsApplier fileSettingsApplier,
+                         UserConfigStore userConfigStore) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
         TaskStore taskStore = new TaskStore(memoryDir);
-        UserConfigStore userConfigStore = new UserConfigStore(memoryDir);
         ChatSessionStore chatSessionStore = ChatSessionStore.openExclusive(memoryDir);
         ChatSessionDeletionCoordinator deletionCoordinator =
                 new ChatSessionDeletionCoordinator(chatSessionStore, agent, config);

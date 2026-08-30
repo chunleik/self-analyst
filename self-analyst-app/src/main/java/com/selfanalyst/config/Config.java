@@ -3,7 +3,6 @@ package com.selfanalyst.config;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -76,31 +75,18 @@ public record Config(
     private static final Logger log = LoggerFactory.getLogger(Config.class);
 
     public static Config load() {
+        return load(resolveConfigDir());
+    }
+
+    static Config load(Path configDir) {
         Properties props = loadClasspathProps();
         String defaultAwPort = props.getProperty("aw.port", "5700");
 
-        // Compute memory.dir early — needed to find user config saved by desktop UI
-        String memDir = memoryDirOf(props);
-
-        // Overlay user config from ~/.self-analyst/config.properties (legacy, lowest
-        // user priority; properties semantics unchanged — SPEC-TOML-DEC-001).
-        Path legacyConfig = Path.of(System.getProperty("user.home"), ".self-analyst", "config.properties");
-        if (Files.exists(legacyConfig)) {
-            Properties userProps = new Properties();
-            try (Reader r = Files.newBufferedReader(legacyConfig, StandardCharsets.UTF_8)) {
-                userProps.load(r);
-                props.putAll(userProps);
-            } catch (IOException ignored) {}
-        }
-
-        // The legacy home-level properties file remains a fallback for other keys,
-        // but the desktop/backend port has one user source: {memoryDir}/config.toml
-        // (or the not-yet-migrated properties file in that same directory).
+        // The portable config location is independent from memory.dir, so config.toml
+        // can choose where memory and indexes are stored without a bootstrap cycle.
         props.setProperty("aw.port", defaultAwPort);
-
-        // Overlay user-level config from {memoryDir}: config.toml preferred, else the
-        // un-migrated config.properties (CLI-only path). SPEC-TOML-MIG-002a.
-        overlayUserConfig(props, Path.of(memDir));
+        overlayUserConfig(props, configDir);
+        String memDir = memoryDirOf(props);
 
         String apiKey = envOrProp(props, "llm.api-key", "OPENAI_API_KEY", "")
                 .replace("${OPENAI_API_KEY:CHANGE_ME}", "CHANGE_ME")
@@ -367,7 +353,7 @@ public record Config(
         return props;
     }
 
-    /** Resolve memory.dir: system property > env {@code MEMORY_DIR} > classpath {@code memory.dir} > {@code ~/.self-analyst}. */
+    /** Resolve memory.dir: system property > env {@code MEMORY_DIR} > user TOML > classpath default. */
     private static String memoryDirOf(Properties props) {
         String systemProp = System.getProperty("memory.dir");
         if (systemProp != null && !systemProp.isBlank()) {
@@ -377,26 +363,19 @@ public record Config(
                 System.getProperty("user.home") + "/.self-analyst");
     }
 
-    /**
-     * The effective memory directory, resolvable before {@link #load()} so callers
-     * (e.g. startup migration) can locate the user config file first.
-     * SPEC-TOML-MIG-001a.
-     */
-    public static Path resolveMemoryDir() {
-        return Path.of(memoryDirOf(loadClasspathProps()));
+    /** Portable user configuration directory, relative to the executable working directory. */
+    public static Path resolveConfigDir() {
+        return Path.of("./data/config");
     }
 
     /**
-     * Overlay the user-level config from {@code {memoryDir}}: prefer
-     * {@code config.toml} (parsed + flattened + normalized), else fall back to the
-     * un-migrated {@code config.properties}. A TOML parse failure at runtime is
+     * Overlay {@code config.toml} from the portable config directory. A TOML parse failure at runtime is
      * logged and skipped — startup must not crash on a hand-broken file; the raw
-     * editor is the strict gate. SPEC-TOML-MIG-002a, SPEC-TOML-DEC-001. Package
+     * editor is the strict gate. SPEC-TOML-LOAD-002a, SPEC-TOML-DEC-001. Package
      * visibility for load-priority tests.
      */
-    static void overlayUserConfig(Properties props, Path memoryDir) {
-        Path toml = memoryDir.resolve("config.toml");
-        Path properties = memoryDir.resolve("config.properties");
+    static void overlayUserConfig(Properties props, Path configDir) {
+        Path toml = configDir.resolve("config.toml");
         if (Files.exists(toml)) {
             try {
                 props.putAll(TomlSupport.parseAndFlatten(
@@ -404,10 +383,6 @@ public record Config(
             } catch (IOException | RuntimeException e) {
                 log.warn("跳过无法解析的 {}: {}", toml, e.getMessage());
             }
-        } else if (Files.exists(properties)) {
-            try (Reader r = Files.newBufferedReader(properties, StandardCharsets.UTF_8)) {
-                props.load(r);
-            } catch (IOException ignored) {}
         }
     }
 
@@ -449,7 +424,7 @@ public record Config(
     public void validate() {
         if (llmApiKey == null || llmApiKey.isBlank() || llmApiKey.equals("CHANGE_ME")) {
             throw new IllegalStateException(
-                    "LLM API key not configured. Set OPENAI_API_KEY env var or llm.api-key in application.properties");
+                    "LLM API key not configured. Set OPENAI_API_KEY or llm.api-key in ./data/config/config.toml");
         }
     }
 }

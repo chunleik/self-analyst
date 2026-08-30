@@ -6,6 +6,7 @@ import com.selfanalyst.aw.store.Database;
 import com.selfanalyst.aw.store.EventStore;
 import com.selfanalyst.aw.store.PulseTimeConfig;
 import com.selfanalyst.config.Config;
+import com.selfanalyst.desktop.store.UserConfigStore;
 import io.javalin.Javalin;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,8 +45,9 @@ class DesktopServerIntegrationTest {
         database = new Database(tempDir.resolve("aw-data"));
         EventStore eventStore = new EventStore(database, PulseTimeConfig.DEFAULT);
         javalin = Javalin.create();
-        desktop = new DesktopServer(
-                javalin, config, null, eventStore, null, null, null);
+        desktop = new DesktopServer(javalin, config, null, eventStore, null, null, null,
+                true, null, null, null, null,
+                new UserConfigStore(tempDir.resolve("config")));
         desktop.start();
         javalin.start(0);
         baseUrl = "http://127.0.0.1:" + javalin.port();

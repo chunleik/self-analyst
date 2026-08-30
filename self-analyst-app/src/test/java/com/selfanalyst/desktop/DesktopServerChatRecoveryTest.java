@@ -2,6 +2,7 @@ package com.selfanalyst.desktop;
 
 import com.selfanalyst.config.Config;
 import com.selfanalyst.desktop.store.ChatSessionStore;
+import com.selfanalyst.desktop.store.UserConfigStore;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.JsonFileAgentStateStore;
 import io.javalin.Javalin;
@@ -32,7 +33,9 @@ class DesktopServerChatRecoveryTest {
         setup.close();
 
         DesktopServer server = new DesktopServer(
-                Javalin.create(), config, null, null, null, null, null);
+                Javalin.create(), config, null, null, null, null, null,
+                true, null, null, null, null,
+                new UserConfigStore(tempDir.resolve("config")));
         try {
             assertFalse(Files.exists(config.memoryDir().resolve("chat-sessions")
                     .resolve(session.id + ".json")));

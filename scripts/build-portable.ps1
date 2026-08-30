@@ -74,6 +74,7 @@ Write-Host "=== 3/6 Preparing dist-portable/ ===" -ForegroundColor Cyan
 Remove-Item -Recurse -Force -LiteralPath $Dist -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Dist "data/memory") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Dist "data/config") | Out-Null
 
 Copy-Item -LiteralPath $ExeSrc -Destination (Join-Path $Dist "SelfAnalyst.exe") -Force
 Copy-Item -LiteralPath $JarSrc -Destination (Join-Path $Dist "self-analyst-app.jar") -Force
@@ -97,16 +98,19 @@ Write-Host "=== 5/6 Preparing user config ===" -ForegroundColor Cyan
 # WebView2 is intentionally not bundled — the app uses the system (Evergreen)
 # WebView2 runtime, preinstalled on Windows 10/11.
 
-# Seed an empty user config so first launch finds the file (LLM key set via UI).
-$seedCfg = Join-Path $Dist "data/memory/config.properties"
+# Seed an empty TOML config so first launch finds the file (LLM key set via UI).
+$seedCfg = Join-Path $Dist "data/config/config.toml"
 if (-not (Test-Path -LiteralPath $seedCfg)) {
-    @(
-        "# SelfAnalyst user config (overrides bundled application.properties).",
-        "# Set your LLM API key here or via the desktop 'Config' tab.",
-        "#llm.api-key=",
-        "#llm.base-url=https://api.openai.com/v1",
-        "#llm.model=gpt-4o"
-    ) | Set-Content -Path $seedCfg -Encoding UTF8
+    $seedText = @(
+        "# SelfAnalyst 用户配置（覆盖内置 application.properties）。",
+        "# 可在此处或桌面端「配置」页面设置 LLM。",
+        "[llm]",
+        "# api-key = ''",
+        "# base-url = 'https://api.openai.com/v1'",
+        "# model = 'gpt-4o'"
+    ) -join [Environment]::NewLine
+    [IO.File]::WriteAllText($seedCfg, $seedText + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
 }
 
 # ── 6. Package ─────────────────────────────────────────────────────────────────

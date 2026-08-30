@@ -1,7 +1,7 @@
 # SelfAnalyst 用户配置与桌面编辑器 SDD 规格说明书
 
 > 本文档定义用户级配置文件 **TOML v1.0**（`config.toml`）的当前行为契约：格式与键映射、
-> 加载优先级、旧 `.properties` 自动迁移，以及桌面端 raw 编辑器。本文同时接管旧版配置编辑器
+> 便携包配置路径、加载优先级，以及桌面端 raw 编辑器。本文同时接管旧版配置编辑器
 > 规格中仍有效的 `SPEC-CFGUI-*` 契约。
 
 ---
@@ -10,7 +10,7 @@
 
 | 属性 | 值 |
 |------|-----|
-| 功能名称 | 用户级配置文件从 `.properties` 迁移到 TOML（`{memoryDir}/config.toml`） |
+| 功能名称 | 便携包 TOML 用户配置（`./data/config/config.toml`） |
 | 文档状态 | 已实现（当前契约） |
 | 日期 | 2026-07-02 |
 | 目标平台 | Windows 优先（中文路径、反斜杠路径为一等场景） |
@@ -18,14 +18,14 @@
 | 取代关系 | 接管旧版配置编辑器规格的有效契约；`SPEC-CFGUI-NON-001` 已由 TOML 格式取代 |
 | 主要后端逻辑 | `self-analyst-app`：`config/Config.java`、`desktop/store/UserConfigStore.java`、`desktop/controller/DesktopConfigController.java` |
 | 主要前端逻辑 | `self-analyst-app/src/main/resources/desktop-ui/`（config/api/events/state.js） |
-| 配置存储 | `{memoryDir}/config.toml`（UTF-8） |
+| 配置存储 | `./data/config/config.toml`（UTF-8，相对于便携包根目录） |
 
 ---
 
 ## 2. 背景与动机
 
-早期版本使用 `{memoryDir}/config.properties`，桌面端配置模态直接编辑该文件。该方案已迁移为
-`{memoryDir}/config.toml`；保留下面的迁移动机用于解释兼容层和 `.bak` 文件来源：
+早期版本使用 `.properties`，桌面端配置模态直接编辑该文件。当前便携包使用
+`./data/config/config.toml`，并与 `memory.dir` 分离，使配置可以决定记忆和索引的存储位置：
 
 1. **Windows 路径静默损坏**：`memory.dir=D:\docs` 中 `\d` 是未知转义，Java Properties 解析时
    丢弃反斜杠得到 `D:docs`；raw 保存校验只拦非法 `\u` 转义，这种损坏不报错、直接生效。
@@ -39,11 +39,9 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ## 3. 设计结论（决策与取舍）
 
-- **SPEC-TOML-DEC-001**：迁移范围仅限**用户级覆盖文件**：`{memoryDir}/config.properties` →
-  `{memoryDir}/config.toml`。classpath 默认值 `application.properties` 与 legacy
-  `~/.self-analyst/config.properties` 覆盖层**保持 properties 格式与既有读取方式不变**。
-  - *取舍*：classpath 默认是开发者维护、用户不可见；legacy 文件是只读兼容层。手编痛点只存在于
-    用户级文件，收窄范围可显著降低迁移面。
+- **SPEC-TOML-DEC-001**：便携包的用户级覆盖文件固定为
+  `./data/config/config.toml`。classpath 默认值仍使用 `application.properties`。
+  - *取舍*：配置目录不依赖 `memory.dir`，因此 TOML 中的 `memory.dir` 能在启动时生效。
 - **SPEC-TOML-DEC-002**：**内部键命名空间不变**。运行时、白名单（`SPEC-CFG-TOOL-002`）、
   重启键集合（`SPEC-CFG-TOOL-003`）继续使用扁平点分键
   （如 `llm.api-key`）。TOML 表在解析后**拍平**为点分键（见 SPEC-TOML-FMT-002），
@@ -56,8 +54,7 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
   `SPEC-CFGUI-API-002b` 语义）；结构化写入（`PUT /desktop/config`、`ConfigTools.setConfigValue`）
   **整文件重新生成** TOML（分区表、不保留用户注释）——与既有 `.properties` 结构化 `save()`
   丢注释的行为持平，不新增保真承诺。
-- **SPEC-TOML-DEC-005**：存量迁移为**后端启动时一次性自动转换**（见“存量迁移契约”），迁移后
-  `config.properties` 重命名保留备份，避免"两份文件谁生效"的歧义。
+- **SPEC-TOML-DEC-005（已废止）**：不再执行 `.properties` 自动迁移或读取旧路径。
 - **SPEC-TOML-DEC-006（已废止）**：配置历史功能已移除；旧 `config-history.json` 不主动删除，
   但应用不再读取或写入。
 - **SPEC-TOML-DEC-007**：TOML 解析器作为第三方依赖引入（Java 无标准库实现）。选型、版本号
@@ -68,9 +65,9 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ## 4. 目标
 
-- **SPEC-TOML-GOAL-001**：用户级配置持久化为 `{memoryDir}/config.toml`（TOML v1.0，UTF-8）。
+- **SPEC-TOML-GOAL-001**：用户级配置持久化为 `./data/config/config.toml`（TOML v1.0，UTF-8）。
 - **SPEC-TOML-GOAL-002**：Windows 反斜杠路径在字面量字符串中所见即所得，不再被转义规则吞噬。
-- **SPEC-TOML-GOAL-003**：既有用户的 `config.properties` 在升级后自动、无损、一次性迁移。
+- **SPEC-TOML-GOAL-003**：配置路径与 `memory.dir` 解耦，`memory.dir` 可由 TOML 覆盖。
 - **SPEC-TOML-GOAL-004**：桌面端 raw 编辑器与连接测试在 TOML 下行为等价可用。
 - **SPEC-TOML-GOAL-005**：非法 TOML 文本与已知键的类型错误不得落盘，错误反馈含行/列与可读原因。
 - **SPEC-TOML-GOAL-006**：白名单、重启键等点分键消费方无感知（拍平后契约不变）。
@@ -136,7 +133,7 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ### SPEC-TOML-FMT-001：文件与编码
 
-- **SPEC-TOML-FMT-001a**：用户级配置文件为 `{memoryDir}/config.toml`，UTF-8 读写，
+- **SPEC-TOML-FMT-001a**：用户级配置文件为 `./data/config/config.toml`，UTF-8 读写，
   语法遵循 TOML v1.0。
 - **SPEC-TOML-FMT-001b**：文件仅含用户覆盖项（不合并默认值），与 `SPEC-CFGUI-DEC-001` 语义一致。
 
@@ -174,34 +171,28 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ---
 
-## 7. 存量迁移契约
+## 7. 配置路径与加载契约
 
-### SPEC-TOML-MIG-001：迁移时机与条件
+### SPEC-TOML-LOAD-001：便携包路径
 
-- **SPEC-TOML-MIG-001a**：后端启动、用户配置首次被读取之前执行一次迁移检查：
-  当 `{memoryDir}/config.toml` **不存在**且 `{memoryDir}/config.properties` **存在**时触发转换；
-  `config.toml` 已存在时永不触发（幂等，properties 文件即使残留也被忽略）。
-- **SPEC-TOML-MIG-001b**：转换内容：按 `.properties` 语义（UTF-8，与 `SPEC-CFGUI-DEC-005` 一致）
-  解析旧文件为键值集，重新生成为分区表组织的 TOML 写入 `config.toml`。旧文件的注释不迁移
-  （properties 注释与生成的 TOML 分区注释无对应关系）。
-- **SPEC-TOML-MIG-001c**：转换成功后，将 `config.properties` 重命名为 `config.properties.bak`
-  （已存在同名备份则覆盖）。转换失败（旧文件不可解析/写入失败）时**不重命名、不写入**
-  `config.toml`，记录错误日志并按「无用户覆盖」继续启动，不得阻断后端。
+- **SPEC-TOML-LOAD-001a**：后端以进程工作目录为便携包根目录，只读写
+  `./data/config/config.toml`。Tauri 启动 Java 时必须将工作目录设为 EXE 所在目录。
+- **SPEC-TOML-LOAD-001b**：配置目录不依赖 `memory.dir`；后端先读取 TOML，再解析有效
+  `memory.dir`。
+- **SPEC-TOML-LOAD-001c**：不自动迁移或读取 `config.properties`、`{memoryDir}/config.toml`
+  及 `~/.self-analyst/config.properties`。
 
-### SPEC-TOML-MIG-002：加载优先级
+### SPEC-TOML-LOAD-002：加载优先级
 
-- **SPEC-TOML-MIG-002a**：配置解析优先级（高到低）更新为：
-  1. 环境变量
-  2. `{memoryDir}/config.toml`（TOML 解析 + 拍平归一化）
-  3. `{memoryDir}/config.properties`（仅当 `config.toml` 不存在时读取；兼容迁移未运行的旧路径，如 CLI 单独启动）
-  4. legacy `~/.self-analyst/config.properties`（properties 语义，保持不变）
-  5. classpath `application.properties` 默认值
-  6. 硬编码默认值
-- **SPEC-TOML-MIG-002b**：`Config.load()` 与 `UserConfigStore` 对用户级文件的读取行为
-  一致（同一优先级、同一拍平归一化规则），不得出现两处解析结果不一致。
-- **SPEC-TOML-MIG-002c**：`aw.port` 不接受环境变量覆盖。用户配置仅来自
-  `{memoryDir}/config.toml`（或首次启动时迁移到该文件的旧配置）；文件未配置时使用 classpath 默认值。
-  Tauri 不得自行解析另一份端口配置，也不得向 Java 注入端口覆盖值。
+- **SPEC-TOML-LOAD-002a**：配置解析优先级（高到低）为：
+  1. 支持该入口的环境变量或 JVM system property
+  2. `./data/config/config.toml`（TOML 解析 + 拍平归一化）
+  3. classpath `application.properties` 默认值
+  4. 硬编码默认值
+- **SPEC-TOML-LOAD-002b**：`Config.load()` 与 `UserConfigStore` 对用户级 TOML 的读取行为
+  一致，不得出现两处解析结果不一致。
+- **SPEC-TOML-LOAD-002c**：`aw.port` 不接受环境变量覆盖，只来自用户 TOML 或 classpath
+  默认值。Tauri 不得自行解析另一份端口配置，也不得向 Java 注入端口覆盖值。
 
 ### SPEC-TOML-PORT-001：桌面启动端口握手
 
@@ -273,14 +264,12 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 
 ## 10. 非目标
 
-- **SPEC-TOML-NON-001**：不迁移 classpath `application.properties` 与 legacy
-  `~/.self-analyst/config.properties`（见 SPEC-TOML-DEC-001）。
+- **SPEC-TOML-NON-001**：classpath `application.properties` 仍作为内置默认值，不改为 TOML。
 - **SPEC-TOML-NON-002**：不新增/删除/重命名任何配置键；点分键命名空间、白名单、
   重启键集合原样复用。
 - **SPEC-TOML-NON-003**：不提供 TOML 语法高亮、自动补全、行内校验（沿 `SPEC-CFGUI-NON-002`）。
 - **SPEC-TOML-NON-004**：结构化写入不保留用户注释（与既有行为持平，见 SPEC-TOML-DEC-004）。
-- **SPEC-TOML-NON-005**：不提供 TOML → properties 的反向回滚工具；回滚依赖迁移备份
-  `config.properties.bak` 与旧版本二进制。
+- **SPEC-TOML-NON-005**：不提供旧配置路径的自动迁移或回滚工具。
 
 ---
 
@@ -300,10 +289,10 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 | SPEC-TOML-TST-005 | `PUT .../raw` 已知键类型不可解析（`aw.port = "abc"`） | 400，列出违规键与期望类型，磁盘未变 |
 | SPEC-TOML-TST-006 | `PUT .../raw` 合法文本 → `GET .../raw` | round-trip 逐字符一致（注释、顺序保真） |
 | SPEC-TOML-TST-007 | `PUT .../raw` 修改重启键 / 含未知键 | `restartRequired`/`unknownKeys` 语义与 `SPEC-CFGUI-API-002c` 一致 |
-| SPEC-TOML-TST-008 | 启动时存在 `config.properties`、无 `config.toml` | 自动转换生成 TOML，旧文件重命名 `.bak` |
-| SPEC-TOML-TST-009 | 启动时 `config.toml` 已存在（无论 properties 是否残留） | 不触发迁移，properties 被忽略 |
-| SPEC-TOML-TST-010 | 迁移源文件损坏不可解析 | 不写 TOML、不重命名，记日志，启动不中断 |
-| SPEC-TOML-TST-011 | 中文值（路径/模型名）迁移 + TOML round-trip | UTF-8 无乱码 |
+| SPEC-TOML-TST-008 | 便携包根目录下存在 `data/config/config.toml` | `Config.load()` 与桌面配置 API 读取同一文件 |
+| SPEC-TOML-TST-009 | TOML 中设置 `memory.dir` | 配置位置不变，记忆目录按配置生效 |
+| SPEC-TOML-TST-010 | `config.toml` 损坏不可解析 | 记录日志并按无用户覆盖继续启动 |
+| SPEC-TOML-TST-011 | 中文值（路径/模型名）TOML round-trip | UTF-8 无乱码 |
 | SPEC-TOML-TST-012 | `GET .../raw`，文件不存在 | `text` 为合法 TOML 模板，含全部支持键、默认值、类型、中英文说明与路径写法指引 |
 | SPEC-TOML-TST-014 | `ConfigTools.setConfigValue` 写入后读回 | 值落入 `config.toml`，白名单/重启提示行为不变 |
 | SPEC-TOML-TST-015 | 结构化 `PUT /desktop/config` 保存 | 重新生成的 `config.toml` 可被 raw 端点与 `Config.load()` 一致解析 |
@@ -322,15 +311,14 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 | SPEC-CFGUI-DEC-*、SPEC-CFGUI-GOAL-*、SPEC-CFGUI-NON-* | 本文第 5 节；`UserConfigStore.java`、`DesktopConfigController.java` | 代码审查、单元测试 |
 | SPEC-CFGUI-UI-* | `desktop-ui/config.js`、`index.html`、`ui.js`、`events.js`、`api.js`、`state.js`、`styles.css` | `check-desktop-config-editor.ps1`、UI 验收 |
 | SPEC-CFGUI-API-* | `DesktopConfigController.java`、`DesktopServer.java`、`UserConfigStore.java` | `DesktopConfigControllerTest`、集成测试 |
-| SPEC-TOML-DEC-001..007 | 本 spec（设计决策）；`config/TomlSupport.java`（DEC-003/004/007）、`config/Config.java`（DEC-001）、`desktop/store/ConfigMigration.java`（DEC-005） | 代码审查 |
+| SPEC-TOML-DEC-001..007 | 本 spec（设计决策）；`config/TomlSupport.java`（DEC-003/004/007）、`config/Config.java`（DEC-001/005） | 代码审查 |
 | SPEC-TOML-FMT-001..003 | `config/TomlSupport.java`（解析/拍平/归一化/类型校验）、`config/SupportedKeys.java`、`config/Config.java` | 单元测试 `TomlSupportTest`、`ConfigTest` |
 | SPEC-TOML-FMT-004 | `config/TomlSupport.java#buildTemplate`、`desktop/controller/DesktopConfigController.java#buildTemplate` | 单元测试 `TomlSupportTest`、`DesktopConfigControllerTest` + 代码审查 |
-| SPEC-TOML-MIG-001 | `desktop/store/ConfigMigration.java`、`AppSession.java`（时机） | 单元测试 `ConfigMigrationTest` |
-| SPEC-TOML-MIG-002 | `config/Config.java#overlayUserConfig`、`desktop/store/UserConfigStore.java#loadUser` | 单元测试 `ConfigTest`、`UserConfigStoreRawTest` |
+| SPEC-TOML-LOAD-001..002 | `config/Config.java#resolveConfigDir/overlayUserConfig`、`desktop/store/UserConfigStore.java#loadUser` | 单元测试 `ConfigTest`、`UserConfigStoreRawTest` |
 | SPEC-TOML-API-001 | `desktop/controller/DesktopConfigController.java`、`config/TomlSupport.java`、`desktop/store/UserConfigStore.java` | 单元测试 `DesktopConfigControllerTest` |
 | SPEC-TOML-API-001e | `desktop/controller/DesktopConfigController.java#supportedKeyInfos`、`config/TomlSupport.java#emitAssignment` | 单元测试 `DesktopConfigControllerTest` |
 | SPEC-TOML-API-002 | `desktop/controller/DesktopConfigController.java`、`desktop/store/UserConfigStore.java`、`ConfigTools`（`agent/tools`） | 单元测试 `DesktopConfigControllerTest` + `DesktopServerIntegrationTest.configRoundTripPersistsModel` |
 | SPEC-TOML-UI-001..003 | `desktop-ui/config.js`（`parseEditorToml`、标签）、`api.js`、`styles.css` | 静态检查 `check-desktop-config-editor.ps1` + 手动/验收测试 |
 | SPEC-TOML-UI-004 | `desktop-ui/config.js`、`events.js`、`state.js`、`ui.js`、`styles.css` | 静态检查 `check-desktop-config-editor.ps1` + 手动/验收测试 |
-| SPEC-TOML-NON-001..005 | 全特性（`SupportedKeys` 键集不变、`Config.java` 保留 classpath/legacy properties、结构化写入丢注释、无回滚工具） | 代码审查 |
-| SPEC-TOML-TST-001..018（013 已废止） | 测试用例 | 单元测试 `TomlSupportTest`/`ConfigTest`/`UserConfigStoreRawTest`/`ConfigMigrationTest`/`DesktopConfigControllerTest` + 手动/验收测试 |
+| SPEC-TOML-NON-001..005 | 全特性（`SupportedKeys` 键集不变、classpath 默认保留、结构化写入丢注释、无迁移工具） | 代码审查 |
+| SPEC-TOML-TST-001..020（013 已废止） | 测试用例 | 单元测试 `TomlSupportTest`/`ConfigTest`/`UserConfigStoreRawTest`/`DesktopConfigControllerTest` + 手动/验收测试 |

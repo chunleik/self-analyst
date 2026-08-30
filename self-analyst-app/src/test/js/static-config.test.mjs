@@ -15,6 +15,10 @@ const awServer = fs.readFileSync(
   new URL("../../../../self-analyst-aw/src/main/java/com/selfanalyst/aw/AwServer.java", import.meta.url),
   "utf8",
 );
+const portableBuild = fs.readFileSync(
+  new URL("../../../../scripts/build-portable.ps1", import.meta.url),
+  "utf8",
+);
 
 assert.doesNotMatch(apiJs, /var API_BASE = "http:\/\/localhost:5700"/);
 assert.match(apiJs, /window\.location\.origin/);
@@ -33,3 +37,5 @@ assert.match(appPom, /<executable>node<\/executable>/);
 assert.match(appPom, /<skip>\$\{skipTests\}<\/skip>/);
 
 assert.match(awServer, /\.start\("127\.0\.0\.1", port\)/);
+assert.match(portableBuild, /data\/config\/config\.toml/);
+assert.match(portableBuild, /\[Text\.UTF8Encoding\]::new\(\$false\)/);

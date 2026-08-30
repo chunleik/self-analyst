@@ -7,7 +7,6 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.desktop.DesktopServer;
 import com.selfanalyst.desktop.controller.DesktopFileController;
-import com.selfanalyst.desktop.store.ConfigMigration;
 import com.selfanalyst.desktop.store.ContentEventV2Migration;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.usage.UsageMeter;
@@ -61,10 +60,6 @@ public class AppSession implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public AppSession() throws IOException {
-        // Migrate the user config to TOML before it is first read. AppSession is the
-        // single backend entry (CLI + desktop), so "首次读取之前" holds here.
-        // SPEC-TOML-MIG-001a.
-        ConfigMigration.migrateIfNeeded(Config.resolveMemoryDir());
         this.config = Config.load();
         this.usageMeter = new UsageMeter(config, config.memoryDir());
         if (config.awEmbedded()) {
@@ -114,7 +109,7 @@ public class AppSession implements AutoCloseable {
                     config.wikiSemanticTopK());
         }
 
-        UserConfigStore userConfigStore = new UserConfigStore(config.memoryDir());
+        UserConfigStore userConfigStore = new UserConfigStore(Config.resolveConfigDir());
 
         // File watch: store + semantic index + embedding worker + tools (SPEC-FILE-001/016/017).
         // FileTools must exist before the agent so it can be registered; the watcher/index
@@ -222,7 +217,8 @@ public class AppSession implements AutoCloseable {
                     awServer.eventStore(), memoryStore,
                     watcherManager, contentWatcher,
                     contentPersistenceReady, contentMigrationError,
-                    fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings);
+                    fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings,
+                    userConfigStore);
             desktopServer.start();
             awServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));

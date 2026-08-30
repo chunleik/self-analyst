@@ -50,8 +50,8 @@ class ConfigTest {
                 keepTokens = 5000
                 """, StandardCharsets.UTF_8);
 
-        withMemoryDir(dir, () -> {
-            Config c = Config.load();
+        withConfigDir(dir, () -> {
+            Config c = Config.load(dir);
             assertTrue(c.agentCompactionEnabled());
             assertEquals(12, c.agentCompactionTriggerMessages());
             assertEquals(20000, c.agentCompactionTriggerTokens());
@@ -72,8 +72,8 @@ class ConfigTest {
                 keepTokens = 999999
                 """, StandardCharsets.UTF_8);
 
-        withMemoryDir(dir, () -> {
-            Config c = Config.load();
+        withConfigDir(dir, () -> {
+            Config c = Config.load(dir);
             assertEquals(4, c.agentCompactionKeepMessages());
             assertEquals(0, c.agentCompactionKeepTokens(),
                     "message-only mode must use AgentScope's message cutoff");
@@ -88,8 +88,8 @@ class ConfigTest {
                 keepTokens = 0
                 """, StandardCharsets.UTF_8);
 
-        withMemoryDir(dir, () -> {
-            Config c = Config.load();
+        withConfigDir(dir, () -> {
+            Config c = Config.load(dir);
             assertEquals(10, c.agentCompactionKeepMessages());
             assertEquals(5000, c.agentCompactionKeepTokens(),
                     "token-only mode needs a positive cutoff below its trigger");
@@ -106,8 +106,8 @@ class ConfigTest {
                 enabled = true
                 """, StandardCharsets.UTF_8);
 
-        withMemoryDir(dir, () -> {
-            Config config = Config.load();
+        withConfigDir(dir, () -> {
+            Config config = Config.load(dir);
             assertNotNull(config);
             var componentNames = java.util.Arrays.stream(Config.class.getRecordComponents())
                     .map(java.lang.reflect.RecordComponent::getName)
@@ -117,7 +117,7 @@ class ConfigTest {
         });
     }
 
-    // ── TOML overlay load priority (SPEC-TOML-MIG-002a) ──────────────────
+    // ── TOML overlay load priority (SPEC-TOML-LOAD-002a) ──────────────────
 
     @Test
     void tomlOverridesClasspathDefault(@TempDir Path dir) throws Exception {
@@ -136,8 +136,8 @@ class ConfigTest {
         Files.writeString(dir.resolve("config.toml"), "[aw]\nport = 45731\n",
                 StandardCharsets.UTF_8);
 
-        withMemoryDir(dir, () -> {
-            Config config = Config.load();
+        withConfigDir(dir, () -> {
+            Config config = Config.load(dir);
             assertEquals(45731, config.awPort());
             assertEquals("http://localhost:45731/api/0", config.awBaseUrl());
         });
@@ -152,56 +152,18 @@ class ConfigTest {
                 base-url = "http://example.test:5600/api/0"
                 """, StandardCharsets.UTF_8);
 
-        withMemoryDir(dir, () ->
-                assertEquals("http://example.test:5600/api/0", Config.load().awBaseUrl()));
+        withConfigDir(dir, () ->
+                assertEquals("http://example.test:5600/api/0", Config.load(dir).awBaseUrl()));
     }
 
     @Test
-    void legacyHomePropertiesCannotOverrideAwPort(@TempDir Path dir) throws Exception {
-        Path homeDir = dir.resolve("home");
-        Path memoryDir = dir.resolve("memory");
-        Files.createDirectories(homeDir.resolve(".self-analyst"));
-        Files.createDirectories(memoryDir);
-        Files.writeString(homeDir.resolve(".self-analyst/config.properties"),
-                "aw.port=59999\n", StandardCharsets.UTF_8);
-        Files.writeString(memoryDir.resolve("config.toml"),
-                "[llm]\nmodel = \"from-toml\"\n", StandardCharsets.UTF_8);
-
-        String previousHome = System.getProperty("user.home");
-        String previousMemory = System.getProperty("memory.dir");
-        System.setProperty("user.home", homeDir.toString());
-        System.setProperty("memory.dir", memoryDir.toString());
-        try {
-            assertEquals(5700, Config.load().awPort());
-        } finally {
-            restoreSystemProperty("user.home", previousHome);
-            restoreSystemProperty("memory.dir", previousMemory);
-        }
-    }
-
-    @Test
-    void tomlWinsWhenBothTomlAndPropertiesPresent(@TempDir Path dir) throws Exception {
-        // SPEC-TOML-TST-009 load half: properties residue ignored while toml exists.
-        Files.writeString(dir.resolve("config.toml"), "[llm]\nmodel = \"from-toml\"\n",
-                StandardCharsets.UTF_8);
-        Files.writeString(dir.resolve("config.properties"), "llm.model=from-props\n",
+    void configTomlCanChooseMemoryDirectory(@TempDir Path dir) throws Exception {
+        Path memoryDir = dir.resolve("自定义记忆");
+        Files.writeString(dir.resolve("config.toml"),
+                "memory.dir = '" + memoryDir + "'\n",
                 StandardCharsets.UTF_8);
 
-        Properties props = new Properties();
-        Config.overlayUserConfig(props, dir);
-
-        assertEquals("from-toml", props.getProperty("llm.model"));
-    }
-
-    @Test
-    void propertiesHonoredWhenTomlAbsent(@TempDir Path dir) throws Exception {
-        Files.writeString(dir.resolve("config.properties"), "llm.model=from-props\n",
-                StandardCharsets.UTF_8);
-
-        Properties props = new Properties();
-        Config.overlayUserConfig(props, dir);
-
-        assertEquals("from-props", props.getProperty("llm.model"));
+        withConfigDir(dir, () -> assertEquals(memoryDir, Config.load(dir).memoryDir()));
     }
 
     @Test
@@ -228,27 +190,14 @@ class ConfigTest {
         assertEquals("default", props.getProperty("llm.model"));
     }
 
-    private static void withMemoryDir(Path dir, ThrowingRunnable action) throws Exception {
-        Files.createDirectories(dir);
-        String previous = System.getProperty("memory.dir");
-        System.setProperty("memory.dir", dir.toString());
-        try {
-            action.run();
-        } finally {
-            if (previous == null) {
-                System.clearProperty("memory.dir");
-            } else {
-                System.setProperty("memory.dir", previous);
-            }
-        }
+    @Test
+    void defaultConfigDirTargetsPortableDataDirectory() {
+        assertEquals(Path.of("./data/config"), Config.resolveConfigDir());
     }
 
-    private static void restoreSystemProperty(String key, String previous) {
-        if (previous == null) {
-            System.clearProperty(key);
-        } else {
-            System.setProperty(key, previous);
-        }
+    private static void withConfigDir(Path dir, ThrowingRunnable action) throws Exception {
+        Files.createDirectories(dir);
+        action.run();
     }
 
     @FunctionalInterface

@@ -111,7 +111,7 @@ public final class SupportedKeys {
         put("app.language", "auto", KeyType.STRING);
 
         describe("log.dir", "应用日志的保存目录。", "Directory where application logs are stored.");
-        describe("memory.dir", "用户数据、记忆与配置文件的根目录。", "Root directory for user data, memories, and configuration.");
+        describe("memory.dir", "用户数据、记忆与相关索引的根目录。", "Root directory for user data, memories, and related indexes.");
 
         describe("llm.api-key", "LLM 服务的 API 密钥；留空时尝试读取环境变量。", "API key for the LLM service; when empty, the environment variable is used.");
         describe("llm.base-url", "OpenAI 兼容 LLM API 的基础地址。", "Base URL of the OpenAI-compatible LLM API.");

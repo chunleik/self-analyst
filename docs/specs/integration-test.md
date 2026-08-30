@@ -78,7 +78,7 @@ mvn test
 # 单独运行 AW HTTP 集成测试
 mvn -pl self-analyst-aw -Dtest=AwServerIntegrationTest test
 
-# 单独运行桌面 API 集成测试及其依赖
+# 运行桌面 API 集成测试及其依赖（同时执行桌面 Node 测试）
 mvn -pl self-analyst-app -am -Dtest=DesktopServerIntegrationTest `
   -Dsurefire.failIfNoSpecifiedTests=false test
 

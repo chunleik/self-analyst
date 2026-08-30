@@ -8,7 +8,7 @@ const read = (name) => fs.readFileSync(
   "utf8",
 );
 
-function createSandbox(overview) {
+function createSandbox(overview, getFiles) {
   const elements = {
     content: { innerHTML: "" },
     status: { innerHTML: "" },
@@ -19,6 +19,7 @@ function createSandbox(overview) {
     filesOverview: overview,
     filesLoading: false,
     filesError: null,
+    filesLoadRequestId: 0,
     dom: {
       fileContent: elements.content,
       fileTabStatus: elements.status,
@@ -27,7 +28,7 @@ function createSandbox(overview) {
   };
   const sandbox = {
     state,
-    api: { getFiles() { return Promise.resolve(overview); } },
+    api: { getFiles: getFiles || function () { return Promise.resolve(overview); } },
     escHtml(value) {
       return String(value == null ? "" : value)
         .replaceAll("&", "&amp;")
@@ -43,6 +44,16 @@ function createSandbox(overview) {
   vm.runInContext(read("i18n.js"), sandbox);
   vm.runInContext(read("files.js"), sandbox);
   return { sandbox, elements };
+}
+
+function deferred() {
+  var resolve;
+  var reject;
+  var promise = new Promise(function (resolvePromise, rejectPromise) {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 test("running file collector renders status, counts, roots, and recent summaries", () => {
@@ -110,6 +121,73 @@ test("degraded reason and technical detail are escaped", () => {
   assert.doesNotMatch(elements.content.innerHTML, /<worker failed>/);
   assert.match(elements.content.innerHTML, /data-file-action="retry"/);
   assert.match(elements.content.innerHTML, /已配置 0 个目录/);
+});
+
+test("newer file overview wins when requests resolve out of order", async () => {
+  const first = deferred();
+  const second = deferred();
+  let calls = 0;
+  const { sandbox } = createSandbox(null, () => calls++ === 0 ? first.promise : second.promise);
+  const older = { status: "running", latestPath: "older.txt", totals: {}, roots: [], files: [] };
+  const newer = { status: "running", latestPath: "newer.txt", totals: {}, roots: [], files: [] };
+
+  const firstLoad = sandbox.loadFiles();
+  const secondLoad = sandbox.loadFiles();
+  second.resolve(newer);
+  await secondLoad;
+  first.resolve(older);
+  await firstLoad;
+
+  assert.equal(sandbox.state.filesOverview.latestPath, "newer.txt");
+  assert.equal(sandbox.state.filesError, null);
+  assert.equal(sandbox.state.filesLoading, false);
+});
+
+test("stale file overview failure cannot overwrite a newer success", async () => {
+  const first = deferred();
+  const second = deferred();
+  let calls = 0;
+  const { sandbox } = createSandbox(null, () => calls++ === 0 ? first.promise : second.promise);
+  const newer = { status: "running", latestPath: "newer.txt", totals: {}, roots: [], files: [] };
+
+  const firstLoad = sandbox.loadFiles();
+  const secondLoad = sandbox.loadFiles();
+  second.resolve(newer);
+  await secondLoad;
+  first.reject(new Error("stale failure"));
+  await firstLoad;
+
+  assert.equal(sandbox.state.filesOverview.latestPath, "newer.txt");
+  assert.equal(sandbox.state.filesError, null);
+  assert.equal(sandbox.state.filesLoading, false);
+});
+
+test("stale file completion cannot finish or render while the latest request is pending", async () => {
+  const first = deferred();
+  const second = deferred();
+  let calls = 0;
+  const { sandbox } = createSandbox(null, () => calls++ === 0 ? first.promise : second.promise);
+  const originalRender = sandbox.renderFilesTab;
+  let renders = 0;
+  sandbox.renderFilesTab = function () {
+    renders++;
+    return originalRender();
+  };
+
+  const firstLoad = sandbox.loadFiles();
+  const secondLoad = sandbox.loadFiles();
+  const rendersBeforeStaleCompletion = renders;
+  first.resolve({ status: "running", latestPath: "older.txt", totals: {}, roots: [], files: [] });
+  await firstLoad;
+
+  assert.equal(sandbox.state.filesOverview, null);
+  assert.equal(sandbox.state.filesLoading, true);
+  assert.equal(renders, rendersBeforeStaleCompletion);
+
+  second.resolve({ status: "running", latestPath: "newer.txt", totals: {}, roots: [], files: [] });
+  await secondLoad;
+  assert.equal(sandbox.state.filesLoading, false);
+  assert.equal(renders, rendersBeforeStaleCompletion + 1);
 });
 
 test("desktop shell and API expose the file collector page", () => {

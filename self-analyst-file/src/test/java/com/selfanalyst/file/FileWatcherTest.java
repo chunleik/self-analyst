@@ -60,6 +60,22 @@ class FileWatcherTest {
                 "volatile file must not be enqueued");
     }
 
+    @Test
+    void reportsUnavailableAfterAllWatchRegistrationsBecomeInvalid(@TempDir Path tmp)
+            throws Exception {
+        Path root = Files.createDirectory(tmp.resolve("watched"));
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
+        watcher.start();
+        assertTrue(watcher.isRunning());
+
+        Files.delete(root);
+
+        assertTrue(pollForUnavailable(20_000),
+                "watcher health should turn false after its only WatchKey is invalidated");
+    }
+
     private FileRecord pollForPending(String absPath, long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
@@ -68,5 +84,14 @@ class FileWatcherTest {
             Thread.sleep(200);
         }
         return store.findByPath(absPath);
+    }
+
+    private boolean pollForUnavailable(long timeoutMs) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            if (!watcher.isRunning()) return true;
+            Thread.sleep(50);
+        }
+        return !watcher.isRunning();
     }
 }

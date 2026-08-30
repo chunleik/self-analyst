@@ -10,6 +10,7 @@ var state = {
   filesOverview: null,
   filesLoading: false,
   filesError: null,
+  filesLoadRequestId: 0,
   summary: null,
   usage: null,
   tasks: [],

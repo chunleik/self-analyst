@@ -4,17 +4,25 @@
 "use strict";
 
 function loadFiles() {
+  state.filesLoadRequestId = (state.filesLoadRequestId || 0) + 1;
+  var requestId = state.filesLoadRequestId;
+  function requestIsCurrent() {
+    return requestId === state.filesLoadRequestId;
+  }
   state.filesLoading = true;
   state.filesError = null;
   renderFilesTab();
   return api.getFiles(20)
     .then(function (overview) {
+      if (!requestIsCurrent()) return;
       state.filesOverview = overview || null;
     })
     .catch(function (error) {
+      if (!requestIsCurrent()) return;
       state.filesError = error && error.message ? error.message : t("common.unknownError");
     })
     .then(function () {
+      if (!requestIsCurrent()) return;
       state.filesLoading = false;
       renderFilesTab();
     });

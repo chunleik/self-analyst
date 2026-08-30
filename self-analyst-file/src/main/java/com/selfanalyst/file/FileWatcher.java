@@ -128,7 +128,8 @@ public class FileWatcher {
                 && thread != null
                 && thread.isAlive()
                 && executor != null
-                && !executor.isShutdown();
+                && !executor.isShutdown()
+                && keyToDir.keySet().stream().anyMatch(WatchKey::isValid);
     }
 
     // ── registration ──

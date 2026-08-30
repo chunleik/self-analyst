@@ -15,7 +15,7 @@
 | [specs/core.md](specs/core.md) | 主应用、配置、记忆、Agent 与启动流程 | `SPEC-CFG-*`、`SPEC-MEM-*`、`SPEC-AGT-*`、`SPEC-CLI-*` |
 | [specs/content.md](specs/content.md) | UIA 临时读取与上下文标题提取 | `SPEC-CTX-*`、`SPEC-UIA-*`、`SPEC-WCH-*` |
 | [specs/file.md](specs/file.md) | 文件监控、提取、摘要与语义索引 | `SPEC-FILE-*` |
-| [specs/integration-test.md](specs/integration-test.md) | 跨模块集成验证 | `SPEC-ITEST-*` |
+| [specs/integration-test.md](specs/integration-test.md) | 模块内 JUnit 集成测试与手动 UIA 验证 | `SPEC-ITEST-*` |
 
 ## 功能规格
 

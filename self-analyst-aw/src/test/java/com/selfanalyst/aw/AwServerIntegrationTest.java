@@ -7,7 +7,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -33,14 +32,10 @@ class AwServerIntegrationTest {
     private String baseUrl;
 
     @BeforeEach
-    void startServer() throws Exception {
-        int port;
-        try (ServerSocket socket = new ServerSocket(0)) {
-            port = socket.getLocalPort();
-        }
-        server = new AwServer(dataDir, port, null);
+    void startServer() {
+        server = new AwServer(dataDir, 0, null);
         server.start();
-        baseUrl = "http://127.0.0.1:" + port + "/api/0";
+        baseUrl = "http://127.0.0.1:" + server.port() + "/api/0";
     }
 
     @AfterEach

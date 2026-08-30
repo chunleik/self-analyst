@@ -18,7 +18,7 @@ public class AwServer {
     private final EventStore eventStore;
     private final SettingsManager settings;
     private final ServerLog serverLog;
-    private final int port;
+    private volatile int port;
     private final String desktopToken;
     private final AtomicBoolean stopped = new AtomicBoolean();
 
@@ -51,7 +51,7 @@ public class AwServer {
 
         // Enforce the loopback trust boundary before any API route can mutate state.
         this.app.before(ctx -> {
-            if (!LocalRequestGuard.isAllowedHost(ctx.header("Host"), port)) {
+            if (!LocalRequestGuard.isAllowedHost(ctx.header("Host"), this.port)) {
                 ctx.status(403).json(Map.of("error", "Invalid Host header"));
                 ctx.skipRemainingHandlers();
                 return;
@@ -113,10 +113,12 @@ public class AwServer {
 
     public void start() {
         app.start("127.0.0.1", port);
+        port = app.port();
     }
 
     public void start(int port) {
         app.start("127.0.0.1", port);
+        this.port = app.port();
     }
 
     public void stop() {
@@ -149,6 +151,11 @@ public class AwServer {
 
     public ServerLog serverLog() {
         return serverLog;
+    }
+
+    /** Actual listening port; resolves an ephemeral port requested with {@code 0}. */
+    public int port() {
+        return port;
     }
 
     /** The Javalin instance for registering additional routes (e.g. desktop API). */

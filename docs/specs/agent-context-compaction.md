@@ -90,8 +90,7 @@ keepTokens = 12000
 - 本地 OpenAI-compatible HTTP 集成测试覆盖压缩、重启恢复、瞬时快照不落盘和幂等重试零调用。
 - `UsageMeteredModel` 测试覆盖 compaction token 计量。
 - `self-analyst-app` Maven `test` 阶段必须调用 Node 内置 test runner；Node 缺失时构建失败。
-- 根项目 `mvn test` 是统一入口。不得无参数执行根 `mvn verify`，因为 integration verifier
-  会访问真实麦克风、前台窗口和 OCR；安全打包使用：
+- 根项目 `mvn test` 是统一入口。需要跳过测试执行打包时使用：
 
 ```bash
 mvn -pl self-analyst-app -am verify -DskipTests

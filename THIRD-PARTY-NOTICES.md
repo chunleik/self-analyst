@@ -10,9 +10,8 @@ SelfAnalyst 采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。项
 | [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) | LLM Agent 框架 | Apache-2.0 |
 | [Javalin](https://javalin.io) | 嵌入式 HTTP 服务 | Apache-2.0 |
 | [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) | SQLite JDBC 驱动 | Apache-2.0 |
-| [JNA / JNA Platform](https://github.com/java-native-access/jna) | 窗口/AFK、截屏、WASAPI 等原生调用 | Apache-2.0 / LGPL-2.1 双许可证；本项目按 Apache-2.0 使用 |
+| [JNA / JNA Platform](https://github.com/java-native-access/jna) | 窗口与 AFK 状态的原生调用 | Apache-2.0 / LGPL-2.1 双许可证；本项目按 Apache-2.0 使用 |
 | [Jackson](https://github.com/FasterXML/jackson) | JSON 序列化 | Apache-2.0 |
-| [Tess4J](https://github.com/nguyenq/tess4j) | Tesseract OCR Java 封装 | Apache-2.0 |
 | [Apache Lucene](https://lucene.apache.org) | 本地向量/KNN 语义索引 | Apache-2.0 |
 | [Apache PDFBox](https://pdfbox.apache.org) | PDF 文本提取 | Apache-2.0 |
 | [Apache POI](https://poi.apache.org) | Office 文档提取 | Apache-2.0 |
@@ -22,17 +21,11 @@ SelfAnalyst 采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。项
 | [jtokkit](https://github.com/knuddelsgmbh/jtokkit) | 本地 token 计数 | MIT |
 | [JUnit 5](https://junit.org/junit5/) | 测试依赖 | EPL-2.0 |
 
-## 下载或打包的工具和模型
+## 已移除的可选工具
 
-这些内容不提交到 Git 仓库。`scripts/download-tools.ps1` 下载到 `tools/`，构建脚本再按发行变体
-放入 `dist/` 或免安装包。
-
-| 组件 | 用途 | 许可证 |
-|------|------|--------|
-| [PaddleOCR-json](https://github.com/hiroi-sora/PaddleOCR-json) | 中文 OCR 引擎和模型 | Apache-2.0 |
-| [whisper.cpp](https://github.com/ggerganov/whisper.cpp) | 本地语音转写 | MIT |
-| [OpenAI Whisper 模型](https://github.com/openai/whisper) | whisper.cpp 模型权重来源 | MIT |
-| [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) | OCR 回退引擎 | Apache-2.0 |
+当前源码和发布包不依赖或打包 PaddleOCR、Tesseract、whisper.cpp 与 Whisper 模型。旧版本可能在
+用户工作区或发布目录留下这些文件；现行构建会从 `dist/tools` 清理已知旧目录，但不会删除用户
+数据目录。恢复背景见 [移除说明](docs/specs/removed-ocr-audio.md)。
 
 ## Tauri 桌面壳
 

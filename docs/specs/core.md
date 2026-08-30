@@ -27,8 +27,7 @@ App (入口) → AppSession (生命周期管理)
                 ├── UserConfigStore (用户配置读写)
                 ├── AwServer (嵌入式 ActivityWatch 服务)
                 │     ├── WatcherManager (窗口/AFK 采集)
-                │     ├── ContentWatcher (上下文标题识别)
-                │     └── AudioWatcher (音频采集)
+                │     └── ContentWatcher (上下文标题识别)
                 ├── DesktopServer (桌面 API 路由)
                 └── SelfAnalystAgent (核心智能体)
                       ├── MemoryStore (持久化)
@@ -261,17 +260,13 @@ agent.summaryRefreshMinutes, agent.allowAgentTasks, agent.cacheSummaries
 desktop.hideToTray, desktop.autoOpenWindow, desktop.autoStartBackend
 aw.mode, aw.port
 aw.collection.window, aw.collection.afk, aw.collection.content
-aw.ocr.engine
-aw.audio.enabled, aw.audio.whisperPath, aw.audio.vadThreshold
-aw.audio.source, aw.audio.engine, aw.audio.model, aw.audio.chunkSeconds
 embedding.enabled, embedding.base-url, embedding.api-key
 embedding.model, embedding.dimensions, embedding.send-encoding-format
 llm.max-tokens, llm.agent.maxIters, desktop.summary.maxTimelineLlm
 llm.budget.mode, llm.budget.dailyTokens, llm.budget.warnRatio
 ```
 
-`aw.ocr.engine` 默认值为 `off`，可选值为 `off`、`auto`、`paddle`、`tesseract`；
-只有非 `off` 值才允许上下文标题识别执行 OCR 截图。
+已移除的 OCR 与声音键由 `DeprecatedKeys` 识别并忽略，不属于受支持配置，也不得出现在工具输出中。
 
 ### SPEC-CFG-TOOL-003: 重启提示键集合
 
@@ -280,7 +275,6 @@ llm.budget.mode, llm.budget.dailyTokens, llm.budget.warnRatio
 ```
 app.language, llm.model, llm.temperature, aw.mode, aw.port,
 aw.collection.window, aw.collection.afk, aw.collection.content,
-aw.audio.source, aw.audio.engine, aw.audio.model, aw.audio.chunkSeconds,
 agent.summaryRefreshMinutes, desktop.autoStartBackend,
 websearch.enabled, websearch.mcp-url, websearch.api-key,
 llm.max-tokens, llm.agent.maxIters, desktop.summary.maxTimelineLlm,
@@ -373,7 +367,7 @@ System Prompt 必须包含以下四部分（按顺序）：
 - 构造时加载 Config，根据 `aw.mode` 决定是否启动嵌入式 AW 服务。
 - 在构造 SelfAnalystAgent **之前**创建 `UserConfigStore`，并传入 Agent 构造器，使 `ConfigTools` 可用。
 - 构造 DesktopServer 并注册 `/desktop/*` 路由（当 AW 以 embedded 模式运行时）。DesktopServer 内部独立创建自己的 `UserConfigStore` 实例供配置页使用。
-- `saveAndShutdown()` 持久化 Memory，依次关闭 AudioWatcher → ContentWatcher → WatcherManager → AwServer。
+- `saveAndShutdown()` 持久化 Memory，依次关闭 ContentWatcher → WatcherManager → AwServer。
 - `close()` 委托给 `saveAndShutdown()`。
 - 实现 `AutoCloseable`，支持 try-with-resources。
 
@@ -400,7 +394,7 @@ System Prompt 必须包含以下四部分（按顺序）：
 
 ### SPEC-BLD-001: Maven 构建
 
-根 POM 聚合 `self-analyst-aw`、`content`、`audio`、`wiki`、`file`、`app` 和
+根 POM 聚合 `self-analyst-aw`、`content`、`wiki`、`file`、`app` 和
 `self-analyst-integration-test`；Tauri 桌面壳与 Rust accessibility sidecar 单独构建：
 
 - `mvn compile`: 编译全部 Java 模块，Java 21 target。

@@ -23,7 +23,7 @@
 - 复用 wiki 模块的 `EmbeddingClient` 接口；LLM client / EmbeddingClient 由 app 层注入
 - 新增 `org.apache.pdfbox:pdfbox`（PDF）、`org.apache.poi:poi-ooxml`（Office）
 - 复用父 BOM 的 `lucene-*`（向量索引）、`sqlite-jdbc`、`jackson`
-- **不依赖** `self-analyst-aw`：时间轴 heartbeat 走 HTTP（与 content/audio 一致），非 `EventStore` 直连
+- **不依赖** `self-analyst-aw`：时间轴 heartbeat 走 HTTP（与标题采集器一致），非 `EventStore` 直连
 - **SPEC-FILE-001a**：`poi-ooxml` 传递引入 `log4j-api`（POI 用 log4j2 API）。本仓库日志栈为 slf4j+logback；仅 `log4j-api`（无 `log4j-core`）不冲突，POI 日志默认 no-op，需要并入 logback 时可加 `log4j-to-slf4j` 桥接（可选）
 
 ### SPEC-FILE-002: 数据流

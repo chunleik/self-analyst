@@ -28,7 +28,7 @@
 - 旧接口直接暴露 JNA `HWND`，阻碍了 OS 中性实现。
 
 旧下游已经只依赖纯数据模型 `UiaNode`；当前实现用 `AxSidecarClient.query(long) → UiaNode` 替换旧
-PowerShell 入口，并保留 Java 侧文本提取与 Thin/OCR 合并逻辑。
+PowerShell 入口，并保留 Java 侧标题提取逻辑。
 
 ---
 
@@ -65,13 +65,13 @@ PowerShell 入口，并保留 Java 侧文本提取与 Thin/OCR 合并逻辑。
 - 把单次 UIA 查询延迟从 1–3 秒降到**常驻态典型 < 100ms**。
 - 建立 OS 中性契约，使**接入 macOS 无需改动 Java 业务逻辑**——只增加一个同语言二进制。
 - **行为不回归**：对相同窗口，最终 `textContent` 输出与现状一致（`SPEC-UIA-005/006` 语义保留）。
-- 保持降级语义：边车任何失败 → 查询返回 `null`；可选 OCR 已启用时由 `ContentWatcher` 退化为 OCR，否则保留空 UIA 结果（`SPEC-WCH-003`/`SPEC-NFR-102`）。
+- 保持降级语义：边车任何失败 → 查询返回 `null`；`ContentWatcher` 使用系统窗口标题继续运行。
 - 顺手修正 `PlatformCapture` 的 `HWND` 泄漏。
 
 ### 4.2 非目标
 
 - **不实现 macOS 边车**本身（§7 仅为设计预留；其落地是后续独立工程）。
-- 不改动已启用 OCR 时的识别（`SPEC-OCR-*`）、Thin 检测（`SPEC-THN-*`）、混合合并（`SPEC-HYB-*`）逻辑。
+- 不实现截图或其他正文识别回退。
 - 不改动 heartbeat / `ContentEvent` 对外契约。
 - 不实现流式 / 增量树更新；仍是「一次请求一棵完整树」。
 - 不保留 PowerShell 实现作为运行时回退（`SPEC-UIA-001` 删除；失败即降级为无 UIA，与现状 COM 失败降级一致）。
@@ -173,7 +173,7 @@ Unknown
 
 ### SPEC-AXS-051：权限与分发
 
-- 需 TCC 授权：辅助功能（Accessibility）；若该 OS 上同时启用 OCR，还需屏幕录制权限。首启需引导用户授权。
+- 需 TCC 授权：辅助功能（Accessibility）。首启需引导用户授权。
 - 二进制必须 **codesign + notarize**，否则 Gatekeeper 拦截；AX 授权绑定签名身份。
 - 产出 **arm64 + x86_64 通用二进制**。
 
@@ -199,7 +199,7 @@ Unknown
 
 ### SPEC-AXS-023：降级容错
 
-- 下列任一情况，`query(handle)` 返回 `null`；只有显式启用 OCR 时，`ContentWatcher` 才退化为 OCR：二进制缺失 / 启动失败 / 崩溃 / 超时 / 响应解析失败 / `status != ok`。
+- 下列任一情况，`query(handle)` 返回 `null`，由 `ContentWatcher` 使用系统窗口标题：二进制缺失 / 启动失败 / 崩溃 / 超时 / 响应解析失败 / `status != ok`。
 - 等价保留 `SPEC-WCH-003`、`SPEC-NFR-102`。
 
 ### SPEC-AXS-030：Java 客户端
@@ -227,8 +227,7 @@ Unknown
 | system property `content.axsidecar.timeout-ms` | `1500` | 单次查询超时；超时后终止当前边车并在下次查询重启 |
 
 未指定路径时，Java 先尝试从 classpath `/axsidecar/<binary>` 释放到临时文件，再尝试开发目录
-`self-analyst-axsidecar/target/release/`；均不存在时 UIA 返回空，可选 OCR 是否接管由
-`aw.ocr.engine` 决定。当前没有
+`self-analyst-axsidecar/target/release/`；均不存在时 UIA 返回空。当前没有
 `content.axsidecar.enabled` 配置键；禁用全部上下文标题识别使用 `aw.collection.content=false`。
 
 ---
@@ -273,7 +272,7 @@ Unknown
 |------|------|
 | 边车进程被杀 | 下次查询自动重启并成功，或降级返回 `null` |
 | 查询超时 | 在 `timeout-ms` 内返回 `null`，边车被重启 |
-| 二进制缺失 | `query` 返回 `null`；OCR 启用时走 OCR，否则保持 UIA-only 降级 |
+| 二进制缺失 | `query` 返回 `null`；使用系统窗口标题降级 |
 | JVM 退出 | 无残留边车进程 |
 
 ### SPEC-AXS-T05：行为等价
@@ -289,7 +288,7 @@ Unknown
 ### SPEC-AXS-060：边车构建产物
 
 - 新增 `self-analyst-axsidecar`（Cargo 项目）。`scripts/` 构建脚本编译当前 OS 的边车二进制并随包分发；运行时按 OS 选择。
-- 二进制随 `self-analyst-content` 资源打包，运行时释放到临时目录或安装目录；该边车始终属于核心上下文标题识别，不依赖可选 PaddleOCR 包。
+- 二进制随 `self-analyst-content` 资源打包，运行时释放到临时目录或安装目录；该边车属于核心上下文标题识别。
 
 ### SPEC-AXS-061：模块接线
 
@@ -305,7 +304,7 @@ Unknown
 | **取代** | `SPEC-UIA-001`（PowerShell one-shot 实现方式） |
 | **语义保留、载体改变** | `SPEC-UIA-002/003/005/006`（属性、遍历、跳过、文本提取规则） |
 | **数据模型** | `SPEC-MDL-101`：协议层用中性 `AxNode`（`role` 字符串）；Java 内部节点表示保留 `UiaNode`（int `controlType`），由 `AxSidecarClient` 适配（见 SPEC-AXS-030 决策）。`SPEC-MDL-101c` 密码脱敏由 `SPEC-AXS-014b` 在边车侧承接 |
-| **不变** | `SPEC-OCR-*`、`SPEC-THN-*`、`SPEC-HYB-*`、`SPEC-WCH-*`、`SPEC-NFR-102` |
+| **不变** | UIA 协议、超时和进程生命周期语义 |
 
 ---
 

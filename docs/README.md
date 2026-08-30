@@ -13,8 +13,7 @@
 | 文档 | 模块 | 规格前缀 |
 |------|------|----------|
 | [specs/core.md](specs/core.md) | 主应用、配置、记忆、Agent 与启动流程 | `SPEC-CFG-*`、`SPEC-MEM-*`、`SPEC-AGT-*`、`SPEC-CLI-*` |
-| [specs/content.md](specs/content.md) | UIA/OCR 临时识别与上下文标题提取 | `SPEC-CTX-*`、`SPEC-OCR-*`、`SPEC-UIA-*` |
-| [specs/audio.md](specs/audio.md) | 音频采集与转写 | `SPEC-AU-*` |
+| [specs/content.md](specs/content.md) | UIA 临时读取与上下文标题提取 | `SPEC-CTX-*`、`SPEC-UIA-*`、`SPEC-WCH-*` |
 | [specs/file.md](specs/file.md) | 文件监控、提取、摘要与语义索引 | `SPEC-FILE-*` |
 | [specs/integration-test.md](specs/integration-test.md) | 跨模块集成验证 | `SPEC-ITEST-*` |
 
@@ -35,6 +34,7 @@
 | [specs/web-search.md](specs/web-search.md) | Agent 联网搜索 | `SPEC-WS-*` |
 | [specs/accessibility-sidecar.md](specs/accessibility-sidecar.md) | Rust 无障碍树边车与 OS 中性协议 | `SPEC-AXS-*` |
 | [specs/content-title-persistence.md](specs/content-title-persistence.md) | UIA 临时读取、上下文标题事件 v2、AW 入库边界与历史净化 | `SPEC-CTP-*` |
+| [specs/removed-ocr-audio.md](specs/removed-ocr-audio.md) | OCR 与声音模块移除范围、兼容和恢复说明 | — |
 | [specs/long-term-memory.md](specs/long-term-memory.md) | 会话长期记忆提炼和管理 | `SPEC-LTM-*` |
 
 新增或删除正式规格时，必须同步更新本索引。规格正文负责描述当前契约；一次性实施步骤不作为
@@ -43,3 +43,4 @@
 ## 归档
 
 - [archive/design-proposals/](archive/design-proposals/) — 已被正式规格取代、但仍保留背景价值的历史设计提案
+- [archive/removed-features/](archive/removed-features/) — 已移除功能的恢复基线索引

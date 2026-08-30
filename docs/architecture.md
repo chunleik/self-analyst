@@ -1,157 +1,88 @@
-# SelfAnalyst 架构文档
+# SelfAnalyst 架构
 
-## 概述
+## 1. 总览
 
-SelfAnalyst 通过窗口/AFK、上下文标题、可选音频和文件数据构建个人活动时间线，再由 LLM Agent、
-多级 Wiki 摘要和长期记忆形成“感知 → 认知 → 改进”闭环。项目以 Java 21 Maven 多模块为主体，
-桌面壳和无障碍边车使用 Rust。
-
-## 模块边界
+SelfAnalyst 使用 Java 21 Maven 多模块后端、Tauri 桌面壳和 Rust accessibility sidecar。系统以
+“事实采集—本地存储—派生分析—Agent 查询”为主链路；内容事实限定为标题，不保存屏幕正文。
 
 ```text
-self-analyst/
-├── self-analyst-aw/           ActivityWatch-compatible API、窗口/AFK watcher、aw.db
-├── self-analyst-content/      无障碍树客户端与可选 OCR/截图增强
-├── self-analyst-axsidecar/    常驻 Rust 无障碍树进程（Windows UIAutomation）
-├── self-analyst-audio/        mic/system 音频输入、VAD、本地 whisper/云端 ASR
-├── self-analyst-wiki/         多级时间摘要、Embedding 客户端与 Lucene 索引
-├── self-analyst-file/         文件监控、正文提取、LLM 摘要与语义索引
-├── self-analyst-app/          配置、Agent、记忆、桌面 API 和模块生命周期
-├── self-analyst-integration-test/
-│                              AW/content/audio/wiki/app 集成验证程序
-└── self-analyst-desktop/      Tauri 单实例桌面壳、Java 子进程、认证和窗口/托盘
+Win32 前台窗口 ───────────────┐
+Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2 ─> ActivityWatch
+窗口/AFK watcher ─────────────┘                         │
+                                                       ├─> Wiki 聚合/派生摘要
+用户选择的文件 ─> 临时解析 ─> 文件派生存储 ─────────────┤
+                                                       └─> Agent / 桌面 API
 ```
 
-Maven 根 POM 聚合 6 个 Java 功能模块和集成测试模块组。`self-analyst-desktop` 与
-`self-analyst-axsidecar` 使用 Cargo 单独构建，再由发布脚本组装。
+OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
+[specs/removed-ocr-audio.md](specs/removed-ocr-audio.md)。
 
-## 运行时数据流
+## 2. 模块边界
 
-```text
-WindowWatcher ──────────────┐
-AfkWatcher ─────────────────┤
-Accessibility sidecar → UIA ┤
-可选截图 → OCR ─────────────┤
-mic/system → VAD → ASR ─────┼→ AW HTTP heartbeat → aw.db
-FileWatcher ────────────────┘                         │
-                                                      ├→ Summary/Advice
-                                                      ├→ WikiWorker
-                                                      └→ ReActAgent tools
+| 模块 | 边界 |
+|------|------|
+| `self-analyst-aw` | 嵌入式 ActivityWatch 服务、SQLite 事件存储、内容事件策略和迁移 |
+| `self-analyst-content` | 前台窗口查询、UIA 临时读取、标题候选提取和 heartbeat |
+| `self-analyst-file` | 文件监控、临时正文解析及摘要/主题等派生信息 |
+| `self-analyst-wiki` | 按小时/天/月/年聚合标题事实和派生摘要 |
+| `self-analyst-app` | 生命周期、配置、Agent、桌面 REST/SSE 与静态 UI |
+| `self-analyst-axsidecar` | OS 无障碍树查询协议；失败返回空，不负责持久化 |
+| `self-analyst-desktop` | Tauri 窗口、Java 后端启动与关闭、端口握手 |
 
-Desktop UI → /desktop/* → Desktop controllers → chat.db / AgentState / memory.json
-```
+## 3. 标题采集链路
 
-### 上下文标题识别
+`WindowsCapture` 读取前台应用、系统窗口标题和句柄。`TitleCapture` 在窗口变化或稳定刷新时查询
+UIA，将整棵树作为单次调用内的临时输入，依次尝试应用专用标题和 `Document.Name`。它返回不含
+树或正文的 `TitleCaptureResult`，由 `ContentWatcher` 构造固定字段 heartbeat。
 
-Windows 上下文标题识别先把前台窗口句柄交给进程级共享的 `AxSidecarClient`。Rust 边车通过 JSONL 协议
-返回 OS 中性的无障碍树；`UiaTreeWalker` 在 Java 侧临时执行文本提取和密码字段脱敏。边车不存在、
-超时或失败时返回空树；仅当用户显式启用 OCR 时才截图降级，不再启动 PowerShell one-shot 进程。
+边车不可用、超时或解析失败时，系统保留窗口标题采集，不启动任何截图回退。敏感应用由
+`ContextCapturePolicy` 在查询前排除。
 
-完整 UIA/OCR 文本只存在于当前识别调用中。`ContentWatcher` 在发送 heartbeat 前投影为内容事件 v2，
-只保留系统窗口标题、应用内上下文标题、标题来源、置信度和诊断计数。AW 的共享写入策略会拒绝
-内容 bucket 中的 `text_content` 及未知字段；历史 v1 事件在 watcher 启动前完成净化。
+## 4. 持久化边界
 
-OCR 默认关闭。启用后裁剪窗口顶部标题条，并对稳定画面复用指纹缓存；具体刷新和隐私边界见
-[specs/content.md](specs/content.md)、[specs/content-title-persistence.md](specs/content-title-persistence.md)
-与 [specs/accessibility-sidecar.md](specs/accessibility-sidecar.md)。
+内容事件 v2 允许 `app`、`title`、可选 `context_title/context_kind`、`title_source`、可选
+`title_confidence`、`uia_chars` 和时间元数据。共享写入策略覆盖 HTTP heartbeat/events、导入和
+内部存储调用。历史 v1 内容会在 watcher 启动前净化。
 
-### 音频采集
+Wiki 只能消费标题事实；文件正文只在文件处理调用内存在。任何日志、异常、失败记录或备份都不得
+绕开相应规格保存原始输入。
 
-`AudioCaptureManager` 可在运行时启动或停止 mic、Windows system loopback 或两者。VAD 过滤静音后，
-`local-whisper` 在本地调用 whisper.cpp，`cloud-asr` 将 WAV 发送到 OpenAI-compatible ASR，`auto`
-优先云端再回退本地。音频默认关闭，隐私边界见 [specs/audio.md](specs/audio.md)。
+## 5. 生命周期
 
-### 文件与 Wiki
+`AppSession` 的主要顺序是：加载配置 → 启动 AW → 执行内容历史迁移 → 启动窗口/AFK 与标题 watcher
+→ 启动 Wiki/文件/Agent → 启动桌面服务。关闭时按依赖反序停止 watcher、派生服务和 AW。
 
-`FileWatcher` 去抖后向 AW 写 heartbeat，并把待处理项写入 `file-watch.db`；`FileIndexWorker` 临时提取正文、
-只把摘要和主题写入数据库及 Lucene 索引。`WikiWorker` 从标题事件和已完成时间段生成 HOUR 到 MONTH 多级摘要，
-不会为高层摘要重新读取全部原始屏幕内容。
+不存在声音 watcher、声音控制器或 OCR 引擎生命周期。
 
-## 配置
+## 6. 配置兼容
 
-classpath `application.properties` 只保存开发者默认值。用户覆盖统一写入
-`{memory.dir}/config.toml`；旧 `{memory.dir}/config.properties` 在首次启动时迁移为 TOML 并重命名
-为 `.bak`。主要优先级为：
+`SupportedKeys` 是现行配置白名单。`DeprecatedKeys` 保存已移除 OCR/声音键的墓碑：旧文件加载时
+静默忽略，桌面配置响应不暴露，结构化保存不写回。此兼容层不创建旧模块依赖。
 
-1. 支持该入口的环境变量；
-2. 用户级 `config.toml`；
-3. 尚未迁移的用户级 `config.properties`；
-4. legacy 用户配置；
-5. classpath 默认；
-6. 硬编码兜底。
-
-`aw.port` 是例外：它不接受环境变量覆盖，只由用户 TOML 或默认值决定。`ConfigTools` 和桌面 raw
-编辑器都通过 `UserConfigStore` 读写 `config.toml`。完整契约见 [specs/config-toml.md](specs/config-toml.md)。
-
-## Agent 与持久化
-
-`SelfAnalystAgent` 基于 AgentScope ReActAgent，按需注册 AW、配置、Wiki、文件和网络搜索工具。
-聊天包含两套用途不同的权威数据：
-
-- `{memory.dir}/chat-sessions/chat.db`：UI transcript、会话元数据、FTS5 搜索和删除意图；
-- `{memory.dir}/agent-state/self-analyst-chat/desktop/<sessionId>/`：模型执行历史、近期上下文和滚动摘要。
-
-会话写入使用 SQLite WAL 事务；旧分片首次迁移到 `chat.db` 后移动到 `chat-sessions/legacy/`。
-删除先在 `pending_deletions` 写持久意图，再清理 AgentState 和 transcript，启动时会继续未完成删除。
-
-## 桌面启动与安全边界
-
-Tauri 桌面壳负责单实例、托盘、窗口和 Java 子进程：
-
-1. 生成本次启动使用的随机桌面 token 与唯一端口握手文件路径；
-2. 通过环境变量启动 `self-analyst-app.jar`；
-3. Java 解析 `config.toml`、绑定 `127.0.0.1:<aw.port>`，注册认证生命周期路由；
-4. Java 原子发布实际端口；
-5. Tauri 使用 token 调用 `/desktop/lifecycle/health`；
-6. 健康检查成功后，创建带请求头注入脚本的 WebView 和浏览器会话链接；
-7. 退出时调用认证 shutdown 路由，并由受管子进程机制兜底回收 Java。
-
-除 `/desktop/session` 外，桌面模式的 `/desktop/*` 路由要求 token header 或 HttpOnly cookie。
-AW-compatible `/api/0`、`/0` 路由不使用桌面 token，但全部受回环绑定和 Host/Origin 校验保护。
-
-## 构建与发布
-
-```powershell
-# 按需下载 whisper.cpp；增加 -WithOcr 才下载 PaddleOCR
-.\scripts\download-tools.ps1
-
-# 构建 Java、桌面壳、accessibility sidecar 并组装 dist/
-.\scripts\build-dist.ps1
-
-# 生成 Windows 免安装包
-.\scripts\build-portable.ps1
-```
-
-主要产物：
+## 7. 发布结构
 
 ```text
 dist/
 ├── SelfAnalyst.exe
 ├── self-analyst-app.jar
-└── tools/
+└── data/                       # 首次运行或既有数据
 
 dist-portable/
 ├── SelfAnalyst.exe
 ├── self-analyst-app.jar
-├── runtime/
-└── tools/
+├── runtime/                    # jlink JRE
+└── data/
 
 artifacts/
-├── SelfAnalyst-portable-minimal.zip
-├── SelfAnalyst-portable.zip
-├── SelfAnalyst-portable-minimal-ocr.zip  # 仅 -WithOcr
-└── SelfAnalyst-portable-ocr.zip          # 仅 -WithOcr
+└── SelfAnalyst-portable.zip
 ```
 
-## 技术栈
+accessibility sidecar 随内容模块资源打包并按平台释放。发布结构没有 `tools/PaddleOCR-json`、
+`tools/whisper` 或声音模型。
 
-| 领域 | 技术 |
-|------|------|
-| Agent | AgentScope Java 2.0.1、Project Reactor |
-| HTTP | Javalin / Jetty |
-| 数据 | SQLite、JDBC、WAL、FTS5、Lucene KNN |
-| 原生采集 | JNA、Rust `uiautomation`、WASAPI |
-| 内容 | Rust UIAutomation、可选 PaddleOCR-json/Tess4J、PDFBox、Apache POI |
-| 音频 | Java Sound、whisper.cpp、OpenAI-compatible ASR |
-| 桌面 | Tauri 2.x、WebView2、Deep Chat |
-| 配置 | TOML v1.0（tomlj） |
+## 8. 验证
+
+- Java：`mvn test`
+- Rust sidecar：`cargo test --manifest-path self-analyst-axsidecar/Cargo.toml`
+- 便携发布：`.\scripts\build-portable.ps1`
+- 数据边界：内容策略、迁移、标题提取和配置墓碑的自动化测试

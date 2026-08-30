@@ -161,6 +161,12 @@
 - `/desktop/chat` 与 `/desktop/chat/stream` 使用数据库中的 canonical user content/contextSnapshot，
   按 `(userId=desktop, sessionId)` 选择 AgentState。
 - 相同 user turn 已完成时返回已有 terminal assistant；gate 冲突返回 409，不追加模型历史。
+- Agent 流必须产生一个非空 terminal result。最终 result 为空但已有非空文本 delta 时，必须
+  原子地用累计 delta 替换 AgentState 中同一 user turn 的空 terminal assistant 并持久化，再将其
+  作为 canonical result；无法安全写回、没有 result 或 result/delta 都为空时抛出空响应错误，
+  映射为 HTTP 502 或 SSE error。同一 user turn 保持可重试，不得生成成功占位 assistant；写回
+  成功后同 turn 重放必须直接返回已持久化结果，不得再次调用模型或工具。legacy 无
+  `userMessageId` 入口只可在应用级互斥门内定位最后一个 user turn；无法唯一安全定位时必须失败。
 - `/desktop/chat/sessions/{id}/cancel` 只取消匹配的当前执行，不得影响其它会话。
 
 ## 7. 前端契约
@@ -174,7 +180,8 @@
 - **SPEC-CSP-FE-005**：搜索 debounce 200ms；普通/搜索 cursor 分离；request ID 与 mutation generation
   丢弃乱序响应。
 - **SPEC-CSP-FE-006**：不读取旧 localStorage，并清理旧 key。
-- **SPEC-CSP-FE-007**：持久化前失败保留 composer；409/500/网络错误不能渲染成成功 assistant。
+- **SPEC-CSP-FE-007**：持久化前失败保留 composer；409/500/502/网络错误以及成功响应中缺失
+  非空消息文本都不能渲染成成功 assistant。user/pending 已落盘时必须把原 pending 更新为 error。
 - **SPEC-CSP-FE-008**：会话页始终传 server-owned session/user IDs；legacy drawer 可同时省略两者。
 - **SPEC-CSP-FE-009**：不发送 `context.history`；AgentState 是模型历史权威。
 - **SPEC-CSP-FE-010**：重试复用原 session/user/pending/context IDs，不追加新 turn。
@@ -202,7 +209,7 @@
 | SPEC-CSP-TST-010..013 | 200 条完整-turn retention、20k code point、404、非法 active 400 |
 | SPEC-CSP-TST-014（已取代） | 旧索引重建测试由 `SPEC-CSS-TST-014/-019` 覆盖 |
 | SPEC-CSP-TST-015..018 | 摘要降级、搜索、发送顺序、localStorage 清理 |
-| SPEC-CSP-TST-019..029 | AgentState 隔离/迁移/恢复、busy、删除、压缩事务安全 |
+| SPEC-CSP-TST-019..029 | AgentState 隔离/迁移/恢复、空响应与同 turn 重试、busy、删除、压缩事务安全 |
 | SPEC-CSP-TST-030..034 | 资源预算、Unicode 裁剪、请求限制、状态机、前端 reconciliation |
 | SPEC-CSP-TST-035..037（已取代） | 旧 shard/index.state 恢复，由 SQLite 事务测试覆盖 |
 | SPEC-CSP-TST-038..039 | 稳定 keyset 分页、active 不在首屏和搜索乱序 |

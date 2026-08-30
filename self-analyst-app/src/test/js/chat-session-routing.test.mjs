@@ -354,6 +354,54 @@ test("send mirrors retention and adopts the canonical updated assistant", async 
   assert.equal(sandbox.state.dom.chatTabInput.value, "");
 });
 
+test("an empty successful send response becomes a retryable assistant error", async () => {
+  const patches = [];
+  const savedUser = {
+    id: "user-new",
+    role: "user",
+    content: "new question",
+    status: "sent",
+  };
+  const savedPending = {
+    id: "assistant-new",
+    role: "assistant",
+    content: "Thinking",
+    status: "pending",
+  };
+  const api = {
+    appendMessages() { return Promise.resolve([savedUser, savedPending]); },
+    postChat() { return Promise.resolve({}); },
+    updateMessage(sessionId, messageId, patch) {
+      patches.push(patch);
+      return Promise.resolve({ ...savedPending, ...patch });
+    },
+  };
+  const { sandbox, session } = createChatSandbox({ status: "sent", api });
+  sandbox.state.dom.chatTabInput = { value: "new question" };
+  sandbox.renderChatTab = () => {};
+  sandbox.resortChatSessions = () => {};
+  sandbox.backfillSessionTitle = () => {};
+  sandbox.alert = () => {};
+
+  const outcome = await sandbox.sendChatTabMessage();
+
+  assert.deepEqual(patches.map((patch) => patch.status), ["error"]);
+  assert.equal(session.messages.at(-1).status, "error");
+  assert.match(session.messages.at(-1).content, /No content/);
+  assert.match(outcome.error.message, /No content/);
+});
+
+test("chat execution responses reject non-string message fields", async () => {
+  const { sandbox } = createChatSandbox({ status: "sent" });
+
+  for (const message of [{}, [], 42, true]) {
+    await assert.rejects(
+      sandbox.requireChatExecutionResponse(Promise.resolve({ message })),
+      /No content/,
+    );
+  }
+});
+
 test("send completion waits for replacement metadata and renders it", async () => {
   const replacement = deferred();
   let listCalls = 0;
@@ -1127,6 +1175,33 @@ test("retry failures return the assistant to an error state with retry available
   sandbox.renderChatThread();
   assert.match(thread.innerHTML, /class="msg-retry" data-mid="assistant-01"/);
   assert.equal(typeof thread.retryElements[0]?.clickHandler, "function");
+});
+
+test("an empty successful retry response remains retryable", async () => {
+  const events = [];
+  const api = {
+    updateMessage(sessionId, messageId, patch) {
+      events.push({ type: "put", patch });
+      return Promise.resolve(patch);
+    },
+    postChat() {
+      events.push({ type: "post" });
+      return Promise.resolve({});
+    },
+  };
+  const { sandbox, assistant, thread } = createChatSandbox({ status: "error", api });
+  sandbox.renderChatTab = () => {};
+
+  await sandbox.retryChatMessage(assistant.id);
+
+  assert.deepEqual(events.map((event) => event.type), ["put", "post", "put"]);
+  assert.deepEqual(events.filter((event) => event.type === "put")
+    .map((event) => event.patch.status), ["pending", "error"]);
+  assert.equal(assistant.status, "error");
+  assert.match(assistant.content, /No content/);
+
+  sandbox.renderChatThread();
+  assert.match(thread.innerHTML, /class="msg-retry" data-mid="assistant-01"/);
 });
 
 test("a failed pending PUT does not post and still releases the retry state", async () => {

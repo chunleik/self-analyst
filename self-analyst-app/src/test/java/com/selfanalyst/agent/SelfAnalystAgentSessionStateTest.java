@@ -38,6 +38,9 @@ class SelfAnalystAgentSessionStateTest {
     private static final String SESSION_D = "d".repeat(32);
     private static final String SESSION_E = "e".repeat(32);
     private static final String SESSION_F = "f".repeat(32);
+    private static final String SESSION_G = "0".repeat(32);
+    private static final String SESSION_H = "9".repeat(32);
+    private static final String SESSION_I = "2".repeat(32);
     private static final String MESSAGE_A1 = "1".repeat(12);
 
     @Test
@@ -87,6 +90,109 @@ class SelfAnalystAgentSessionStateTest {
                     "cancelling a canonical replay must not roll back its completed turn");
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void emptyModelResultFailsAndSameTurnCanBeRetried(@TempDir Path tempDir) throws Exception {
+        AtomicInteger modelCalls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            int call = modelCalls.incrementAndGet();
+            String body = call == 1
+                    ? sseResponseChunks(List.of())
+                    : sseResponse("recovered answer");
+            byte[] response = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+
+        Config config = withLlm(Config.testDefaults(tempDir),
+                "test-key",
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
+                "test-model");
+        String messageId = "8".repeat(12);
+        try (SelfAnalystAgent agent = new SelfAnalystAgent(config)) {
+            assertThrows(SelfAnalystAgent.EmptyAgentResponseException.class,
+                    () -> agent.chat(
+                            SESSION_G,
+                            messageId,
+                            () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                                    "answer me", null, List.of()))
+                            .block());
+
+            assertEquals("recovered answer", agent.chat(
+                    SESSION_G,
+                    messageId,
+                    () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                            "answer me", null, List.of()))
+                    .block());
+            assertEquals(2, modelCalls.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void emptyCanonicalResultFallsBackToAlreadyStreamedText() {
+        assertEquals("partial answer",
+                SelfAnalystAgent.canonicalResponseText("", "partial answer"));
+        assertEquals("canonical answer",
+                SelfAnalystAgent.canonicalResponseText("canonical answer", "partial answer"));
+        assertThrows(SelfAnalystAgent.EmptyAgentResponseException.class,
+                () -> SelfAnalystAgent.canonicalResponseText("  ", "\n"));
+    }
+
+    @Test
+    void deltaFallbackIsPersistedAsAnIdempotentTerminalReply(@TempDir Path tempDir)
+            throws Exception {
+        Config config = Config.testDefaults(tempDir);
+        String userMessageId = "9".repeat(12);
+        Msg blankFinal = message("a".repeat(12), MsgRole.ASSISTANT, "");
+        try (SelfAnalystAgent owner = new SelfAnalystAgent(config)) {
+            ReActAgent reactAgent = reactAgent(owner);
+            AgentState state = reactAgent.getAgentState("desktop", SESSION_H);
+            state.contextMutable().addAll(List.of(
+                    message(userMessageId, MsgRole.USER, "question"),
+                    blankFinal));
+            reactAgent.saveAgentState("desktop", SESSION_H);
+
+            assertEquals("partial answer", owner.finalizeChatResponse(
+                    SESSION_H, userMessageId, blankFinal, "partial answer"));
+            reactAgent.clearStateCache("desktop", SESSION_H);
+
+            assertEquals("partial answer", owner.chat(
+                    SESSION_H,
+                    userMessageId,
+                    () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                            "must not call model", null, List.of()))
+                    .block());
+        }
+    }
+
+    @Test
+    void legacyDeltaFallbackUsesTheLatestUserTurnWithoutAMessageId(@TempDir Path tempDir)
+            throws Exception {
+        Config config = Config.testDefaults(tempDir);
+        Msg blankFinal = message("d".repeat(12), MsgRole.ASSISTANT, "");
+        try (SelfAnalystAgent owner = new SelfAnalystAgent(config)) {
+            ReActAgent reactAgent = reactAgent(owner);
+            AgentState state = reactAgent.getAgentState("desktop", SESSION_I);
+            state.contextMutable().addAll(List.of(
+                    message("1".repeat(12), MsgRole.USER, "older question"),
+                    message("2".repeat(12), MsgRole.ASSISTANT, "older answer"),
+                    message("3".repeat(12), MsgRole.USER, "current question"),
+                    blankFinal));
+            reactAgent.saveAgentState("desktop", SESSION_I);
+
+            assertEquals("partial legacy answer", owner.finalizeChatResponse(
+                    SESSION_I, null, blankFinal, "partial legacy answer"));
+            assertEquals("older answer", state.getContext().get(1).getTextContent());
+            assertEquals("partial legacy answer", state.getContext().getLast().getTextContent());
         }
     }
 

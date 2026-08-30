@@ -245,11 +245,7 @@ public class DesktopAgentController {
                                     chatSessionStore.getSession(sessionId), userMessageId)))
                     .block(Duration.ofSeconds(180));
             if (response == null || response.isBlank()) {
-                ctx.json(Map.of(
-                        "message", "Agent 暂时无响应",
-                        "suggestedTasks", List.of()
-                ));
-                return;
+                throw new SelfAnalystAgent.EmptyAgentResponseException();
             }
 
             // Extract suggested tasks from the response (heuristic)
@@ -298,8 +294,7 @@ public class DesktopAgentController {
                                 writeSseEvent(streamOutput, "delta", Map.of("text", event.text()));
                             } else if (event.type()
                                     == SelfAnalystAgent.ChatStreamEventType.RESULT) {
-                                String response = event.text() == null || event.text().isBlank()
-                                        ? "Agent 暂时无响应" : event.text();
+                                String response = requireAgentResponse(event.text());
                                 Map<String, Object> result = new LinkedHashMap<>();
                                 result.put("message", response);
                                 result.put("suggestedTasks", extractSuggestedTasks(response));
@@ -313,8 +308,7 @@ public class DesktopAgentController {
                     .blockLast(Duration.ofSeconds(180));
 
             if (!resultSent.get()) {
-                writeSseEvent(output, "result", Map.of(
-                        "message", "Agent 暂时无响应", "suggestedTasks", List.of()));
+                throw new SelfAnalystAgent.EmptyAgentResponseException();
             }
         } catch (Exception e) {
             if (hasCause(e, SseWriteException.class)) {
@@ -435,7 +429,7 @@ public class DesktopAgentController {
         ctx.status(error.status()).json(Map.of("error", error.message()));
     }
 
-    private static ChatError describeChatError(Exception e) {
+    static ChatError describeChatError(Exception e) {
         if (e instanceof DesktopChatJson.PayloadTooLargeException) {
             return new ChatError(413, e.getMessage());
         }
@@ -459,6 +453,9 @@ public class DesktopAgentController {
         if (hasCause(e, SelfAnalystAgent.ChatCancelledException.class)) {
             return new ChatError(409, "Chat request was cancelled");
         }
+        if (hasCause(e, SelfAnalystAgent.EmptyAgentResponseException.class)) {
+            return new ChatError(502, "模型未返回文本，请重试");
+        }
         if (hasAgentStillRunning(e)) {
             return new ChatError(409, "上一条消息仍在处理中，请稍后再试...");
         }
@@ -474,7 +471,14 @@ public class DesktopAgentController {
     private record ChatRequest(
             String message, Object context, String sessionId, String userMessageId) {}
 
-    private record ChatError(int status, String message) {}
+    record ChatError(int status, String message) {}
+
+    private static String requireAgentResponse(String response) {
+        if (response == null || response.isBlank()) {
+            throw new SelfAnalystAgent.EmptyAgentResponseException();
+        }
+        return response;
+    }
 
     private static final class SseWriteException extends UncheckedIOException {
         private SseWriteException(IOException cause) {

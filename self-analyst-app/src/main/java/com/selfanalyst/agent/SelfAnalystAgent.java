@@ -15,6 +15,7 @@ import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
+import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.GenerateReason;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -43,6 +44,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZonedDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
@@ -407,6 +409,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                 // With a persistent store every call reloads its slot. Eagerly evict the local
                 // cache after completion/error/cancel so long-running desktop sessions stay bounded.
                 return Flux.defer(() -> {
+                    StringBuilder streamedText = new StringBuilder();
                     if (!activeChat.beginModelCall()) {
                         return Flux.error(new ChatCancelledException(userMessageId));
                     }
@@ -417,29 +420,114 @@ public class SelfAnalystAgent implements AutoCloseable {
                                         .handle((event, sink) -> {
                                             if (event instanceof AgentResultEvent) {
                                                 if (activeChat.completeModelCall()) {
-                                                    mapStreamEvent(event, sink);
+                                                    mapStreamEvent(event, sink, streamedText,
+                                                            sessionId, userMessageId);
                                                 }
                                             } else if (!activeChat.cancelled()) {
-                                                mapStreamEvent(event, sink);
+                                                mapStreamEvent(event, sink, streamedText,
+                                                        sessionId, userMessageId);
                                             }
                                         }),
                                 ignored -> agent.clearStateCache(DESKTOP_USER_ID, sessionId),
                                 true);
                 });
             }));
-        }));
+        })).transform(SelfAnalystAgent::requireTerminalChatResult);
     }
 
-    private static void mapStreamEvent(
+    private static Flux<ChatStreamEvent> requireTerminalChatResult(
+            Flux<ChatStreamEvent> source) {
+        return Flux.defer(() -> {
+            AtomicBoolean resultSeen = new AtomicBoolean();
+            return source
+                    .doOnNext(event -> {
+                        if (event.type() == ChatStreamEventType.RESULT) {
+                            resultSeen.set(true);
+                        }
+                    })
+                    .concatWith(Flux.defer(() -> resultSeen.get()
+                            ? Flux.empty()
+                            : Flux.error(new EmptyAgentResponseException())));
+        });
+    }
+
+    private void mapStreamEvent(
             AgentEvent event,
-            reactor.core.publisher.SynchronousSink<ChatStreamEvent> sink) {
+            reactor.core.publisher.SynchronousSink<ChatStreamEvent> sink,
+            StringBuilder streamedText,
+            String sessionId,
+            String userMessageId) {
         if (event instanceof TextBlockDeltaEvent delta) {
             if (delta.getDelta() != null && !delta.getDelta().isEmpty()) {
+                streamedText.append(delta.getDelta());
                 sink.next(ChatStreamEvent.delta(delta.getDelta()));
             }
-        } else if (event instanceof AgentResultEvent result && result.getResult() != null) {
-            sink.next(ChatStreamEvent.result(result.getResult().getTextContent()));
+        } else if (event instanceof AgentResultEvent result) {
+            sink.next(ChatStreamEvent.result(
+                    finalizeChatResponse(
+                            sessionId, userMessageId, result.getResult(), streamedText.toString())));
         }
+    }
+
+    String finalizeChatResponse(
+            String sessionId, String userMessageId, Msg finalMessage, String streamedText) {
+        String finalText = finalMessage != null ? finalMessage.getTextContent() : null;
+        if (finalText != null && !finalText.isBlank()) return finalText;
+        String fallback = canonicalResponseText(finalText, streamedText);
+        return persistFallbackTerminalReply(
+                sessionId, userMessageId, finalMessage, fallback);
+    }
+
+    private String persistFallbackTerminalReply(
+            String sessionId, String userMessageId, Msg finalMessage, String fallback) {
+        AgentState state = agent.getAgentState(DESKTOP_USER_ID, sessionId);
+        List<Msg> context = state.contextMutable();
+        int userIndex = -1;
+        for (int i = context.size() - 1; i >= 0; i--) {
+            Msg candidate = context.get(i);
+            if (candidate.getRole() == MsgRole.USER
+                    && (userMessageId == null || userMessageId.equals(candidate.getId()))) {
+                userIndex = i;
+                break;
+            }
+        }
+        if (userIndex < 0) throw new EmptyAgentResponseException();
+
+        int terminalIndex = -1;
+        for (int i = userIndex + 1; i < context.size(); i++) {
+            Msg candidate = context.get(i);
+            if (candidate.getRole() == MsgRole.USER) break;
+            if (candidate.getRole() != MsgRole.ASSISTANT
+                    || candidate.getGenerateReason() == GenerateReason.TOOL_CALLS
+                    || candidate.getContent().stream().anyMatch(ToolUseBlock.class::isInstance)) {
+                continue;
+            }
+            terminalIndex = i;
+            if (finalMessage != null && finalMessage.getId() != null
+                    && finalMessage.getId().equals(candidate.getId())) {
+                break;
+            }
+        }
+        if (terminalIndex < 0) throw new EmptyAgentResponseException();
+
+        Msg terminal = context.get(terminalIndex);
+        if (terminal.getTextContent() != null && !terminal.getTextContent().isBlank()) {
+            return terminal.getTextContent();
+        }
+        List<ContentBlock> replacement = new ArrayList<>();
+        terminal.getContent().stream()
+                .filter(block -> !(block instanceof TextBlock))
+                .forEach(replacement::add);
+        replacement.add(TextBlock.builder().text(fallback).build());
+        context.set(terminalIndex, terminal.withContent(replacement));
+        agent.saveAgentState(DESKTOP_USER_ID, sessionId);
+        return fallback;
+    }
+
+    static String canonicalResponseText(String finalText, String streamedText) {
+        if (finalText != null && !finalText.isBlank()) return finalText;
+        if (streamedText != null && !streamedText.isBlank()) return streamedText;
+        throw new EmptyAgentResponseException();
     }
 
     private String budgetBlockedMessage() {
@@ -673,6 +761,12 @@ public class SelfAnalystAgent implements AutoCloseable {
     public static final class ChatCancelledException extends IllegalStateException {
         public ChatCancelledException(String userMessageId) {
             super("Desktop chat turn was cancelled: " + userMessageId);
+        }
+    }
+
+    public static final class EmptyAgentResponseException extends IllegalStateException {
+        public EmptyAgentResponseException() {
+            super("Model returned no text");
         }
     }
 

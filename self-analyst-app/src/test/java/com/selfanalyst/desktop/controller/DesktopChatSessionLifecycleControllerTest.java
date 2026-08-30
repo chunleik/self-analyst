@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -170,6 +171,15 @@ class DesktopChatSessionLifecycleControllerTest {
                         .formatted("b".repeat(32)), null);
         controller.chat(sessionIdOnly.context());
         assertEquals(400, sessionIdOnly.status);
+    }
+
+    @Test
+    void emptyAgentResponseMapsToRetryableBadGateway() {
+        var error = DesktopAgentController.describeChatError(new CompletionException(
+                new SelfAnalystAgent.EmptyAgentResponseException()));
+
+        assertEquals(502, error.status());
+        assertEquals("模型未返回文本，请重试", error.message());
     }
 
     @Test

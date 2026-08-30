@@ -1059,6 +1059,17 @@ function updateChatInputState() {
 
 // ---- Send Message ----
 
+function requireChatExecutionResponse(executionRequest) {
+  return executionRequest.then(function (response) {
+    var payload = response || {};
+    var content = payload.message || payload.reply || payload.content || "";
+    if (typeof content !== "string" || !content.trim()) {
+      throw new Error(t("chat.agentNoContent"));
+    }
+    return { payload: payload, content: content };
+  });
+}
+
 function sendChatTabMessage(request) {
   if (state.chatSending) return Promise.resolve({ skipped: true });
   var deepChatRequest = request && request.source === "deep-chat";
@@ -1117,8 +1128,9 @@ function sendChatTabMessage(request) {
               },
             })
           : api.postChat(text, context, session.id, savedUser.id);
-        return executionRequest.then(function (resp) {
-          var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
+        return requireChatExecutionResponse(executionRequest).then(function (execution) {
+          var resp = execution.payload;
+          var content = execution.content;
           var tasks = normalizeSuggestedTasks(
             resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []);
           savedPending.status = "sent";
@@ -1232,8 +1244,9 @@ function retryChatMessage(msgId, options) {
           userMsg.contextSnapshot || buildChatContext(session),
           session.id,
           userMsg.id);
-    return retryRequest.then(function (resp) {
-      var content = resp.message || resp.reply || resp.content || t("chat.agentNoContent");
+    return requireChatExecutionResponse(retryRequest).then(function (execution) {
+      var resp = execution.payload;
+      var content = execution.content;
       var tasks = normalizeSuggestedTasks(
         resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []);
       pendingMsg.status = "sent";

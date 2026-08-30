@@ -66,7 +66,9 @@
 2. 向 `POST /desktop/chat/sessions/{id}/messages` 原子追加 server-owned user 与 pending assistant；
 3. 使用返回的 `sessionId`、`userMessageId` 和业务 `context` 调用 `/desktop/chat/stream`；
 4. 把 delta 只显示到发起请求的会话；
-5. 完成后用后端 canonical message 更新同一 pending，不追加第二条 assistant；
+5. 完成后用后端 canonical message 更新同一 pending，不追加第二条 assistant；若 canonical
+   文本为空但已有非空 delta，则必须先把 delta 写回 AgentState terminal assistant，再以其作为
+   canonical 文本；无法完成一致持久化或两者都为空时必须失败；
 6. 刷新会话元数据、摘要和排序。
 
 同一时刻前端只允许一个发送流程。切换会话不会改变执行所属 session，也不得把 delta 写到新会话。
@@ -108,6 +110,9 @@
 
 - 输入在持久化前失败时保留为编辑器草稿，并显示瞬态错误，不伪造已保存消息。
 - user/pending 已持久化后失败时，把原 pending 更新为 error；重试复用原 session/user/pending IDs。
+- 模型未产生最终文本时不得写入“无响应”等占位文本或把 pending 标记为 sent；后端返回
+  502/SSE error，前端把原 pending 更新为 error 并保留重试入口。即使后端错误地返回成功但
+  消息字段为空或不是字符串，前端也必须执行同样的 error 转换。
 - 刷新后发现 pending 时，只允许恢复最新未完成 turn；如果 AgentState 已有 terminal 回复，后端返回既有结果，不再次调用模型。
 - busy 返回 409；网络、500、解析和流中断必须提供重试入口，不能重复 user turn。
 - 会话切换、删除或新加载产生的陈旧响应必须被 generation/ID 检查丢弃。
@@ -149,8 +154,8 @@ deep-chat.bundle.js（module）→ utils.js → i18n.js → state.js → api.js 
 
 - `scripts/check-desktop-chat-tab.ps1`
 - `scripts/check-desktop-chat-session-store.ps1`
-- Node UI 测试覆盖分页、过期响应、stream、取消、重试、pending 恢复、Deep Chat fallback 和 XSS 转义。
-- 后端测试覆盖 server-owned IDs、幂等、busy 409、AgentState 恢复、取消和删除协调。
+- Node UI 测试覆盖分页、过期响应、stream、空响应、取消、重试、pending 恢复、Deep Chat fallback 和 XSS 转义。
+- 后端测试覆盖 server-owned IDs、幂等、空响应 502 与同 turn 重试、busy 409、AgentState 恢复、取消和删除协调。
 - 手动验证 800×600、宽屏、输入法、键盘、慢流、断网、切换会话和重载。
 
 ## 10. 追溯矩阵

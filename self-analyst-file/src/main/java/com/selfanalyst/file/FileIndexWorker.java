@@ -1,19 +1,14 @@
 package com.selfanalyst.file;
 
-import com.selfanalyst.file.extractor.FileContentExtractor;
-import com.selfanalyst.file.extractor.FileContentExtractorFactory;
-import com.selfanalyst.file.semantic.FileEmbeddingWorker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HexFormat;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -23,43 +18,38 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Asynchronous processing path (SPEC-FILE-013, SPEC-FILE-004 path B).
+ * Metadata-only file collection worker (SPEC-FILE-040..043).
  *
- * <p>On start does one reconcile scan of every watch root (SPEC-FILE-003a: no
- * heartbeats), then on a fixed schedule takes one PENDING (or retryable FAILED)
- * row per round and runs {@code extract → truncate → summarize → updateIndexed
- * → enqueueEmbedding}, with cheap (size,mtime) prefiltering and SHA-256 change
- * detection so unchanged files are never re-summarized (SPEC-FILE-010d).
+ * <p>The historical class name is retained for compatibility, but the worker
+ * never opens a file byte stream. It reads only {@link BasicFileAttributes}
+ * and persists title/path metadata.
  */
 public class FileIndexWorker {
 
     private static final Logger log = LoggerFactory.getLogger(FileIndexWorker.class);
+    private static final int BATCH_SIZE = 256;
 
     private final FileWatchStore store;
     private final PathFilter pathFilter;
-    private final FileContentExtractorFactory extractorFactory;
-    private final FileSummarizer summarizer;
-    private final FileEmbeddingWorker embeddingWorker; // nullable
     private final List<Path> watchRoots;
     private final List<String> activeWatchRoots;
     private final Set<String> activeWatchRootSet;
     private final int intervalSeconds;
-    private final int maxContentChars;
-    private final Duration minReindexInterval;
-
+    private final Runnable beforeRetireMissing;
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
 
     public FileIndexWorker(FileWatchStore store, PathFilter pathFilter,
-                           FileContentExtractorFactory extractorFactory, FileSummarizer summarizer,
-                           FileEmbeddingWorker embeddingWorker, List<Path> watchRoots,
-                           int intervalSeconds, int maxContentChars, int minReindexIntervalMinutes) {
+                           List<Path> watchRoots, int intervalSeconds) {
+        this(store, pathFilter, watchRoots, intervalSeconds, () -> {});
+    }
+
+    FileIndexWorker(FileWatchStore store, PathFilter pathFilter,
+                    List<Path> watchRoots, int intervalSeconds,
+                    Runnable beforeRetireMissing) {
         this.store = store;
         this.pathFilter = pathFilter;
-        this.extractorFactory = extractorFactory;
-        this.summarizer = summarizer;
-        this.embeddingWorker = embeddingWorker;
         this.watchRoots = watchRoots == null ? List.of() : watchRoots.stream()
                 .map(path -> path.toAbsolutePath().normalize())
                 .distinct()
@@ -67,10 +57,9 @@ public class FileIndexWorker {
         this.activeWatchRoots = this.watchRoots.stream().map(Path::toString).toList();
         this.activeWatchRootSet = Set.copyOf(new LinkedHashSet<>(activeWatchRoots));
         this.intervalSeconds = Math.max(5, intervalSeconds);
-        this.maxContentChars = Math.max(500, maxContentChars);
-        this.minReindexInterval = Duration.ofMinutes(Math.max(0, minReindexIntervalMinutes));
+        this.beforeRetireMissing = beforeRetireMissing != null ? beforeRetireMissing : () -> {};
         this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "file-index-worker");
+            Thread t = new Thread(r, "file-metadata-worker");
             t.setDaemon(true);
             return t;
         });
@@ -81,16 +70,14 @@ public class FileIndexWorker {
         executor.execute(() -> {
             try {
                 reconcileScan();
+                if (running.get() && !cancelled.get()) processOneRound();
             } catch (Exception e) {
-                if (!cancelled.get()) {
-                    log.warn("File reconcile scan failed ({})", errorType(e));
-                }
+                if (!cancelled.get()) log.warn("File metadata reconcile failed ({})", errorType(e));
             }
         });
         executor.scheduleWithFixedDelay(this::tick,
                 intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
-        log.info("FileIndexWorker started (interval={}s, maxContentChars={})",
-                intervalSeconds, maxContentChars);
+        log.info("File metadata worker started (interval={}s)", intervalSeconds);
     }
 
     public void shutdown() {
@@ -103,20 +90,20 @@ public class FileIndexWorker {
             executor.shutdownNow();
             Thread.currentThread().interrupt();
         }
-        log.info("FileIndexWorker shut down");
+        log.info("File metadata worker shut down");
     }
 
-    /** Runtime health used by the desktop collector status. */
     public boolean isRunning() {
         return running.get() && !executor.isShutdown() && !executor.isTerminated();
     }
-
-    // ── reconcile scan (SPEC-FILE-013, SPEC-FILE-003a) ──
 
     void reconcileScan() throws IOException {
         for (Path root : watchRoots) {
             if (cancelled.get()) return;
             if (!Files.isDirectory(root)) continue;
+            Instant scanStartedAt = Instant.now();
+            Set<String> seen = new HashSet<>();
+            boolean[] traversalComplete = {true};
             Files.walkFileTree(root, new SimpleFileVisitor<>() {
                 @Override
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
@@ -129,31 +116,57 @@ public class FileIndexWorker {
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                     if (cancelled.get()) return FileVisitResult.TERMINATE;
                     try {
-                        if (!attrs.isRegularFile() || pathFilter.isExcludedFile(file)) {
-                            return FileVisitResult.CONTINUE;
+                        if (attrs.isRegularFile() && !pathFilter.isExcludedFile(file)) {
+                            seen.add(file.toAbsolutePath().toString());
+                            maybeEnqueue(root, file, attrs);
                         }
-                        maybeEnqueue(root, file, attrs);
                     } catch (Exception e) {
-                        log.debug("Reconcile skip {} ({})", file, errorType(e));
+                        log.debug("Metadata reconcile skipped {} ({})", file, errorType(e));
                     }
                     return FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    traversalComplete[0] = false;
                     return FileVisitResult.CONTINUE;
                 }
             });
+            if (!cancelled.get() && traversalComplete[0]) {
+                beforeRetireMissing.run();
+                retireMissingFiles(root, seen, scanStartedAt);
+            }
         }
     }
 
-    /** Enqueue a file found during scan only if it is new or changed vs its indexed snapshot. */
+    private void retireMissingFiles(Path root, Set<String> seen, Instant scanStartedAt) {
+        String watchRoot = root.toAbsolutePath().normalize().toString();
+        for (FileRecord record : store.findActiveByWatchRoot(watchRoot)) {
+            if (seen.contains(record.absolutePath())) continue;
+            if (record.updatedAt() != null && record.updatedAt().isAfter(scanStartedAt)) continue;
+            try {
+                Path path = Path.of(record.absolutePath());
+                boolean confirmedMissing = Files.notExists(path);
+                boolean exists = Files.exists(path);
+                boolean noLongerRegular = exists && !Files.isRegularFile(path);
+                boolean nowExcluded = exists && !noLongerRegular && pathFilter.isExcludedFile(path);
+                if (confirmedMissing || noLongerRegular || nowExcluded) {
+                    store.markDeleted(record.absolutePath());
+                }
+            } catch (InvalidPathException invalidPath) {
+                store.markDeleted(record.absolutePath());
+            }
+        }
+    }
+
     private void maybeEnqueue(Path root, Path file, BasicFileAttributes attrs) {
         String abs = file.toAbsolutePath().toString();
         FileRecord existing = store.findByPath(abs);
         String currentRoot = root.toAbsolutePath().normalize().toString();
         String currentRelativePath = relativize(root, file);
         String currentExtension = PathFilter.extensionOf(file.getFileName().toString());
+        Instant created = attrs.creationTime().toInstant();
+        Instant modified = attrs.lastModifiedTime().toInstant();
         boolean locationChanged = existing != null
                 && (!currentRoot.equals(existing.watchRoot())
                 || !currentRelativePath.equals(existing.relativePath()));
@@ -162,26 +175,22 @@ public class FileIndexWorker {
         }
         boolean changed = existing == null
                 || existing.status() == FileStatus.DELETED
+                || existing.fileCreatedAt() == null
                 || existing.lastModified() == null
                 || existing.sizeBytes() != attrs.size()
-                || !attrs.lastModifiedTime().toInstant().equals(existing.lastModified());
-        // PENDING/FAILED rows are already queued; don't disturb them.
+                || !created.equals(existing.fileCreatedAt())
+                || !modified.equals(existing.lastModified());
         if (existing != null
                 && (existing.status() == FileStatus.PENDING || existing.status() == FileStatus.FAILED)) {
             return;
         }
-        if (changed) {
-            upsert(root, file);
-        } else if (locationChanged && embeddingWorker != null) {
-            embeddingWorker.enqueueMetadataRefresh(abs);
-        }
+        if (changed) upsert(root, file);
     }
 
     private void upsert(Path root, Path file) {
-        String abs = file.toAbsolutePath().toString();
-        String rel = relativize(root, file);
-        String ext = PathFilter.extensionOf(file.getFileName().toString());
-        store.upsertPending(abs, rel, root.toAbsolutePath().toString(), ext);
+        store.upsertPending(file.toAbsolutePath().toString(), relativize(root, file),
+                root.toAbsolutePath().normalize().toString(),
+                PathFilter.extensionOf(file.getFileName().toString()));
     }
 
     static String relativize(Path root, Path file) {
@@ -192,29 +201,27 @@ public class FileIndexWorker {
         }
     }
 
-    // ── periodic processing (SPEC-FILE-004 path B) ──
-
     private void tick() {
-        if (!running.get()) return;
-        processOneRound();
+        if (running.get()) processOneRound();
     }
 
-    /** Process at most one PENDING (else one retryable FAILED) row. Package-visible for tests. */
+    /** Process a bounded metadata batch without opening any file content stream. */
     void processOneRound() {
         if (cancelled.get()) return;
         try {
-            List<FileRecord> pending = store.findPending(activeWatchRoots, 1);
-            for (FileRecord rec : pending) {
+            int processed = 0;
+            for (FileRecord rec : store.findPending(activeWatchRoots, BATCH_SIZE)) {
                 processOne(rec);
-                return;
+                if (++processed >= BATCH_SIZE || cancelled.get()) return;
             }
-            List<FileRecord> retryable = store.findRetryable(activeWatchRoots, 1);
-            for (FileRecord rec : retryable) {
+            int remaining = BATCH_SIZE - processed;
+            if (remaining <= 0) return;
+            for (FileRecord rec : store.findRetryable(activeWatchRoots, remaining)) {
                 processOne(rec);
-                return;
+                if (cancelled.get()) return;
             }
         } catch (Exception e) {
-            log.warn("FileIndexWorker round failed ({})", errorType(e));
+            log.warn("File metadata worker round failed ({})", errorType(e));
         }
     }
 
@@ -223,66 +230,19 @@ public class FileIndexWorker {
         if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
         Path file = Path.of(abs);
         try {
-            if (cancelled.get()) return;
             if (!Files.isRegularFile(file)) {
                 store.markDeleted(abs);
                 return;
             }
-
             BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class);
-            long curSize = attrs.size();
-            Instant curMtime = attrs.lastModifiedTime().toInstant();
-
-            // SPEC-FILE-010d cheap prefilter: same (size,mtime) as last index → unchanged.
-            boolean cheapUnchanged = rec.fileHash() != null
-                    && rec.lastModified() != null
-                    && curSize == rec.sizeBytes()
-                    && curMtime.equals(rec.lastModified());
-            if (cheapUnchanged) {
-                store.updateChecksum(abs, curSize, curMtime, rec.fileHash());
-                if (embeddingWorker != null) embeddingWorker.enqueue(abs);
-                return;
-            }
-
-            String hash = sha256(file);
-            if (rec.fileHash() != null && rec.fileHash().equals(hash)) {
-                // content identical (touch / metadata-only change) → no re-summary.
-                store.updateChecksum(abs, curSize, curMtime, hash);
-                if (embeddingWorker != null) embeddingWorker.enqueue(abs);
-                return;
-            }
-
-            // SPEC-FILE-019b: per-file minimum re-summary interval. Leave PENDING for a later round.
-            if (rec.lastIndexedAt() != null && !minReindexInterval.isZero()
-                    && Duration.between(rec.lastIndexedAt(), Instant.now()).compareTo(minReindexInterval) < 0) {
-                log.debug("Skip {} this round: within min re-index interval", abs);
-                return;
-            }
-
-            String content = extractWithFallback(rec.extension(), file);
-            String truncated = truncateByCodepoint(content, maxContentChars);
-            if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
-
-            FileSummarizer.FileSummaryResult result =
-                    summarizer.summarize(rec.relativePath(), rec.extension(), curMtime, truncated);
-            if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
-
-            store.updateIndexed(abs, curSize, curMtime, hash, result.summary(),
-                    result.mainTopics(), "llm", summarizer.promptVersion());
-
-            if (embeddingWorker != null) {
-                embeddingWorker.enqueue(abs);
-            }
-            log.debug("Indexed file {}", abs);
-        } catch (com.selfanalyst.wiki.usage.BudgetExceededException be) {
-            // 达到每日 token 预算：保持 PENDING，下个周期/次日重试，不计入失败重试次数
-            log.debug("File {} 因 token 预算暂停，保持 PENDING 稍后重试", abs);
+            store.updateCollected(abs, attrs.size(), attrs.creationTime().toInstant(),
+                    attrs.lastModifiedTime().toInstant());
+            log.debug("Collected file metadata {}", abs);
         } catch (Exception e) {
             if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
-            log.warn("File index failed for {} ({})", abs, errorType(e));
             int retryCount = rec.retryCount() + 1;
             long delayMinutes = (long) Math.min(1440, Math.pow(2, retryCount));
-            store.markFailed(abs, "FILE_INDEX_FAILED:" + errorType(e),
+            store.markFailed(abs, "FILE_METADATA_FAILED:" + errorType(e),
                     Instant.now().plus(Duration.ofMinutes(delayMinutes)));
         }
     }
@@ -290,51 +250,11 @@ public class FileIndexWorker {
     private boolean isActiveRoot(String watchRoot) {
         if (watchRoot == null) return false;
         try {
-            return activeWatchRootSet.contains(Path.of(watchRoot).toAbsolutePath().normalize().toString());
+            return activeWatchRootSet.contains(
+                    Path.of(watchRoot).toAbsolutePath().normalize().toString());
         } catch (InvalidPathException ignored) {
             return false;
         }
-    }
-
-    /** Dedicated extractor; on failure fall back to metadata-only (SPEC-FILE-013b). */
-    private String extractWithFallback(String extension, Path file) {
-        FileContentExtractor extractor = extractorFactory.forExtension(extension);
-        try {
-            String text = extractor.extract(file);
-            if (text == null || text.isBlank()) {
-                return extractorFactory.metadataOnly().extract(file);
-            }
-            return text;
-        } catch (Exception e) {
-            log.debug("Extractor failed for {} ({}), using metadata fallback ({})",
-                    file, extension, errorType(e));
-            try {
-                return extractorFactory.metadataOnly().extract(file);
-            } catch (Exception e2) {
-                return "文件名: " + file.getFileName();
-            }
-        }
-    }
-
-    /** Truncate by Unicode codepoint, not char, so surrogate pairs stay intact (SPEC-FILE-018f). */
-    static String truncateByCodepoint(String s, int maxCodepoints) {
-        if (s == null) return "";
-        int count = s.codePointCount(0, s.length());
-        if (count <= maxCodepoints) return s;
-        int end = s.offsetByCodePoints(0, maxCodepoints);
-        return s.substring(0, end);
-    }
-
-    private static String sha256(Path file) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        try (var in = Files.newInputStream(file)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) != -1) {
-                md.update(buf, 0, n);
-            }
-        }
-        return HexFormat.of().formatHex(md.digest());
     }
 
     private static String errorType(Throwable error) {

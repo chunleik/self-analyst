@@ -3,193 +3,193 @@ package com.selfanalyst.file;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.selfanalyst.file.semantic.FileSemanticIndex;
-import com.selfanalyst.wiki.semantic.EmbeddingClient;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-/**
- * Agent-facing file tools (SPEC-FILE-017). JSON-string returns, matching the
- * {@code WikiTools} shape (SPEC-FILE-017a). When embedding is unavailable,
- * {@link #searchFiles} degrades to keyword/time queries (SPEC-FILE-017b).
- */
+/** Agent-facing metadata-only file tools (SPEC-FILE-060..062). */
 public class FileTools {
 
-    private static final Logger log = LoggerFactory.getLogger(FileTools.class);
     private static final ObjectMapper MAPPER = new ObjectMapper().registerModule(new JavaTimeModule());
-
     private final FileWatchStore store;
-    private final FileSemanticIndex semanticIndex; // nullable
-    private final EmbeddingClient embeddingClient;  // nullable
-    private final int defaultTopK;
+    private volatile Set<String> activeWatchRoots = Set.of();
 
     public FileTools(FileWatchStore store) {
-        this(store, null, null, 8);
-    }
-
-    public FileTools(FileWatchStore store, FileSemanticIndex semanticIndex,
-                     EmbeddingClient embeddingClient, int defaultTopK) {
         this.store = store;
-        this.semanticIndex = semanticIndex;
-        this.embeddingClient = embeddingClient;
-        this.defaultTopK = defaultTopK > 0 ? defaultTopK : 8;
     }
 
-    public boolean hasSemanticIndex() {
-        return semanticIndex != null && embeddingClient != null;
+    public void updateWatchRoots(List<Path> watchRoots) {
+        if (watchRoots == null || watchRoots.isEmpty()) {
+            activeWatchRoots = Set.of();
+            return;
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (Path root : watchRoots) {
+            if (root != null) normalized.add(root.toAbsolutePath().normalize().toString());
+        }
+        activeWatchRoots = Set.copyOf(normalized);
     }
 
     @Tool(description = """
-            按自然语言主题语义检索被监控目录中的文件摘要，并可按目录、扩展名、修改时间过滤。
-            query 为自然语言查询（如"关于数据库迁移的文档"）。
-            watchRoot/extension/start/end 均可选；start/end 为 ISO-8601 时间字符串。
-            topK 可选，默认取配置值。embedding 不可用时自动降级为按时间/目录的关键词检索。""")
+            按文件名或相对路径检索被监控目录中的文件，并可按目录、扩展名和修改时间过滤。
+            仅查询本地文件系统元数据，不读取文件正文，也不调用 LLM 或 embedding 服务。""")
     public String searchFiles(
-            @ToolParam(name = "query", description = "自然语言查询文本") String query,
+            @ToolParam(name = "query", description = "文件名或相对路径关键词") String query,
             @ToolParam(name = "watchRoot", description = "监控根目录绝对路径过滤，可选") String watchRoot,
-            @ToolParam(name = "extension", description = "扩展名过滤（不含点，如 pdf），可选") String extension,
-            @ToolParam(name = "start", description = "起始时间 ISO-8601 字符串，可选") String start,
-            @ToolParam(name = "end", description = "结束时间 ISO-8601 字符串，可选") String end,
-            @ToolParam(name = "topK", description = "返回结果数量，可选，默认8") int topK) {
-
-        Instant startInstant = parseInstantNullable(start);
-        Instant endInstant = parseInstantNullable(end);
-        int k = topK > 0 && topK <= 50 ? topK : defaultTopK;
-
-        // SPEC-FILE-017b: degrade to time/dir listing when semantic search unavailable.
-        if (!hasSemanticIndex()) {
-            return fallbackListing(watchRoot, extension, startInstant, endInstant, k,
-                    "Semantic index not available, returned recent files instead");
-        }
+            @ToolParam(name = "extension", description = "扩展名过滤（不含点），可选") String extension,
+            @ToolParam(name = "start", description = "修改时间起点 ISO-8601，可选") String start,
+            @ToolParam(name = "end", description = "修改时间终点 ISO-8601，可选") String end,
+            @ToolParam(name = "limit", description = "返回数量，可选，默认20") int limit) {
         try {
-            float[] vector = embeddingClient.embedSingle(query);
-            List<FileSemanticIndex.SearchHit> hits = semanticIndex.search(
-                    vector, k, startInstant, endInstant, watchRoot, extension);
-            List<Map<String, Object>> results = new ArrayList<>();
-            for (FileSemanticIndex.SearchHit hit : hits) {
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.put("score", hit.score());
-                item.put("path", hit.path());
-                item.put("watchRoot", hit.watchRoot());
-                item.put("extension", hit.extension());
-                item.put("summary", hit.summary());
-                item.put("mainTopics", hit.mainTopics());
-                results.add(item);
-            }
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("results", results);
-            return writeJson(out);
+            int lim = limit > 0 && limit <= 200 ? limit : 20;
+            List<String> roots = activeRootsForQuery(watchRoot);
+            if (roots.isEmpty()) return recordsPayload(List.of());
+            List<FileRecord> records = store.queryMetadataForRoots(query, parseInstantNullable(start),
+                    parseInstantNullable(end), roots, extension, lim);
+            return recordsPayload(records);
         } catch (Exception e) {
-            log.warn("searchFiles semantic failed, falling back: {}", e.getMessage());
-            return fallbackListing(watchRoot, extension, startInstant, endInstant, k,
-                    "Semantic search failed: " + e.getMessage());
+            return error(e.getMessage());
         }
     }
 
-    @Tool(description = """
-            按最后修改时间列出被监控目录中已索引的文件（无需 embedding）。
-            watchRoot/start/end 均可选；start/end 为 ISO-8601 时间字符串。limit 可选，默认20。""")
+    @Tool(description = "按最后修改时间列出被监控目录中的文件元数据。")
     public String listRecentFiles(
             @ToolParam(name = "watchRoot", description = "监控根目录绝对路径过滤，可选") String watchRoot,
-            @ToolParam(name = "start", description = "起始时间 ISO-8601 字符串，可选") String start,
-            @ToolParam(name = "end", description = "结束时间 ISO-8601 字符串，可选") String end,
-            @ToolParam(name = "limit", description = "返回数量上限，可选，默认20") int limit) {
-        int lim = limit > 0 && limit <= 200 ? limit : 20;
-        return fallbackListing(watchRoot, null, parseInstantNullable(start),
-                parseInstantNullable(end), lim, null);
+            @ToolParam(name = "start", description = "修改时间起点 ISO-8601，可选") String start,
+            @ToolParam(name = "end", description = "修改时间终点 ISO-8601，可选") String end,
+            @ToolParam(name = "limit", description = "返回数量，可选，默认20") int limit) {
+        try {
+            int lim = limit > 0 && limit <= 200 ? limit : 20;
+            List<String> roots = activeRootsForQuery(watchRoot);
+            if (roots.isEmpty()) return recordsPayload(List.of());
+            return recordsPayload(store.queryMetadataForRoots(null, parseInstantNullable(start),
+                    parseInstantNullable(end), roots, null, lim));
+        } catch (Exception e) {
+            return error(e.getMessage());
+        }
     }
 
-    @Tool(description = "查询指定文件路径的已生成摘要、主题关键词与索引状态。path 为文件绝对路径。")
-    public String getFileSummary(
+    @Tool(description = "查询指定绝对路径的文件名、路径、大小、创建时间和修改时间。")
+    public String getFileMetadata(
             @ToolParam(name = "path", description = "文件绝对路径") String path) {
         try {
             FileRecord rec = store.findByPath(path);
-            if (rec == null) {
-                return "{\"error\": \"File not tracked: " + safe(path) + "\"}";
-            }
-            return writeJson(formatRecord(rec, true));
+            return rec == null || !isActiveRoot(rec.watchRoot())
+                    ? error("File not tracked in active roots: " + safe(path))
+                    : writeJson(formatRecord(rec, true));
         } catch (Exception e) {
-            return "{\"error\": \"" + safe(e.getMessage()) + "\"}";
+            return error(e.getMessage());
         }
     }
 
-    @Tool(description = "查询各监控根目录下文件索引的状态计数（PENDING/INDEXED/FAILED/SKIPPED/DELETED）。")
-    public String fileIndexStatus() {
+    @Tool(description = "查询各监控根目录下文件元数据的采集状态计数。")
+    public String fileCollectionStatus() {
         try {
-            Map<String, Map<String, Long>> counts = store.statusCountsByWatchRoot();
-            return writeJson(counts);
+            Map<String, Map<String, Long>> all = store.statusCountsByWatchRoot();
+            Map<String, Map<String, Long>> active = new LinkedHashMap<>();
+            for (String root : activeWatchRoots) {
+                if (all.containsKey(root)) active.put(root, all.get(root));
+            }
+            return writeJson(active);
         } catch (Exception e) {
-            return "{\"error\": \"" + safe(e.getMessage()) + "\"}";
+            return error(e.getMessage());
         }
     }
 
-    // ── helpers ──
+    private String recordsPayload(List<FileRecord> records) {
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (FileRecord rec : records) results.add(formatRecord(rec, false));
+        return writeJson(Map.of("results", results));
+    }
 
-    private String fallbackListing(String watchRoot, String extension, Instant start,
-                                   Instant end, int limit, String note) {
+    private List<String> activeRootsForQuery(String requestedRoot) {
+        Set<String> roots = activeWatchRoots;
+        if (roots.isEmpty()) return List.of();
+        if (requestedRoot == null || requestedRoot.isBlank()) return List.copyOf(roots);
         try {
-            List<FileRecord> records = store.queryByTime(start, end, watchRoot, extension, limit);
-            List<Map<String, Object>> results = new ArrayList<>();
-            for (FileRecord rec : records) {
-                results.add(formatRecord(rec, false));
-            }
-            Map<String, Object> out = new LinkedHashMap<>();
-            out.put("results", results);
-            if (note != null) out.put("note", note);
-            return writeJson(out);
-        } catch (Exception e) {
-            return "{\"error\": \"" + safe(e.getMessage()) + "\"}";
+            String normalized = Path.of(requestedRoot).toAbsolutePath().normalize().toString();
+            return roots.contains(normalized) ? List.of(normalized) : List.of();
+        } catch (InvalidPathException ignored) {
+            return List.of();
+        }
+    }
+
+    private boolean isActiveRoot(String watchRoot) {
+        if (watchRoot == null) return false;
+        try {
+            return activeWatchRoots.contains(
+                    Path.of(watchRoot).toAbsolutePath().normalize().toString());
+        } catch (InvalidPathException ignored) {
+            return false;
         }
     }
 
     private static Map<String, Object> formatRecord(FileRecord rec, boolean detailed) {
         Map<String, Object> map = new LinkedHashMap<>();
+        map.put("name", fileName(rec));
         map.put("path", rec.absolutePath());
         map.put("relativePath", rec.relativePath());
         map.put("watchRoot", rec.watchRoot());
         map.put("extension", rec.extension());
         map.put("status", rec.status().name());
-        map.put("summary", rec.summary());
-        map.put("mainTopics", rec.mainTopics());
-        map.put("lastModified", rec.lastModified() != null ? rec.lastModified().toString() : null);
+        map.put("sizeBytes", rec.sizeBytes());
+        map.put("fileCreatedAt", text(rec.fileCreatedAt()));
+        map.put("lastModified", text(rec.lastModified()));
+        map.put("lastCollectedAt", text(rec.lastCollectedAt()));
         if (detailed) {
-            map.put("sizeBytes", rec.sizeBytes());
-            map.put("lastIndexedAt", rec.lastIndexedAt() != null ? rec.lastIndexedAt().toString() : null);
-            map.put("model", rec.model());
-            map.put("promptVersion", rec.promptVersion());
+            map.put("firstSeenAt", text(rec.firstSeenAt()));
             if (rec.lastError() != null) map.put("lastError", rec.lastError());
         }
         return map;
+    }
+
+    private static String fileName(FileRecord rec) {
+        try {
+            Path name = Path.of(rec.absolutePath()).getFileName();
+            return name != null ? name.toString() : rec.relativePath();
+        } catch (InvalidPathException ignored) {
+            return rec.relativePath();
+        }
+    }
+
+    private static String text(Instant value) {
+        return value == null ? null : value.toString();
     }
 
     private static String writeJson(Object obj) {
         try {
             return MAPPER.writeValueAsString(obj);
         } catch (JsonProcessingException e) {
-            return "{\"error\": \"Failed to serialize result\"}";
+            return "{\"error\":\"Failed to serialize result\"}";
         }
     }
 
-    /** Accepts "2026-06-15T00:00:00Z" and "2026-06-15T00:00:00" (treated as local). */
-    private static Instant parseInstantNullable(String s) {
-        if (s == null || s.isBlank()) return null;
-        if (s.length() > 19 && (s.charAt(19) == 'Z' || s.charAt(19) == '+' || s.charAt(19) == '-')) {
-            return Instant.parse(s);
+    private static Instant parseInstantNullable(String value) {
+        if (value == null || value.isBlank()) return null;
+        if (value.length() > 19 && (value.charAt(19) == 'Z'
+                || value.charAt(19) == '+' || value.charAt(19) == '-')) {
+            return Instant.parse(value);
         }
-        return LocalDateTime.parse(s).atZone(ZoneId.systemDefault()).toInstant();
+        return LocalDateTime.parse(value).atZone(ZoneId.systemDefault()).toInstant();
     }
 
-    private static String safe(String s) {
-        return s == null ? "" : s.replace("\"", "'");
+    private static String error(String value) {
+        return "{\"error\":\"" + safe(value) + "\"}";
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "'")
+                .replace("\r", " ").replace("\n", " ");
     }
 }

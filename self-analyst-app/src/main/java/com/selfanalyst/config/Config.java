@@ -49,16 +49,14 @@ public record Config(
         boolean fileWatchEnabled,
         String fileWatchPaths,
         int fileWatchMaxFileSizeKb,
-        int fileWatchMaxContentChars,
         int fileWatchWorkerIntervalSeconds,
         int fileWatchDebounceSeconds,
-        int fileWatchMinReindexIntervalMinutes,
         int fileWatchHeartbeatThrottleSeconds,
         String fileWatchExtensions,
         String fileWatchExcludeDirs,
         String fileWatchExcludeGlobs,
-        boolean fileWatchSemanticEnabled,
-        Path fileSemanticIndexDir,
+        /** Legacy content-index path retained only so startup can purge old artifacts. */
+        Path legacyFileSemanticIndexDir,
         int llmMaxTokens,
         int agentMaxIters,
         boolean agentCompactionEnabled,
@@ -177,23 +175,16 @@ public record Config(
         String fileWatchPaths = envOrProp(props, "file.watch.paths", "FILE_WATCH_PATHS", "");
         int fileWatchMaxFileSizeKb = parseIntOr(props,
                 envOrProp(props, "file.watch.maxFileSizeKb", "FILE_WATCH_MAX_FILE_SIZE_KB", "512"), 512);
-        int fileWatchMaxContentChars = parseIntOr(props,
-                envOrProp(props, "file.watch.maxContentChars", "FILE_WATCH_MAX_CONTENT_CHARS", "8000"), 8000);
-        if (fileWatchMaxContentChars < 500) fileWatchMaxContentChars = 8000;
         int fileWatchWorkerIntervalSeconds = parseIntOr(props,
                 envOrProp(props, "file.watch.worker.intervalSeconds", "FILE_WATCH_WORKER_INTERVAL_SECONDS", "60"), 60);
         int fileWatchDebounceSeconds = parseIntOr(props,
                 envOrProp(props, "file.watch.debounceSeconds", "FILE_WATCH_DEBOUNCE_SECONDS", "5"), 5);
-        int fileWatchMinReindexIntervalMinutes = parseIntOr(props,
-                envOrProp(props, "file.watch.minReindexIntervalMinutes", "FILE_WATCH_MIN_REINDEX_INTERVAL_MINUTES", "5"), 5);
         int fileWatchHeartbeatThrottleSeconds = parseIntOr(props,
                 envOrProp(props, "file.watch.heartbeatThrottleSeconds", "FILE_WATCH_HEARTBEAT_THROTTLE_SECONDS", "5"), 5);
         String fileWatchExtensions = envOrProp(props, "file.watch.extensions", "FILE_WATCH_EXTENSIONS", "");
         String fileWatchExcludeDirs = envOrProp(props, "file.watch.excludeDirs", "FILE_WATCH_EXCLUDE_DIRS", "");
         String fileWatchExcludeGlobs = envOrProp(props, "file.watch.excludeGlobs", "FILE_WATCH_EXCLUDE_GLOBS", "");
-        boolean fileWatchSemanticEnabled = Boolean.parseBoolean(
-                envOrProp(props, "file.watch.semantic.enabled", "FILE_WATCH_SEMANTIC_ENABLED", "true"));
-        Path fileSemanticIndexDir = Path.of(envOrProp(props, "file.watch.semantic.index-dir",
+        Path legacyFileSemanticIndexDir = Path.of(envOrProp(props, "file.watch.semantic.index-dir",
                 "FILE_WATCH_SEMANTIC_INDEX_DIR", memDir + "/file-semantic-index"));
 
         // ── Token 用量限制 / 预算 (SPEC-BUDGET-*) ──
@@ -293,11 +284,10 @@ public record Config(
                 webSearchEnabled, webSearchMcpUrl, webSearchApiKey,
                 llmTemperature, collectWindow, collectAfk, collectContent,
                 fileWatchEnabled, fileWatchPaths, fileWatchMaxFileSizeKb,
-                fileWatchMaxContentChars, fileWatchWorkerIntervalSeconds,
-                fileWatchDebounceSeconds, fileWatchMinReindexIntervalMinutes,
+                fileWatchWorkerIntervalSeconds, fileWatchDebounceSeconds,
                 fileWatchHeartbeatThrottleSeconds, fileWatchExtensions,
                 fileWatchExcludeDirs, fileWatchExcludeGlobs,
-                fileWatchSemanticEnabled, fileSemanticIndexDir,
+                legacyFileSemanticIndexDir,
                 llmMaxTokens, agentMaxIters,
                 agentCompactionEnabled, agentCompactionTriggerMessages,
                 agentCompactionTriggerTokens, agentCompactionKeepMessages,
@@ -334,7 +324,7 @@ public record Config(
                 false, "", "", "", 1024, true, 500,
                 false, "https://search.parallel.ai/mcp", "",
                 0.7, false, false, false,
-                false, "", 512, 8000, 60, 5, 5, 5, "", "", "", true,
+                false, "", 512, 60, 5, 5, "", "", "",
                 baseDir.resolve("file-semantic-index"),
                 2048, 8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,

@@ -14,21 +14,9 @@
     <packaging>jar</packaging>
 
     <name>SelfAnalyst :: File Watch</name>
-    <description>Directory file watch + LLM summary + semantic index + timeline (SPEC-FILE-*)</description>
+    <description>Metadata-only directory file watch + timeline (SPEC-FILE-*)</description>
 
     <dependencies>
-        <!-- Reuse the EmbeddingClient interface from wiki. We do NOT depend on
-             self-analyst-aw (SPEC-FILE-001): timeline heartbeats go over HTTP. -->
-        <dependency>
-            <groupId>com.selfanalyst</groupId>
-            <artifactId>self-analyst-wiki</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>com.selfanalyst</groupId>
-                    <artifactId>self-analyst-aw</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
         <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-core</artifactId>
@@ -44,24 +32,6 @@
         <dependency>
             <groupId>org.xerial</groupId>
             <artifactId>sqlite-jdbc</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.lucene</groupId>
-            <artifactId>lucene-analysis-common</artifactId>
-        </dependency>
-        <!-- PDF (SPEC-FILE-014 PdfExtractor) -->
-        <dependency>
-            <groupId>org.apache.pdfbox</groupId>
-            <artifactId>pdfbox</artifactId>
-        </dependency>
-        <!-- Office OOXML (SPEC-FILE-018 OfficeExtractor) -->
-        <dependency>
-            <groupId>org.apache.poi</groupId>
-            <artifactId>poi-ooxml</artifactId>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>

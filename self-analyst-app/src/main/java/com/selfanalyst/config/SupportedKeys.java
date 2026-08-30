@@ -93,16 +93,12 @@ public final class SupportedKeys {
         put("file.watch.enabled", "false", KeyType.BOOLEAN);
         put("file.watch.paths", "", KeyType.STRING);
         put("file.watch.maxFileSizeKb", "512", KeyType.INTEGER);
-        put("file.watch.maxContentChars", "8000", KeyType.INTEGER);
         put("file.watch.worker.intervalSeconds", "60", KeyType.INTEGER);
         put("file.watch.debounceSeconds", "5", KeyType.INTEGER);
-        put("file.watch.minReindexIntervalMinutes", "5", KeyType.INTEGER);
         put("file.watch.heartbeatThrottleSeconds", "5", KeyType.INTEGER);
         put("file.watch.extensions", "", KeyType.LIST);
         put("file.watch.excludeDirs", "", KeyType.LIST);
         put("file.watch.excludeGlobs", "", KeyType.LIST);
-        put("file.watch.semantic.enabled", "true", KeyType.BOOLEAN);
-        put("file.watch.semantic.index-dir", "./data/memory/file-semantic-index", KeyType.STRING);
 
         put("websearch.enabled", "false", KeyType.BOOLEAN);
         put("websearch.mcp-url", "https://search.parallel.ai/mcp", KeyType.STRING);
@@ -163,19 +159,15 @@ public final class SupportedKeys {
         describe("embedding.dimensions", "Embedding 向量维度。", "Number of dimensions in generated embedding vectors.");
         describe("embedding.send-encoding-format", "是否向服务发送 encoding_format 参数。", "Whether to send the encoding_format parameter to the service.");
 
-        describe("file.watch.enabled", "是否监控本地文件并建立内容索引。", "Whether to watch local files and index their content.");
+        describe("file.watch.enabled", "是否监控本地文件并采集文件系统元数据。", "Whether to watch local files and collect filesystem metadata.");
         describe("file.watch.paths", "要监控的文件或目录路径，以逗号分隔。", "Comma-separated files or directories to watch.");
-        describe("file.watch.maxFileSizeKb", "允许索引的单个文件最大大小（KB）。", "Maximum size of one indexed file, in KB.");
-        describe("file.watch.maxContentChars", "每个文件最多提取并索引的字符数。", "Maximum characters extracted and indexed from each file.");
+        describe("file.watch.maxFileSizeKb", "允许采集的单个文件最大大小（KB）。", "Maximum size of one collected file, in KB.");
         describe("file.watch.worker.intervalSeconds", "文件监控后台扫描间隔（秒）。", "Background file-watch scan interval, in seconds.");
         describe("file.watch.debounceSeconds", "文件变更后的防抖等待时间（秒）。", "Debounce delay after a file change, in seconds.");
-        describe("file.watch.minReindexIntervalMinutes", "同一文件两次重建索引的最小间隔（分钟）。", "Minimum interval between reindexing the same file, in minutes.");
         describe("file.watch.heartbeatThrottleSeconds", "文件监控心跳事件的最小间隔（秒）。", "Minimum interval between file-watch heartbeat events, in seconds.");
-        describe("file.watch.extensions", "允许索引的文件扩展名列表。", "List of file extensions allowed for indexing.");
+        describe("file.watch.extensions", "允许采集的文件扩展名列表。", "List of file extensions allowed for collection.");
         describe("file.watch.excludeDirs", "扫描时排除的目录名列表。", "List of directory names excluded from scanning.");
         describe("file.watch.excludeGlobs", "扫描时排除的 glob 模式列表。", "List of glob patterns excluded from scanning.");
-        describe("file.watch.semantic.enabled", "是否为文件内容启用语义索引。", "Whether to enable semantic indexing for file content.");
-        describe("file.watch.semantic.index-dir", "文件语义索引的保存目录。", "Directory where the file semantic index is stored.");
 
         describe("websearch.enabled", "是否允许 Agent 使用网络搜索。", "Whether to allow the agent to use web search.");
         describe("websearch.mcp-url", "网络搜索 MCP 服务地址。", "URL of the web-search MCP service.");

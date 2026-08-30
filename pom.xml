@@ -33,8 +33,6 @@
         <logback.version>1.5.18</logback.version>
         <junit.version>5.11.4</junit.version>
         <lucene.version>10.4.0</lucene.version>
-        <pdfbox.version>3.0.5</pdfbox.version>
-        <poi.version>5.4.1</poi.version>
         <commons-codec.version>1.18.0</commons-codec.version>
         <commons-io.version>2.18.0</commons-io.version>
 
@@ -139,16 +137,6 @@
                 <groupId>org.apache.lucene</groupId>
                 <artifactId>lucene-queryparser</artifactId>
                 <version>${lucene.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.pdfbox</groupId>
-                <artifactId>pdfbox</artifactId>
-                <version>${pdfbox.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.poi</groupId>
-                <artifactId>poi-ooxml</artifactId>
-                <version>${poi.version}</version>
             </dependency>
             <dependency>
                 <groupId>commons-codec</groupId>

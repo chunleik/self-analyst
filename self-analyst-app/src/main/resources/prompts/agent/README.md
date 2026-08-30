@@ -15,7 +15,7 @@
 | `memory-context.en.md` | 长期记忆临时上下文的英文版本 | 每次英文主 Agent 调用前追加 |
 | `memory-empty.zh.md` | 中文模式下没有长期记忆时的占位文案 | `memory-context.zh.md` 渲染时发现记忆为空时使用 |
 | `memory-empty.en.md` | 没有长期记忆时的英文占位文案 | `memory-context.en.md` 渲染时发现记忆为空时使用 |
-| `plain-completion.zh.md` | 中文无状态摘要改写器的系统提示，禁止工具调用和会话记忆 | 每次调用 `SelfAnalystAgent.completePlain()` 时使用，包括 Wiki 摘要和文件摘要 |
+| `plain-completion.zh.md` | 中文无状态摘要改写器的系统提示，禁止工具调用和会话记忆 | 每次调用 `SelfAnalystAgent.completePlain()` 时使用，包括 Wiki 摘要 |
 | `plain-completion.en.md` | 无状态摘要改写器的英文版本 | 英文模式下每次调用 `completePlain()` 时使用 |
 | `wiki-enabled.zh.md` | 告诉 Agent 可以使用 WikiTools 查询历史活动摘要 | Agent 初始化时检测到 Wiki 可用后插入主系统提示 |
 | `wiki-enabled.en.md` | WikiTools 可用说明的英文版本 | 英文 Agent 初始化且 Wiki 可用时插入 |
@@ -23,7 +23,7 @@
 | `wiki-disabled.en.md` | Wiki 不可用说明的英文版本 | 英文 Agent 初始化且 Wiki 不可用时插入 |
 | `wiki-semantic.zh.md` | 说明没有明确时间范围时优先使用 Wiki 语义检索 | Wiki 和语义索引同时可用时，填入 `wiki-enabled.zh.md` |
 | `wiki-semantic.en.md` | Wiki 语义检索说明的英文版本 | 英文模式下 Wiki 语义索引可用时填入 |
-| `file-tools.zh.md` | 说明文件搜索、最近文件、文件摘要和索引状态工具 | Agent 初始化时检测到 FileTools 已注册后插入 |
+| `file-tools.zh.md` | 说明文件名/路径搜索、最近文件、单文件元数据和采集状态工具 | Agent 初始化时检测到 FileTools 已注册后插入 |
 | `file-tools.en.md` | 文件工具说明的英文版本 | 英文 Agent 初始化且 FileTools 可用时插入 |
 | `web-search.zh.md` | 说明何时使用联网搜索，以及个人活动数据仍优先使用本地工具 | 每次主系统提示初始化时固定插入 |
 | `web-search.en.md` | 联网搜索说明的英文版本 | 英文主系统提示初始化时固定插入 |

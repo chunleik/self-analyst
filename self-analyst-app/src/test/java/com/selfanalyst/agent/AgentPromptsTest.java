@@ -85,8 +85,9 @@ class AgentPromptsTest {
         assertTrue(system.contains("when showing them to the user.\n\n\n\n## Long-term memory"));
         assertTrue(system.contains("MEM\n\n## LLM Wiki time-range summaries"));
         assertTrue(system.contains("has failed.When the user's question"));
-        assertTrue(system.contains("semantic retrieval.\n\n## File index"));
-        assertTrue(system.contains("call these tools.\n\nWhen the user's question needs"));
+        assertTrue(system.contains("semantic retrieval.\n\n## File metadata"));
+        assertTrue(system.contains("metadata is available.\n\nWhen the user's question needs"));
+        assertTrue(system.contains("FileTools cannot read file contents"));
         assertTrue(system.contains("ActivityWatch / Wiki tools.\n\n## Configuration management"));
         assertFalse(system.endsWith("\n"));
 

@@ -61,8 +61,8 @@ function fileSubtitle(overview) {
   if (state.filesError && !overview) return t("file.subtitle");
   if (!overview || overview.status === "disabled") return t("file.subtitle");
   if (overview.status === "degraded") return fileReasonMessage(overview);
-  if (overview.latestIndexedAt) {
-    return t("file.latest", { time: formatRelativeTime(overview.latestIndexedAt) });
+  if (overview.latestCollectedAt) {
+    return t("file.latest", { time: formatRelativeTime(overview.latestCollectedAt) });
   }
   return t("file.watching");
 }
@@ -109,14 +109,10 @@ function renderFileOverview(overview) {
         { n: roots.length })) + "</div>" +
     '<div class="file-status-detail">' + escHtml(fileLatestDetail(overview)) + "</div></div>" +
     '<div class="file-counts">' +
-      fileCount(totals.indexed, t("file.indexed")) +
+      fileCount(totals.collected, t("file.collected")) +
       fileCount(totals.pending, t("file.pending")) +
       fileCount(totals.failed, t("file.failed")) +
     "</div></section>";
-
-  if (overview.semantic && overview.semantic.configured && !overview.semantic.available) {
-    html += '<div class="file-semantic-note">' + escHtml(t("file.semanticUnavailable")) + "</div>";
-  }
 
   html += '<div class="file-main-grid">' +
     '<section class="card file-recent-panel">' +
@@ -142,15 +138,16 @@ function renderRecentFiles(files) {
       '<p>' + escHtml(t("file.emptyBody")) + "</p></div>";
   }
   return files.map(function (file) {
-    var topics = (file.mainTopics || []).slice(0, 4).map(function (topic) {
-      return '<span class="file-topic">' + escHtml(topic) + "</span>";
-    }).join("");
+    var created = file.fileCreatedAt ? formatRelativeTime(file.fileCreatedAt) : t("file.unknownTime");
+    var modified = file.lastModified ? formatRelativeTime(file.lastModified) : t("file.unknownTime");
     return '<article class="file-item">' +
       '<div class="file-item-header"><span class="file-item-name" title="' + escHtml(file.path) + '">' +
         escHtml(fileDisplayName(file)) + '</span><span class="file-item-time">' +
-        escHtml(formatRelativeTime(file.lastIndexedAt)) + "</span></div>" +
-      '<p class="file-item-summary">' + escHtml(file.summary || t("file.noSummary")) + "</p>" +
-      '<div class="file-item-meta">' + topics +
+        escHtml(formatRelativeTime(file.lastCollectedAt)) + "</span></div>" +
+      '<p class="file-item-metadata">' + escHtml(t("file.metadataLine", {
+        created: created, modified: modified, size: formatFileSize(file.sizeBytes),
+      })) + "</p>" +
+      '<div class="file-item-meta">' +
         '<span class="file-item-path" title="' + escHtml(file.path) + '">' +
           escHtml(file.relativePath || file.path) + "</span></div>" +
     "</article>";
@@ -164,7 +161,7 @@ function renderWatchRoots(roots) {
     return '<div class="file-root-item"><div class="file-root-path" title="' + escHtml(root.path) + '">' +
       escHtml(root.path) + '</div><div class="file-root-counts">' +
       escHtml(t("file.rootCounts", {
-        indexed: counts.indexed || 0,
+        collected: counts.collected || 0,
         pending: counts.pending || 0,
         failed: counts.failed || 0,
       })) + "</div></div>";
@@ -172,13 +169,13 @@ function renderWatchRoots(roots) {
 }
 
 function fileLatestDetail(overview) {
-  if (overview.latestIndexedAt && overview.latestPath) {
+  if (overview.latestCollectedAt && overview.latestPath) {
     return t("file.latestPath", {
-      time: formatRelativeTime(overview.latestIndexedAt),
+      time: formatRelativeTime(overview.latestCollectedAt),
       path: overview.latestPath,
     });
   }
-  return overview.status === "running" ? t("file.awaitingFirstIndex") : fileReasonMessage(overview);
+  return overview.status === "running" ? t("file.awaitingFirstCollection") : fileReasonMessage(overview);
 }
 
 function fileReasonMessage(overview) {
@@ -194,6 +191,13 @@ function fileDisplayName(file) {
   var value = file.relativePath || file.path || "";
   var parts = value.split(/[\\/]/);
   return parts[parts.length - 1] || value;
+}
+
+function formatFileSize(value) {
+  var bytes = Number(value || 0);
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
 function fileCount(value, label) {

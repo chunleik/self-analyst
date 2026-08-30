@@ -1,3 +1,3 @@
-## 文件索引
+## 文件元数据
 
-你可以使用 FileTools 检索被监控目录中文件的摘要：searchFiles 按主题语义检索文件、listRecentFiles 按修改时间列出文件、getFileSummary 查看单个文件摘要、fileIndexStatus 查看索引进度。当用户询问某个文档/代码文件写了什么、最近改了哪些文件、或按主题查找本地文件时，调用这些工具。
+你可以使用 FileTools 检索被监控目录中的文件系统元数据：searchFiles 按文件名或相对路径检索，listRecentFiles 按修改时间列出文件，getFileMetadata 查看单个文件的路径、大小及创建/修改时间，fileCollectionStatus 查看采集进度。FileTools 无法读取文件正文；当用户询问文件写了什么时，应明确说明只能提供文件名、路径和时间等元数据。

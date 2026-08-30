@@ -153,7 +153,7 @@ public class DesktopServer {
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.fileCtrl = new DesktopFileController(
-                config.fileWatchSemanticEnabled(), fileWatchStore, userConfigStore,
+                fileWatchStore, userConfigStore,
                 fileStateSupplier, fileSettingsApplier);
         this.statusCtrl = new DesktopStatusController(
                 config, watcherManager, contentWatcher,

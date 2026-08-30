@@ -23,15 +23,16 @@ import java.util.concurrent.TimeUnit;
 import java.util.List;
 
 /**
- * Real-time capture path (SPEC-FILE-012, SPEC-FILE-004 path A).
+ * Real-time metadata capture path (SPEC-FILE-030..034).
  *
  * <p>A daemon thread drains a NIO {@link WatchService}; events are filtered by
- * {@link PathFilter} and debounced (SPEC-FILE-019a) so only files that fall
+ * {@link PathFilter} and debounced so only files that fall
  * silent for {@code debounceSeconds} are upserted as PENDING. The watcher never
- * reads file content or calls the LLM (SPEC-FILE-004b) — it only registers
- * intent and posts throttled heartbeats over HTTP to the AW timeline.
+ * reads file content or calls the LLM (SPEC-FILE-002/004) — it only registers
+ * metadata collection intent and posts throttled metadata heartbeats over HTTP
+ * to the AW timeline.
  *
- * <p><b>Platform note (SPEC-FILE-012c):</b> this uses the JDK default
+ * <p><b>Platform note:</b> this uses the JDK default
  * {@link java.nio.file.WatchService}. On Windows/Linux it is event-driven
  * (native backend). macOS has no native FSEvents backend in the JDK, so the
  * default service falls back to a polling implementation with higher latency —
@@ -43,14 +44,14 @@ public class FileWatcher {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     /** Must exceed vis-timeline's 1s filterShortEvents threshold. */
     private static final double HEARTBEAT_DURATION_S = 2.0;
-    private static final double PULSETIME_S = 30.0; // SPEC-FILE-012b
+    private static final double PULSETIME_S = 30.0;
 
     private final FileWatchStore store;
     private final PathFilter pathFilter;
     private final List<Path> watchRoots;
     private final String serverUrl;
-    private final long debounceMs;          // SPEC-FILE-019a
-    private final long heartbeatThrottleMs; // SPEC-FILE-019c
+    private final long debounceMs;
+    private final long heartbeatThrottleMs;
 
     private final HttpClient httpClient;
     private final String hostname;
@@ -79,7 +80,7 @@ public class FileWatcher {
         this.heartbeatThrottleMs = Math.max(0, heartbeatThrottleSeconds) * 1000L;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         this.hostname = getHostname();
-        this.bucketId = "aw-watcher-file_" + hostname; // SPEC-FILE-012a
+        this.bucketId = "aw-watcher-file_" + hostname;
     }
 
     public void start() {
@@ -229,7 +230,15 @@ public class FileWatcher {
             }
             boolean valid = key.reset();
             if (!valid) {
-                keyToDir.remove(key);
+                Path invalidDir = keyToDir.remove(key);
+                if (invalidDir != null && Files.notExists(invalidDir)) {
+                    try {
+                        store.markDeletedTree(invalidDir.toAbsolutePath().toString());
+                    } catch (RuntimeException e) {
+                        log.debug("Failed to retire invalid watch tree {} ({})",
+                                invalidDir, e.getClass().getSimpleName());
+                    }
+                }
             }
         }
     }
@@ -243,18 +252,16 @@ public class FileWatcher {
         if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
             pending.remove(child);
             String abs = child.toAbsolutePath().toString();
-            if (store.findByPath(abs) != null) {
-                store.markDeleted(abs); // SPEC-FILE-004
-            }
+            store.markDeletedTree(abs);
             return;
         }
-        // CREATE / MODIFY of a file → debounce (SPEC-FILE-019a); content is read later.
+        // CREATE / MODIFY of a file → debounce; only metadata is read later.
         if (pathFilter.isExcludedFile(child)) return;
         String type = kind == StandardWatchEventKinds.ENTRY_CREATE ? "create" : "modify";
         pending.put(child, new Pending(System.currentTimeMillis(), type));
     }
 
-    // ── debounce flush (SPEC-FILE-019a) ──
+    // ── debounce flush ──
 
     private void flushDebounced() {
         long now = System.currentTimeMillis();
@@ -280,8 +287,8 @@ public class FileWatcher {
         String rel = FileIndexWorker.relativize(root, file);
         String ext = PathFilter.extensionOf(file.getFileName().toString());
 
-        store.upsertPending(abs, rel, root.toAbsolutePath().toString(), ext); // SPEC-FILE-004 path A
-        sendHeartbeatThrottled(abs, rel, root, eventType, ext); // SPEC-FILE-012/019c
+        store.upsertPending(abs, rel, root.toAbsolutePath().toString(), ext);
+        sendHeartbeatThrottled(abs, rel, root, eventType, ext);
     }
 
     private Path matchRoot(Path file) {
@@ -292,7 +299,7 @@ public class FileWatcher {
         return null;
     }
 
-    // ── heartbeat (SPEC-FILE-012b, throttled by SPEC-FILE-019c) ──
+    // ── metadata heartbeat (SPEC-FILE-033/034) ──
 
     private void sendHeartbeatThrottled(String abs, String rel, Path root,
                                         String eventType, String ext) {
@@ -303,7 +310,15 @@ public class FileWatcher {
 
         try {
             long size = 0;
-            try { size = Files.size(Path.of(abs)); } catch (IOException ignored) {}
+            String fileCreatedAt = null;
+            String lastModified = null;
+            try {
+                BasicFileAttributes attrs = Files.readAttributes(
+                        Path.of(abs), BasicFileAttributes.class);
+                size = attrs.size();
+                fileCreatedAt = attrs.creationTime().toInstant().toString();
+                lastModified = attrs.lastModifiedTime().toInstant().toString();
+            } catch (IOException ignored) {}
 
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("path", abs);
@@ -312,6 +327,8 @@ public class FileWatcher {
             data.put("event_type", eventType);
             data.put("extension", ext);
             data.put("size_bytes", size);
+            data.put("file_created_at", fileCreatedAt);
+            data.put("last_modified", lastModified);
 
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("timestamp", Instant.now().toString());

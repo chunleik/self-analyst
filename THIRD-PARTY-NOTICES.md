@@ -13,8 +13,6 @@ SelfAnalyst 采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。项
 | [JNA / JNA Platform](https://github.com/java-native-access/jna) | 窗口与 AFK 状态的原生调用 | Apache-2.0 / LGPL-2.1 双许可证；本项目按 Apache-2.0 使用 |
 | [Jackson](https://github.com/FasterXML/jackson) | JSON 序列化 | Apache-2.0 |
 | [Apache Lucene](https://lucene.apache.org) | 本地向量/KNN 语义索引 | Apache-2.0 |
-| [Apache PDFBox](https://pdfbox.apache.org) | PDF 文本提取 | Apache-2.0 |
-| [Apache POI](https://poi.apache.org) | Office 文档提取 | Apache-2.0 |
 | [SLF4J](https://www.slf4j.org) | 日志门面 | MIT |
 | [Logback](https://logback.qos.ch) | 日志实现 | EPL-1.0 / LGPL-2.1 双许可证 |
 | [tomlj](https://github.com/tomlj/tomlj) | TOML 1.0 解析 | Apache-2.0 |

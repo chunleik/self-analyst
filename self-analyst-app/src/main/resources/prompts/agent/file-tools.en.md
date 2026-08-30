@@ -1,3 +1,3 @@
-## File index
+## File metadata
 
-You can use FileTools to search summaries of files in the watched directories: searchFiles for semantic search by topic, listRecentFiles to list files by modification time, getFileSummary to view a single file's summary, fileIndexStatus to check indexing progress. When the user asks what a document/code file contains, which files changed recently, or to find local files by topic, call these tools.
+You can use FileTools to query filesystem metadata in watched directories: searchFiles searches file names or relative paths, listRecentFiles lists by modification time, getFileMetadata returns a file's path, size, creation time, and modification time, and fileCollectionStatus reports collection progress. FileTools cannot read file contents; when asked what a document or code file contains, explain that only name, path, and timestamp metadata is available.

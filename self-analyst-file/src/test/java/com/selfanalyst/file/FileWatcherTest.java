@@ -51,7 +51,7 @@ class FileWatcherTest {
         watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1);
         watcher.start();
 
-        Path log = tmp.resolve("app.log"); // volatile → excluded (SPEC-FILE-011f)
+        Path log = tmp.resolve("app.log"); // volatile → excluded (SPEC-FILE-023)
         Files.writeString(log, "noise");
 
         // give the watcher more than the debounce window to (not) act
@@ -64,7 +64,12 @@ class FileWatcherTest {
     void reportsUnavailableAfterAllWatchRegistrationsBecomeInvalid(@TempDir Path tmp)
             throws Exception {
         Path root = Files.createDirectory(tmp.resolve("watched"));
+        Path historicalFile = root.resolve("historical.txt").toAbsolutePath();
         store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        store.upsertPending(historicalFile.toString(), "historical.txt",
+                root.toAbsolutePath().toString(), "txt");
+        store.updateCollected(historicalFile.toString(), 7,
+                java.time.Instant.now(), java.time.Instant.now());
         PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
         watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
         watcher.start();
@@ -74,6 +79,8 @@ class FileWatcherTest {
 
         assertTrue(pollForUnavailable(20_000),
                 "watcher health should turn false after its only WatchKey is invalidated");
+        assertTrue(pollForStatus(historicalFile.toString(), FileStatus.DELETED, 20_000),
+                "invalidated deleted root must retire descendant metadata");
     }
 
     @Test
@@ -90,6 +97,26 @@ class FileWatcherTest {
         assertTrue(pollForRegistrationComplete(20_000));
         assertFalse(watcher.isRunning());
         assertNotNull(watcher.registrationError());
+    }
+
+    @Test
+    void deletingDirectoryRetiresPreviouslyCollectedDescendants(@TempDir Path tmp) throws Exception {
+        Path root = Files.createDirectory(tmp.resolve("watched"));
+        Path childDir = Files.createDirectory(root.resolve("child"));
+        Path historicalFile = childDir.resolve("historical.txt").toAbsolutePath();
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        store.upsertPending(historicalFile.toString(), "child/historical.txt",
+                root.toAbsolutePath().toString(), "txt");
+        store.updateCollected(historicalFile.toString(), 7,
+                java.time.Instant.now(), java.time.Instant.now());
+        PathFilter filter = new PathFilter(1024, List.of(), List.of(), List.of());
+        watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
+        watcher.start();
+        assertTrue(pollForAvailable(20_000));
+
+        Files.delete(childDir);
+
+        assertTrue(pollForStatus(historicalFile.toString(), FileStatus.DELETED, 20_000));
     }
 
     private FileRecord pollForPending(String absPath, long timeoutMs) throws InterruptedException {
@@ -127,5 +154,17 @@ class FileWatcherTest {
             Thread.sleep(50);
         }
         return watcher.isRegistrationComplete();
+    }
+
+    private boolean pollForStatus(String absolutePath, FileStatus status, long timeoutMs)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (System.currentTimeMillis() < deadline) {
+            FileRecord record = store.findByPath(absolutePath);
+            if (record != null && record.status() == status) return true;
+            Thread.sleep(100);
+        }
+        FileRecord record = store.findByPath(absolutePath);
+        return record != null && record.status() == status;
     }
 }

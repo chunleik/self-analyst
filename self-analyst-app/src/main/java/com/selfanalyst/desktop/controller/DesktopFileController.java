@@ -27,40 +27,33 @@ public class DesktopFileController {
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 100;
 
-    private final boolean semanticConfigured;
     private final FileWatchStore store;
     private final UserConfigStore configStore;
     private final Supplier<CollectorState> stateSupplier;
     private final SettingsApplier settingsApplier;
 
     public DesktopFileController(boolean enabled,
-                                 boolean semanticConfigured,
                                  List<Path> watchRoots,
                                  FileWatchStore store,
                                  BooleanSupplier watcherRunning,
-                                 BooleanSupplier indexWorkerRunning,
-                                 BooleanSupplier semanticWorkerRunning,
+                                 BooleanSupplier metadataWorkerRunning,
                                  String startupReason,
                                  String startupError) {
         List<Path> roots = watchRoots == null ? List.of() : List.copyOf(watchRoots);
-        this.semanticConfigured = semanticConfigured;
         this.store = store;
         this.configStore = null;
         this.stateSupplier = () -> new CollectorState(
                 enabled, roots,
                 safeBoolean(orFalse(watcherRunning)),
-                safeBoolean(orFalse(indexWorkerRunning)),
-                safeBoolean(orFalse(semanticWorkerRunning)),
+                safeBoolean(orFalse(metadataWorkerRunning)),
                 startupReason, startupError);
         this.settingsApplier = null;
     }
 
-    public DesktopFileController(boolean semanticConfigured,
-                                 FileWatchStore store,
+    public DesktopFileController(FileWatchStore store,
                                  UserConfigStore configStore,
                                  Supplier<CollectorState> stateSupplier,
                                  SettingsApplier settingsApplier) {
-        this.semanticConfigured = semanticConfigured;
         this.store = store;
         this.configStore = configStore;
         this.stateSupplier = stateSupplier;
@@ -121,7 +114,7 @@ public class DesktopFileController {
         if (store != null && store.isHealthy()) {
             try {
                 rawCounts = store.statusCountsByWatchRoot();
-                recent = store.findRecentlyIndexed(new ArrayList<>(configuredRoots), limit);
+                recent = store.findRecentlyCollected(new ArrayList<>(configuredRoots), limit);
             } catch (RuntimeException storeFailure) {
                 status = "degraded";
                 reason = "store_unavailable";
@@ -150,15 +143,12 @@ public class DesktopFileController {
         if (reason != null) payload.put("reason", reason);
         if (error != null) payload.put("error", error);
         payload.put("restartRequiredOnChange", false);
-        payload.put("semantic", Map.of(
-                "configured", semanticConfigured,
-                "available", semanticConfigured && collector.semanticWorkerRunning()));
         payload.put("roots", roots);
         payload.put("totals", totals);
         payload.put("files", files);
         if (!files.isEmpty()) {
             Map<String, Object> latest = files.get(0);
-            payload.put("latestIndexedAt", latest.get("lastIndexedAt"));
+            payload.put("latestCollectedAt", latest.get("lastCollectedAt"));
             payload.put("latestPath", latest.get("path"));
         }
         return payload;
@@ -191,11 +181,11 @@ public class DesktopFileController {
 
     private CollectorState currentState() {
         if (stateSupplier == null) {
-            return new CollectorState(false, List.of(), false, false, false,
+            return new CollectorState(false, List.of(), false, false,
                     "runtime_unavailable", null);
         }
         CollectorState state = stateSupplier.get();
-        return state != null ? state : new CollectorState(false, List.of(), false, false, false,
+        return state != null ? state : new CollectorState(false, List.of(), false, false,
                 "runtime_unavailable", null);
     }
 
@@ -208,8 +198,8 @@ public class DesktopFileController {
         if (store == null || !store.isHealthy()) {
             return new RuntimeStatus("degraded", "store_unavailable");
         }
-        if (!state.indexWorkerRunning()) {
-            return new RuntimeStatus("degraded", "index_worker_unavailable");
+        if (!state.metadataWorkerRunning()) {
+            return new RuntimeStatus("degraded", "metadata_worker_unavailable");
         }
         if (!state.watcherRunning()) {
             return new RuntimeStatus("degraded", "watcher_unavailable");
@@ -263,19 +253,29 @@ public class DesktopFileController {
 
     private static Map<String, Object> filePayload(FileRecord record) {
         Map<String, Object> file = new LinkedHashMap<>();
+        file.put("name", fileName(record));
         file.put("path", record.absolutePath());
         file.put("relativePath", record.relativePath());
         file.put("watchRoot", record.watchRoot());
         file.put("extension", record.extension());
         file.put("status", record.status().name().toLowerCase(Locale.ROOT));
-        file.put("summary", record.summary());
-        file.put("mainTopics", record.mainTopics());
         file.put("sizeBytes", record.sizeBytes());
+        file.put("fileCreatedAt", record.fileCreatedAt() != null
+                ? record.fileCreatedAt().toString() : null);
         file.put("lastModified", record.lastModified() != null
                 ? record.lastModified().toString() : null);
-        file.put("lastIndexedAt", record.lastIndexedAt() != null
-                ? record.lastIndexedAt().toString() : null);
+        file.put("lastCollectedAt", record.lastCollectedAt() != null
+                ? record.lastCollectedAt().toString() : null);
         return file;
+    }
+
+    private static String fileName(FileRecord record) {
+        try {
+            Path name = Path.of(record.absolutePath()).getFileName();
+            return name != null ? name.toString() : record.relativePath();
+        } catch (InvalidPathException ignored) {
+            return record.relativePath();
+        }
     }
 
     private static Map<String, Long> emptyCounts() {
@@ -319,8 +319,7 @@ public class DesktopFileController {
     public record CollectorState(boolean enabled,
                                  List<Path> watchRoots,
                                  boolean watcherRunning,
-                                 boolean indexWorkerRunning,
-                                 boolean semanticWorkerRunning,
+                                 boolean metadataWorkerRunning,
                                  String reason,
                                  String error) {
         public CollectorState {

@@ -87,7 +87,7 @@
             <h2 class="file-page-title" data-i18n="file.title">文件采集</h2>
             <div id="file-tab-status"></div>
           </div>
-          <p id="file-tab-subtitle" class="file-page-subtitle" data-i18n="file.subtitle">自动发现文件变更，生成摘要，并供 Agent 检索</p>
+          <p id="file-tab-subtitle" class="file-page-subtitle" data-i18n="file.subtitle">只采集文件名、路径和时间等文件系统元数据</p>
         </div>
         <button id="file-settings-btn" class="btn btn-outline" type="button" data-i18n="file.settings">采集设置</button>
       </div>
@@ -178,7 +178,7 @@
     </div>
     <div class="file-settings-body">
       <label class="file-settings-toggle">
-        <span><strong data-i18n="file.enableCollection">启用文件采集</strong><small data-i18n="file.enableCollectionHint">关闭后保留目录配置，但暂停监控和索引。</small></span>
+        <span><strong data-i18n="file.enableCollection">启用文件采集</strong><small data-i18n="file.enableCollectionHint">关闭后保留目录配置，但暂停监控和元数据采集。</small></span>
         <input id="file-settings-enabled" type="checkbox">
       </label>
       <div class="file-settings-section-header">
@@ -189,7 +189,7 @@
         <button id="file-settings-add-btn" class="btn btn-sm btn-outline" type="button" data-i18n="file.addFolder">+ 添加目录</button>
       </div>
       <div id="file-settings-paths" class="file-settings-paths"></div>
-      <div class="file-privacy-note"><strong data-i18n="file.privacyTitle">隐私提示：</strong> <span data-i18n="file.privacyBody">文件正文会发送给已配置的 LLM 生成摘要；敏感文件、构建目录和临时文件默认排除。</span></div>
+      <div class="file-privacy-note"><strong data-i18n="file.privacyTitle">隐私提示：</strong> <span data-i18n="file.privacyBody">文件采集器不读取文件正文，不计算内容哈希，也不会把文件内容发送给 LLM 或 embedding 服务。</span></div>
       <div id="file-settings-error" class="file-settings-error hidden" role="alert"></div>
     </div>
     <div class="file-settings-actions">

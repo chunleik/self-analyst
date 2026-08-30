@@ -15,32 +15,32 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Single source of exclusion rules (SPEC-FILE-011). Called consistently at
+ * Single source of exclusion rules (SPEC-FILE-020..024). Called consistently at
  * FileWatcher registration, FileIndexWorker scan, and before enqueue.
  */
 public class PathFilter {
 
     private static final Logger log = LoggerFactory.getLogger(PathFilter.class);
 
-    /** SPEC-FILE-011a: built-in blacklisted directory names. */
+    /** SPEC-FILE-020: built-in blacklisted directory names. */
     private static final Set<String> BLACKLIST_DIRS = Set.of(
             ".git", "node_modules", "target", "build", "dist", ".gradle",
             ".idea", ".vscode", "out", "bin", ".mvn", "__pycache__", "venv", ".venv");
 
-    /** SPEC-FILE-011c: default-excluded sensitive file globs. */
+    /** SPEC-FILE-022: default-excluded sensitive file globs. */
     private static final List<String> SENSITIVE_GLOBS = List.of(
             ".env", ".env.*", "*.pem", "*.key", "id_rsa*", "*.p12", "*.keystore");
 
-    /** SPEC-FILE-011f: high-churn / volatile files that must never be indexed. */
+    /** High-churn / volatile files that must never be collected. */
     private static final List<String> VOLATILE_GLOBS = List.of(
             "*.log", "*.tmp", "*.temp", "*.lock", "*.swp", "*~");
 
     private final long maxFileSizeBytes;
-    private final Set<String> excludeDirs;        // SPEC-FILE-011d
-    private final List<PathMatcher> excludeGlobs;  // SPEC-FILE-011d
+    private final Set<String> excludeDirs;
+    private final List<PathMatcher> excludeGlobs;
     private final List<PathMatcher> sensitiveMatchers;
     private final List<PathMatcher> volatileMatchers;
-    private final Set<String> allowedExtensions;   // empty = all extractable types
+    private final Set<String> allowedExtensions;   // empty = all non-excluded file types
 
     public PathFilter(long maxFileSizeKb, List<String> excludeDirs,
                       List<String> excludeGlobs, List<String> extensions) {
@@ -69,18 +69,18 @@ public class PathFilter {
         if (dir == null) return false;
         String name = fileName(dir);
         if (name.isEmpty()) return false;
-        if (isNameBlacklistedDir(name)) return true;             // SPEC-FILE-011a/011d
-        if (isHidden(dir, name)) return true;                    // SPEC-FILE-011b
+        if (isNameBlacklistedDir(name)) return true;
+        if (isHidden(dir, name)) return true;
         return false;
     }
 
-    /** Name-only blacklist check (SPEC-FILE-011a/011d), excluding the hidden test. */
+    /** Name-only blacklist check, excluding the hidden test. */
     private boolean isNameBlacklistedDir(String name) {
         return BLACKLIST_DIRS.contains(name) || excludeDirs.contains(name);
     }
 
     /**
-     * True if the file should NOT be indexed. Checks (in order): containment in
+     * True if the file should NOT be collected. Checks (in order): containment in
      * an excluded dir, hidden, sensitive, volatile, extension allow-list, custom
      * globs, and size cap (last, since it touches the filesystem).
      */
@@ -96,17 +96,17 @@ public class PathFilter {
             if (isNameBlacklistedDir(fileName(p))) return true;
         }
 
-        if (isHidden(file, name)) return true;                   // SPEC-FILE-011b
-        if (matchesAny(sensitiveMatchers, file, name)) return true; // SPEC-FILE-011c
-        if (matchesAny(volatileMatchers, file, name)) return true;  // SPEC-FILE-011f
+        if (isHidden(file, name)) return true;
+        if (matchesAny(sensitiveMatchers, file, name)) return true;
+        if (matchesAny(volatileMatchers, file, name)) return true;
 
         if (!allowedExtensions.isEmpty()
                 && !allowedExtensions.contains(extensionOf(name))) {
             return true;
         }
-        if (matchesAny(excludeGlobs, file, name)) return true;   // SPEC-FILE-011d
+        if (matchesAny(excludeGlobs, file, name)) return true;
 
-        // SPEC-FILE-011b: oversized files (by disk bytes, SPEC-FILE-018j).
+        // SPEC-FILE-021: oversized files are filtered by filesystem metadata.
         if (maxFileSizeBytes > 0) {
             try {
                 if (Files.isRegularFile(file) && Files.size(file) > maxFileSizeBytes) {

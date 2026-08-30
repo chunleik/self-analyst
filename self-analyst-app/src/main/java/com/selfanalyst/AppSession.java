@@ -13,9 +13,6 @@ import com.selfanalyst.usage.UsageMeter;
 import com.selfanalyst.wiki.*;
 import com.selfanalyst.wiki.semantic.*;
 import com.selfanalyst.file.*;
-import com.selfanalyst.file.extractor.FileContentExtractorFactory;
-import com.selfanalyst.file.semantic.FileSemanticIndex;
-import com.selfanalyst.file.semantic.FileEmbeddingWorker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,13 +40,10 @@ public class AppSession implements AutoCloseable {
     private WikiSemanticIndex wikiSemanticIndex;
     private WikiEmbeddingWorker wikiEmbeddingWorker;
     private FileWatchStore fileWatchStore;
-    private FileSemanticIndex fileSemanticIndex;
-    private FileEmbeddingWorker fileEmbeddingWorker;
+    private FileTools fileTools;
     private FileIndexWorker fileIndexWorker;
     private FileWatcher fileWatcher;
     private PathFilter filePathFilter;
-    private FileSummarizer fileSummarizer;
-    private FileContentExtractorFactory fileExtractorFactory;
     private boolean fileWatchEnabled;
     private List<Path> fileWatchRoots = List.of();
     private String fileWatchStartupReason;
@@ -111,13 +105,16 @@ public class AppSession implements AutoCloseable {
 
         UserConfigStore userConfigStore = new UserConfigStore(Config.resolveConfigDir());
 
-        // File watch: store + semantic index + embedding worker + tools (SPEC-FILE-001/016/017).
-        // FileTools must exist before the agent so it can be registered; the watcher/index
-        // worker (which need the agent's LLM client) are started after the agent below.
-        FileTools fileTools = null;
+        // Metadata-only file store + tools (SPEC-FILE-001/050/060).
+        fileTools = null;
         fileWatchEnabled = config.fileWatchEnabled();
         fileWatchRoots = List.copyOf(parseWatchRoots(config.fileWatchPaths()));
         try {
+            int purgedLegacyIndexFiles = LegacyFileSemanticIndexPurger.purge(
+                    config.legacyFileSemanticIndexDir());
+            if (purgedLegacyIndexFiles > 0) {
+                log.info("已清理旧文件内容语义索引 ({} 个索引文件)", purgedLegacyIndexFiles);
+            }
             // The store and FileTools stay available while collection is disabled so the
             // dedicated settings page can enable the complete pipeline without a restart.
             fileWatchStore = new FileWatchStore(config.memoryDir().resolve("file-watch.db"));
@@ -125,14 +122,8 @@ public class AppSession implements AutoCloseable {
                     PathFilter.splitCsv(config.fileWatchExcludeDirs()),
                     PathFilter.splitCsv(config.fileWatchExcludeGlobs()),
                     PathFilter.splitCsv(config.fileWatchExtensions()));
-            if (embeddingClient != null && config.fileWatchSemanticEnabled()) {
-                fileSemanticIndex = new FileSemanticIndex(config.fileSemanticIndexDir());
-                fileEmbeddingWorker = new FileEmbeddingWorker(fileWatchStore, fileSemanticIndex,
-                        embeddingClient, config.fileWatchWorkerIntervalSeconds());
-            }
-            fileTools = new FileTools(fileWatchStore, fileSemanticIndex,
-                    config.fileWatchSemanticEnabled() ? embeddingClient : null,
-                    config.wikiSemanticTopK());
+            fileTools = new FileTools(fileWatchStore);
+            fileTools.updateWatchRoots(fileWatchEnabled ? fileWatchRoots : List.of());
             log.info("FileWatchStore 已初始化 ({} 个已配置目录)", fileWatchRoots.size());
         } catch (Exception e) {
             fileWatchInitializationError = e.getMessage();
@@ -143,8 +134,6 @@ public class AppSession implements AutoCloseable {
                 fileWatchStore.close();
             }
             fileWatchStore = null;
-            fileSemanticIndex = null;
-            fileEmbeddingWorker = null;
             filePathFilter = null;
             fileTools = null;
         }
@@ -203,12 +192,7 @@ public class AppSession implements AutoCloseable {
             }
         }
 
-        // File watch workers (SPEC-FILE-013/012/019). The worker instances are
-        // replaceable so enabled/paths can be applied by the desktop API at runtime.
-        if (a != null && fileWatchStore != null) {
-            fileSummarizer = new FileSummarizer(a.wikiLLMClient());
-            fileExtractorFactory = new FileContentExtractorFactory();
-        }
+        // Metadata-only workers do not depend on Agent or LLM availability.
         applyFileWatchSettings(fileWatchEnabled, fileWatchRoots);
 
         if (awServer != null && awServer.app() != null) {
@@ -325,11 +309,9 @@ public class AppSession implements AutoCloseable {
                 .toList();
         fileWatchStartupReason = null;
         fileWatchStartupError = null;
-        if (fileEmbeddingWorker != null) {
-            if (fileEmbeddingWorker.isRunning()) fileEmbeddingWorker.pause();
-            fileEmbeddingWorker.updateWatchRoots(fileWatchRoots);
+        if (fileTools != null) {
+            fileTools.updateWatchRoots(enabled ? fileWatchRoots : List.of());
         }
-
         if (!enabled) {
             log.info("文件采集已在运行时禁用");
             return;
@@ -344,21 +326,10 @@ public class AppSession implements AutoCloseable {
             fileWatchStartupError = fileWatchInitializationError;
             return;
         }
-        if (fileSummarizer == null || fileExtractorFactory == null) {
-            fileWatchStartupReason = "agent_unavailable";
-            return;
-        }
-
         try {
             fileWatchStartupReason = "starting";
-            if (fileEmbeddingWorker != null && !fileEmbeddingWorker.isRunning()) {
-                fileEmbeddingWorker.start();
-                log.info("FileEmbeddingWorker 已启动");
-            }
             fileIndexWorker = new FileIndexWorker(fileWatchStore, filePathFilter,
-                    fileExtractorFactory, fileSummarizer, fileEmbeddingWorker, fileWatchRoots,
-                    config.fileWatchWorkerIntervalSeconds(), config.fileWatchMaxContentChars(),
-                    config.fileWatchMinReindexIntervalMinutes());
+                    fileWatchRoots, config.fileWatchWorkerIntervalSeconds());
             fileIndexWorker.start();
 
             String fileHeartbeatUrl = "http://localhost:" + config.awPort();
@@ -391,7 +362,6 @@ public class AppSession implements AutoCloseable {
                 fileWatchRoots,
                 watcherRunning,
                 indexWorkerRunning,
-                fileEmbeddingWorker != null && fileEmbeddingWorker.isRunning(),
                 fileWatchStartupReason,
                 fileWatchStartupError);
     }
@@ -424,12 +394,6 @@ public class AppSession implements AutoCloseable {
             }
             synchronized (this) {
                 stopFileWatchWorkers();
-                if (fileEmbeddingWorker != null) {
-                    fileEmbeddingWorker.shutdown();
-                }
-                if (fileSemanticIndex != null) {
-                    fileSemanticIndex.close();
-                }
                 if (fileWatchStore != null) {
                     fileWatchStore.close();
                 }

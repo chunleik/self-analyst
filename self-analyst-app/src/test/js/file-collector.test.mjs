@@ -56,23 +56,24 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-test("running file collector renders status, counts, roots, and recent summaries", () => {
+test("running file collector renders status, counts, roots, and metadata only", () => {
   const overview = {
     status: "running",
-    latestIndexedAt: "2026-08-30T01:00:00Z",
+    latestCollectedAt: "2026-08-30T01:00:00Z",
     latestPath: "D:\\Docs\\design.md",
-    totals: { indexed: 12, pending: 2, failed: 0 },
-    semantic: { configured: true, available: true },
+    totals: { collected: 12, pending: 2, failed: 0 },
     roots: [{
       path: "D:\\Docs",
-      counts: { indexed: 12, pending: 2, failed: 0 },
+      counts: { collected: 12, pending: 2, failed: 0 },
     }],
     files: [{
+      name: "design.md",
       path: "D:\\Docs\\design.md",
       relativePath: "design.md",
-      summary: "文件采集界面设计",
-      mainTopics: ["文件采集", "界面"],
-      lastIndexedAt: "2026-08-30T01:00:00Z",
+      sizeBytes: 2048,
+      fileCreatedAt: "2026-08-29T01:00:00Z",
+      lastModified: "2026-08-30T00:30:00Z",
+      lastCollectedAt: "2026-08-30T01:00:00Z",
     }],
   };
   const { sandbox, elements } = createSandbox(overview);
@@ -80,11 +81,13 @@ test("running file collector renders status, counts, roots, and recent summaries
   sandbox.renderFilesTab();
 
   assert.match(elements.content.innerHTML, /design\.md/);
-  assert.match(elements.content.innerHTML, /文件采集界面设计/);
+  assert.match(elements.content.innerHTML, /2\.0 KB/);
+  assert.doesNotMatch(elements.content.innerHTML, /摘要|主题|summary/);
   assert.match(elements.content.innerHTML, /正在监控 1 个目录/);
-  assert.match(elements.content.innerHTML, />12<\/strong><span>已索引/);
+  assert.match(elements.content.innerHTML, />12<\/strong><span>已采集/);
   assert.match(elements.content.innerHTML, /隐私提示/);
-  assert.equal(elements.subtitle.textContent, "最近一次索引：2分钟前");
+  assert.match(elements.content.innerHTML, /不读取文件正文/);
+  assert.equal(elements.subtitle.textContent, "最近一次采集：2分钟前");
 });
 
 test("disabled file collector remains discoverable with a configuration action", () => {
@@ -98,7 +101,7 @@ test("disabled file collector remains discoverable with a configuration action",
 
   sandbox.renderFilesTab();
 
-  assert.match(elements.content.innerHTML, /让 Agent 理解你的本地文档/);
+  assert.match(elements.content.innerHTML, /了解文件变更，不读取文件正文/);
   assert.match(elements.content.innerHTML, /data-file-action="settings"/);
   assert.match(elements.content.innerHTML, /无需重启/);
 });
@@ -109,7 +112,6 @@ test("degraded reason and technical detail are escaped", () => {
     reason: "worker_start_failed",
     error: "<worker failed>",
     totals: {},
-    semantic: { configured: false, available: false },
     roots: [],
     files: [],
   });

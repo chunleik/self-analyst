@@ -112,6 +112,12 @@ class DesktopConfigControllerTest {
         assertTrue(defaults.containsKey("aw.base-url"));
         assertTrue(defaults.containsKey("wiki.prompt.maxContentChars"));
         assertTrue(defaults.containsKey("file.watch.paths"));
+        assertFalse(defaults.containsKey("file.watch.maxContentChars"));
+        assertFalse(defaults.containsKey("file.watch.minReindexIntervalMinutes"));
+        assertFalse(defaults.containsKey("file.watch.semantic.enabled"));
+        assertFalse(defaults.containsKey("file.watch.semantic.index-dir"));
+        assertTrue(DeprecatedKeys.contains("file.watch.semantic.enabled"));
+        assertTrue(DeprecatedKeys.contains("file.watch.semantic.index-dir"));
         assertTrue(defaults.containsKey("llm.budget.dailyTokens"));
         assertTrue(defaults.containsKey("desktop.summary.maxTimelineLlm"));
         assertFalse(defaults.keySet().stream().anyMatch(key -> key.startsWith("headroom.")));

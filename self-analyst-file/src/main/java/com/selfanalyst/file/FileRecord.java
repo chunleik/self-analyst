@@ -1,16 +1,11 @@
 package com.selfanalyst.file;
 
 import java.time.Instant;
-import java.util.List;
-
 /**
- * One row of the {@code file_index} table (SPEC-FILE-010).
+ * One metadata-only row of the {@code file_metadata} table (SPEC-FILE-010).
  *
- * <p>{@code sizeBytes}, {@code lastModified} and {@code fileHash} hold the
- * <em>last successfully indexed</em> snapshot of the file — they are written by
- * {@link FileWatchStore#updateIndexed} / {@link FileWatchStore#updateChecksum},
- * not by {@link FileWatchStore#upsertPending}. This lets the worker cheaply
- * detect "nothing changed since last index" (SPEC-FILE-010d).
+ * <p>The type deliberately cannot represent file content, content hashes,
+ * summaries, topics, prompts, models, or embeddings.
  */
 public record FileRecord(
         long id,
@@ -19,15 +14,11 @@ public record FileRecord(
         String watchRoot,
         String extension,
         long sizeBytes,
-        String fileHash,
+        Instant fileCreatedAt,
         Instant lastModified,
         Instant firstSeenAt,
-        Instant lastIndexedAt,
+        Instant lastCollectedAt,
         FileStatus status,
-        String summary,
-        List<String> mainTopics,
-        String model,
-        String promptVersion,
         int retryCount,
         Instant nextRetryAt,
         String lastError,

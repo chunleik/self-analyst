@@ -10,7 +10,7 @@ Win32 前台窗口 ───────────────┐
 Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2 ─> ActivityWatch
 窗口/AFK watcher ─────────────┘                         │
                                                        ├─> Wiki 聚合/派生摘要
-用户选择的文件 ─> 临时解析 ─> 文件派生存储 ─────────────┤
+用户选择的文件 ─> 文件系统元数据采集 ─> 元数据存储 ─────┤
                                                        └─> Agent / 桌面 API
 ```
 
@@ -23,7 +23,7 @@ OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
 |------|------|
 | `self-analyst-aw` | 嵌入式 ActivityWatch 服务、SQLite 事件存储、内容事件策略和迁移 |
 | `self-analyst-content` | 前台窗口查询、UIA 临时读取、标题候选提取和 heartbeat |
-| `self-analyst-file` | 文件监控、临时正文解析及摘要/主题等派生信息 |
+| `self-analyst-file` | 文件监控及文件名、路径、大小、创建/修改时间等元数据；禁止读取正文 |
 | `self-analyst-wiki` | 按小时/天/月/年聚合标题事实和派生摘要 |
 | `self-analyst-app` | 生命周期、配置、Agent、桌面 REST/SSE 与静态 UI |
 | `self-analyst-axsidecar` | OS 无障碍树查询协议；失败返回空，不负责持久化 |
@@ -44,8 +44,8 @@ UIA，将整棵树作为单次调用内的临时输入，依次尝试应用专�
 `title_confidence`、`uia_chars` 和时间元数据。共享写入策略覆盖 HTTP heartbeat/events、导入和
 内部存储调用。历史 v1 内容会在 watcher 启动前净化。
 
-Wiki 只能消费标题事实；文件正文只在文件处理调用内存在。任何日志、异常、失败记录或备份都不得
-绕开相应规格保存原始输入。
+Wiki 只能消费标题事实；文件采集器不得读取文件正文、计算内容哈希或调用内容摘要/embedding。
+任何日志、异常、失败记录或备份都不得绕开相应规格保存原始输入。
 
 ## 5. 生命周期
 

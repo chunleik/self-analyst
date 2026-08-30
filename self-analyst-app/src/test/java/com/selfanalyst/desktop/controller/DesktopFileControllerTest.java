@@ -32,18 +32,17 @@ class DesktopFileControllerTest {
         try {
             String path = root.resolve("design.md").toString();
             store.upsertPending(path, "design.md", root.toString(), "md");
-            store.updateIndexed(path, 42, Instant.parse("2026-08-30T01:00:00Z"),
-                    "hash", "文件采集界面设计", List.of("文件采集", "界面"),
-                    "test-model", "file-v1");
+            store.updateCollected(path, 42, Instant.parse("2026-08-29T01:00:00Z"),
+                    Instant.parse("2026-08-30T01:00:00Z"));
             String retiredRoot = dir.resolve("retired").toAbsolutePath().normalize().toString();
             String retiredPath = Path.of(retiredRoot).resolve("old.md").toString();
             store.upsertPending(retiredPath, "old.md", retiredRoot, "md");
-            store.updateIndexed(retiredPath, 12, Instant.parse("2026-08-30T02:00:00Z"),
-                    "old-hash", "旧目录记录", List.of(), "test-model", "file-v1");
+            store.updateCollected(retiredPath, 12, Instant.parse("2026-08-29T02:00:00Z"),
+                    Instant.parse("2026-08-30T02:00:00Z"));
 
             DesktopFileController controller = new DesktopFileController(
-                    true, true, List.of(root), store,
-                    () -> true, () -> true, () -> true, null, null);
+                    true, List.of(root), store,
+                    () -> true, () -> true, null, null);
 
             Map<String, Object> payload = controller.overviewPayload(20);
             Map<String, Long> totals = (Map<String, Long>) payload.get("totals");
@@ -54,13 +53,15 @@ class DesktopFileControllerTest {
 
             assertEquals("running", payload.get("status"));
             assertNull(payload.get("reason"));
-            assertEquals(1L, totals.get("indexed"));
+            assertEquals(1L, totals.get("collected"));
             assertEquals(root.toString(), roots.get(0).get("path"));
             assertEquals(path, files.get(0).get("path"));
             assertEquals(1, files.size(), "removed watch roots must not leak into the current view");
-            assertEquals("文件采集界面设计", files.get(0).get("summary"));
+            assertEquals("design.md", files.get(0).get("name"));
+            assertEquals("2026-08-29T01:00:00Z", files.get(0).get("fileCreatedAt"));
+            assertFalse(files.get(0).containsKey("summary"));
             assertEquals(path, payload.get("latestPath"));
-            assertTrue((Boolean) ((Map<String, Object>) payload.get("semantic")).get("available"));
+            assertFalse(payload.containsKey("semantic"));
         } finally {
             store.close();
         }
@@ -70,8 +71,8 @@ class DesktopFileControllerTest {
     @SuppressWarnings("unchecked")
     void disabledOverviewRemainsDiscoverableWithoutAStore() {
         DesktopFileController controller = new DesktopFileController(
-                false, true, List.of(), null,
-                () -> false, () -> false, () -> false, null, null);
+                false, List.of(), null,
+                () -> false, () -> false, null, null);
 
         Map<String, Object> payload = controller.overviewPayload(20);
 
@@ -80,7 +81,7 @@ class DesktopFileControllerTest {
         assertEquals(List.of(), payload.get("roots"));
         assertEquals(List.of(), payload.get("files"));
         assertFalse((Boolean) payload.get("restartRequiredOnChange"));
-        assertFalse((Boolean) ((Map<String, Object>) payload.get("semantic")).get("available"));
+        assertFalse(payload.containsKey("semantic"));
     }
 
     @Test
@@ -90,12 +91,12 @@ class DesktopFileControllerTest {
         UserConfigStore configStore = new UserConfigStore(dir.resolve("memory"));
         AtomicReference<DesktopFileController.CollectorState> state = new AtomicReference<>(
                 new DesktopFileController.CollectorState(false, List.of(), false, false,
-                        false, null, null));
+                        null, null));
         try (FileWatchStore store = new FileWatchStore(dir.resolve("file-watch.db"))) {
             DesktopFileController controller = new DesktopFileController(
-                    false, store, configStore, state::get,
+                    store, configStore, state::get,
                     (enabled, roots) -> state.set(new DesktopFileController.CollectorState(
-                            enabled, roots, enabled, enabled, false, null, null)));
+                            enabled, roots, enabled, enabled, null, null)));
 
             Map<String, Object> payload = controller.updateSettings(true,
                     List.of(first.toString(), second.toString(), first.toString()));
@@ -114,9 +115,9 @@ class DesktopFileControllerTest {
         UserConfigStore configStore = new UserConfigStore(dir.resolve("memory"));
         AtomicBoolean applied = new AtomicBoolean();
         DesktopFileController controller = new DesktopFileController(
-                false, null, configStore,
+                null, configStore,
                 () -> new DesktopFileController.CollectorState(false, List.of(), false, false,
-                        false, null, null),
+                        null, null),
                 (enabled, roots) -> applied.set(true));
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
@@ -138,9 +139,9 @@ class DesktopFileControllerTest {
         CountDownLatch releaseFirstApply = new CountDownLatch(1);
         AtomicBoolean firstCall = new AtomicBoolean(true);
         DesktopFileController controller = new DesktopFileController(
-                false, null, configStore,
+                null, configStore,
                 () -> new DesktopFileController.CollectorState(true, appliedRoots.get(), true, true,
-                        false, null, null),
+                        null, null),
                 (enabled, roots) -> {
                     if (firstCall.compareAndSet(true, false)) {
                         firstApplyEntered.countDown();
@@ -173,8 +174,8 @@ class DesktopFileControllerTest {
     @Test
     void degradedOverviewSanitizesStartupError(@TempDir Path dir) {
         DesktopFileController controller = new DesktopFileController(
-                true, false, List.of(dir), null,
-                () -> false, () -> false, () -> false,
+                true, List.of(dir), null,
+                () -> false, () -> false,
                 "worker_start_failed", "first line\r\nsecond line");
 
         Map<String, Object> payload = controller.overviewPayload(20);
@@ -190,14 +191,13 @@ class DesktopFileControllerTest {
         Path root = Files.createDirectories(dir.resolve("docs")).toAbsolutePath().normalize();
         FileWatchStore store = new FileWatchStore(dir.resolve("file-watch.db"));
         DesktopFileController controller = new DesktopFileController(
-                true, true, List.of(root), store,
-                () -> true, () -> true, () -> false, null, null);
+                true, List.of(root), store,
+                () -> true, () -> true, null, null);
         try {
             assertEquals("running", controller.collectorStatus());
             Map<String, Object> running = controller.overviewPayload(20);
             assertEquals("running", running.get("status"));
-            assertFalse((Boolean) ((Map<String, Object>) running.get("semantic")).get("available"),
-                    "an unstarted semantic worker must not be reported available");
+            assertFalse(running.containsKey("semantic"));
 
             store.close();
             assertEquals("degraded", controller.collectorStatus());
@@ -210,15 +210,15 @@ class DesktopFileControllerTest {
     }
 
     @Test
-    void stoppedIndexWorkerDegradesPipeline(@TempDir Path dir) throws Exception {
+    void stoppedMetadataWorkerDegradesPipeline(@TempDir Path dir) throws Exception {
         Path root = Files.createDirectories(dir.resolve("docs")).toAbsolutePath().normalize();
         try (FileWatchStore store = new FileWatchStore(dir.resolve("file-watch.db"))) {
             DesktopFileController controller = new DesktopFileController(
-                    true, false, List.of(root), store,
-                    () -> true, () -> false, () -> false, null, null);
+                    true, List.of(root), store,
+                    () -> true, () -> false, null, null);
 
             assertEquals("degraded", controller.collectorStatus());
-            assertEquals("index_worker_unavailable",
+            assertEquals("metadata_worker_unavailable",
                     controller.overviewPayload(20).get("reason"));
         }
     }

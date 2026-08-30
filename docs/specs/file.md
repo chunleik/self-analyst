@@ -1,329 +1,194 @@
-# self-analyst-file SDD 规格说明书
+# 文件元数据采集规范
 
-> 目录文件监控 + LLM 摘要 + 语义索引 + 时间轴关联模块。
-> 状态：**已实现**（`self-analyst-file` 模块）。
+> 本规范定义严格隐私边界下的本地文件采集、持久化、查询与桌面端展示行为。
 
----
+## 1. 目标与边界
 
-## 1. 模块标识
+文件采集器用于回答“有哪些文件”“文件在哪里”“何时创建或修改”“最近哪些文件发生变化”等问题。
+它不是文件内容索引器，不得理解、摘要或向量化文件正文。
 
-| 属性 | 值 |
-|------|-----|
-| 模块名 | `self-analyst-file` |
-| 版本 | 1.0.0 |
-| 类型 | Java 21 库模块 |
-| 默认开关 | `file.watch.enabled=false` |
+- **SPEC-FILE-001（严格元数据边界）**：文件模块只能采集文件名、绝对路径、相对路径、监控根目录、
+  扩展名、字节大小、文件系统创建时间、最后修改时间，以及采集流程所需的状态、重试时间和错误类型。
+- **SPEC-FILE-002（禁止读取正文）**：文件模块不得为采集目的打开文件字节流，不得调用
+  `Files.readAllBytes`、`Files.newInputStream`、文本/PDF/Office 提取器或等价正文读取入口。
+- **SPEC-FILE-003（禁止正文派生）**：不得计算内容哈希，不得生成或保存正文摘要、主题、用途、
+  prompt、模型名称或由正文产生的 embedding。
+- **SPEC-FILE-004（禁止外发）**：文件正文不得发送给 LLM、embedding、MCP、搜索服务或其他进程；
+  文件元数据查询必须在本地完成。
+- **SPEC-FILE-005（标题语义）**：文件名及其相对路径是文件模块唯一的“标题”事实。系统不得把正文首行、
+  摘要或主题冒充文件标题。
 
----
+上述边界同时适用于成功、失败、重试、日志、ActivityWatch 事件、SQLite、WAL/SHM、备份、导出和桌面 API。
 
-## 2. 架构契约
+## 2. 数据流
 
-### SPEC-FILE-001: 模块依赖
+```text
+监控根目录
+  ├─ FileIndexWorker 首次对账扫描
+  │    └─ Files.readAttributes(BasicFileAttributes)
+  └─ FileWatcher / WatchService
+       └─ CREATE / MODIFY 静默去抖
 
-- 复用 wiki 模块的 `EmbeddingClient` 接口；LLM client / EmbeddingClient 由 app 层注入
-- 新增 `org.apache.pdfbox:pdfbox`（PDF）、`org.apache.poi:poi-ooxml`（Office）
-- 复用父 BOM 的 `lucene-*`（向量索引）、`sqlite-jdbc`、`jackson`
-- **不依赖** `self-analyst-aw`：时间轴 heartbeat 走 HTTP（与标题采集器一致），非 `EventStore` 直连
-- **SPEC-FILE-001a**：`poi-ooxml` 传递引入 `log4j-api`（POI 用 log4j2 API）。本仓库日志栈为 slf4j+logback；仅 `log4j-api`（无 `log4j-core`）不冲突，POI 日志默认 no-op，需要并入 logback 时可加 `log4j-to-slf4j` 桥接（可选）
-
-### SPEC-FILE-002: 数据流
-
-```
-watch 目录变更 → FileWatcher (NIO WatchService)
-  → PathFilter 过滤 → FileWatchStore.upsertPending() → POST heartbeat (HTTP)
-
-FileIndexWorker (周期)
-  → 取一条 PENDING → FileContentExtractor.extract()
-    → truncate(maxContentChars) → FileSummarizer.summarize(LLM)
-      → FileWatchStore.updateIndexed() → FileEmbeddingWorker.enqueue()
-        → embed → FileSemanticIndex (Lucene KNN)
-
-Agent → FileTools → FileSemanticIndex / FileWatchStore 查询
+路径过滤
+  → FileWatchStore.upsertPending()
+  → FileIndexWorker 每轮批量读取 BasicFileAttributes
+  → FileWatchStore.updateCollected()
+  → 本地路径/时间查询与元数据 heartbeat
 ```
 
-### SPEC-FILE-003: 职责边界
+链路中不存在正文提取、内容哈希、摘要器或文件语义索引。
 
-- **FileWatcher**：仅处理运行期间的增量变更（事件驱动）
-- **FileIndexWorker**：启动时做一次对账扫描，之后周期处理 PENDING 队列
-- **SPEC-FILE-003a**：启动扫描发现的已有文件**不**补发 heartbeat，因此时间轴只覆盖运行期间的变更（历史补发列为后续增强）
+## 3. 生命周期与状态
 
-### SPEC-FILE-004: 单次变更处理时序
+- **SPEC-FILE-010**：状态为 `PENDING | COLLECTED | FAILED | SKIPPED | DELETED`。
+- **SPEC-FILE-011**：新文件或元数据变化进入 `PENDING`；成功读取属性后进入 `COLLECTED`。
+- **SPEC-FILE-012**：文件不存在时进入 `DELETED`；重新出现时可再次进入 `PENDING`。
+- **SPEC-FILE-013**：属性读取失败时只保存固定错误码 `FILE_METADATA_FAILED:<ExceptionType>`，
+  按指数退避重试；不得保存异常 message。
+- **SPEC-FILE-014**：每轮最多批量处理 256 条，避免元数据采集仍按旧 LLM 节奏逐文件积压。
 
-检测到文件变更后分两条解耦路径，通过 SQLite 的 PENDING 队列衔接：
+`last_collected_at` 表示最近一次成功采集元数据的时间；它不同于文件系统提供的
+`file_created_at` 和 `last_modified`。
 
-**路径 A — 实时捕获（FileWatcher 线程，事件驱动，不读内容/不调 LLM）**
+## 4. PathFilter
 
+FileWatcher 注册、首次扫描和入队前统一调用 PathFilter。
+
+- **SPEC-FILE-020**：内置排除目录：`.git`、`node_modules`、`target`、`build`、`dist`、`.gradle`、
+  `.idea`、`.vscode`、`out`、`bin`、`.mvn`、`__pycache__`、`venv`、`.venv`。
+- **SPEC-FILE-021**：排除隐藏文件/目录、超过 `maxFileSizeKb` 的文件和用户配置的目录/glob。
+- **SPEC-FILE-022**：默认排除敏感文件 `.env`、`.env.*`、`*.pem`、`*.key`、`id_rsa*`、
+  `*.p12`、`*.keystore`。
+- **SPEC-FILE-023**：默认排除高频易变文件 `*.log`、`*.tmp`、`*.temp`、`*.lock`、`*.swp`、`*~`。
+- **SPEC-FILE-024**：扩展名白名单为空时不限制类型；它只决定是否采集元数据，不代表支持正文提取。
+
+## 5. FileWatcher
+
+- **SPEC-FILE-030**：启动时递归注册非排除子目录到 JDK `WatchService`。
+- **SPEC-FILE-031**：文件 CREATE/MODIFY 经静默期去抖后只写入元数据采集意图。
+- **SPEC-FILE-032**：DELETE 只更新已知路径状态，不读取文件。
+- **SPEC-FILE-032a**：目录 DELETE 或监控根目录的 WatchKey 因目录消失而失效时，必须把已采集的
+  后代路径一并标记为 `DELETED`；无法确认目录不存在时不得淘汰。
+- **SPEC-FILE-033**：同一路径 heartbeat 按配置节流。
+- **SPEC-FILE-034**：heartbeat data 白名单为：
+  `path`、`relative_path`、`watch_root`、`event_type`、`extension`、`size_bytes`、
+  `file_created_at`、`last_modified`。不得出现正文、哈希、摘要、主题或向量。
+
+## 6. FileIndexWorker
+
+历史类名 `FileIndexWorker` 为兼容保留，实际职责是文件系统元数据采集。
+
+- **SPEC-FILE-040**：首次扫描只遍历路径并读取 `BasicFileAttributes`。
+- **SPEC-FILE-041**：变更判定仅比较大小、文件创建时间、最后修改时间和路径归属。
+- **SPEC-FILE-042**：处理 PENDING/FAILED 时只调用 `Files.isRegularFile` 与
+  `Files.readAttributes(..., BasicFileAttributes.class)`。
+- **SPEC-FILE-043**：后台线程不依赖 Agent、LLM、embedding 配置或 API key；即使 Agent 不可用，
+  文件元数据采集仍可启动。
+- **SPEC-FILE-044**：完整且无访问错误的首次扫描结束后，必须把该根目录下未再出现的历史记录标记为
+  `DELETED`；扫描发生访问错误或被取消时不得执行缺失记录淘汰。扫描期间由 watcher 新增/更新的行
+  必须通过 `updated_at` 快照和文件存在性复核排除，避免并发 CREATE 被误删。
+
+## 7. SQLite v2
+
+数据库路径保持 `{memory.dir}/file-watch.db`，schema version 为 2，主表为 `file_metadata`：
+
+```sql
+CREATE TABLE file_metadata (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  absolute_path TEXT NOT NULL UNIQUE,
+  relative_path TEXT,
+  watch_root TEXT,
+  extension TEXT,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  file_created_at TEXT,
+  last_modified TEXT,
+  first_seen_at TEXT NOT NULL,
+  last_collected_at TEXT,
+  status TEXT NOT NULL,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  next_retry_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 ```
-ENTRY_CREATE/MODIFY(文件)
-  → PathFilter（命中排除 → 直接丢弃）
-  → 去抖判定（SPEC-FILE-019：未静默则推迟，不入队）
-  → upsertPending(path)  // status=PENDING，幂等
-  → 发 heartbeat（HTTP，节流后）→ AW 时间轴
-ENTRY_DELETE → markDeleted(path)  // status=DELETED，不摘要
-```
 
-**路径 B — 异步处理（FileIndexWorker 线程，周期取一条 PENDING）**
+- **SPEC-FILE-050（不可表达正文）**：schema 和 `FileRecord` 类型均不得包含 `content`、`file_hash`、
+  `summary`、`main_topics`、`model`、`prompt`、`embedding` 或语义等价字段。
+- **SPEC-FILE-051（v1 净化迁移）**：打开 v1 或未标版本的旧数据库时必须只复制允许的元数据到 v2 表，
+  将 `INDEXED` 映射为 `COLLECTED`，以 `secure_delete=ON` 删除旧表并执行 `VACUUM`；只有 `VACUUM`
+  成功后才能写入 schema version 2。若进程在两阶段之间中断，下次启动必须识别
+  `file_metadata` 已存在而 `file_index` 已删除的中间态并继续净化。
+- **SPEC-FILE-052**：启用 WAL 和 `busy_timeout=5000`；跨线程访问继续由 store 实例串行化。
+- **SPEC-FILE-053**：旧 Lucene 文件内容索引在启动时清理；删除前必须完整验证目录仅含 Lucene
+  artifact、文件名符合精确 grammar，且存在带 Lucene codec magic 的已提交 `segments_[base36]`。
+  `pending_segments_*` 不能作为提交证明。根目录、符号链接、混合目录和无法验证的目录必须在删除
+  任何文件前整体拒绝；不得递归删除任意目录。数据 artifact 必须先删、commit point 最后删，
+  使中途失败后仍能在下次启动识别并重试。
+- **SPEC-FILE-054**：旧 `file.watch.semantic.*`、`maxContentChars`、
+  `minReindexIntervalMinutes` 配置不再受支持；旧 semantic index 路径仅在迁移期读取以完成净化。
 
-```
-取一条 PENDING
-  → (size,last_modified) 预筛 → 必要时算 SHA-256
-      ├─ hash 未变 → 跳过（不重新摘要）
-      └─ hash 变 / 新文件:
-          extract → truncate → summarize(LLM)
-          → updateIndexed（status=INDEXED, 写 summary+新 hash）
-          → enqueueEmbedding → 向量入 FileSemanticIndex
-  失败 → markFailed（status=FAILED, 写 next_retry_at 退避）
-```
+## 8. FileTools
 
-- **SPEC-FILE-004a**：状态流转 `PENDING → (INDEXED | SKIPPED | FAILED)`；`FAILED` 到 `next_retry_at` 后重回处理；`DELETED` 为终态（再次出现则新 upsert 回 PENDING）
-- **SPEC-FILE-004b**：路径 A 只登记意图（轻量），路径 B 才读文件——保证 watcher 线程不被 IO/LLM 阻塞
-- **SPEC-FILE-004c**：同一 path 在 worker 处理前被多次 upsert，仍只是一行 PENDING，处理时读**当前最新内容**算一次 hash → 一段时间内多次编辑只摘要一次
+FileTools 仅提供本地元数据工具：
 
----
+| 工具 | 行为 |
+|---|---|
+| `searchFiles` | 按文件名/相对路径关键词、目录、扩展名、修改时间查询 |
+| `listRecentFiles` | 按最后修改时间列出文件元数据 |
+| `getFileMetadata` | 返回指定路径的文件名、路径、大小、创建/修改/采集时间 |
+| `fileCollectionStatus` | 返回各监控根目录状态计数 |
 
-## 3. 组件规格
+- **SPEC-FILE-060**：所有工具响应不得包含摘要、主题、内容哈希、模型或 prompt。
+- **SPEC-FILE-061**：`searchFiles` 使用 SQLite 路径匹配，不得调用 embedding 服务。
+- **SPEC-FILE-062**：用户询问“文件写了什么”时，Agent 必须说明 FileTools 无法读取正文，只能提供元数据。
+- **SPEC-FILE-063**：所有 FileTools 查询必须限制在当前已启用的监控根目录；禁用采集或移除目录后，
+  该目录的历史名称、路径和时间不得继续暴露给 Agent。
 
-### SPEC-FILE-010: FileWatchStore（SQLite）
+## 9. Desktop API 与界面
 
-库文件：`{memory.dir}/file-watch.db`。`file_index` 表列：
-`id`, `absolute_path` (UNIQUE), `relative_path`, `watch_root`, `extension`, `size_bytes`,
-`file_hash` (SHA-256), `last_modified` (ISO-8601), `first_seen_at`, `last_indexed_at`, `status`
-(PENDING|INDEXED|FAILED|SKIPPED|DELETED), `summary`, `main_topics_json`, `model`,
-`prompt_version`, `retry_count`, `next_retry_at`, `last_error`, `created_at`, `updated_at`。
+`GET /desktop/files` 返回：
 
-- **SPEC-FILE-010a**：开启 `PRAGMA journal_mode=WAL` + `PRAGMA busy_timeout`
-- **SPEC-FILE-010b**：FileWatcher 与 FileIndexWorker 跨线程写入，所有写操作 `synchronized`（或单写线程 + 队列）；不得出现 `SQLITE_BUSY`
-- **SPEC-FILE-010c**：时间轴查询走 `WHERE last_modified BETWEEN ? AND ?`
-- **SPEC-FILE-010d**：变更检测先比 `(size, last_modified)` 廉价预筛，命中才算 SHA-256；hash 未变则跳过重新摘要
-- **SPEC-FILE-010e**：`findRetryable` 由 `next_retry_at` 驱动指数退避（参照 `WikiStore`）
-- **SPEC-FILE-010f**：`extension` 入库前统一小写
+- `enabled/status/reason/error/restartRequiredOnChange`
+- `roots[].path/counts`
+- `totals`
+- `files[]`：`name/path/relativePath/watchRoot/extension/status/sizeBytes/fileCreatedAt/lastModified/lastCollectedAt`
+- `latestCollectedAt/latestPath`
 
-### SPEC-FILE-011: PathFilter（排除规则）
+- **SPEC-FILE-070**：响应不得再提供 `semantic`、`summary`、`mainTopics` 或 `lastIndexedAt`。
+- **SPEC-FILE-071**：界面统一使用“已采集/元数据”，不得使用“内容索引/摘要/语义检索”。
+- **SPEC-FILE-072**：隐私提示必须明确声明“不读取正文、不计算内容哈希、不发送给 LLM/embedding”。
+- **SPEC-FILE-073**：`PUT /desktop/files/settings` 继续支持监控目录与 enabled 热更新。
 
-在 FileWatcher 注册、FileIndexWorker 扫描、入队前**统一**调用。
-
-- **SPEC-FILE-011a**：内置黑名单目录 `.git`/`node_modules`/`target`/`build`/`dist`/`.gradle`/`.idea`/`.vscode`/`out`/`bin`/`.mvn`/`__pycache__`/`venv`/`.venv`
-- **SPEC-FILE-011b**：过滤隐藏文件、超 `maxFileSizeKb` 的文件
-- **SPEC-FILE-011c**：默认排除敏感文件 `.env`/`.env.*`/`*.pem`/`*.key`/`id_rsa*`/`*.p12`/`*.keystore`
-- **SPEC-FILE-011d**：`excludeDirs`/`excludeGlobs` 配置可追加排除
-- **SPEC-FILE-011e**：watch root 存在 `.gitignore` 时尊重其规则（推荐增强）
-- **SPEC-FILE-011f**：默认排除高频易变文件 `*.log`/`*.tmp`/`*.temp`/`*.lock`/`*.swp`/`*~`（这类文件不该索引，且会触发频繁变更）
-
-### SPEC-FILE-012: FileWatcher
-
-- 启动递归注册所有子目录到 `WatchService`（注册时跳过排除目录）
-- `ENTRY_CREATE`(目录) → 经 PathFilter 递归注册新目录
-- `ENTRY_CREATE`/`ENTRY_MODIFY`(文件) → PathFilter → `upsertPending()` → 发 heartbeat
-- `ENTRY_DELETE` → `markDeleted()`
-- 单独 daemon 线程
-- **SPEC-FILE-012a**：bucket `aw-watcher-file_{hostname}`，启动 `ensureBucket()`（HTTP）
-- **SPEC-FILE-012b**：heartbeat data = `{path, relative_path, watch_root, event_type, extension, size_bytes}`，pulsetime 30s
-- **SPEC-FILE-012c**：macOS 无原生 FSEvents 后端，回退 `PollingWatchService`（延迟高）—— 文档需注明
-
-### SPEC-FILE-013: FileIndexWorker
-
-- 启动对账扫描（`Files.walkFileTree` + 廉价预筛，见 SPEC-FILE-010d）
-- `ScheduledExecutorService` 周期 `file.watch.worker.intervalSeconds`，每轮取一条 PENDING
-- 处理：`extract → truncate（按 codepoint）→ summarize → updateIndexed → enqueueEmbedding`
-- **SPEC-FILE-013a**：失败按指数退避写 `next_retry_at`（与 `WikiWorker` 一致）
-- **SPEC-FILE-013b**：单个文件提取失败不拖垮 worker，走 `MetadataOnlyExtractor` 兜底
-- **SPEC-FILE-013c**：失败日志不得输出异常 message；`last_error` 只能保存固定错误码和异常类型，
-  防止 LLM、解析器或提取器把 prompt/文件正文回显到持久化介质
-
-### SPEC-FILE-019: 变更去抖与频率控制
-
-防止频繁变化的文件（日志、编辑器自动保存、构建产物）造成 heartbeat 洪泛、读到写一半的文件、以及被无限重复摘要而流失 LLM 成本。
-
-- **SPEC-FILE-019a（静默期 debounce，核心）**：FileWatcher 检测到变更后**不立即** `upsertPending`，而是记录 `pending_since`；仅当该文件**连续静默 ≥ `file.watch.debounceSeconds`（默认 5s）** 才真正入队。持续变化的文件因永远静默不下来而被自然推迟，同时保证读取时写入已完成
-- **SPEC-FILE-019b（每文件最小重摘间隔）**：worker 处理时，若该 path 距 `last_indexed_at` 不足 `file.watch.minReindexIntervalMinutes`（默认 5min），跳过本轮，硬性封顶单文件 LLM 频率
-- **SPEC-FILE-019c（heartbeat 节流）**：watcher 对同一 path 的 heartbeat 发送设最小间隔 `file.watch.heartbeatThrottleSeconds`（默认 5s），避免 HTTP 洪泛（与 AW 侧 30s pulsetime 互补：pulsetime 合并时间轴事件，节流减少请求数）
-- **SPEC-FILE-019d**：高频易变文件类型由 PathFilter 直接排除（见 SPEC-FILE-011f），与上述去抖互补
-
-### SPEC-FILE-014: FileContentExtractor 体系
-
-接口 `extract(Path) → String`；`FileContentExtractorFactory` 按小写扩展名选实现。
-
-| 实现 | 覆盖 | 库 |
-|------|------|-----|
-| `PlainTextExtractor` | .txt/.md/.csv/.json/.xml/.yaml… | JDK |
-| `SourceCodeExtractor` | .java/.py/.js/.ts/.go/.rs/.kt… | JDK |
-| `PdfExtractor` | .pdf | Apache PDFBox |
-| `OfficeExtractor` | .docx/.xlsx/.pptx | Apache POI |
-| `MetadataOnlyExtractor` | 二进制兜底 | — |
-
-- **SPEC-FILE-014a**：`OfficeExtractor` 仅现代 OOXML，用 `org.apache.poi.extractor.ExtractorFactory.createExtractor(File).getText()` 统一识别三格式，try-with-resources 关闭（POI 5.x 中 `ExtractorFactory` 位于 `org.apache.poi.extractor` 包，由 `poi-ooxml` 提供）
-- **SPEC-FILE-014b**：不支持旧二进制 .doc/.xls/.ppt
-- **SPEC-FILE-014c**：合法大文件被 POI zip-bomb 检测误伤时，可在 `OfficeExtractor` 静态初始化调 `ZipSecureFile.setMinInflateRatio(...)` 放宽
-- **SPEC-FILE-014d**：文件索引不执行图片 OCR；.png/.jpg 等图片与其他二进制文件统一落到 `MetadataOnlyExtractor`
-
-### SPEC-FILE-018: OfficeExtractor 详细规格
-
-#### 格式范围
-
-- **SPEC-FILE-018a**：支持现代 OOXML —— `.docx`（Word）、`.xlsx`（Excel）、`.pptx`（PowerPoint）
-- **SPEC-FILE-018b**：**不**支持旧二进制 `.doc/.xls/.ppt`（POI 对 .doc 提取质量差且需额外 `poi-scratchpad`）；这些扩展名落到 `MetadataOnlyExtractor` 兜底，不报错
-- **SPEC-FILE-018c**：库选型为 Apache POI（`poi-ooxml`），不引入 Apache Tika
-
-#### 提取实现
-
-- **SPEC-FILE-018d**：统一入口 `org.apache.poi.extractor.ExtractorFactory.createExtractor(File)`（POI 5.x 包路径），按文件内容（非仅扩展名）自动识别并返回对应 `POITextExtractor`，调用 `getText()` 得纯文本
-- **SPEC-FILE-018e**：`POITextExtractor` 用 try-with-resources 关闭，释放底层 `OPCPackage` 与文件句柄；`extract()` 异常向上抛由 FileIndexWorker 按 SPEC-FILE-013a/013b 处理
-- **SPEC-FILE-018f**：返回的原始文本不在 extractor 内截断；截断由上层按 `maxContentChars`（codepoint）统一处理
-
-#### 各格式提取行为
-
-- **SPEC-FILE-018g（Word .docx）**：`XWPFWordExtractor` 输出段落正文与表格文本；页眉/页脚等非正文内容是否纳入以 POI 默认行为为准，不额外定制
-- **SPEC-FILE-018h（Excel .xlsx）**：`XSSFExcelExtractor` 按 sheet → row → cell 顺序输出单元格文本（含公式计算值的文本形式）；多 sheet 全部纳入；超大表的体量由 `maxContentChars` 截断兜底，不另设行数上限
-- **SPEC-FILE-018i（PowerPoint .pptx）**：`XSLFPowerPointExtractor` 输出各幻灯片的形状文本；备注（notes）是否纳入以 POI 默认为准
-
-#### 健壮性
-
-- **SPEC-FILE-018j**：解压后体量可能远大于压缩体积；`maxFileSizeKb` 按**磁盘字节**在 PathFilter 阶段拦截（SPEC-FILE-011b），提取阶段不再二次判断大小
-- **SPEC-FILE-018k**：损坏 / 加密 / 非预期格式的文件触发 POI 异常时，FileIndexWorker 捕获并走退避重试，最终落 `MetadataOnlyExtractor` 兜底，不终止 worker
-- **SPEC-FILE-018l**：zip-bomb 误伤的放宽策略见 SPEC-FILE-014c
-
-### SPEC-FILE-015: FileSummarizer
-
-LLM prompt（中文）输入文件路径/类型/最后修改时间/截取内容，要求输出：
-1. 一段简洁摘要（≤100 字）
-2. 3-5 个主题关键词
-3. 文件用途推断
-
-返回严格 JSON：`{"summary":"...","mainTopics":["..."],"estimatedPurpose":"..."}`。
-
-- **SPEC-FILE-015a**：`prompt_version` 随 prompt 结构变化递增，便于后续按版本重摘
-
-### SPEC-FILE-016: FileSemanticIndex + FileEmbeddingWorker
-
-- Embedding 输入只能由相对路径、摘要和主题组成。
-- Lucene 文档不得包含原始文件正文或完整摘要 prompt。
-
-- Lucene `FSDirectory`：`{memory.dir}/file-semantic-index/`
-- 字段：`path`(StringField)、`extension`(StringField)、`last_modified_ms`(LongPoint 范围)、`summary`(TextField stored)、`main_topics`(TextField stored)、`embedding`(KnnFloatVectorField cosine)
-- **SPEC-FILE-016a**：一个 `FSDirectory` 同时只允许一个 `IndexWriter`；`FileEmbeddingWorker` 是唯一写入者
-- **SPEC-FILE-016b**：`semantic.enabled=false` 或 embedding client 为 null 时跳过索引
-
-### SPEC-FILE-017: FileTools（@Tool）
-
-| 方法 | 描述 |
-|------|------|
-| `searchFiles(query, watchRoot, extension, start, end, topK)` | 语义向量搜索 + 目录/扩展名/时间过滤 |
-| `listRecentFiles(watchRoot, start, end, limit)` | 按 last_modified 列出（无需 embedding） |
-| `getFileSummary(path)` | 查指定路径摘要 |
-| `fileIndexStatus()` | 各 watchRoot 的 PENDING/INDEXED/FAILED 计数 |
-
-- **SPEC-FILE-017a**：返回 JSON 字符串，格式与 `WikiTools` 一致
-- **SPEC-FILE-017b**：embedding 不可用时 `searchFiles` 降级到关键词/时间查询，不抛异常
-
-### SPEC-FILE-020：桌面端可见性与状态 API
-
-- `GET /desktop/status` 的 `collectors.file` 返回粗粒度状态：
-  `disabled`、`running` 或 `degraded`，供顶部状态栏持续展示。
-- 粗粒度状态与详情 API 必须复用同一运行管线健康判断；只有存储可查询、
-  `FileWatcher` 与 `FileIndexWorker` 均在运行时，核心文件采集状态才是 `running`。
-- `semantic.available=true` 仅表示已配置且 `FileEmbeddingWorker` 实际运行；
-  对象已构造但 worker 未启动时必须为 `false`，且不影响核心采集状态。
-- `GET /desktop/files?limit=20` 返回文件采集概览，包含：
-  `enabled`、`status`、可选 `reason/error`、`semantic`、`roots`、
-  `totals`、`files`、`latestIndexedAt` 与 `latestPath`。
-- `roots[].counts` 和 `totals` 使用小写状态键：
-  `pending/indexed/failed/skipped/deleted`。
-- `files` 只返回当前配置监控目录内最近完成索引的记录，按
-  `last_indexed_at` 倒序；不得返回原始文件正文或完整提示词。
-- `PUT /desktop/files/settings` 接收 `enabled` 和 `paths[]`。服务端必须校验每个路径为
-  已存在目录、规范化并去重，持久化 `file.watch.enabled/file.watch.paths` 后立即重建
-  `FileWatcher` 与 `FileIndexWorker`；响应返回更新后的文件采集概览，不要求重启应用。
-- 后台启动过程使用稳定代码 `starting`；启动失败原因使用稳定代码：`paths_unavailable`、
-  `initialization_failed`、`agent_unavailable`、`worker_start_failed`；
-  存储查询失败使用 `store_unavailable`，运行时 worker 停止使用
-  `index_worker_unavailable` 或 `watcher_unavailable`。异常详情必须压成单行且最长 200 字符。
-
-#### SPEC-FILE-020a：桌面界面
-
-- 顶部状态栏必须有独立的“文件”状态入口，点击进入“文件”页签。
-- “文件”页签始终可见；关闭状态不得隐藏入口，而应展示功能说明、隐私提示和配置操作。
-- 运行状态展示监控目录、已索引/待处理/失败计数、最近完成索引的文件摘要和主题。
-- 降级状态展示本地化原因和可用的技术详情，目录文案使用“已配置”而非“正在监控”，
-  并同时提供进入配置和重新加载的操作。
-- 从文件页进入设置时，必须打开文件页专用的目录配置弹窗，不得跳转到通用配置文件编辑器。
-- 目录配置以一行一个目录的形式展示，支持新增和移除多个目录，并可单独启用或暂停文件采集。
-- 保存时必须显示后端路径校验错误；保存成功后立即刷新文件页和顶部采集状态，并明确提示无需重启。
-- 界面必须明确说明：文件正文会发送给已配置的 LLM 生成摘要；敏感文件、构建目录和临时文件默认排除。
-
----
-
-## 4. 配置
+## 10. 配置
 
 ```properties
-# File Watch（被监控目录的文件内容会发送给 LLM，注意隐私）
 file.watch.enabled=false
-file.watch.paths=                 # 逗号分隔绝对路径，可多目录
+file.watch.paths=
 file.watch.maxFileSizeKb=512
-file.watch.maxContentChars=8000   # 按 codepoint 截断
 file.watch.worker.intervalSeconds=60
-file.watch.debounceSeconds=5              # 文件静默≥此值才入队（去抖）
-file.watch.minReindexIntervalMinutes=5   # 同一文件两次摘要的最小间隔
-file.watch.heartbeatThrottleSeconds=5    # 同一文件 heartbeat 最小发送间隔
-file.watch.extensions=            # 空=不限制扩展名；不支持正文提取的文件仅记录元数据
+file.watch.debounceSeconds=5
+file.watch.heartbeatThrottleSeconds=5
+file.watch.extensions=
 file.watch.excludeDirs=
 file.watch.excludeGlobs=
-file.watch.semantic.enabled=true
 ```
 
-AppSession 启动时初始化 FileWatchStore、PathFilter、可选 FileSemanticIndex/FileEmbeddingWorker
-与 FileTools，使文件采集从关闭状态启用时 Agent 不需要重建。`file.watch.enabled=true`
-且存在有效目录时，再按序启动 FileEmbeddingWorker → FileIndexWorker → FileWatcher；
-`SelfAnalystAgent` 构造器接收可空 `FileTools` 并条件注册。配置统一经 `Config` 和
-UserConfigStore 读取、持久化。
+## 11. 验收与回归
 
-`file.watch.enabled` 与 `file.watch.paths` 可通过 `PUT /desktop/files/settings` 在运行时更新：
-旧 FileWatcher/FileIndexWorker 必须有序关闭，新实例按新目录启动，FileWatchStore、
-FileTools 和语义索引保持复用。待处理、失败重试和 embedding 队列必须按当前目录过滤；
-被移除目录的历史记录可以保留，但不得再读取正文、调用摘要或 embedding 服务。禁用采集时
-FileEmbeddingWorker 必须暂停，重新启用时只对当前目录执行 reconcile。首次扫描和 WatchService
-递归注册在后台 worker 中执行，不得阻塞设置保存请求。目录由父级收窄为子级或规范化名称变化时，
-reconcile 必须更新现有记录和语义文档的 watchRoot/relativePath，不得丢失已有摘要；异步注册失败
-必须从 `starting` 进入可诊断的降级状态。其他 `file.watch.*` 参数仍在启动阶段
-读取，通过通用配置 API 修改时继续返回 `restartRequired`。
-
----
-
-## 5. 测试规格
-
-| 测试 | 预期 |
-|------|------|
-| `FileContentExtractorFactory` | .docx/.xlsx/.pptx → `OfficeExtractor`；旧版 Office 与图片 → `MetadataOnlyExtractor` |
-| `OfficeExtractor` .docx | POI 程序化生成含已知段落+表格的 .docx，提取出对应文字 |
-| `OfficeExtractor` .xlsx | 生成含已知单元格（多 sheet）的 .xlsx，提取出对应文字 |
-| `OfficeExtractor` .pptx | 生成含已知幻灯片文本的 .pptx，提取出对应文字 |
-| `OfficeExtractor` 损坏文件 | 非法 OOXML 抛异常，由上层兜底，不崩 worker |
-| `FileWatchStore` upsert / hash 未变 | 重复 upsert 跳过、status 正确流转 |
-| `FileWatchStore` markDeleted / findRetryable | 删除标记、退避查询正确 |
-| `PathFilter` | 黑名单目录 / 敏感文件 / 超大文件 / 易变文件(*.log…) 被排除 |
-| 去抖（debounce） | 静默期内持续变更不入队；静默后只入队一次 |
-| 最小重摘间隔 | 间隔内重复变更被 worker 跳过，不重复摘要 |
-| `searchFiles` 无 embedding | 降级不抛异常 |
-| `DesktopFileController` | disabled/running/degraded、目录计数、最近文件和错误清理正确 |
-| 桌面端文件页 | 入口常驻；关闭、运行、降级三种状态均可理解并可操作 |
-| 文件目录配置保存 | 多目录规范化、去重并持久化；无效目录不保存；enabled/paths 保存后立即应用且不要求重启 |
-| 运行时目录收缩/禁用 | 被移除目录的 PENDING/FAILED/embedding 不再处理；禁用时 watcher、索引和 embedding 均暂停 |
-| 其他文件配置保存 | 修改 enabled/paths 之外的 `file.watch.*` 键返回 `restartRequired` |
-
----
-
-## 追溯矩阵
-
-| 规格 ID | 文件 |
-|---------|------|
-| SPEC-FILE-001..003 | pom.xml（根 + self-analyst-file）、AppSession.java |
-| SPEC-FILE-004 | FileWatcher.java + FileIndexWorker.java + FileWatchStore.java |
-| SPEC-FILE-010 | FileWatchStore.java |
-| SPEC-FILE-011 | PathFilter.java |
-| SPEC-FILE-012 | FileWatcher.java |
-| SPEC-FILE-013 | FileIndexWorker.java |
-| SPEC-FILE-019 | FileWatcher.java（debounce/节流）+ FileIndexWorker.java（重摘间隔） |
-| SPEC-FILE-014 | extractor/*.java + FileContentExtractorFactory.java |
-| SPEC-FILE-018 | extractor/OfficeExtractor.java + pom.xml（poi-ooxml） |
-| SPEC-FILE-015 | FileSummarizer.java |
-| SPEC-FILE-016 | semantic/FileSemanticIndex.java + FileEmbeddingWorker.java |
-| SPEC-FILE-017 | FileTools.java + agent/SelfAnalystAgent.java |
+- **SPEC-FILE-TST-001**：处理带唯一秘密标记的文件后，`file-watch.db`、WAL、SHM 均不含该标记。
+- **SPEC-FILE-TST-002**：`FileIndexWorker` 字节码不得引用内容流、哈希、摘要器、提取器或文件 embedding 类。
+- **SPEC-FILE-TST-003**：v1 迁移后 schema 不含禁止字段，旧摘要/主题标记从数据库字节中消失。
+- **SPEC-FILE-TST-004**：创建时间、修改时间、大小和路径可以正确采集与查询。
+- **SPEC-FILE-TST-005**：FileTools 与 Desktop API 响应不含摘要、主题、哈希、模型或 prompt。
+- **SPEC-FILE-TST-006**：旧 Lucene 索引文件被清理，文件系统根目录受到保护。
+- **SPEC-FILE-TST-007**：文件采集在 Agent/LLM 不可用时仍可运行。
+- **SPEC-FILE-TST-008**：桌面 UI 只展示元数据与严格隐私提示。
+- **SPEC-FILE-TST-009**：混有普通文件的自定义旧索引目录在删除任何文件前被拒绝。
+- **SPEC-FILE-TST-010**：`VACUUM` 前中断后，下次启动继续净化并最终写入 schema version 2。
+- **SPEC-FILE-TST-011**：移除/禁用监控根目录后，所有 Agent 文件工具都隐藏对应历史元数据。
+- **SPEC-FILE-TST-012**：停机期间删除文件或运行期间删除子目录后，历史记录进入 `DELETED`。
+- **SPEC-FILE-TST-013**：扫描快照后并发创建并入队的文件不会被缺失记录对账误删。
+- **SPEC-FILE-TST-014**：删除监控根目录导致 WatchKey 失效时，其后代历史记录进入 `DELETED`。
+- **SPEC-FILE-TST-015**：伪造前缀/无效 codec header 不能通过旧索引验证；删除中断时 commit point
+  保留且下次清理可恢复。

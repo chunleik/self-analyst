@@ -1,5 +1,7 @@
 # SelfAnalyst 过往行为建议/鼓励显示框 SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`behavior-advice`](../../openspec/specs/behavior-advice/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > Specification-Driven Development spec. 本文档定义桌面端“基于过往行为的建议/鼓励显示框”的行为契约。实现必须可追溯至本文档中的规格 ID。
 
 ---

@@ -1,26 +1,29 @@
-# SelfAnalyst 规格约定（SDD Conventions）
+# SelfAnalyst Legacy 规格与 OpenSpec 迁移约定
 
-SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本文件集中说明编写、评审和维护正式规格的约定。
+SelfAnalyst 的现行行为契约已经迁移到仓库根目录 `openspec/specs/`。本目录保留迁移前的 SDD 文档，
+用于历史背景、旧 ID 与源码追溯；不得再作为与 OpenSpec 并行维护的第二套权威规格。
 
-> SDD 索引（有哪些 spec、Key Prefix）见 [`docs/README.md`](../README.md)；本文件只讲**怎么写、写什么**。
+> 当前 capability 索引见 [`docs/README.md`](../README.md)，OpenSpec 写作约束见
+> [`openspec/config.yaml`](../../openspec/config.yaml)。
 
 ---
 
 ## 1. 核心原则
 
-- **覆盖范围**：每个模块（`self-analyst-*` 子模块）和每个重大特性都必须有一份正式 spec。
+- **覆盖范围**：每个当前能力都必须有一份 `openspec/specs/<capability>/spec.md` 主规格。
 - **spec 是契约层**：描述「**要满足什么**」（行为、接口、约束、数据契约），不描述「**怎么实现**」（具体类的私有逻辑、版本号、方法名清单、构建接线）。一次性实施步骤保留在 Issue、提交或短期工作记录中，不作为长期项目文档维护。
-- **可追溯**：每条需求有稳定编号 ID，贯穿 spec → 源码 → commit。
+- **可追溯**：每条 Requirement 名称保留稳定编号 ID，贯穿 OpenSpec → 源码 → commit。
 
 ## 2. spec 分类
 
-| 类型 | 放置 | 对象 | 示例 |
-|------|------|------|------|
-| **Module Spec** | `docs/specs/<module>.md` | 一个 `self-analyst-*` 子模块 | `core.md`、`content.md`、`file.md` |
-| **Feature Spec** | `docs/specs/<feature>.md` | 跨模块的特性 | `desktop-chat-tab.md`、`llm-wiki.md` |
-| **Archive** | `docs/archive/design-proposals/` | 被正式 spec 取代的旧设计提案 | — |
+| 类型 | 放置 | 对象 |
+|------|------|------|
+| **OpenSpec Main Spec** | `openspec/specs/<capability>/spec.md` | 当前已实现能力的行为权威 |
+| **OpenSpec Change** | `openspec/changes/<change>/` | 尚未归档的行为变更 delta 与实施记录 |
+| **Legacy Spec** | `docs/specs/*.md` | 迁移来源、旧 ID 与历史追溯 |
+| **Archive** | `docs/archive/` | 已取代设计、移除功能与历史背景 |
 
-新增 spec 后必须在 [`docs/README.md`](../README.md) 的 SDD 索引表登记（文档链接、用途、Key Prefix）。
+新增 capability 后必须在 [`docs/README.md`](../README.md) 的 OpenSpec 主规格表登记。
 
 ## 3. 编号方案
 
@@ -29,27 +32,29 @@ SelfAnalyst 采用规格驱动开发（Specification-Driven Development）。本
 - ID **只增不改、不复用**：已发布的 ID 含义固定；废弃就标注「已废弃」而非删号重用。
 - ID 同时出现在：组件正文、末尾追溯矩阵、相关 commit message。
 
-## 4. 标准结构（Module Spec 骨架）
+## 4. OpenSpec 主规格结构
 
-以 `content.md` / `file.md` 为范式：
+主规格使用 OpenSpec 可解析结构：
 
 ```
-# <模块名> SDD 规格说明书
-> 一句话定位 + 状态（设计中/已实现）
+# <能力名称>规格
 
-1. 模块标识      模块名 / 版本 / 类型 / 默认开关
-2. 架构契约      依赖、数据流、职责边界（SPEC-*-00x）
-3. 组件规格      每个类/组件一节，按 SPEC-*-0NN 编号，子项 a/b/c
-4. 配置          配置键清单 + 读取入口
-5. 测试规格      单测级「测试 → 预期」表
-── 追溯矩阵      ID → 源文件
+## Purpose
+<能力目的>
+
+## Requirements
+
+### Requirement: SPEC-<域>-001 <需求名称>
+系统 SHALL ...
+
+#### Scenario: <场景名称>
+- **WHEN** ...
+- **THEN** ...
 ```
 
-Feature Spec 以 `desktop-chat-tab.md` 为规范模板（结构更丰富，含交互/UI 契约）。
+## 5. Legacy 追溯矩阵
 
-## 5. 追溯矩阵
-
-- 位于 spec **末尾**，把 spec ID 段映射到承载它的源文件。
+- 旧文档末尾追溯矩阵继续保留，但不复制到 OpenSpec 主规格。
 - 形式：`| 规格 ID | 文件 |`，可用 `SPEC-X-001..003` 表示一段。
 - 追溯矩阵至少包含 **ID → 文件/组件**；如验证方式不便从测试规格直接判断，可增加「验证方式」列。
 
@@ -70,9 +75,10 @@ Feature Spec 以 `desktop-chat-tab.md` 为规范模板（结构更丰富，含�
 
 ---
 
-## 新增一份 spec 的清单
+## 新增或修改能力的清单
 
-1. 在 `docs/specs/` 新建 `<name>.md`，套用第 4 节骨架，分配 Key Prefix。
-2. 为每条需求编号，写好末尾追溯矩阵。
-3. 在 `docs/README.md` 的 SDD 索引表登记。
-4. 实现时 commit message 引用 spec ID；源文件与矩阵保持一致。
+1. 新能力在 `openspec/specs/<capability>/spec.md` 建立主规格；行为变更优先通过 OpenSpec change delta。
+2. 每条 Requirement 使用稳定 ID，并至少提供一个 `#### Scenario` 与 WHEN/THEN。
+3. 运行 `openspec validate --specs --strict` 或对应 change 的 strict validation。
+4. 在 `docs/README.md` 的 OpenSpec 主规格表登记 capability。
+5. 实现和提交引用相关 spec ID；用户向或架构文档按需同步更新。

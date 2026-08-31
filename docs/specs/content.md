@@ -1,5 +1,7 @@
 # 上下文标题采集规格
 
+> **迁移状态：** 现行行为契约已迁移至 [`title-capture`](../../openspec/specs/title-capture/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > 状态：现行
 >
 > 规格前缀：`SPEC-CTX-*`、`SPEC-UIA-*`、`SPEC-WCH-*`

@@ -1,5 +1,7 @@
 # 无障碍树边车（Accessibility Sidecar）SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`accessibility-sidecar`](../../openspec/specs/accessibility-sidecar/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > Specification-Driven Development spec. 本文档定义把 UIA 采集从「一次性 PowerShell 进程」改造为「常驻 Rust 边车进程 + OS 中性协议」的行为契约。所有实现必须可追溯至本文档某一项规格。
 
 ---

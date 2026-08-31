@@ -1,14 +1,38 @@
 # SelfAnalyst 文档索引
 
-本目录是项目架构、规格驱动开发（SDD）契约和历史设计记录的统一入口。现行行为以
-`docs/specs/` 下的正式规格为准；已被取代但仍需保留背景的材料放入 `docs/archive/`。
+本目录是项目架构、用户文档和历史设计记录的统一入口。现行行为契约以仓库根目录
+`openspec/specs/` 下的 OpenSpec 主规格为准；`docs/specs/` 保留为迁移来源和历史追溯，
+不再与 OpenSpec 并行维护。已被取代但仍需保留背景的材料放入 `docs/archive/`。
 
 ## 架构
 
 - [architecture.md](architecture.md) — 系统架构、模块边界、数据流、配置和发布结构
-- [specs/README.md](specs/README.md) — SDD 文档结构、编号、追溯矩阵和维护约定
+- [specs/README.md](specs/README.md) — legacy SDD 文档与 OpenSpec 迁移约定
 
-## 模块规格
+## OpenSpec 主规格（现行权威）
+
+| Capability | 主规格 | 主要旧文档来源 |
+|------------|--------|----------------|
+| `accessibility-sidecar` | [spec](../openspec/specs/accessibility-sidecar/spec.md) | `accessibility-sidecar.md` |
+| `activitywatch-tools` | [spec](../openspec/specs/activitywatch-tools/spec.md) | `core.md` |
+| `agent-context-compaction` | [spec](../openspec/specs/agent-context-compaction/spec.md) | `agent-context-compaction.md` |
+| `agent-runtime` | [spec](../openspec/specs/agent-runtime/spec.md) | `core.md` |
+| `behavior-advice` | [spec](../openspec/specs/behavior-advice/spec.md) | `behavior-advice.md` |
+| `chat-sessions` | [spec](../openspec/specs/chat-sessions/spec.md) | `chat-session-store.md`、`chat-session-sqlite-store.md` |
+| `content-event-persistence` | [spec](../openspec/specs/content-event-persistence/spec.md) | `content-title-persistence.md` |
+| `desktop-chat` | [spec](../openspec/specs/desktop-chat/spec.md) | `desktop-chat-tab.md` |
+| `desktop-shell` | [spec](../openspec/specs/desktop-shell/spec.md) | `desktop.md` |
+| `file-metadata-collection` | [spec](../openspec/specs/file-metadata-collection/spec.md) | `file.md` |
+| `internationalization` | [spec](../openspec/specs/internationalization/spec.md) | `i18n.md` |
+| `llm-budget` | [spec](../openspec/specs/llm-budget/spec.md) | `llm-budget.md` |
+| `llm-wiki` | [spec](../openspec/specs/llm-wiki/spec.md) | `llm-wiki.md` |
+| `long-term-memory` | [spec](../openspec/specs/long-term-memory/spec.md) | `long-term-memory.md` |
+| `title-capture` | [spec](../openspec/specs/title-capture/spec.md) | `content.md` |
+| `user-configuration` | [spec](../openspec/specs/user-configuration/spec.md) | `config-toml.md`、`core.md` |
+| `user-profile-memory` | [spec](../openspec/specs/user-profile-memory/spec.md) | `core.md` |
+| `web-search` | [spec](../openspec/specs/web-search/spec.md) | `web-search.md` |
+
+## Legacy 模块规格（迁移来源）
 
 | 文档 | 模块 | 规格前缀 |
 |------|------|----------|
@@ -17,7 +41,7 @@
 | [specs/file.md](specs/file.md) | 严格无正文的文件系统元数据监控与查询 | `SPEC-FILE-*` |
 | [specs/integration-test.md](specs/integration-test.md) | 模块内 JUnit 集成测试与手动 UIA 验证 | `SPEC-ITEST-*` |
 
-## 功能规格
+## Legacy 功能规格（迁移来源）
 
 | 文档 | 功能 | 规格前缀 |
 |------|------|----------|
@@ -37,8 +61,9 @@
 | [specs/removed-ocr-audio.md](specs/removed-ocr-audio.md) | OCR 与声音模块移除范围、兼容和恢复说明 | — |
 | [specs/long-term-memory.md](specs/long-term-memory.md) | 会话长期记忆提炼和管理 | `SPEC-LTM-*` |
 
-新增或删除正式规格时，必须同步更新本索引。规格正文负责描述当前契约；一次性实施步骤不作为
-长期文档保留，必要的历史背景应写入 `docs/archive/` 并明确标注取代关系。
+新增、删除或重命名 OpenSpec capability 时，必须同步更新本索引。现行契约只在对应
+`openspec/specs/<capability>/spec.md` 维护；一次性实施步骤不进入主规格，必要历史背景应写入
+`docs/archive/` 并明确标注取代关系。
 
 ## 归档
 

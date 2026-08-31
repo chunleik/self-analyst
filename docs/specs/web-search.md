@@ -1,5 +1,7 @@
 # SelfAnalyst Agent 联网搜索 SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`web-search`](../../openspec/specs/web-search/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > Specification-Driven Development spec. 本文档定义 Agent 通过 MCP 接入联网搜索的行为契约。实现必须可追溯至本文档中的规格 ID。
 
 ---

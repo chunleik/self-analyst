@@ -1,5 +1,7 @@
 # self-analyst-desktop SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`desktop-shell`](../../openspec/specs/desktop-shell/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > Tauri 桌面壳负责单实例、Java 后端生命周期、端口握手、桌面认证、WebView 和系统托盘。
 
 ## 1. 系统标识

@@ -1,5 +1,7 @@
 # 上下文标题最小化持久化规格
 
+> **迁移状态：** 现行行为契约已迁移至 [`content-event-persistence`](../../openspec/specs/content-event-persistence/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > 状态：已实现
 >
 > 规格前缀：`SPEC-CTP-*`

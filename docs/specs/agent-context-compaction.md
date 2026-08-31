@@ -1,5 +1,7 @@
 # AgentState 长会话压缩规格
 
+> **迁移状态：** 现行行为契约已迁移至 [`agent-context-compaction`](../../openspec/specs/agent-context-compaction/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > 本规格定义 SelfAnalyst 在 AgentScope Java 2.0.1 上的长会话上下文治理。它补充
 > [`chat-session-store.md`](chat-session-store.md)，不改变 UI transcript 的可见正文契约。
 

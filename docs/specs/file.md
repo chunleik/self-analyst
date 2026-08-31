@@ -1,5 +1,7 @@
 # 文件元数据采集规范
 
+> **迁移状态：** 现行行为契约已迁移至 [`file-metadata-collection`](../../openspec/specs/file-metadata-collection/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > 本规范定义严格隐私边界下的本地文件采集、持久化、查询与桌面端展示行为。
 
 ## 1. 目标与边界

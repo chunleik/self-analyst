@@ -1,5 +1,7 @@
 # SelfAnalyst 会话服务契约 SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`chat-sessions`](../../openspec/specs/chat-sessions/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > 本文档定义会话/消息 REST、数据模型、前端接线、AgentState 路由和资源不变量。物理存储当前为
 > SQLite `chat.db`；表结构、迁移和 WAL 语义见
 > [`chat-session-sqlite-store.md`](chat-session-sqlite-store.md)。

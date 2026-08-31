@@ -5,9 +5,10 @@ context: |
   桌面壳使用 Tauri，Windows accessibility sidecar 使用 Rust；Node.js 仅用于桌面 UI 测试和构建。
   项目文档统一使用简体中文，命令、代码标识符、文件路径和专有名词可以保留英文。
 
-  既有现行行为契约位于 docs/specs/，架构边界位于 docs/architecture.md。在能力完成 OpenSpec
-  基线迁移前，创建或修改该能力的 OpenSpec 制品必须阅读并核对相关旧规格；基线迁移只转换已实现
-  的当前行为，不引入新功能。既有 SPEC-<域>-* ID 是稳定追溯标识，不得改号或复用。
+  现行行为契约以 openspec/specs/ 下的主规格为准，架构边界位于 docs/architecture.md。
+  docs/specs/ 保留为迁移来源和历史追溯，不再作为与 OpenSpec 并行维护的第二套权威规格。
+  创建或修改能力时必须先读取对应 OpenSpec 主规格；既有 SPEC-<域>-* ID 是稳定追溯标识，
+  不得改号或复用。
 
   内容采集只持久化标题事实，不保存 UIA 正文、控件树、截图、OCR 或音频。文件采集严格限于
   用户显式配置目录内的文件系统元数据；除安全解析 .gitignore 外，不读取普通文件正文，不计算
@@ -23,7 +24,7 @@ rules:
   specs:
     - 使用简体中文编写可观察、可验证的行为契约，并使用 SHALL 或 MUST 表达规范性要求
     - 每条 Requirement 至少包含一个严格使用四级标题的 Scenario，并明确 WHEN 和 THEN
-    - 从旧规格迁移时在 Requirement 名称中保留对应的 SPEC-<域>-* ID
+    - Requirement 名称应保留或分配稳定的 SPEC-<域>-* ID
     - 不写入私有类或方法清单、依赖版本、逐步实现方案、源码追溯矩阵或已完成实施记录
     - 基线内容必须与当前代码和测试核对；发现冲突时先显式记录并解决，不得静默选择
   design:
@@ -39,6 +40,7 @@ operations:
     guidance:
       - 保留无关工作区修改，只处理已批准 change 的任务
       - 缺陷修复应补充回归测试，先运行针对性测试再按风险扩大验证范围
+      - 行为契约变化时同步更新对应 OpenSpec 主规格；用户向或架构文档需要时一并更新
   archive:
     guidance:
       - 归档前确认任务完成、严格验证通过，并说明主规格是否已经同步

@@ -1,5 +1,7 @@
 # SelfAnalyst 用户配置与桌面编辑器 SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`user-configuration`](../../openspec/specs/user-configuration/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > 本文档定义用户级配置文件 **TOML v1.0**（`config.toml`）的当前行为契约：格式与键映射、
 > 便携包配置路径、加载优先级，以及桌面端 raw 编辑器。本文同时接管旧版配置编辑器
 > 规格中仍有效的 `SPEC-CFGUI-*` 契约。

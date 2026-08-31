@@ -1,5 +1,7 @@
 # SelfAnalyst LLM Token 用量限制与每日预算 SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`llm-budget`](../../openspec/specs/llm-budget/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > Specification-Driven Development spec. 本文档定义 SelfAnalyst 对大模型（LLM / embedding）token 消耗的限制与每日预算控制的行为契约。实现必须可追溯至本文档中的规格 ID。
 
 ---

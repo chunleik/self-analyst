@@ -1,5 +1,7 @@
 # SelfAnalyst LLM Wiki SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`llm-wiki`](../../openspec/specs/llm-wiki/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > Specification-Driven Development — 本文档定义 LLM Wiki 多级时间摘要与语义索引机制的精确行为契约。实现必须可追溯至本文档中的规格 ID。
 
 ---

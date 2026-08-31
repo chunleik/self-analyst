@@ -1,5 +1,7 @@
 # SelfAnalyst 桌面会话页 SDD 规格说明书
 
+> **迁移状态：** 现行行为契约已迁移至 [`desktop-chat`](../../openspec/specs/desktop-chat/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+
 > 本文档定义桌面会话页的当前 UI、交互和发送语义。会话数据模型与 REST 契约见
 > [`chat-session-store.md`](chat-session-store.md)，SQLite 实现见
 > [`chat-session-sqlite-store.md`](chat-session-sqlite-store.md)。

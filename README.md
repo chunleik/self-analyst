@@ -1,7 +1,8 @@
 # SelfAnalyst
 
-SelfAnalyst 是一个本地优先的个人活动分析工具。它记录窗口/AFK 状态、应用内上下文标题和用户
-显式选择的文件派生信息，由本地 ActivityWatch 存储、Wiki 聚合与 Agent 查询共同提供回顾能力。
+SelfAnalyst 是一个本地优先的个人活动分析工具。窗口/AFK 状态与应用内上下文标题由本地
+ActivityWatch 存储并供 Wiki 聚合；用户显式配置目录中的文件系统元数据则由本地文件存储、
+FileTools 和桌面 API 提供查询，并以 metadata-only heartbeat 留存在本地 ActivityWatch 历史中。
 
 当前“内容采集”的严格定义是标题采集：允许在识别时临时读取完整 UIA 控件树，但最终只保存
 系统窗口标题、微信对话人、文章/文档/页面标题及来源、置信度和时间等元数据，禁止保存 UIA 正文。
@@ -53,7 +54,7 @@ pnpm tauri dev
 |------|------|
 | `self-analyst-aw` | 嵌入式 ActivityWatch、事件策略和历史迁移 |
 | `self-analyst-content` | 前台窗口、UIA 临时查询和上下文标题提取 |
-| `self-analyst-file` | 用户显式配置目录的文件派生信息 |
+| `self-analyst-file` | 用户显式配置目录中的文件名、路径、大小和时间等元数据 |
 | `self-analyst-wiki` | 标题事实的时间聚合、摘要和索引 |
 | `self-analyst-app` | 启动编排、Agent、桌面 API/UI |
 | `self-analyst-axsidecar` | Windows UIAutomation Rust 边车 |
@@ -64,7 +65,8 @@ pnpm tauri dev
 - 内容事件只允许 v2 标题白名单字段，不允许 `text_content`、`uia_text`、`raw_tree`、正文或截图。
 - UIA 查询失败时退回系统窗口标题，不使用截图/OCR 回退。
 - 敏感应用会跳过 UIA 查询。
-- 文件模块可以临时读取正文，但持久化范围由文件规格限定为路径、哈希、摘要、主题和向量等派生数据。
+- 文件模块只采集文件名、路径、大小和创建/修改时间等文件系统元数据；除安全解析 `.gitignore` 外，
+  不读取普通文件正文，不计算内容哈希，也不生成摘要、主题或向量。
 - OCR/音频旧配置键被识别并忽略；旧数据库和用户目录不会自动删除。
 
 隐私细节见 [PRIVACY.md](PRIVACY.md)，现行规格索引见 [docs/README.md](docs/README.md)。

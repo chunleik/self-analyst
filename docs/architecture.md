@@ -7,11 +7,11 @@ SelfAnalyst 使用 Java 21 Maven 多模块后端、Tauri 桌面壳和 Rust acces
 
 ```text
 Win32 前台窗口 ───────────────┐
-Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2 ─> ActivityWatch
-窗口/AFK watcher ─────────────┘                         │
-                                                       ├─> Wiki 聚合/派生摘要
-用户选择的文件 ─> 文件系统元数据采集 ─> 元数据存储 ─────┤
-                                                       └─> Agent / 桌面 API
+Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2 ─┐
+窗口/AFK watcher ────────────────────────────────> window/AFK ─┼─> ActivityWatch ─> Wiki 聚合
+
+用户配置的监控目录 ─> 文件系统元数据采集 ─> file-watch.db ─> FileTools / 桌面 API
+                                   └─> metadata-only heartbeat ─> ActivityWatch 通用历史
 ```
 
 OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
@@ -46,7 +46,7 @@ UIA，将整棵树作为单次调用内的临时输入，依次尝试应用专�
 
 Wiki 只能消费标题事实；文件采集器不得读取普通文件正文、计算内容哈希或调用内容摘要/embedding；
 只允许通过不跟随链接且有大小/身份校验的入口，在内存中读取监控树内 `.gitignore` 以决定路径是否排除；
-规则原文不得进入缓存、日志、错误记录或外发数据。
+规则及其编译后的 matcher 只可保留在进程内缓存，不得进入持久化、日志、错误记录或外发数据。
 任何日志、异常、失败记录或备份都不得绕开相应规格保存原始输入。
 
 ## 5. 生命周期

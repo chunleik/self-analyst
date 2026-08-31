@@ -15,7 +15,8 @@
 - **SPEC-FILE-003（禁止正文派生）**：不得计算内容哈希，不得生成或保存正文摘要、主题、用途、
   prompt、模型名称或由正文产生的 embedding。
 - **SPEC-FILE-004（禁止外发）**：文件正文不得发送给 LLM、embedding、MCP、搜索服务或其他进程；
-  文件元数据查询必须在本地完成。
+  文件元数据匹配查询必须在本地完成；文件名、路径和时间等元数据作为 Agent 工具结果时，可能进入
+  用户配置的 LLM 会话。
 - **SPEC-FILE-005（标题语义）**：文件名及其相对路径是文件模块唯一的“标题”事实。系统不得把正文首行、
   摘要或主题冒充文件标题。
 
@@ -45,8 +46,9 @@
 - **SPEC-FILE-010**：状态为 `PENDING | COLLECTED | FAILED | SKIPPED | DELETED`。
 - **SPEC-FILE-011**：新文件或元数据变化进入 `PENDING`；成功读取属性后进入 `COLLECTED`。
 - **SPEC-FILE-012**：文件不存在时进入 `DELETED`；重新出现时可再次进入 `PENDING`。
-- **SPEC-FILE-013**：属性读取失败时只保存固定错误码 `FILE_METADATA_FAILED:<ExceptionType>`，
-  按指数退避重试；不得保存异常 message。
+- **SPEC-FILE-013**：处理已入队 PENDING/FAILED 记录时，新产生的属性读取或安全过滤失败只保存固定
+  错误码 `FILE_METADATA_FAILED:<ExceptionType>`，按指数退避重试且不得保存异常 message；从旧数据库
+  迁移的历史错误值可以保留旧前缀或旧跳过原因。
 - **SPEC-FILE-014**：每轮最多批量处理 256 条，避免元数据采集仍按旧 LLM 节奏逐文件积压。
 
 `last_collected_at` 表示最近一次成功采集元数据的时间；它不同于文件系统提供的
@@ -72,11 +74,12 @@ FileWatcher 注册、首次扫描和入队前统一调用 PathFilter。
   与 `!` 否定；被上层规则排除的目录不能由其内部规则重新包含后代。使用 JGit ignore matcher，
   不读取全局 excludes 或 `.git/info/exclude`；缓存必须绑定目录身份，规则文件超过 1 MiB、不是普通文件、
   路径链含链接或无法通过 `NOFOLLOW_LINKS` 及目录链/规则文件读取前后身份校验时，该路径树暂时
-  fail-closed。规则原文只存在于
-  解析期间的内存，不进入缓存、日志、错误信息或任何持久化/外发数据。
-- **SPEC-FILE-026**：扫描与目录注册显式不跟随 symlink；符号链接、`isOther`、junction/reparse point、
-  根目录外路径和无法证明安全的特殊节点 fail-closed；文件判定还必须逐级验证从 watch root 到父目录
-  的每个节点，不能只检查最终文件。
+  fail-closed。规则及其编译后的 matcher 只可保留在进程内缓存，不得进入日志、错误信息或任何
+  持久化/外发数据。
+- **SPEC-FILE-026**：扫描与目录注册显式不跟随 symlink；文件系统属性报告为 symbolic link 或
+  `isOther` 的节点、根目录外路径和无法证明安全的特殊节点 fail-closed；文件判定还必须逐级验证从
+  watch root 到父目录的每个节点，不能只检查最终文件。本保证不扩展为未经平台证据验证的所有
+  Windows reparse point 分类。
 
 ## 5. FileWatcher
 
@@ -98,9 +101,10 @@ FileWatcher 注册、首次扫描和入队前统一调用 PathFilter。
 历史类名 `FileIndexWorker` 为兼容保留，实际职责是文件系统元数据采集。
 
 - **SPEC-FILE-040**：首次扫描只遍历路径并读取 `BasicFileAttributes`。
-- **SPEC-FILE-041**：变更判定仅比较大小、文件创建时间、最后修改时间和路径归属。
-- **SPEC-FILE-042**：处理 PENDING/FAILED 时只调用 `Files.isRegularFile` 与
-  `Files.readAttributes(..., BasicFileAttributes.class)`。
+- **SPEC-FILE-041**：首次扫描或子树对账判断已知记录是否需要重新采集时，仅比较大小、文件创建时间、
+  最后修改时间和路径归属；实时 CREATE/MODIFY 事件可以直接形成 `PENDING` 意图。
+- **SPEC-FILE-042**：处理 PENDING/FAILED 时不得打开普通被监控文件的内容流；只允许执行存在性、
+  `BasicFileAttributes`、隐藏项、链接、祖先目录与 `.gitignore` 等元数据和路径安全检查。
 - **SPEC-FILE-043**：后台线程不依赖 Agent、LLM、embedding 配置或 API key；即使 Agent 不可用，
   文件元数据采集仍可启动。
 - **SPEC-FILE-044**：完整且无访问错误的首次扫描结束后，必须把该根目录下未再出现的历史记录标记为
@@ -134,8 +138,9 @@ CREATE TABLE file_metadata (
 );
 ```
 
-- **SPEC-FILE-050（不可表达正文）**：schema 和 `FileRecord` 类型均不得包含 `content`、`file_hash`、
-  `summary`、`main_topics`、`model`、`prompt`、`embedding` 或语义等价字段。
+- **SPEC-FILE-050（当前存储和模型字段边界）**：schema、正常采集模型和查询响应均不得提供
+  `content`、`file_hash`、`summary`、`main_topics`、`model`、`prompt`、`embedding` 或语义等价的
+  专用字段，正常采集路径只写入允许元数据。该保证不声称通用文本字段在类型上无法容纳任意字符串。
 - **SPEC-FILE-051（v1 净化迁移）**：打开 v1 或未标版本的旧数据库时必须只复制允许的元数据到 v2 表，
   将 `INDEXED` 映射为 `COLLECTED`，以 `secure_delete=ON` 删除旧表并执行 `VACUUM`；只有 `VACUUM`
   成功后才能写入 schema version 2。若进程在两阶段之间中断，下次启动必须识别
@@ -161,20 +166,23 @@ FileTools 仅提供本地元数据工具：
 | `fileCollectionStatus` | 返回各监控根目录状态计数 |
 
 - **SPEC-FILE-060**：所有工具响应不得包含摘要、主题、内容哈希、模型或 prompt。
-- **SPEC-FILE-061**：`searchFiles` 使用 SQLite 路径匹配，不得调用 embedding 服务。
+- **SPEC-FILE-061**：`searchFiles` 使用 SQLite 路径匹配，不得调用 embedding 服务；匹配结果作为
+  Agent 工具消息时可能进入用户配置的 LLM。
 - **SPEC-FILE-062**：用户询问“文件写了什么”时，Agent 必须说明 FileTools 无法读取正文，只能提供元数据。
 - **SPEC-FILE-063**：所有 FileTools 查询必须限制在当前已启用的监控根目录；禁用采集或移除目录后，
-  该目录的历史名称、路径和时间不得继续暴露给 Agent。
+  FileTools 不得继续返回该目录的历史名称、路径和时间。本保证不扩展到通用 ActivityWatch 查询工具
+  或原始桌面历史接口。
 
 ## 9. Desktop API 与界面
 
 `GET /desktop/files` 返回：
 
-- `enabled/status/reason/error/restartRequiredOnChange`
+- 始终返回 `enabled/status/restartRequiredOnChange`
 - `roots[].path/counts`
 - `totals`
 - `files[]`：`name/path/relativePath/watchRoot/extension/status/sizeBytes/fileCreatedAt/lastModified/lastCollectedAt`
-- `latestCollectedAt/latestPath`
+- `reason` 仅在运行状态存在原因时返回，`error` 仅在存在启动或存储错误时返回
+- `latestCollectedAt/latestPath` 仅在至少存在一条最近采集记录时返回
 
 - **SPEC-FILE-070**：响应不得再提供 `semantic`、`summary`、`mainTopics` 或 `lastIndexedAt`。
 - **SPEC-FILE-071**：界面统一使用“已采集/元数据”，不得使用“内容索引/摘要/语义检索”。
@@ -182,6 +190,11 @@ FileTools 仅提供本地元数据工具：
 - **SPEC-FILE-073**：`PUT /desktop/files/settings` 继续支持监控目录与 enabled 热更新。
 
 ## 10. 配置
+
+- **SPEC-FILE-080**：文件采集默认关闭且监控目录为空；`maxFileSizeKb` 默认为 `0`，后台采集间隔
+  默认为 60 秒，去抖与 heartbeat 节流分别默认为 5 秒；系统支持扩展名允许列表、目录/glob 排除和
+  `respectGitIgnore` 设置，默认扩展名仅包含 Office/Markdown，目录和 glob 排除列表为空，
+  `respectGitIgnore` 默认启用。
 
 ```properties
 file.watch.enabled=false
@@ -217,6 +230,7 @@ file.watch.respectGitIgnore=true
 - **SPEC-FILE-TST-016**：空后缀列表 fail-closed，`*` 显式放行，默认仅允许 Office/Markdown。
 - **SPEC-FILE-TST-017**：目录名大小写、点前缀工具目录、相对路径 glob 与 Office 临时文件均被早期排除。
 - **SPEC-FILE-TST-018**：根与嵌套 `.gitignore`、否定规则、运行时规则变更和 `OVERFLOW` 对账可用。
-- **SPEC-FILE-TST-019**：symlink、junction/`isOther` 和 root 外路径不能注册或采集。
+- **SPEC-FILE-TST-019**：symlink、文件系统属性报告为 `isOther` 的节点和 root 外路径不能注册或采集；
+  本测试不扩展为未经平台证据验证的所有 Windows reparse point 分类。
 - **SPEC-FILE-TST-020**：`.gitignore` 无法安全判定或扫描发生访问错误时不得把既有元数据误标为
   `DELETED`；错误恢复后可通过规则事件或后续对账收敛。

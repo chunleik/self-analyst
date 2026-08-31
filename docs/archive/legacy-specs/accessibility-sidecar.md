@@ -1,6 +1,6 @@
 # 无障碍树边车（Accessibility Sidecar）SDD 规格说明书
 
-> **迁移状态：** 现行行为契约已迁移至 [`accessibility-sidecar`](../../openspec/specs/accessibility-sidecar/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+> **迁移状态：** 现行行为契约已迁移至 [`accessibility-sidecar`](../../../openspec/specs/accessibility-sidecar/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
 
 > Specification-Driven Development spec. 本文档定义把 UIA 采集从「一次性 PowerShell 进程」改造为「常驻 Rust 边车进程 + OS 中性协议」的行为契约。所有实现必须可追溯至本文档某一项规格。
 
@@ -22,7 +22,7 @@
 
 ## 2. 改造前背景
 
-改造前实现（见 [content.md](content.md) §5 的已取代条款）：
+改造前实现（见 [`title-capture`](../../../openspec/specs/title-capture/spec.md) 中的现行条款）：
 
 - `SPEC-UIA-001` 曾在每次 UIA 查询时启动一次 `powershell.exe`，加载 .NET UIAutomation 并输出 JSON 树。
 - 单次调用曾耗时 1–3 秒，主要成本是进程启动、程序集加载与 JIT，而非树遍历本身。

@@ -15,7 +15,7 @@ Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2
 ```
 
 OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
-[specs/removed-ocr-audio.md](specs/removed-ocr-audio.md)。
+[archive/removed-features/removed-ocr-audio.md](archive/removed-features/removed-ocr-audio.md)。
 
 ## 2. 模块边界
 

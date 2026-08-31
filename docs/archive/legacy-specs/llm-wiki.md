@@ -1,6 +1,6 @@
 # SelfAnalyst LLM Wiki SDD 规格说明书
 
-> **迁移状态：** 现行行为契约已迁移至 [`llm-wiki`](../../openspec/specs/llm-wiki/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+> **迁移状态：** 现行行为契约已迁移至 [`llm-wiki`](../../../openspec/specs/llm-wiki/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
 
 > Specification-Driven Development — 本文档定义 LLM Wiki 多级时间摘要与语义索引机制的精确行为契约。实现必须可追溯至本文档中的规格 ID。
 
@@ -696,7 +696,7 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 - `self-analyst-app/src/main/java/com/selfanalyst/config/Config.java`
 - `self-analyst-app/src/main/java/com/selfanalyst/AppSession.java`
 - `self-analyst-app/src/main/java/com/selfanalyst/agent/SelfAnalystAgent.java`
-- `docs/specs/llm-wiki.md`
+- `docs/archive/legacy-specs/llm-wiki.md`
 - `docs/README.md`
 
 ### 17.2 不应修改的文件
@@ -815,7 +815,7 @@ LLM 必须返回 JSON，禁止 Markdown 代码块:
 
 | 规格 ID | 目标文件/组件 | 验证方式 |
 |---------|---------------|----------|
-| SPEC-WIKI-GOAL-* | `docs/specs/llm-wiki.md` | 规格审查 |
+| SPEC-WIKI-GOAL-* | `docs/archive/legacy-specs/llm-wiki.md` | 规格审查 |
 | SPEC-WIKI-ARCH-* | `com.selfanalyst.wiki.*`, `AppSession`, `SelfAnalystAgent` | 代码审查 |
 | SPEC-WIKI-FLOW-* | `WikiWorker`, `WikiSummarizer` | Worker/Summarizer 测试 |
 | SPEC-WIKI-TIME-* | `WikiPeriodFactory` | 单元测试 |

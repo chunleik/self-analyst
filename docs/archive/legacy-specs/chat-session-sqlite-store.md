@@ -1,6 +1,6 @@
 # SelfAnalyst 会话存储收敛为 SQLite 单库 SDD 规格说明书
 
-> **迁移状态：** 现行行为契约已迁移至 [`chat-sessions`](../../openspec/specs/chat-sessions/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+> **迁移状态：** 现行行为契约已迁移至 [`chat-sessions`](../../../openspec/specs/chat-sessions/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
 
 > Specification-Driven Development spec. 本文档定义桌面端会话存储从「分片文件 + SQLite 投影 + index.state/tombstone 恢复机制」收敛为 **SQLite 单库（WAL）唯一权威 + FTS5 搜索** 的行为契约。实现必须可追溯至本文档中的规格 ID。
 

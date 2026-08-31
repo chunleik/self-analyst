@@ -24,7 +24,7 @@ SelfAnalyst 采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。项
 
 当前源码和发布包不依赖或打包 PaddleOCR、Tesseract、whisper.cpp 与 Whisper 模型。旧版本可能在
 用户工作区或发布目录留下这些文件；现行构建会从 `dist/tools` 清理已知旧目录，但不会删除用户
-数据目录。恢复背景见 [移除说明](docs/specs/removed-ocr-audio.md)。
+数据目录。恢复背景见 [移除说明](docs/archive/removed-features/removed-ocr-audio.md)。
 
 ## Tauri 桌面壳
 

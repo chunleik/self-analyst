@@ -1,6 +1,6 @@
 # SelfAnalyst 长期记忆 SDD 规格说明书
 
-> **迁移状态：** 现行行为契约已迁移至 [`long-term-memory`](../../openspec/specs/long-term-memory/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+> **迁移状态：** 现行行为契约已迁移至 [`long-term-memory`](../../../openspec/specs/long-term-memory/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
 
 > Specification-Driven Development spec. 本文档定义 SelfAnalyst 从会话中自动提炼长期记忆，并允许用户通过会话设置与记忆管理界面控制记忆的行为契约。实现必须可追溯至本文档中的规格 ID。
 
@@ -455,7 +455,7 @@ pendingMemoryCount: 0
 
 | 规格 ID | 目标文件/组件 | 验证方式 |
 |---------|---------------|----------|
-| SPEC-LTM-REL-001..005 | `docs/specs/core.md`、`docs/specs/chat-session-store.md`、`docs/specs/desktop-chat-tab.md` | spec 审查 |
+| SPEC-LTM-REL-001..005 | `docs/archive/legacy-specs/core.md`、`docs/archive/legacy-specs/chat-session-store.md`、Git 历史中的 `docs/specs/desktop-chat-tab.md` | spec 审查 |
 | SPEC-LTM-DEC-001..008 | 全特性 | spec 审查、代码审查 |
 | SPEC-LTM-GOAL-001..007 | 全特性 | 单元测试 + 手动验收 |
 | SPEC-LTM-NON-001..006 | 全特性 | 代码审查 |

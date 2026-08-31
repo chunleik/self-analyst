@@ -43,7 +43,7 @@ OCR、音频或第三方工具历史目录。
 
 ## 旧配置
 
-旧 `config.toml` 中由[移除说明](docs/specs/removed-ocr-audio.md)列出的 OCR 键和所有 `aw.audio.*`
+旧 `config.toml` 中由[移除说明](docs/archive/removed-features/removed-ocr-audio.md)列出的 OCR 键和所有 `aw.audio.*`
 会被识别并忽略，不会重新启用功能，也不会出现在桌面配置表单中。
 
 ## 建议
@@ -53,6 +53,6 @@ OCR、音频或第三方工具历史目录。
 - 定期检查本机数据目录和备份策略。
 - 清理旧 OCR/声音数据前先做可恢复备份，并确认目标路径。
 
-实现契约见 [上下文标题采集规格](docs/specs/content.md) 与
-[标题最小化持久化规格](docs/specs/content-title-persistence.md)，文件边界见
-[文件元数据采集规范](docs/specs/file.md)。
+实现契约见 [上下文标题采集规格](openspec/specs/title-capture/spec.md) 与
+[标题最小化持久化规格](openspec/specs/content-event-persistence/spec.md)，文件边界见
+[文件元数据采集规范](openspec/specs/file-metadata-collection/spec.md)。

@@ -4,7 +4,7 @@
 
 SelfAnalyst 是一个使用 Java 21 的 Maven 多模块项目。`self-analyst-app` 包含后端、智能体以及桌面端 API/UI；其他同级模块负责实现各项功能服务。集成测试位于各模块的 `src/test/java`，Tauri 外壳位于 `self-analyst-desktop/`，Rust 边车程序位于 `self-analyst-axsidecar/`。
 
-Java 代码使用 `src/main/java` 和 `src/test/java` 目录。桌面端资源和 Node 测试分别位于 `self-analyst-app/src/main/resources/desktop-ui/` 和 `src/test/js/`。规范文档位于 `docs/specs/`；运行时目录和构建目录均为输出目录。
+Java 代码使用 `src/main/java` 和 `src/test/java` 目录。桌面端资源和 Node 测试分别位于 `self-analyst-app/src/main/resources/desktop-ui/` 和 `src/test/js/`。现行行为规格位于 `openspec/specs/`；历史文档位于 `docs/archive/`；运行时目录和构建目录均为输出目录。
 
 ## 构建、测试与开发命令
 
@@ -34,7 +34,7 @@ Java 测试文件命名为 `*Test.java`，Node 测试文件命名为 `*.test.mjs
 
 ## 智能体专用说明
 
-保留工作区中与当前任务无关的变更；行为契约发生变化时，应同步更新 `docs/specs/` 中的相关文档。
+保留工作区中与当前任务无关的变更；行为契约发生变化时，应同步更新 `openspec/specs/` 中的相关主规格。
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

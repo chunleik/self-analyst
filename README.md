@@ -8,7 +8,7 @@ FileTools 和桌面 API 提供查询，并以 metadata-only heartbeat 留存在�
 系统窗口标题、微信对话人、文章/文档/页面标题及来源、置信度和时间等元数据，禁止保存 UIA 正文。
 
 OCR、截图样本、麦克风/系统声音采集和语音转写已暂时从代码与产品入口中移除。详细范围、旧配置
-兼容和恢复方式见 [OCR 与声音模块暂时移除说明](docs/specs/removed-ocr-audio.md)。
+兼容和恢复方式见 [OCR 与声音模块暂时移除说明](docs/archive/removed-features/removed-ocr-audio.md)。
 
 ## 环境要求
 
@@ -74,7 +74,7 @@ pnpm tauri dev
 ## 配置
 
 首次启动会在数据目录创建 `config.toml`。桌面“配置”页可编辑当前受支持字段；环境变量仍可覆盖
-对应配置。完整键表以 [配置规格](docs/specs/config-toml.md) 和 `SupportedKeys` 为准。
+对应配置。完整键表以 [用户配置规格](openspec/specs/user-configuration/spec.md) 和 `SupportedKeys` 为准。
 
 | 配置键 | 环境变量 | 默认值 |
 |--------|----------|--------|
@@ -85,7 +85,7 @@ pnpm tauri dev
 | `aw.port` | `AW_PORT` | `5700` |
 | `aw.collection.content` | `AW_COLLECTION_CONTENT` | `true` |
 
-[移除说明](docs/specs/removed-ocr-audio.md) 中列出的旧 OCR 键和所有 `aw.audio.*` 不再是受支持配置。
+[移除说明](docs/archive/removed-features/removed-ocr-audio.md) 中列出的旧 OCR 键和所有 `aw.audio.*` 不再是受支持配置。
 加载旧文件时这些键不会导致启动失败，但不会产生任何功能。
 
 ## 恢复基线
@@ -101,7 +101,7 @@ git show archive/pre-remove-ocr-audio
 ## 文档
 
 - [架构](docs/architecture.md)
-- [上下文标题采集规格](docs/specs/content.md)
-- [标题最小化持久化规格](docs/specs/content-title-persistence.md)
-- [OCR 与声音模块暂时移除说明](docs/specs/removed-ocr-audio.md)
+- [上下文标题采集规格](openspec/specs/title-capture/spec.md)
+- [标题最小化持久化规格](openspec/specs/content-event-persistence/spec.md)
+- [OCR 与声音模块暂时移除说明](docs/archive/removed-features/removed-ocr-audio.md)
 - [隐私说明](PRIVACY.md)

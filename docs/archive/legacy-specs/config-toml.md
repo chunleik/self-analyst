@@ -1,6 +1,6 @@
 # SelfAnalyst 用户配置与桌面编辑器 SDD 规格说明书
 
-> **迁移状态：** 现行行为契约已迁移至 [`user-configuration`](../../openspec/specs/user-configuration/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
+> **迁移状态：** 现行行为契约已迁移至 [`user-configuration`](../../../openspec/specs/user-configuration/spec.md)。本文档仅保留为旧 ID、历史背景和源码追溯，不再独立维护。
 
 > 本文档定义用户级配置文件 **TOML v1.0**（`config.toml`）的当前行为契约：格式与键映射、
 > 便携包配置路径、加载优先级，以及桌面端 raw 编辑器。本文同时接管旧版配置编辑器
@@ -84,7 +84,7 @@ TOML 的字面量字符串（`'D:\docs'`）、原生类型、数组、带行列�
 ### 5.1 设计与目标
 
 - **SPEC-CFGUI-DEC-001**：编辑器展示和保存的是用户级覆盖文件原文，不把默认值合并成已启用配置。
-- **SPEC-CFGUI-DEC-002**：raw 文本不脱敏。编辑器必须显示真实 API key，否则保存脱敏占位符会破坏密钥。接口始终受回环 Host/Origin 边界保护；只有 Tauri 管理启动时额外要求 desktop token。standalone 模式的同机进程边界见 [`../../SECURITY.md`](../../SECURITY.md)。
+- **SPEC-CFGUI-DEC-002**：raw 文本不脱敏。编辑器必须显示真实 API key，否则保存脱敏占位符会破坏密钥。接口始终受回环 Host/Origin 边界保护；只有 Tauri 管理启动时额外要求 desktop token。standalone 模式的同机进程边界见 [`../../../SECURITY.md`](../../../SECURITY.md)。
 - **SPEC-CFGUI-DEC-003**：raw 保存提交完整文本并逐字覆盖，不做逐键 diff；成功写入使用同目录临时文件后 `REPLACE_EXISTING` 替换目标。当前实现未请求 Java `ATOMIC_MOVE`，因此不承诺崩溃级原子 rename。
 - **SPEC-CFGUI-DEC-004**：受支持键和需重启键由后端单一声明维护，UI 与 Agent 工具不得复制另一套列表。
 - **SPEC-CFGUI-DEC-005**：用户配置统一使用 UTF-8。

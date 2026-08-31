@@ -32,7 +32,7 @@ import java.util.function.Supplier;
  *
  * <p>实现 {@link UsageRecorder}：可直接作为 embedding 客户端的用量回调（计入 EMBEDDING）。
  *
- * 见 docs/specs/llm-budget.md（SPEC-BUDGET-*）。
+ * 见 openspec/specs/llm-budget/spec.md（SPEC-BUDGET-*）。
  */
 public class UsageMeter implements UsageRecorder {
 

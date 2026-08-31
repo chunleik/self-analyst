@@ -1,6 +1,6 @@
 # SelfAnalyst SDD 规格说明书
 
-> **迁移状态：** 现行契约已拆分迁移至 [`agent-runtime`](../../openspec/specs/agent-runtime/spec.md)、[`activitywatch-tools`](../../openspec/specs/activitywatch-tools/spec.md)、[`user-profile-memory`](../../openspec/specs/user-profile-memory/spec.md) 与 [`user-configuration`](../../openspec/specs/user-configuration/spec.md)。本文档仅保留历史追溯。
+> **迁移状态：** 现行契约已拆分迁移至 [`agent-runtime`](../../../openspec/specs/agent-runtime/spec.md)、[`activitywatch-tools`](../../../openspec/specs/activitywatch-tools/spec.md)、[`user-profile-memory`](../../../openspec/specs/user-profile-memory/spec.md) 与 [`user-configuration`](../../../openspec/specs/user-configuration/spec.md)。本文档仅保留历史追溯。
 
 > Specification-Driven Development — 本文档定义系统的精确行为契约，所有实现必须可追溯至本文档的某一项规格。
 

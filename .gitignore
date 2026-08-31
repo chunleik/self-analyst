@@ -22,6 +22,9 @@ dist/
 .worktrees/
 .workbuddy/
 
+# 本地 AI 智能体工作流配置
+.agents/
+
 # 本机 cargo 配置（含机器相关的 linker 路径），见同目录 .example
 self-analyst-desktop/src-tauri/.cargo/config.toml
 

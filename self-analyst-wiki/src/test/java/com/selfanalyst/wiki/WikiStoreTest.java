@@ -90,6 +90,30 @@ class WikiStoreTest {
     }
 
     @Test
+    void shouldMigrateAndRoundTripBoundedProjectionCoverage() {
+        WikiEntry base = createPendingEntry("coverage", WikiLevel.HOUR, t1, t2);
+        WikiEntry entry = new WikiEntry(base.id(), base.level(), base.periodStart(), base.periodEnd(),
+                base.timezone(), base.status(), base.summary(), base.primaryTask(),
+                base.taskSegments(), base.metrics(), base.sourceEntryIds(), base.model(),
+                base.promptVersion(), base.retryCount(), base.nextRetryAt(), base.lastError(),
+                base.createdAt(), base.updatedAt(), base.summarizedAt(),
+                "facts-v1", "projector-v2", Map.of("window",
+                new WikiEntry.SourceCoverage("complete", t1, t2, 0L)));
+
+        store.upsert(entry);
+        WikiEntry loaded = store.query(t1, t2, WikiLevel.HOUR).getFirst();
+
+        assertEquals("facts-v1", loaded.factBuilderVersion());
+        assertEquals("projector-v2", loaded.projectorVersion());
+        assertEquals("complete", loaded.sourceCoverage().get("window").status());
+        assertThrows(IllegalArgumentException.class, () -> new WikiEntry(
+                base.id(), base.level(), base.periodStart(), base.periodEnd(), base.timezone(),
+                base.status(), null, null, List.of(), base.metrics(), List.of(), null, null,
+                0, null, null, Instant.now(), Instant.now(), null,
+                "x".repeat(65), "v1", Map.of()));
+    }
+
+    @Test
     void shouldQueryByPeriodAndLevel() {
         Instant t3 = Instant.parse("2026-06-08T12:00:00Z");
         Instant t4 = Instant.parse("2026-06-09T00:00:00Z");

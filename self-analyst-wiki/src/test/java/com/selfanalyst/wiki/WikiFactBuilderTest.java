@@ -62,6 +62,15 @@ class WikiFactBuilderTest {
             assertTrue(facts.contextTitleSamples().contains("[notes.exe] 设计文档"));
             assertFalse(facts.contextTitleSamples().toString()
                     .contains("SELF_ANALYST_FORBIDDEN_BODY_7F3A"));
+            assertEquals(WikiFactBuilder.FACT_BUILDER_VERSION, facts.factBuilderVersion());
+            assertEquals("complete", facts.sourceCoverage().get("content").status());
+
+            WikiFactBuilder.WikiFacts lagging = new WikiFactBuilder(
+                    events, 12_000, () -> 42L).buildFacts(
+                    new WikiPeriod(WikiLevel.HOUR, start, start.plusSeconds(3600), "UTC"));
+            assertEquals("lagging", lagging.sourceCoverage().get("content").status());
+            assertEquals(42L,
+                    lagging.sourceCoverage().get("content").projectionLagSeconds());
 
             String windowBucket = "aw-watcher-window_" + host;
             events.insertEvent(windowBucket, new Event(

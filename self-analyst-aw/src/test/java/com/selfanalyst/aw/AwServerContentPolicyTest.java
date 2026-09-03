@@ -12,6 +12,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.YearMonth;
+import java.time.ZoneOffset;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +41,7 @@ class AwServerContentPolicyTest {
                     event(legalData));
             assertEquals(200, legal.statusCode());
             assertEquals(1, server.eventStore().countByBucket(bucketId));
+            assertEquals(1, server.rawEventStore().count(YearMonth.now(ZoneOffset.UTC)));
 
             String forbiddenData = "{\"app\":\"Weixin.exe\",\"title\":\"微信\","
                     + "\"text_content\":\"" + FORBIDDEN + "\"}";
@@ -54,6 +57,8 @@ class AwServerContentPolicyTest {
             assertEquals(422, batch.statusCode());
             assertFalse(batch.body().contains(FORBIDDEN));
             assertEquals(1, server.eventStore().countByBucket(bucketId));
+            assertEquals(1, server.rawEventStore().count(YearMonth.now(ZoneOffset.UTC)),
+                    "禁止字段不得进入原始分区");
         } finally {
             server.stop();
         }

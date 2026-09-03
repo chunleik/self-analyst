@@ -3,6 +3,14 @@ package com.selfanalyst.aw;
 import com.selfanalyst.aw.controller.*;
 import com.selfanalyst.aw.log.ServerLog;
 import com.selfanalyst.aw.settings.SettingsManager;
+import com.selfanalyst.aw.projection.EventProjector;
+import com.selfanalyst.aw.projection.EventIngestionService;
+import com.selfanalyst.aw.projection.HeartbeatIngestionService;
+import com.selfanalyst.aw.projection.RawEventProjector;
+import com.selfanalyst.aw.projection.ProjectionRecoveryService;
+import com.selfanalyst.aw.raw.RawEventStore;
+import com.selfanalyst.aw.raw.RawEventQueryService;
+import com.selfanalyst.aw.raw.RawStorageStatusService;
 import com.selfanalyst.aw.store.*;
 import com.selfanalyst.aw.webui.WebUiHandler;
 import io.javalin.Javalin;
@@ -16,21 +24,53 @@ public class AwServer {
     private final Database db;
     private final BucketStore bucketStore;
     private final EventStore eventStore;
+    private final RawEventStore rawEventStore;
+    private final RawEventQueryService rawEventQueries;
+    private final RawStorageStatusService rawStatus;
     private final SettingsManager settings;
     private final ServerLog serverLog;
     private volatile int port;
     private final String desktopToken;
+    private final boolean projectionReady;
     private final AtomicBoolean stopped = new AtomicBoolean();
 
     public AwServer(Path dataDir, int port) {
         this(dataDir, port, System.getenv("SELF_ANALYST_DESKTOP_TOKEN"));
     }
 
+    public AwServer(Path dataDir, Path rawDir, int port,
+                    int queryMaxRangeDays, int queryMaxPageSize,
+                    long lowDiskWarnBytes, long lowDiskBlockBytes,
+                    int projectorBatchSize) {
+        this(dataDir, rawDir, port, System.getenv("SELF_ANALYST_DESKTOP_TOKEN"),
+                null, queryMaxRangeDays, queryMaxPageSize,
+                lowDiskWarnBytes, lowDiskBlockBytes, projectorBatchSize);
+    }
+
     AwServer(Path dataDir, int port, String desktopToken) {
+        this(dataDir, port, desktopToken, null);
+    }
+
+    AwServer(Path dataDir, int port, String desktopToken,
+             RawEventProjector projectorOverride) {
+        this(dataDir, dataDir.resolve("raw"), port, desktopToken, projectorOverride,
+                31, 1000, 10_737_418_240L, 1_073_741_824L, 1000);
+    }
+
+    private AwServer(Path dataDir, Path rawDir, int port, String desktopToken,
+                     RawEventProjector projectorOverride,
+                     int queryMaxRangeDays, int queryMaxPageSize,
+                     long lowDiskWarnBytes, long lowDiskBlockBytes,
+                     int projectorBatchSize) {
         this.port = port;
         this.desktopToken = desktopToken;
-        this.db = new Database(dataDir);
         PulseTimeConfig pulseConfig = PulseTimeConfig.DEFAULT;
+        this.rawEventStore = new RawEventStore(rawDir);
+        this.rawEventQueries = new RawEventQueryService(
+                rawDir, queryMaxRangeDays, queryMaxPageSize);
+        this.rawStatus = new RawStorageStatusService(rawDir,
+                dataDir.resolve("aw.db"), lowDiskWarnBytes, lowDiskBlockBytes);
+        this.db = new Database(dataDir);
         this.eventStore = new EventStore(db, pulseConfig);
         this.bucketStore = new BucketStore(db);
         this.settings = new SettingsManager(dataDir.resolve("settings.json"));
@@ -39,15 +79,33 @@ public class AwServer {
         InfoController infoCtrl = new InfoController();
         LogController logCtrl = new LogController(serverLog);
         BucketController bucketCtrl = new BucketController(bucketStore, eventStore);
-        EventController eventCtrl = new EventController(eventStore, bucketStore);
-        HeartbeatController heartbeatCtrl = new HeartbeatController(eventStore, bucketStore);
+        RawEventProjector projector = projectorOverride != null
+                ? projectorOverride
+                : new EventProjector(db, pulseConfig.pulsetime(), projectorBatchSize, "v1");
+        boolean recovered = true;
+        if (projector instanceof EventProjector eventProjector) {
+            try (ProjectionRecoveryService recovery = new ProjectionRecoveryService(
+                    rawDir, eventProjector)) {
+                recovery.recoverPending();
+            } catch (Exception recoveryFailure) {
+                recovered = false;
+            }
+        }
+        this.projectionReady = recovered;
+        EventController eventCtrl = new EventController(eventStore, bucketStore,
+                new EventIngestionService(rawEventStore, projector));
+        HeartbeatController heartbeatCtrl = new HeartbeatController(eventStore, bucketStore,
+                new HeartbeatIngestionService(rawEventStore, projector));
         QueryController queryCtrl = new QueryController(eventStore, bucketStore);
-        ExportController exportCtrl = new ExportController(bucketStore, eventStore);
+        ExportController exportCtrl = new ExportController(
+                bucketStore, eventStore, rawEventStore, projector);
         SettingsController settingsCtrl = new SettingsController(settings);
+        RawEventController rawEventCtrl = new RawEventController(rawEventQueries);
 
         this.app = Javalin.create(cfg -> {
             cfg.http.defaultContentType = "application/json";
         });
+        app.get("/desktop/raw-events", rawEventCtrl::query);
 
         // Enforce the loopback trust boundary before any API route can mutate state.
         this.app.before(ctx -> {
@@ -68,6 +126,12 @@ public class AwServer {
                 ctx.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
                 ctx.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-SelfAnalyst-Token");
                 ctx.header("Vary", "Origin");
+            }
+            if (LocalRequestGuard.isSensitiveRawPath(ctx.path())
+                    && !LocalRequestGuard.hasConfiguredDesktopToken(desktopToken)) {
+                ctx.status(503).json(Map.of("error", "Raw event capability unavailable"));
+                ctx.skipRemainingHandlers();
+                return;
             }
             if (LocalRequestGuard.isProtectedDesktopPath(ctx.path())
                     && !LocalRequestGuard.hasDesktopCredential(
@@ -131,6 +195,21 @@ public class AwServer {
         } catch (Exception error) {
             serverLog.error("Failed to close ActivityWatch database: " + error.getMessage());
         }
+        try {
+            rawEventStore.close();
+        } catch (Exception error) {
+            serverLog.error("Failed to close raw event store: " + error.getClass().getSimpleName());
+        }
+        try {
+            rawEventQueries.close();
+        } catch (Exception error) {
+            serverLog.error("Failed to close raw event queries: " + error.getClass().getSimpleName());
+        }
+        try {
+            rawStatus.close();
+        } catch (Exception error) {
+            serverLog.error("Failed to close raw status: " + error.getClass().getSimpleName());
+        }
     }
 
     public Database db() {
@@ -143,6 +222,18 @@ public class AwServer {
 
     public EventStore eventStore() {
         return eventStore;
+    }
+
+    public RawEventStore rawEventStore() {
+        return rawEventStore;
+    }
+
+    public Map<String, Object> rawStatus() {
+        return rawStatus.snapshot();
+    }
+
+    public boolean projectionReady() {
+        return projectionReady;
     }
 
     public SettingsManager settings() {

@@ -235,6 +235,9 @@ public class WikiTools {
         map.put("summary", entry.summary());
         map.put("primaryTask", entry.primaryTask());
         map.put("status", entry.status().name());
+        map.put("factBuilderVersion", entry.factBuilderVersion());
+        map.put("projectorVersion", entry.projectorVersion());
+        map.put("sourceCoverage", entry.sourceCoverage());
         if (!entry.taskSegments().isEmpty()) {
             map.put("taskSegments", entry.taskSegments());
         }

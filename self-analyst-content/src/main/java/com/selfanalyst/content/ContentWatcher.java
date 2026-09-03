@@ -48,6 +48,7 @@ public class ContentWatcher extends Thread {
     private volatile boolean running = true;
     private volatile boolean heartbeatHealthy = true;
     private volatile Thread captureThread;
+    private final ContentHeartbeatDelivery heartbeatDelivery = new ContentHeartbeatDelivery();
 
     /** Minimum heartbeat duration (seconds) — must exceed vis-timeline's filterShortEvents threshold of 1s. */
     private static final double HEARTBEAT_DURATION_S = 2.0;
@@ -184,7 +185,7 @@ public class ContentWatcher extends Thread {
                     latest = null;
                 }
             } catch (Exception e) {
-                log.error("Capture error", e);
+                log.error("Content capture failed type={}", e.getClass().getSimpleName());
             } finally {
                 long sleepNanos = pollIntervalNanos - (System.nanoTime() - cycleStartNanos);
                 if (running && sleepNanos > 0) {
@@ -240,10 +241,8 @@ public class ContentWatcher extends Thread {
 
             Map<String, Object> data = heartbeatData(app, title, result);
 
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("timestamp", Instant.now().toString());
-            body.put("duration", Math.max(HEARTBEAT_DURATION_S, pollIntervalMs / 1000.0));
-            body.put("data", data);
+            Map<String, Object> body = heartbeatDelivery.request(data, Instant.now(),
+                    Math.max(HEARTBEAT_DURATION_S, pollIntervalMs / 1000.0));
 
             String json = MAPPER.writeValueAsString(body);
 
@@ -257,8 +256,10 @@ public class ContentWatcher extends Thread {
             HttpResponse<Void> response =
                     httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             heartbeatHealthy = response.statusCode() >= 200 && response.statusCode() < 300;
+            heartbeatDelivery.complete(heartbeatHealthy);
         } catch (Exception e) {
             heartbeatHealthy = false;
+            heartbeatDelivery.complete(false);
         }
     }
 

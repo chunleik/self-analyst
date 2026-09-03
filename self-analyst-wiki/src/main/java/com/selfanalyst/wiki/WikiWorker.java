@@ -252,7 +252,8 @@ public class WikiWorker {
 
             store.updateStatus(id, WikiStatus.SUMMARIZED, result.summary(), result.primaryTask(),
                     result.taskSegments(), result.metrics(),
-                    List.of(), "llm", summarizer.promptVersion());
+                    List.of(), "llm", summarizer.promptVersion(),
+                    facts.factBuilderVersion(), facts.projectorVersion(), facts.sourceCoverage());
 
             log.debug("Summarized wiki entry {}: {}", id, result.primaryTask());
 

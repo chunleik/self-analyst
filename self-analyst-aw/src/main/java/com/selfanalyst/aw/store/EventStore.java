@@ -47,66 +47,40 @@ public class EventStore {
         }
     }
 
-    public Event insertHeartbeat(String bucketId, Event event) {
-        return insertHeartbeat(bucketId, event, pulseConfig.pulsetime());
-    }
-
-    public Event insertHeartbeat(String bucketId, Event event, int pulsetimeSeconds) {
-        validateEvent(bucketId, event);
-        var last = findLastEvent(bucketId);
-        if (last != null) {
-            String dataJson;
-            try {
-                dataJson = MAPPER.writeValueAsString(event.data());
-                String lastJson = MAPPER.writeValueAsString(last.data());
-                if (dataJson.equals(lastJson)) {
-                    Instant lastEnd = last.timestamp().plusMillis((long) (last.duration() * 1000));
-                    Instant mergeThreshold = lastEnd.plusSeconds(pulsetimeSeconds);
-                    if (!event.timestamp().isAfter(mergeThreshold)) {
-                        double newDuration = (double) (event.timestamp().toEpochMilli()
-                                + (long) (event.duration() * 1000)
-                                - last.timestamp().toEpochMilli()) / 1000.0;
-                        if (newDuration < 0) newDuration = event.duration();
-                        updateDuration(bucketId, last.id(), newDuration);
-                        return new Event(last.id(), last.timestamp(), newDuration, last.data());
-                    }
-                }
-            } catch (JsonProcessingException ignored) {}
-        }
-        return insertEvent(bucketId, event);
-    }
-
     public void validateEvent(String bucketId, Event event) {
         String client = bucketStore.get(bucketId).map(com.selfanalyst.aw.model.Bucket::client)
                 .orElse(null);
         ContentEventPolicy.validate(bucketId, client, event != null ? event.data() : null);
     }
 
-    private Event findLastEvent(String bucketId) {
-        String sql = "SELECT * FROM events WHERE bucket_id = ? ORDER BY timestamp DESC LIMIT 1";
+    public boolean bucketExists(String bucketId) {
+        return bucketStore.get(bucketId).isPresent();
+    }
+
+    public String currentProjectorVersion() {
+        try (Statement statement = db.metaConnection().createStatement();
+             ResultSet result = statement.executeQuery(
+                     "SELECT projector_version FROM raw_projection_sources ORDER BY projected_at DESC LIMIT 1")) {
+            return result.next() ? result.getString(1) : null;
+        } catch (SQLException failure) {
+            return null;
+        }
+    }
+
+    public java.util.Optional<Event> findById(String bucketId, long eventId) {
+        String sql = "SELECT * FROM events WHERE bucket_id = ? AND id = ?";
         try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
             ps.setString(1, bucketId);
+            ps.setLong(2, eventId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return mapEvent(rs);
+                    return java.util.Optional.of(mapEvent(rs));
                 }
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to find last event", e);
         }
-        return null;
-    }
-
-    private void updateDuration(String bucketId, long eventId, double newDuration) {
-        String sql = "UPDATE events SET duration = ? WHERE bucket_id = ? AND id = ?";
-        try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
-            ps.setDouble(1, newDuration);
-            ps.setString(2, bucketId);
-            ps.setLong(3, eventId);
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            throw new RuntimeException("Failed to update event duration", e);
-        }
+        return java.util.Optional.empty();
     }
 
     public List<Event> queryEvents(String bucketId, int limit) {
@@ -176,13 +150,38 @@ public class EventStore {
         }
     }
 
-    public int deleteByBucket(String bucketId) {
-        String sql = "DELETE FROM events WHERE bucket_id = ?";
-        try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {
-            ps.setString(1, bucketId);
-            return ps.executeUpdate();
+    public synchronized int deleteByBucket(String bucketId) {
+        Connection connection = db.metaConnection();
+        try {
+            boolean previousAutoCommit = connection.getAutoCommit();
+            connection.setAutoCommit(false);
+            try {
+                try (PreparedStatement coverage = connection.prepareStatement(
+                        "DELETE FROM projection_event_coverage WHERE bucket_id = ?")) {
+                    coverage.setString(1, bucketId);
+                    coverage.executeUpdate();
+                }
+                try (PreparedStatement sources = connection.prepareStatement(
+                        "DELETE FROM raw_projection_sources WHERE bucket_id = ?")) {
+                    sources.setString(1, bucketId);
+                    sources.executeUpdate();
+                }
+                int deleted;
+                try (PreparedStatement events = connection.prepareStatement(
+                        "DELETE FROM events WHERE bucket_id = ?")) {
+                    events.setString(1, bucketId);
+                    deleted = events.executeUpdate();
+                }
+                connection.commit();
+                return deleted;
+            } catch (SQLException failure) {
+                connection.rollback();
+                throw failure;
+            } finally {
+                connection.setAutoCommit(previousAutoCommit);
+            }
         } catch (SQLException e) {
-            throw new RuntimeException("Failed to delete events for bucket: " + bucketId, e);
+            throw new RuntimeException("Failed to delete projection events for bucket: " + bucketId, e);
         }
     }
 

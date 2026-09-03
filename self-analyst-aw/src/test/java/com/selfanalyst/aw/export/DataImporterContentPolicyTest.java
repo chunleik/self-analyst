@@ -6,6 +6,8 @@ import com.selfanalyst.aw.store.Database;
 import com.selfanalyst.aw.store.EventStore;
 import com.selfanalyst.aw.store.PulseTimeConfig;
 import com.selfanalyst.aw.model.Bucket;
+import com.selfanalyst.aw.projection.EventProjector;
+import com.selfanalyst.aw.raw.RawEventStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -25,10 +27,12 @@ class DataImporterContentPolicyTest {
 
     @Test
     void rejectsLegacyContentImportBeforeCreatingBucketsOrWritingRows() throws Exception {
-        try (Database db = new Database(tempDir)) {
+        try (Database db = new Database(tempDir);
+             RawEventStore raw = new RawEventStore(tempDir.resolve("raw"))) {
             BucketStore buckets = new BucketStore(db);
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
-            DataImporter importer = new DataImporter(buckets, events);
+            DataImporter importer = new DataImporter(buckets, events, raw,
+                    new EventProjector(db, 120, 1000, "v1"));
             String bucketId = "legacy-content-id";
 
             Map<String, Object> legal = event(Map.of(
@@ -58,10 +62,12 @@ class DataImporterContentPolicyTest {
 
     @Test
     void existingContentBucketMetadataCannotBeOverriddenDuringPreflight() throws Exception {
-        try (Database db = new Database(tempDir.resolve("existing"))) {
+        try (Database db = new Database(tempDir.resolve("existing"));
+             RawEventStore raw = new RawEventStore(tempDir.resolve("existing/raw"))) {
             BucketStore buckets = new BucketStore(db);
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
-            DataImporter importer = new DataImporter(buckets, events);
+            DataImporter importer = new DataImporter(buckets, events, raw,
+                    new EventProjector(db, 120, 1000, "v1"));
             String bucketId = "custom-content";
             buckets.create(Bucket.create(
                     bucketId, "Content", "listening", "aw-watcher-content", "test"));
@@ -83,10 +89,12 @@ class DataImporterContentPolicyTest {
 
     @Test
     void invalidEmptyBucketIsRejectedBeforeAnyBucketIsCreated() throws Exception {
-        try (Database db = new Database(tempDir.resolve("invalid-id"))) {
+        try (Database db = new Database(tempDir.resolve("invalid-id"));
+             RawEventStore raw = new RawEventStore(tempDir.resolve("invalid-id/raw"))) {
             BucketStore buckets = new BucketStore(db);
             DataImporter importer = new DataImporter(
-                    buckets, new EventStore(db, PulseTimeConfig.DEFAULT));
+                    buckets, new EventStore(db, PulseTimeConfig.DEFAULT), raw,
+                    new EventProjector(db, 120, 1000, "v1"));
             Map<String, Object> payload = Map.of(
                     "buckets", List.of(
                             Map.of("id", "valid-bucket", "client", "window"),

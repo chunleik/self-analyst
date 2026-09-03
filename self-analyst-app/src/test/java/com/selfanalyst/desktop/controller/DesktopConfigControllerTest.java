@@ -1,5 +1,8 @@
 package com.selfanalyst.desktop.controller;
 
+import com.selfanalyst.aw.raw.RawPartitionCatalog;
+import com.selfanalyst.aw.raw.RawPartitionMetadata;
+import com.selfanalyst.aw.raw.RawPartitionStatus;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.SupportedKeys;
@@ -11,6 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -238,6 +242,69 @@ class DesktopConfigControllerTest {
                 """));
 
         assertEquals("[file.watch]\nextensions = [\"md\"]\n", store.readRaw());
+    }
+
+    @Test
+    void invalidRawSettingsAreRejectedWithoutReplacingDiskFile(@TempDir Path dir)
+            throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        String original = "[aw.raw.integrity]\nverifyOnStartup = \"latest\"\n";
+        store.saveRaw(original);
+        var ctrl = controller(dir, store);
+
+        List<String> invalidTexts = List.of(
+                "[aw.raw.query]\nmaxRangeDays = 0\n",
+                "[aw.raw.query]\nmaxPageSize = 10001\n",
+                "[aw.raw.lowDisk]\nwarnBytes = 1024\nblockBytes = 1024\n",
+                "[aw.raw.projector]\nbatchSize = -1\n",
+                "[aw.raw.integrity]\nverifyOnStartup = \"none\"\n",
+                "[aw.raw]\nenabled = false\n");
+
+        for (String invalidText : invalidTexts) {
+            assertThrows(TomlValidationException.class,
+                    () -> ctrl.applyRawSave(invalidText), invalidText);
+            assertEquals(original, store.readRaw(), invalidText);
+        }
+    }
+
+    @Test
+    void rawDirectoryCannotChangeAfterCatalogContainsPartition(@TempDir Path dir)
+            throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        String original = "[aw.raw]\ndir = '" + dir.resolve("aw-data/raw") + "'\n";
+        store.saveRaw(original);
+        Config config = Config.testDefaults(dir);
+        try (RawPartitionCatalog catalog = new RawPartitionCatalog(config.awRawDir())) {
+            catalog.insert(new RawPartitionMetadata(
+                    "2026-09", "2026/raw-events-2026-09.db",
+                    Instant.parse("2026-09-01T00:00:00Z"), null,
+                    RawPartitionStatus.ACTIVE, 0, null, null, 0,
+                    null, null, RawPartitionCatalog.CATALOG_SCHEMA_VERSION));
+        }
+
+        TomlValidationException error = assertThrows(TomlValidationException.class,
+                () -> new DesktopConfigController(config, store).applyRawSave(
+                        "[aw.raw]\ndir = '" + dir.resolve("new-raw") + "'\n"));
+
+        assertTrue(error.getMessage().contains("aw.raw.dir"), error.getMessage());
+        assertEquals(original, store.readRaw());
+        try (RawPartitionCatalog catalog = new RawPartitionCatalog(config.awRawDir())) {
+            assertEquals(1, catalog.partitionCount());
+        }
+    }
+
+    @Test
+    void rawDirectoryCanChangeBeforeAnyPartitionExists(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        Config config = Config.testDefaults(dir);
+        try (RawPartitionCatalog ignored = new RawPartitionCatalog(config.awRawDir())) {
+            // catalog exists, but the first raw event has not created a partition yet
+        }
+        String replacement = "[aw.raw]\ndir = '" + dir.resolve("new-raw") + "'\n";
+
+        new DesktopConfigController(config, store).applyRawSave(replacement);
+
+        assertEquals(replacement, store.readRaw());
     }
 
     @Test

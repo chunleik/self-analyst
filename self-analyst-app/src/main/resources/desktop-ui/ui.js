@@ -49,6 +49,18 @@ function updateStatusBar() {
   state.dom.fileText.textContent = t("status.file");
   state.dom.fileStatusBtn.title = state.dom.fileDot.title;
 
+  // Permanent raw-event storage: only diagnostic metadata is rendered.
+  var raw = st.raw || { status: "unavailable" };
+  setStatusDotByState(state.dom.rawDot, raw.status, t("status.raw"));
+  state.dom.rawText.textContent = t("status.raw");
+  var rawTitle = state.dom.rawDot.title;
+  if (raw.diskWarning) rawTitle += "; " + t("status.diskWarning");
+  if (typeof raw.projectionLagSeconds === "number") {
+    rawTitle += "; " + t("status.projectionLag") + ": " + raw.projectionLagSeconds + "s";
+  }
+  state.dom.rawDot.title = rawTitle;
+  state.dom.rawText.title = rawTitle;
+
   // LLM
   var llmOk = st.llm && st.llm.configured;
   var llmTitle = t("status.llm") + " " + (llmOk ? t("status.ok") : t("status.notReady"));
@@ -65,9 +77,12 @@ function setStatusDot(el, ok, label) {
 }
 
 function setStatusDotByState(el, status, label) {
-  var css = status === "running" ? "green" : status === "degraded" ? "red" : "gray";
+  var css = status === "running" ? "green" :
+    (status === "degraded" || status === "blocked") ? "red" : "gray";
   var key = status === "running" ? "status.running" :
-    status === "degraded" ? "status.degraded" : "status.disabled";
+    status === "degraded" ? "status.degraded" :
+    status === "blocked" ? "status.blocked" :
+    status === "unavailable" ? "status.unavailable" : "status.disabled";
   el.className = "status-dot " + css;
   el.title = label + " " + t(key);
 }

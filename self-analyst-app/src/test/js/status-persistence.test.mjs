@@ -28,6 +28,12 @@ const context = {
         error: "simulated safe migration error",
       },
       llm: { configured: false },
+      raw: {
+        status: "blocked",
+        diskWarning: true,
+        projectionLagSeconds: 42,
+        data: "SELF_ANALYST_DOM_SECRET",
+      },
       aw: {},
     },
     dom: {
@@ -35,6 +41,8 @@ const context = {
       backendText: element(),
       collectorsDot: element(),
       collectorsText: element(),
+      rawDot: element(),
+      rawText: element(),
       fileStatusBtn: element(),
       fileDot: element(),
       fileText: element(),
@@ -59,3 +67,9 @@ assert.equal(
 );
 assert.match(context.state.dom.fileDot.className, /green/);
 assert.match(context.state.dom.fileStatusBtn.title, /status\.running/);
+assert.match(context.state.dom.rawDot.className, /red/);
+assert.match(context.state.dom.rawDot.title, /status\.blocked/);
+assert.match(context.state.dom.rawDot.title, /status\.diskWarning/);
+assert.match(context.state.dom.rawDot.title, /42s/);
+assert.doesNotMatch(context.state.dom.rawDot.title, /SELF_ANALYST_DOM_SECRET/);
+assert.doesNotMatch(context.state.dom.rawText.title, /SELF_ANALYST_DOM_SECRET/);

@@ -34,6 +34,7 @@ public class DesktopStatusController implements AutoCloseable {
     private final boolean contentPersistenceReady;
     private final String contentMigrationError;
     private final Supplier<String> fileCollectorStatus;
+    private volatile Supplier<Map<String, Object>> rawStatusSupplier;
 
     private final AtomicBoolean llmAvailableCache = new AtomicBoolean(false);
     private final AtomicLong llmCacheUpdatedAt = new AtomicLong(0);
@@ -104,6 +105,7 @@ public class DesktopStatusController implements AutoCloseable {
         aw.put("port", config.awPort());
         aw.put("webUrl", "http://localhost:" + config.awPort() + "/");
         status.put("aw", aw);
+        status.put("raw", rawStatus());
 
         // Collectors section
         Map<String, String> collectors = new LinkedHashMap<>();
@@ -130,6 +132,22 @@ public class DesktopStatusController implements AutoCloseable {
         status.put("llm", buildLlmStatus(llmAvailableCache.get()));
 
         return status;
+    }
+
+    public void setRawStatusSupplier(Supplier<Map<String, Object>> rawStatusSupplier) {
+        this.rawStatusSupplier = rawStatusSupplier;
+    }
+
+    private Map<String, Object> rawStatus() {
+        if (!config.awEmbedded()) return Map.of("status", "unavailable", "reason", "external_aw");
+        Supplier<Map<String, Object>> supplier = rawStatusSupplier;
+        if (supplier == null) return Map.of("status", "unavailable", "reason", "not_initialized");
+        try {
+            Map<String, Object> value = supplier.get();
+            return value == null ? Map.of("status", "degraded", "reason", "status_unavailable") : value;
+        } catch (RuntimeException failure) {
+            return Map.of("status", "degraded", "reason", "status_unavailable");
+        }
     }
 
     Map<String, Object> buildLlmStatus(boolean available) {

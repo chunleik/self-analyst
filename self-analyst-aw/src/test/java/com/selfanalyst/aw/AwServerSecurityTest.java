@@ -21,6 +21,23 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 class AwServerSecurityTest {
 
     @Test
+    void rawEventPathFailsClosedWithoutManagedToken(@TempDir Path dataDir) throws Exception {
+        int port = freePort();
+        AwServer server = new AwServer(dataDir, port, null);
+        server.start();
+        try {
+            HttpResponse<String> response = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(
+                                    "http://127.0.0.1:" + port + "/desktop/raw-events"))
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(503, response.statusCode());
+            assertFalse(response.body().contains("bucket"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
     void rejectsUntrustedOriginsHostsAndMissingDesktopCredential(@TempDir Path dataDir) throws Exception {
         int port = freePort();
         AwServer server = new AwServer(dataDir, port, "launch-secret");
@@ -51,6 +68,23 @@ class AwServerSecurityTest {
                     .header("X-SelfAnalyst-Token", "launch-secret")
                     .GET().build(), HttpResponse.BodyHandlers.ofString());
             assertFalse(credentialAccepted.statusCode() == 401);
+
+            String rawUrl = "http://127.0.0.1:" + port
+                    + "/desktop/raw-events?bucketId=secret-bucket";
+            assertEquals(401, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(401, client.send(HttpRequest.newBuilder(
+                            URI.create(rawUrl + "&token=launch-secret"))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(401, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
+                    .header("X-SelfAnalyst-Token", "wrong")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(400, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
+                    .header("X-SelfAnalyst-Token", "launch-secret")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(400, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
+                    .header("Cookie", "self_analyst_session=launch-secret")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
 
             assertEquals(403, statusWithRawHost(port, "attacker.example:" + port));
         } finally {

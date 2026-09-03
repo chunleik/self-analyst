@@ -5,6 +5,8 @@ import com.selfanalyst.aw.export.DataImporter;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
 import com.selfanalyst.aw.store.ContentEventPolicyViolationException;
+import com.selfanalyst.aw.projection.RawEventProjector;
+import com.selfanalyst.aw.raw.RawEventAppender;
 import io.javalin.http.Context;
 
 import java.util.Map;
@@ -14,9 +16,10 @@ public class ExportController {
     private final DataExporter exporter;
     private final DataImporter importer;
 
-    public ExportController(BucketStore bucketStore, EventStore eventStore) {
+    public ExportController(BucketStore bucketStore, EventStore eventStore,
+                            RawEventAppender rawAppender, RawEventProjector projector) {
         this.exporter = new DataExporter(bucketStore, eventStore);
-        this.importer = new DataImporter(bucketStore, eventStore);
+        this.importer = new DataImporter(bucketStore, eventStore, rawAppender, projector);
     }
 
     public void exportAll(Context ctx) {

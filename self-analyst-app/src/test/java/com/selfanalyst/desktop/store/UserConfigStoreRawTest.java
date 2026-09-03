@@ -80,4 +80,26 @@ class UserConfigStoreRawTest {
         assertTrue(store.readRaw().contains("custom-model"), store.readRaw());
         assertEquals("custom-model", store.loadUser().getProperty("llm.model"));
     }
+
+    @Test
+    void rawEventConfigValuesRoundTripWithDeclaredTomlTypes(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        Properties values = new Properties();
+        values.setProperty("aw.raw.dir", "D:\\self-analyst\\raw");
+        values.setProperty("aw.raw.query.maxRangeDays", "14");
+        values.setProperty("aw.raw.query.maxPageSize", "500");
+        values.setProperty("aw.raw.lowDisk.warnBytes", "10737418240");
+        values.setProperty("aw.raw.lowDisk.blockBytes", "1073741824");
+        values.setProperty("aw.raw.integrity.verifyOnStartup", "all");
+        values.setProperty("aw.raw.projector.batchSize", "256");
+
+        store.save(values);
+
+        Properties loaded = store.loadUser();
+        values.forEach((key, value) -> assertEquals(value, loaded.get(key), key.toString()));
+        String raw = store.readRaw();
+        assertTrue(raw.contains("[aw]"), raw);
+        assertTrue(raw.contains("raw.query.maxRangeDays = 14"), raw);
+        assertTrue(raw.contains("raw.integrity.verifyOnStartup = \"all\""), raw);
+    }
 }

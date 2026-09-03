@@ -39,6 +39,10 @@ public class WikiStore implements AutoCloseable {
                     createV2Schema(stmt);
                     stmt.execute("PRAGMA user_version=2");
                 }
+                if (version < 3) {
+                    createV3Schema(stmt);
+                    stmt.execute("PRAGMA user_version=3");
+                }
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize WikiStore", e);
@@ -110,6 +114,12 @@ public class WikiStore implements AutoCloseable {
             CREATE INDEX IF NOT EXISTS idx_wiki_semantic_documents_entry
               ON wiki_semantic_documents(entry_id, doc_type)
             """);
+    }
+
+    private void createV3Schema(Statement stmt) throws SQLException {
+        stmt.execute("ALTER TABLE wiki_entries ADD COLUMN fact_builder_version TEXT");
+        stmt.execute("ALTER TABLE wiki_entries ADD COLUMN projector_version TEXT");
+        stmt.execute("ALTER TABLE wiki_entries ADD COLUMN source_coverage_json TEXT");
     }
 
     // ── Semantic document CRUD ──
@@ -315,8 +325,9 @@ public class WikiStore implements AutoCloseable {
             INSERT OR REPLACE INTO wiki_entries
             (id, level, period_start, period_end, timezone, status, summary, primary_task,
              task_segments_json, metrics_json, source_entry_ids_json, model, prompt_version,
-             retry_count, next_retry_at, last_error, created_at, updated_at, summarized_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             retry_count, next_retry_at, last_error, created_at, updated_at, summarized_at,
+             fact_builder_version, projector_version, source_coverage_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, entry.id());
@@ -338,6 +349,9 @@ public class WikiStore implements AutoCloseable {
             ps.setString(17, entry.createdAt().toString());
             ps.setString(18, entry.updatedAt().toString());
             ps.setString(19, entry.summarizedAt() != null ? entry.summarizedAt().toString() : null);
+            ps.setString(20, entry.factBuilderVersion());
+            ps.setString(21, entry.projectorVersion());
+            ps.setString(22, toJson(entry.sourceCoverage()));
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to upsert wiki entry", e);
@@ -347,10 +361,20 @@ public class WikiStore implements AutoCloseable {
     public void updateStatus(String id, WikiStatus status, String summary, String primaryTask,
                               List<WikiEntry.TaskSegment> taskSegments, WikiEntry.WikiMetrics metrics,
                               List<String> sourceEntryIds, String model, String promptVersion) {
+        updateStatus(id, status, summary, primaryTask, taskSegments, metrics,
+                sourceEntryIds, model, promptVersion, null, null, Map.of());
+    }
+
+    public void updateStatus(String id, WikiStatus status, String summary, String primaryTask,
+                             List<WikiEntry.TaskSegment> taskSegments, WikiEntry.WikiMetrics metrics,
+                             List<String> sourceEntryIds, String model, String promptVersion,
+                             String factBuilderVersion, String projectorVersion,
+                             Map<String, WikiEntry.SourceCoverage> sourceCoverage) {
         String sql = """
             UPDATE wiki_entries SET status=?, summary=?, primary_task=?,
             task_segments_json=?, metrics_json=?, source_entry_ids_json=?,
-            model=?, prompt_version=?, updated_at=?, summarized_at=?
+            model=?, prompt_version=?, updated_at=?, summarized_at=?,
+            fact_builder_version=?, projector_version=?, source_coverage_json=?
             WHERE id=?
             """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -365,7 +389,10 @@ public class WikiStore implements AutoCloseable {
             String now = Instant.now().toString();
             ps.setString(9, now);
             ps.setString(10, status == WikiStatus.SUMMARIZED ? now : null);
-            ps.setString(11, id);
+            ps.setString(11, factBuilderVersion);
+            ps.setString(12, projectorVersion);
+            ps.setString(13, toJson(sourceCoverage));
+            ps.setString(14, id);
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to update wiki entry status", e);
@@ -509,7 +536,10 @@ public class WikiStore implements AutoCloseable {
                 rs.getString("last_error"),
                 parseInstant(rs.getString("created_at")),
                 parseInstant(rs.getString("updated_at")),
-                parseInstantNullable(rs.getString("summarized_at")));
+                parseInstantNullable(rs.getString("summarized_at")),
+                rs.getString("fact_builder_version"),
+                rs.getString("projector_version"),
+                parseCoverage(rs.getString("source_coverage_json")));
     }
 
     private static String toJson(Object obj) {
@@ -561,6 +591,16 @@ public class WikiStore implements AutoCloseable {
             return MAPPER.readValue(json, new TypeReference<List<String>>() {});
         } catch (Exception e) {
             return List.of();
+        }
+    }
+
+    private static Map<String, WikiEntry.SourceCoverage> parseCoverage(String json) {
+        if (json == null) return Map.of();
+        try {
+            return MAPPER.readValue(json,
+                    new TypeReference<Map<String, WikiEntry.SourceCoverage>>() {});
+        } catch (Exception e) {
+            return Map.of();
         }
     }
 

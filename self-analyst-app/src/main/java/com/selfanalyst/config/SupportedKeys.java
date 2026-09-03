@@ -71,6 +71,13 @@ public final class SupportedKeys {
         put("aw.base-url", "http://localhost:5700/api/0", KeyType.STRING);
         put("aw.timeout", "15000", KeyType.INTEGER);
         put("aw.data-dir", "./data/aw-data", KeyType.STRING);
+        put("aw.raw.dir", "./data/aw-data/raw", KeyType.STRING);
+        put("aw.raw.query.maxRangeDays", "31", KeyType.INTEGER);
+        put("aw.raw.query.maxPageSize", "1000", KeyType.INTEGER);
+        put("aw.raw.lowDisk.warnBytes", "10737418240", KeyType.INTEGER);
+        put("aw.raw.lowDisk.blockBytes", "1073741824", KeyType.INTEGER);
+        put("aw.raw.integrity.verifyOnStartup", "latest", KeyType.STRING);
+        put("aw.raw.projector.batchSize", "1000", KeyType.INTEGER);
         put("aw.collection.window", "true", KeyType.BOOLEAN);
         put("aw.collection.afk", "true", KeyType.BOOLEAN);
         put("aw.collection.content", "true", KeyType.BOOLEAN);
@@ -141,6 +148,13 @@ public final class SupportedKeys {
         describe("aw.base-url", "ActivityWatch HTTP API 基础地址。", "Base URL of the ActivityWatch HTTP API.");
         describe("aw.timeout", "ActivityWatch HTTP 请求超时时间（毫秒）。", "Timeout for ActivityWatch HTTP requests, in milliseconds.");
         describe("aw.data-dir", "ActivityWatch 数据文件目录。", "Directory for ActivityWatch data files.");
+        describe("aw.raw.dir", "永久原始事件分区和 catalog 的保存目录。", "Directory for permanent raw-event partitions and their catalog.");
+        describe("aw.raw.query.maxRangeDays", "单次原始事件查询允许的最大时间范围（天，最多 366）。", "Maximum time range allowed for one raw-event query, in days (up to 366).");
+        describe("aw.raw.query.maxPageSize", "单页原始事件查询允许返回的最大事件数（最多 10000）。", "Maximum number of raw events returned on one page (up to 10000).");
+        describe("aw.raw.lowDisk.warnBytes", "原始目录可用空间低于此字节数时发出告警。", "Warn when free space for the raw directory falls below this byte count.");
+        describe("aw.raw.lowDisk.blockBytes", "原始目录可用空间低于此字节数时阻止新采集。", "Block new collection when free space for the raw directory falls below this byte count.");
+        describe("aw.raw.integrity.verifyOnStartup", "启动完整性校验范围：latest 或 all。", "Startup integrity verification scope: latest or all.");
+        describe("aw.raw.projector.batchSize", "原始事件投影器单批处理的最大事件数（最多 10000）。", "Maximum number of raw events processed in one projector batch (up to 10000).");
         describe("aw.collection.window", "是否采集活动窗口与应用信息。", "Whether to collect active-window and application information.");
         describe("aw.collection.afk", "是否采集用户离开/活跃状态。", "Whether to collect user AFK/active status.");
         describe("aw.collection.content", "是否识别并保存活动窗口的上下文标题；不会保存 UIA 原始正文。", "Whether to identify and save active-window context titles without persisting raw UIA body text.");

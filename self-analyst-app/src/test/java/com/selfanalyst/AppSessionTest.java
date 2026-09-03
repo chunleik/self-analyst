@@ -8,6 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AppSessionTest {
 
     @Test
+    void desktopSessionCookieIsScopedToDesktopAndHttpOnly() {
+        assertEquals("self_analyst_session=token; Path=/desktop; HttpOnly; SameSite=Strict",
+                AppSession.desktopSessionCookie("token"));
+    }
+
+    @Test
     void desktopUiStartupLogMessageIncludesDesktopUiUrl() {
         assertEquals(
                 "Desktop UI 已就绪: http://localhost:5701/desktop-ui/",

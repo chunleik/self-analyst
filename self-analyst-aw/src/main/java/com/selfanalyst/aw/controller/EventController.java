@@ -1,6 +1,7 @@
 package com.selfanalyst.aw.controller;
 
 import com.selfanalyst.aw.model.Event;
+import com.selfanalyst.aw.projection.EventIngestionService;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
 import com.selfanalyst.aw.store.ContentEventPolicyViolationException;
@@ -19,10 +20,13 @@ public class EventController {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final EventStore eventStore;
     private final BucketStore bucketStore;
+    private final EventIngestionService ingestionService;
 
-    public EventController(EventStore eventStore, BucketStore bucketStore) {
+    public EventController(EventStore eventStore, BucketStore bucketStore,
+                           EventIngestionService ingestionService) {
         this.eventStore = eventStore;
         this.bucketStore = bucketStore;
+        this.ingestionService = ingestionService;
     }
 
     public void query(Context ctx) {
@@ -49,7 +53,8 @@ public class EventController {
     public void insert(Context ctx) {
         try {
             String bucketId = ctx.pathParam("id");
-            if (bucketStore.get(bucketId).isEmpty()) {
+            var bucket = bucketStore.get(bucketId);
+            if (bucket.isEmpty()) {
                 ctx.status(404).json(Map.of("error", "Bucket not found: " + bucketId));
                 return;
             }
@@ -66,6 +71,7 @@ public class EventController {
             }
 
             List<Event> parsedEvents = new ArrayList<>();
+            List<String> sourceEventIds = new ArrayList<>();
             for (Map<String, Object> eventData : eventsList) {
                 Instant timestamp = Instant.parse((String) eventData.get("timestamp"));
                 double duration = eventData.containsKey("duration")
@@ -77,18 +83,27 @@ public class EventController {
                         : Map.of();
 
                 parsedEvents.add(new Event(timestamp, duration, data));
+                sourceEventIds.add(eventData.get("sourceEventId") instanceof String value
+                        ? value : null);
             }
 
             // Validate the entire batch before the first write so policy failures are atomic.
             for (Event event : parsedEvents) {
                 eventStore.validateEvent(bucketId, event);
             }
-            for (Event event : parsedEvents) {
-                eventStore.insertEvent(bucketId, event);
+            List<EventIngestionService.Submission> submissions = new ArrayList<>();
+            for (int i = 0; i < parsedEvents.size(); i++) {
+                submissions.add(new EventIngestionService.Submission(
+                        parsedEvents.get(i), sourceEventIds.get(i)));
             }
-
+            EventIngestionService.Result ingestion = ingestionService.ingest(bucket.get(), submissions);
             bucketStore.updateLastUpdated(bucketId);
-            ctx.status(201).json(Map.of("success", true, "count", eventsList.size()));
+            ctx.status(ingestion.projectionPending() ? 202 : 201).json(Map.of(
+                    "success", true,
+                    "count", eventsList.size(),
+                    "rawEventIds", ingestion.rawEvents().stream().map(
+                            com.selfanalyst.aw.raw.RawEvent::eventId).toList(),
+                    "projectionStatus", ingestion.projectionPending() ? "pending" : "projected"));
         } catch (ContentEventPolicyViolationException e) {
             ctx.status(422).json(Map.of(
                     "error", "Content event violates persisted-field policy",

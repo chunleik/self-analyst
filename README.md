@@ -4,6 +4,10 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。窗口/AFK 状态
 ActivityWatch 存储并供 Wiki 聚合；用户显式配置目录中的文件系统元数据则由本地文件存储、
 FileTools 和桌面 API 提供查询，并以 metadata-only heartbeat 留存在本地 ActivityWatch 历史中。
 
+嵌入式 ActivityWatch 模式会先把每次通过隐私校验的原始事件永久、只追加地写入 UTC 月度
+SQLite 分区，再生成可合并、可重建的 `aw.db` 投影。外部 ActivityWatch 模式不提供这项永久保留
+保证。磁盘低于阻断阈值时系统拒绝新采集，不会自动删除最旧分区。
+
 当前“内容采集”的严格定义是标题采集：允许在识别时临时读取完整 UIA 控件树，但最终只保存
 系统窗口标题、微信对话人、文章/文档/页面标题及来源、置信度和时间等元数据，禁止保存 UIA 正文。
 
@@ -84,6 +88,16 @@ pnpm tauri dev
 | `aw.mode` | `AW_MODE` | `embedded` |
 | `aw.port` | `AW_PORT` | `5700` |
 | `aw.collection.content` | `AW_COLLECTION_CONTENT` | `true` |
+| `aw.raw.dir` | `AW_RAW_DIR` | `{aw.data-dir}/raw` |
+| `aw.raw.query.maxRangeDays` | `AW_RAW_QUERY_MAX_RANGE_DAYS` | `31` |
+| `aw.raw.query.maxPageSize` | `AW_RAW_QUERY_MAX_PAGE_SIZE` | `1000` |
+| `aw.raw.lowDisk.warnBytes` | `AW_RAW_LOW_DISK_WARN_BYTES` | `10737418240` |
+| `aw.raw.lowDisk.blockBytes` | `AW_RAW_LOW_DISK_BLOCK_BYTES` | `1073741824` |
+| `aw.raw.integrity.verifyOnStartup` | `AW_RAW_INTEGRITY_VERIFY_ON_STARTUP` | `latest` |
+| `aw.raw.projector.batchSize` | `AW_RAW_PROJECTOR_BATCH_SIZE` | `1000` |
+
+嵌入式模式的永久原始层固定启用，不支持 TTL、最大分区数或自动删除配置。产生分区后，普通配置
+保存不能修改 `aw.raw.dir`；目录迁移需要独立的显式转存流程。
 
 [移除说明](docs/archive/removed-features/removed-ocr-audio.md) 中列出的旧 OCR 键和所有 `aw.audio.*` 不再是受支持配置。
 加载旧文件时这些键不会导致启动失败，但不会产生任何功能。

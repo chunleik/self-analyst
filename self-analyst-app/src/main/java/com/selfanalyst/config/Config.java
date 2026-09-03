@@ -25,6 +25,13 @@ public record Config(
         boolean awEmbedded,
         int awPort,
         Path awDataDir,
+        Path awRawDir,
+        int awRawQueryMaxRangeDays,
+        int awRawQueryMaxPageSize,
+        long awRawLowDiskWarnBytes,
+        long awRawLowDiskBlockBytes,
+        RawIntegrityPolicy awRawIntegrityVerifyOnStartup,
+        int awRawProjectorBatchSize,
         boolean wikiEnabled,
         boolean wikiBackfillEnabled,
         int wikiWorkerIntervalSeconds,
@@ -86,7 +93,8 @@ public record Config(
         // The portable config location is independent from memory.dir, so config.toml
         // can choose where memory and indexes are stored without a bootstrap cycle.
         props.setProperty("aw.port", defaultAwPort);
-        overlayUserConfig(props, configDir);
+        Properties userProps = loadUserConfig(configDir);
+        props.putAll(userProps);
         String memDir = memoryDirOf(props);
 
         String apiKey = envOrProp(props, "llm.api-key", "OPENAI_API_KEY", "")
@@ -115,6 +123,26 @@ public record Config(
                 : configuredAwUrl;
         Path awDataDir = Path.of(envOrProp(props, "aw.data-dir", "AW_DATA_DIR",
                 memDir + "/aw-data"));
+        Path awRawDir = Path.of(envOrProp(userProps, "aw.raw.dir", "AW_RAW_DIR",
+                awDataDir.resolve("raw").toString()));
+        int awRawQueryMaxRangeDays = Integer.parseInt(envOrProp(props,
+                "aw.raw.query.maxRangeDays", "AW_RAW_QUERY_MAX_RANGE_DAYS", "31"));
+        int awRawQueryMaxPageSize = Integer.parseInt(envOrProp(props,
+                "aw.raw.query.maxPageSize", "AW_RAW_QUERY_MAX_PAGE_SIZE", "1000"));
+        long awRawLowDiskWarnBytes = Long.parseLong(envOrProp(props,
+                "aw.raw.lowDisk.warnBytes", "AW_RAW_LOW_DISK_WARN_BYTES", "10737418240"));
+        long awRawLowDiskBlockBytes = Long.parseLong(envOrProp(props,
+                "aw.raw.lowDisk.blockBytes", "AW_RAW_LOW_DISK_BLOCK_BYTES", "1073741824"));
+        RawIntegrityPolicy awRawIntegrityVerifyOnStartup = RawIntegrityPolicy.parse(
+                envOrProp(props, "aw.raw.integrity.verifyOnStartup",
+                        "AW_RAW_INTEGRITY_VERIFY_ON_STARTUP", "latest"));
+        int awRawProjectorBatchSize = Integer.parseInt(envOrProp(props,
+                "aw.raw.projector.batchSize", "AW_RAW_PROJECTOR_BATCH_SIZE", "1000"));
+        RawConfigValidator.rejectUnsupportedRetentionKeys(userProps);
+        RawConfigValidator.validate(awRawDir, awRawQueryMaxRangeDays,
+                awRawQueryMaxPageSize, awRawLowDiskWarnBytes,
+                awRawLowDiskBlockBytes, awRawIntegrityVerifyOnStartup,
+                awRawProjectorBatchSize);
 
         boolean wikiEnabled = Boolean.parseBoolean(
                 envOrProp(props, "wiki.enabled", "WIKI_ENABLED", "false"));
@@ -296,6 +324,9 @@ public record Config(
 
         return new Config(apiKey, baseUrl, model, awUrl, awTimeout,
                 Path.of(memDir), awEmbedded, awPort, awDataDir,
+                awRawDir, awRawQueryMaxRangeDays, awRawQueryMaxPageSize,
+                awRawLowDiskWarnBytes, awRawLowDiskBlockBytes,
+                awRawIntegrityVerifyOnStartup, awRawProjectorBatchSize,
                 wikiEnabled, wikiBackfillEnabled, wikiWorkerIntervalSeconds,
                 wikiPromptMaxContentChars, wikiTopAppsLimit,
                 wikiSemanticEnabled, wikiSemanticIndexDir, wikiSemanticTopK,
@@ -341,6 +372,9 @@ public record Config(
                 "", "https://api.openai.com/v1", "gpt-4o",
                 "http://localhost:5600/api/0", 15000, baseDir.resolve("memory"),
                 false, 5600, baseDir.resolve("aw-data"),
+                baseDir.resolve("aw-data/raw"), 31, 1000,
+                10_737_418_240L, 1_073_741_824L,
+                RawIntegrityPolicy.LATEST, 1000,
                 false, false, 60, 12000, 10,
                 false, baseDir.resolve("wiki-semantic-index"), 8,
                 false, "", "", "", 1024, true, 500,
@@ -388,15 +422,21 @@ public record Config(
      * visibility for load-priority tests.
      */
     static void overlayUserConfig(Properties props, Path configDir) {
+        props.putAll(loadUserConfig(configDir));
+    }
+
+    private static Properties loadUserConfig(Path configDir) {
+        Properties user = new Properties();
         Path toml = configDir.resolve("config.toml");
         if (Files.exists(toml)) {
             try {
-                props.putAll(TomlSupport.parseAndFlatten(
-                        Files.readString(toml, StandardCharsets.UTF_8)));
+                TomlSupport.parseAndFlatten(Files.readString(toml, StandardCharsets.UTF_8))
+                        .forEach(user::setProperty);
             } catch (IOException | RuntimeException e) {
                 log.warn("跳过无法解析的 {}: {}", toml, e.getMessage());
             }
         }
+        return user;
     }
 
     private static String envOrProp(Properties props, String propKey,

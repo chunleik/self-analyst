@@ -1,7 +1,9 @@
 package com.selfanalyst.desktop.controller;
 
+import com.selfanalyst.aw.raw.RawPartitionCatalog;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.config.DeprecatedKeys;
+import com.selfanalyst.config.RawConfigValidator;
 import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
@@ -18,6 +20,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
 
@@ -361,7 +364,9 @@ public class DesktopConfigController {
         }
         Properties newP = toProperties(flat);
         validateFileFilterSettings(newP);
+        validateRawSettings(newP);
         Properties oldP = userStore.loadUser();
+        validateRawDirectoryChange(newP);
         List<String> restart = computeRestartRequired(oldP, newP);
         List<String> unknown = computeUnknownKeys(newP);
         userStore.saveRaw(text);
@@ -383,6 +388,40 @@ public class DesktopConfigController {
         } catch (IllegalArgumentException invalidFilter) {
             throw new TomlValidationException(List.of(invalidFilter.getMessage()));
         }
+    }
+
+    static void validateRawSettings(Properties userProperties) {
+        try {
+            RawConfigValidator.validate(userProperties);
+        } catch (IllegalArgumentException invalidRawConfig) {
+            throw new TomlValidationException(List.of(invalidRawConfig.getMessage()));
+        }
+    }
+
+    private void validateRawDirectoryChange(Properties newUserProperties) {
+        Path current = config.awRawDir().toAbsolutePath().normalize();
+        Path proposed = proposedRawDirectory(newUserProperties).toAbsolutePath().normalize();
+        if (!current.equals(proposed) && RawPartitionCatalog.hasExistingPartitions(current)) {
+            throw new TomlValidationException(List.of(
+                    "aw.raw.dir 已有原始分区，普通配置保存不能修改；请使用独立的显式转存流程"));
+        }
+    }
+
+    private Path proposedRawDirectory(Properties newUserProperties) {
+        String envRawDir = System.getenv("AW_RAW_DIR");
+        if (envRawDir != null && !envRawDir.isBlank()) return Path.of(envRawDir);
+        String configuredRawDir = newUserProperties.getProperty("aw.raw.dir");
+        if (configuredRawDir != null && !configuredRawDir.isBlank()) {
+            return Path.of(configuredRawDir.replace(
+                    "${user.home}", System.getProperty("user.home")));
+        }
+        String envAwDataDir = System.getenv("AW_DATA_DIR");
+        String awDataDir = envAwDataDir != null && !envAwDataDir.isBlank()
+                ? envAwDataDir
+                : newUserProperties.getProperty("aw.data-dir",
+                        SupportedKeys.defaults().get("aw.data-dir"));
+        return Path.of(awDataDir.replace(
+                "${user.home}", System.getProperty("user.home"))).resolve("raw");
     }
 
     /**

@@ -133,6 +133,38 @@ public class Database implements AutoCloseable {
                         ")");
                 stmt.execute("CREATE TABLE IF NOT EXISTS schema_migrations ("
                         + "id TEXT PRIMARY KEY, completed_at TEXT NOT NULL)");
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS raw_projection_sources (
+                        raw_event_id TEXT PRIMARY KEY,
+                        bucket_id TEXT NOT NULL,
+                        projection_event_id INTEGER NOT NULL,
+                        projector_version TEXT NOT NULL,
+                        projected_at TEXT NOT NULL
+                    )
+                    """);
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS projection_event_coverage (
+                        projection_event_id INTEGER PRIMARY KEY,
+                        bucket_id TEXT NOT NULL,
+                        first_raw_event_id TEXT NOT NULL,
+                        last_raw_event_id TEXT NOT NULL,
+                        raw_event_count INTEGER NOT NULL CHECK (raw_event_count > 0),
+                        projector_version TEXT NOT NULL
+                    )
+                    """);
+                stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS raw_projection_checkpoints (
+                        partition_month TEXT PRIMARY KEY,
+                        received_at TEXT NOT NULL,
+                        event_id TEXT NOT NULL,
+                        projector_version TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """);
+                stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_raw_projection_sources_event
+                    ON raw_projection_sources(bucket_id, projection_event_id)
+                    """);
                 migrateEventAppSchema(connection);
                 if (createIndexes) {
                     createEventIndexes(stmt);

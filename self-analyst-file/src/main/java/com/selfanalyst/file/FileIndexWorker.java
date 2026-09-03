@@ -156,7 +156,7 @@ public class FileIndexWorker {
                             maybeEnqueue(root, file, attrs);
                         }
                     } catch (Exception e) {
-                        log.debug("Metadata reconcile skipped {} ({})", file, errorType(e));
+                        log.debug("Metadata reconcile skipped ({})", errorType(e));
                     }
                     return FileVisitResult.CONTINUE;
                 }
@@ -320,7 +320,7 @@ public class FileIndexWorker {
             }
             store.updateCollected(abs, attrs.size(), attrs.creationTime().toInstant(),
                     attrs.lastModifiedTime().toInstant());
-            log.debug("Collected file metadata {}", abs);
+            log.debug("Collected one file metadata record");
         } catch (Exception e) {
             if (cancelled.get() || !isActiveRoot(rec.watchRoot())) return;
             int retryCount = rec.retryCount() + 1;

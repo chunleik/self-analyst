@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ConfigTest {
@@ -38,6 +39,13 @@ class ConfigTest {
         assertEquals("true", props.getProperty("agent.compaction.enabled"));
         assertEquals("30", props.getProperty("agent.compaction.triggerMessages"));
         assertEquals("60000", props.getProperty("agent.compaction.triggerTokens"));
+        assertEquals("./data/aw-data/raw", props.getProperty("aw.raw.dir"));
+        assertEquals("31", props.getProperty("aw.raw.query.maxRangeDays"));
+        assertEquals("1000", props.getProperty("aw.raw.query.maxPageSize"));
+        assertEquals("10737418240", props.getProperty("aw.raw.lowDisk.warnBytes"));
+        assertEquals("1073741824", props.getProperty("aw.raw.lowDisk.blockBytes"));
+        assertEquals("latest", props.getProperty("aw.raw.integrity.verifyOnStartup"));
+        assertEquals("1000", props.getProperty("aw.raw.projector.batchSize"));
     }
 
     @Test
@@ -184,6 +192,75 @@ class ConfigTest {
             assertEquals(45731, config.awPort());
             assertEquals("http://localhost:45731/api/0", config.awBaseUrl());
         });
+    }
+
+    @Test
+    void rawEventSettingsUseDefaultsAndParseTomlOverrides(@TempDir Path dir) throws Exception {
+        Config defaults = Config.testDefaults(dir);
+        assertEquals(dir.resolve("aw-data/raw"), defaults.awRawDir());
+        assertEquals(31, defaults.awRawQueryMaxRangeDays());
+        assertEquals(1000, defaults.awRawQueryMaxPageSize());
+        assertEquals(10_737_418_240L, defaults.awRawLowDiskWarnBytes());
+        assertEquals(1_073_741_824L, defaults.awRawLowDiskBlockBytes());
+        assertEquals(RawIntegrityPolicy.LATEST, defaults.awRawIntegrityVerifyOnStartup());
+        assertEquals(1000, defaults.awRawProjectorBatchSize());
+
+        Path rawDir = dir.resolve("永久原始事件");
+        Files.writeString(dir.resolve("config.toml"), """
+                [aw.raw]
+                dir = '%s'
+                [aw.raw.query]
+                maxRangeDays = 7
+                maxPageSize = 250
+                [aw.raw.lowDisk]
+                warnBytes = 8589934592
+                blockBytes = 536870912
+                [aw.raw.integrity]
+                verifyOnStartup = "all"
+                [aw.raw.projector]
+                batchSize = 128
+                """.formatted(rawDir),
+                StandardCharsets.UTF_8);
+
+        Config configured = Config.load(dir);
+        assertEquals(rawDir, configured.awRawDir());
+        assertEquals(7, configured.awRawQueryMaxRangeDays());
+        assertEquals(250, configured.awRawQueryMaxPageSize());
+        assertEquals(8_589_934_592L, configured.awRawLowDiskWarnBytes());
+        assertEquals(536_870_912L, configured.awRawLowDiskBlockBytes());
+        assertEquals(RawIntegrityPolicy.ALL, configured.awRawIntegrityVerifyOnStartup());
+        assertEquals(128, configured.awRawProjectorBatchSize());
+    }
+
+    @Test
+    void rawIntegrityPolicyAcceptsOnlyLatestAndAll() {
+        assertEquals(RawIntegrityPolicy.LATEST, RawIntegrityPolicy.parse("latest"));
+        assertEquals(RawIntegrityPolicy.ALL, RawIntegrityPolicy.parse("ALL"));
+        assertThrows(IllegalArgumentException.class, () -> RawIntegrityPolicy.parse("none"));
+    }
+
+    @Test
+    void rawDirectoryDefaultsUnderConfiguredAwDataDirectory(@TempDir Path dir) throws Exception {
+        Path awDir = dir.resolve("自定义-aw");
+        Files.writeString(dir.resolve("config.toml"),
+                "[aw]\ndata-dir = '" + awDir + "'\n", StandardCharsets.UTF_8);
+
+        Config configured = Config.load(dir);
+
+        assertEquals(awDir.resolve("raw"), configured.awRawDir());
+    }
+
+    @Test
+    void invalidRawRuntimeSettingsAreRejected(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), """
+                [aw.raw.lowDisk]
+                warnBytes = 1024
+                blockBytes = 1024
+                """, StandardCharsets.UTF_8);
+
+        IllegalArgumentException error = assertThrows(
+                IllegalArgumentException.class, () -> Config.load(dir));
+        assertTrue(error.getMessage().contains("blockBytes"), error.getMessage());
     }
 
     @Test

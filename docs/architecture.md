@@ -12,6 +12,9 @@ Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2
 
 用户配置的监控目录 ─> 文件系统元数据采集 ─> file-watch.db ─> FileTools / 桌面 API
                                    └─> metadata-only heartbeat ─> ActivityWatch 通用历史
+
+通过策略的 heartbeat/events/import ─> 月度 raw SQLite（永久、只追加）
+                                      └─> 幂等投影器 ─> aw.db（合并、可重建）
 ```
 
 OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
@@ -40,6 +43,11 @@ UIA，将整棵树作为单次调用内的临时输入，依次尝试应用专�
 
 ## 4. 持久化边界
 
+嵌入式模式以 `{aw.raw.dir}/<yyyy>/raw-events-<yyyy-MM>.db` 作为事实源，按服务端 `receivedAt`
+的 UTC 月份分区。catalog 和封存 manifest 记录计数、边界、schema 版本与 SHA-256；封存分区只读。
+写入顺序固定为隐私校验、raw 事务提交、幂等投影与 checkpoint。投影失败只产生 pending 状态，
+不得回滚或删除已经提交的 raw 事实。`aw.db`、Wiki 与语义索引都是可删除、可重建的派生数据。
+
 内容事件 v2 允许 `app`、`title`、可选 `context_title/context_kind`、`title_source`、可选
 `title_confidence`、`uia_chars` 和时间元数据。共享写入策略覆盖 HTTP heartbeat/events、导入和
 内部存储调用。历史 v1 内容会在 watcher 启动前净化。
@@ -51,8 +59,10 @@ Wiki 只能消费标题事实；文件采集器不得读取普通文件正文、
 
 ## 5. 生命周期
 
-`AppSession` 的主要顺序是：加载配置 → 启动 AW → 执行内容历史迁移 → 启动窗口/AFK 与标题 watcher
-→ 启动 Wiki/文件/Agent → 启动桌面服务。关闭时按依赖反序停止 watcher、派生服务和 AW。
+`AppSession` 的主要顺序是：加载配置 → 初始化/验证 raw → 初始化并恢复 ActivityWatch 投影 →
+启动 HTTP → 启动窗口/AFK 与标题 watcher → 启动 Wiki/文件/Agent → 启动桌面服务。关闭时先停止
+产生新事件的 watcher，再等待 raw/投影事务完成并关闭数据库。raw 初始化失败不得启动采集器；
+投影恢复失败时只允许 raw 接收与诊断，Wiki 等依赖完整投影的消费者保持降级。
 
 不存在声音 watcher、声音控制器或 OCR 引擎生命周期。
 

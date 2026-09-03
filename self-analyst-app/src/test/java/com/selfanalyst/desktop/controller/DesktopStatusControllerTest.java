@@ -79,4 +79,20 @@ class DesktopStatusControllerTest {
             controller.close();
         }
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void externalAwReportsRawUnavailableWithoutCreatingLocalRawDirectory(@TempDir Path dir) {
+        Config external = Config.testDefaults(dir);
+        DesktopStatusController controller = new DesktopStatusController(external, null, null);
+        try {
+            Map<String, Object> raw = (Map<String, Object>)
+                    controller.statusPayload().get("raw");
+            assertEquals("unavailable", raw.get("status"));
+            assertEquals("external_aw", raw.get("reason"));
+            assertFalse(java.nio.file.Files.exists(external.awRawDir()));
+        } finally {
+            controller.close();
+        }
+    }
 }

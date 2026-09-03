@@ -126,7 +126,7 @@ public class FileWatcher {
                     reconcileRequester.accept(root.toAbsolutePath().normalize(),
                             root.toAbsolutePath().normalize());
                 } else {
-                    log.warn("Watch root not a directory, skipping: {}", root);
+                    log.warn("Configured watch root is unavailable");
                 }
             }
             registrationComplete = true;
@@ -138,7 +138,8 @@ public class FileWatcher {
         } catch (RuntimeException registrationFailure) {
             if (running) {
                 failRegistration(registrationFailure.getMessage());
-                log.warn("FileWatcher registration failed: {}", registrationFailure.getMessage());
+                log.warn("FileWatcher registration failed type={}",
+                        registrationFailure.getClass().getSimpleName());
             }
         } finally {
             registrationComplete = true;
@@ -207,7 +208,7 @@ public class FileWatcher {
                 }
             });
         } catch (IOException e) {
-            log.warn("Failed to register {}: {}", start, e.getMessage());
+            log.warn("Failed to register watch subtree type={}", e.getClass().getSimpleName());
         }
     }
 
@@ -222,7 +223,7 @@ public class FileWatcher {
             keyToDir.put(key, normalized);
         } catch (IOException e) {
             registeredDirs.remove(normalized);
-            log.debug("Failed to register dir {}: {}", dir, e.getMessage());
+            log.debug("Failed to register watch directory type={}", e.getClass().getSimpleName());
         }
     }
 
@@ -261,8 +262,8 @@ public class FileWatcher {
                     try {
                         store.markDeletedTree(invalidDir.toAbsolutePath().toString());
                     } catch (RuntimeException e) {
-                        log.debug("Failed to retire invalid watch tree {} ({})",
-                                invalidDir, e.getClass().getSimpleName());
+                        log.debug("Failed to retire invalid watch tree type={}",
+                                e.getClass().getSimpleName());
                     }
                 }
             }
@@ -332,7 +333,8 @@ public class FileWatcher {
                 try {
                     flushOne(file, p.eventType());
                 } catch (Exception ex) {
-                    log.debug("Flush failed for {}: {}", file, ex.getMessage());
+                    log.debug("Metadata debounce flush failed type={}",
+                            ex.getClass().getSimpleName());
                 }
             }
         }
@@ -400,21 +402,20 @@ public class FileWatcher {
             data.put("file_created_at", attrs.creationTime().toInstant().toString());
             data.put("last_modified", attrs.lastModifiedTime().toInstant().toString());
 
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("timestamp", Instant.now().toString());
-            body.put("duration", HEARTBEAT_DURATION_S);
-            body.put("data", data);
-
-            String json = MAPPER.writeValueAsString(body);
             String url = serverUrl + "/api/0/buckets/" + bucketId
                     + "/heartbeat?pulsetime=" + PULSETIME_S;
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(5))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json))
-                    .build();
-            httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            new FileHeartbeatDelivery().send(data, Instant.now(), HEARTBEAT_DURATION_S, body -> {
+                String json = MAPPER.writeValueAsString(body);
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(url))
+                        .timeout(Duration.ofSeconds(5))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(json))
+                        .build();
+                int status = httpClient.send(request,
+                        HttpResponse.BodyHandlers.discarding()).statusCode();
+                return status >= 200 && status < 300;
+            });
         } catch (Exception e) {
             // timeline best-effort
         }

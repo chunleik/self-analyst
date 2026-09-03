@@ -168,10 +168,14 @@ public class AppSession implements AutoCloseable {
         }
 
         // Wiki summarization worker
-        if (wikiStore != null && a != null && awServer != null && contentPersistenceReady) {
+        if (wikiStore != null && a != null && awServer != null
+                && contentPersistenceReady && awServer.projectionReady()) {
             try {
                 WikiFactBuilder factBuilder = new WikiFactBuilder(
-                        awServer.eventStore(), config.wikiPromptMaxContentChars());
+                        awServer.eventStore(), config.wikiPromptMaxContentChars(), () -> {
+                            Object lag = awServer.rawStatus().get("projectionLagSeconds");
+                            return lag instanceof Number number ? number.longValue() : null;
+                        });
                 WikiSummarizer summarizer = new WikiSummarizer(a.wikiLLMClient());
                 wikiWorker = new WikiWorker(wikiStore, factBuilder, summarizer,
                         ZoneId.systemDefault(),
@@ -187,7 +191,7 @@ public class AppSession implements AutoCloseable {
         }
 
         // Wiki summary buckets (feeds hourly/halfday/daily axes in AW timeline)
-        if (wikiStore != null && awServer != null) {
+        if (wikiStore != null && awServer != null && awServer.projectionReady()) {
             try {
                 wikiSummaryWatcher = new WikiSummaryWatcher(wikiStore,
                         awServer.bucketStore(), awServer.eventStore());
@@ -209,6 +213,7 @@ public class AppSession implements AutoCloseable {
                     contentPersistenceReady, contentMigrationError,
                     fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings,
                     userConfigStore);
+            desktopServer.statusController().setRawStatusSupplier(awServer::rawStatus);
             desktopServer.start();
             awServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));
@@ -217,7 +222,11 @@ public class AppSession implements AutoCloseable {
 
     private void startEmbeddedAW() {
         try {
-            awServer = new AwServer(config.awDataDir(), config.awPort());
+            awServer = new AwServer(
+                    config.awDataDir(), config.awRawDir(), config.awPort(),
+                    config.awRawQueryMaxRangeDays(), config.awRawQueryMaxPageSize(),
+                    config.awRawLowDiskWarnBytes(), config.awRawLowDiskBlockBytes(),
+                    config.awRawProjectorBatchSize());
             try {
                 var migration = ContentEventV2Migration.migrate(awServer.db());
                 contentPersistenceReady = migration.ready();
@@ -275,8 +284,7 @@ public class AppSession implements AutoCloseable {
                 ctx.status(403).json(java.util.Map.of("error", "Invalid desktop session token"));
                 return;
             }
-            ctx.header("Set-Cookie", "self_analyst_session=" + token
-                    + "; Path=/; HttpOnly; SameSite=Strict");
+            ctx.header("Set-Cookie", desktopSessionCookie(token));
             ctx.redirect("/desktop-ui/");
         });
         awServer.app().get("/desktop/lifecycle/health", ctx -> {
@@ -301,6 +309,11 @@ public class AppSession implements AutoCloseable {
                 shutdownSignal.run();
             });
         });
+    }
+
+    static String desktopSessionCookie(String token) {
+        return "self_analyst_session=" + token
+                + "; Path=/desktop; HttpOnly; SameSite=Strict";
     }
 
     private synchronized void applyFileWatchSettings(boolean enabled, List<Path> requestedRoots) {

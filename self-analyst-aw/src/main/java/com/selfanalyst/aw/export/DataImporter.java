@@ -5,6 +5,13 @@ import com.selfanalyst.aw.model.Event;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
 import com.selfanalyst.aw.store.ContentEventPolicy;
+import com.selfanalyst.aw.projection.RawEventProjector;
+import com.selfanalyst.aw.raw.CanonicalJson;
+import com.selfanalyst.aw.raw.RawEvent;
+import com.selfanalyst.aw.raw.RawEventAppender;
+import com.selfanalyst.aw.raw.RawEventIdGenerator;
+import com.selfanalyst.aw.raw.RawEventSource;
+import com.selfanalyst.aw.raw.RawIngestKind;
 
 import java.time.Instant;
 import java.util.*;
@@ -13,16 +20,23 @@ public class DataImporter {
 
     private final BucketStore bucketStore;
     private final EventStore eventStore;
+    private final RawEventAppender rawAppender;
+    private final RawEventProjector projector;
+    private final RawEventIdGenerator ids = new RawEventIdGenerator();
 
-    public DataImporter(BucketStore bucketStore, EventStore eventStore) {
+    public DataImporter(BucketStore bucketStore, EventStore eventStore,
+                        RawEventAppender rawAppender, RawEventProjector projector) {
         this.bucketStore = bucketStore;
         this.eventStore = eventStore;
+        this.rawAppender = rawAppender;
+        this.projector = projector;
     }
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> importData(Map<String, Object> data) {
         int bucketsImported = 0;
         int eventsImported = 0;
+        boolean projectionPending = false;
 
         List<Map<String, Object>> buckets = (List<Map<String, Object>>) data.get("buckets");
         Map<String, String> importedClients = new HashMap<>();
@@ -59,52 +73,76 @@ public class DataImporter {
             }
         }
 
-        // Import buckets
+        Map<String, Bucket> resolvedBuckets = new HashMap<>();
+        List<Bucket> newBuckets = new ArrayList<>();
         if (buckets != null) {
             for (Map<String, Object> bucketMap : buckets) {
                 String id = (String) bucketMap.get("id");
-                if (bucketStore.get(id).isPresent()) {
-                    continue; // Skip existing buckets
+                Bucket bucket = bucketStore.get(id).orElseGet(() -> Bucket.create(
+                        id, (String) bucketMap.getOrDefault("name", id),
+                        (String) bucketMap.getOrDefault("type", "unknown"),
+                        (String) bucketMap.getOrDefault("client", "unknown"),
+                        (String) bucketMap.getOrDefault("hostname", "unknown")));
+                resolvedBuckets.put(id, bucket);
+                if (bucketStore.get(id).isEmpty()) newBuckets.add(bucket);
+            }
+        }
+
+        String importSessionId = data.get("importSessionId") instanceof String explicit
+                && !explicit.isBlank() ? explicit : derivedSessionId(data);
+        Instant receivedAt = Instant.now();
+        List<RawEvent> rawEvents = new ArrayList<>();
+        if (eventsMap != null) {
+            for (String bucketId : new TreeSet<>(eventsMap.keySet())) {
+                List<Map<String, Object>> events = eventsMap.get(bucketId);
+                if (events == null) continue;
+                Bucket bucket = bucketStore.get(bucketId).orElse(resolvedBuckets.get(bucketId));
+                for (int ordinal = 0; ordinal < events.size(); ordinal++) {
+                    Map<String, Object> eventMap = events.get(ordinal);
+                    Instant timestamp = Instant.parse((String) eventMap.get("timestamp"));
+                    double duration = eventMap.containsKey("duration")
+                            ? ((Number) eventMap.get("duration")).doubleValue() : 0.0;
+                    Map<String, Object> eventData = eventMap.containsKey("data")
+                            ? (Map<String, Object>) eventMap.get("data") : Map.of();
+                    int schemaVersion = ContentEventPolicy.isContentBucket(
+                            bucketId, bucket.client()) ? 2 : 1;
+                    rawEvents.add(RawEvent.create(ids, null, bucketId, RawEventSource.IMPORT,
+                            schemaVersion, RawIngestKind.IMPORT, timestamp, receivedAt,
+                            duration, eventData, importSessionId, ordinal));
                 }
+            }
+        }
+        List<RawEvent> storedRawEvents = rawAppender.appendBatch(rawEvents);
 
-                String name = (String) bucketMap.getOrDefault("name", id);
-                String type = (String) bucketMap.getOrDefault("type", "unknown");
-                String client = (String) bucketMap.getOrDefault("client", "unknown");
-                String hostname = (String) bucketMap.getOrDefault("hostname", "unknown");
-
-                Bucket bucket = Bucket.create(id, name, type, client, hostname);
+        // Raw commit succeeded; only now create projection bucket metadata.
+        if (buckets != null) {
+            for (Bucket bucket : newBuckets) {
                 bucketStore.create(bucket);
                 bucketsImported++;
             }
         }
 
-        // Import events
-        if (eventsMap != null) {
-            for (Map.Entry<String, List<Map<String, Object>>> entry : eventsMap.entrySet()) {
-                String bucketId = entry.getKey();
-                List<Map<String, Object>> events = entry.getValue();
-                if (events == null) continue;
-
-                for (Map<String, Object> eventMap : events) {
-                    Instant timestamp = Instant.parse((String) eventMap.get("timestamp"));
-                    double duration = eventMap.containsKey("duration")
-                            ? ((Number) eventMap.get("duration")).doubleValue()
-                            : 0.0;
-                    Map<String, Object> eventData = eventMap.containsKey("data")
-                            ? (Map<String, Object>) eventMap.get("data")
-                            : Map.of();
-
-                    Event event = new Event(timestamp, duration, eventData);
-                    eventStore.insertEvent(bucketId, event);
-                    eventsImported++;
-                }
+        for (RawEvent rawEvent : storedRawEvents) {
+            try {
+                projector.project(rawEvent);
+            } catch (RuntimeException failure) {
+                projectionPending = true;
             }
+            eventsImported++;
         }
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
         result.put("buckets_imported", bucketsImported);
         result.put("events_imported", eventsImported);
+        result.put("import_session_id", importSessionId);
+        result.put("projection_status", projectionPending ? "pending" : "projected");
         return result;
+    }
+
+    private static String derivedSessionId(Map<String, Object> data) {
+        LinkedHashMap<String, Object> identity = new LinkedHashMap<>(data);
+        identity.remove("importSessionId");
+        return "import-v1-" + CanonicalJson.encode(identity).sha256();
     }
 }

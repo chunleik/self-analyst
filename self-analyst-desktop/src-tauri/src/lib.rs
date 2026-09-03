@@ -441,7 +441,24 @@ fn backend_exited(app: &AppHandle) -> bool {
 }
 
 fn create_main_window(app: &AppHandle, port: u16, token: &str) -> tauri::Result<()> {
-    let auth_script = format!(
+    let auth_script = desktop_auth_script(token);
+
+    WebviewWindowBuilder::new(
+        app,
+        "main",
+        WebviewUrl::External(backend_url(port, "/desktop-ui/").parse().unwrap()),
+    )
+    .title("SelfAnalyst")
+    .inner_size(1200.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .center()
+    .initialization_script(auth_script)
+    .build()?;
+    Ok(())
+}
+
+fn desktop_auth_script(token: &str) -> String {
+    format!(
         r#"
         (() => {{
             const originalFetch = window.fetch.bind(window);
@@ -459,20 +476,7 @@ fn create_main_window(app: &AppHandle, port: u16, token: &str) -> tauri::Result<
         }})();
         "#,
         token
-    );
-
-    WebviewWindowBuilder::new(
-        app,
-        "main",
-        WebviewUrl::External(backend_url(port, "/desktop-ui/").parse().unwrap()),
     )
-    .title("SelfAnalyst")
-    .inner_size(1200.0, 800.0)
-    .min_inner_size(800.0, 600.0)
-    .center()
-    .initialization_script(auth_script)
-    .build()?;
-    Ok(())
 }
 
 fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::tray::TrayIcon> {
@@ -567,7 +571,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_backend_port;
+    use super::{desktop_auth_script, parse_backend_port};
 
     #[test]
     fn parses_published_backend_port() {
@@ -579,5 +583,15 @@ mod tests {
         assert!(parse_backend_port("0").is_err());
         assert!(parse_backend_port("65536").is_err());
         assert!(parse_backend_port("not-a-port").is_err());
+    }
+
+    #[test]
+    fn desktop_token_script_is_scoped_to_same_origin_desktop_paths() {
+        let script = desktop_auth_script("launch-secret");
+        assert!(script.contains("url.origin === window.location.origin"));
+        assert!(script.contains("url.pathname.startsWith('/desktop/')"));
+        assert!(script.contains("X-SelfAnalyst-Token"));
+        assert!(script.contains("launch-secret"));
+        assert!(!script.contains("url.searchParams.get('token')"));
     }
 }

@@ -1,6 +1,8 @@
 package com.selfanalyst.aw.controller;
 
 import com.selfanalyst.aw.model.Event;
+import com.selfanalyst.aw.projection.HeartbeatIngestionService;
+import com.selfanalyst.aw.raw.ProjectionStatus;
 import com.selfanalyst.aw.store.BucketStore;
 import com.selfanalyst.aw.store.EventStore;
 import com.selfanalyst.aw.store.ContentEventPolicyViolationException;
@@ -17,16 +19,20 @@ public class HeartbeatController {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final EventStore eventStore;
     private final BucketStore bucketStore;
+    private final HeartbeatIngestionService ingestionService;
 
-    public HeartbeatController(EventStore eventStore, BucketStore bucketStore) {
+    public HeartbeatController(EventStore eventStore, BucketStore bucketStore,
+                               HeartbeatIngestionService ingestionService) {
         this.eventStore = eventStore;
         this.bucketStore = bucketStore;
+        this.ingestionService = ingestionService;
     }
 
     public void handle(Context ctx) {
         try {
             String bucketId = ctx.pathParam("id");
-            if (bucketStore.get(bucketId).isEmpty()) {
+            var bucket = bucketStore.get(bucketId);
+            if (bucket.isEmpty()) {
                 ctx.status(404).json(Map.of("error", "Bucket not found: " + bucketId));
                 return;
             }
@@ -42,7 +48,18 @@ public class HeartbeatController {
                     : Map.of();
 
             Event event = new Event(timestamp, duration, data);
-            Event result = eventStore.insertHeartbeat(bucketId, event);
+            eventStore.validateEvent(bucketId, event);
+            String sourceEventId = body.get("sourceEventId") instanceof String value ? value : null;
+            HeartbeatIngestionService.Result ingestion =
+                    ingestionService.ingest(bucket.get(), event, sourceEventId);
+            if (ingestion.projectionStatus() == ProjectionStatus.PENDING) {
+                ctx.status(202).json(Map.of(
+                        "rawEventId", ingestion.rawEvent().eventId(),
+                        "projectionStatus", "pending"));
+                return;
+            }
+            Event result = eventStore.findById(bucketId, ingestion.projectionEventId())
+                    .orElseThrow(() -> new IllegalStateException("投影事件不存在"));
             bucketStore.updateLastUpdated(bucketId);
 
             Map<String, Object> response = new LinkedHashMap<>();
@@ -50,6 +67,8 @@ public class HeartbeatController {
             response.put("timestamp", result.timestamp().toString());
             response.put("duration", result.duration());
             response.put("data", result.data());
+            response.put("rawEventId", ingestion.rawEvent().eventId());
+            response.put("projectionStatus", "projected");
             ctx.json(response);
         } catch (ContentEventPolicyViolationException e) {
             ctx.status(422).json(Map.of(

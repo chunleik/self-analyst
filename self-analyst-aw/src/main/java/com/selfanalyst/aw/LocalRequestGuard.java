@@ -54,6 +54,15 @@ final class LocalRequestGuard {
         return path != null && path.startsWith("/desktop/") && !"/desktop/session".equals(path);
     }
 
+    static boolean isSensitiveRawPath(String path) {
+        return "/desktop/raw-events".equals(path)
+                || (path != null && path.startsWith("/desktop/raw-"));
+    }
+
+    static boolean hasConfiguredDesktopToken(String configuredToken) {
+        return configuredToken != null && !configuredToken.isBlank();
+    }
+
     static boolean hasDesktopCredential(String configuredToken, String headerToken, String cookieToken) {
         if (configuredToken == null || configuredToken.isBlank()) {
             return true;

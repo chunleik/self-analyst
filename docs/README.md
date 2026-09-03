@@ -27,10 +27,19 @@
 | `llm-budget` | [spec](../openspec/specs/llm-budget/spec.md) | [旧文档](archive/legacy-specs/llm-budget.md) |
 | `llm-wiki` | [spec](../openspec/specs/llm-wiki/spec.md) | [旧文档](archive/legacy-specs/llm-wiki.md) |
 | `long-term-memory` | [spec](../openspec/specs/long-term-memory/spec.md) | [旧文档](archive/legacy-specs/long-term-memory.md) |
+| `raw-event-retention` | [spec](../openspec/specs/raw-event-retention/spec.md) | [归档 change](../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md) |
 | `title-capture` | [spec](../openspec/specs/title-capture/spec.md) | Git 历史 |
 | `user-configuration` | [spec](../openspec/specs/user-configuration/spec.md) | [配置旧文档](archive/legacy-specs/config-toml.md)、[核心旧文档](archive/legacy-specs/core.md) |
 | `user-profile-memory` | [spec](../openspec/specs/user-profile-memory/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `web-search` | [spec](../openspec/specs/web-search/spec.md) | [旧文档](archive/legacy-specs/web-search.md) |
+
+## 已实现的设计参考
+
+- [raw-event-permanent-retention-design.md](raw-event-permanent-retention-design.md) — 合规原始采集事件永久保留、不可变分区与可重建派生层设计
+
+本节保留已实现能力的设计背景与架构取舍，不作为独立行为契约。现行行为以
+[`raw-event-retention` 主规格](../openspec/specs/raw-event-retention/spec.md)为准，实施记录见
+[归档 change](../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md)。
 
 新增、删除或重命名 OpenSpec capability 时，必须同步更新本索引。现行契约只在对应
 `openspec/specs/<capability>/spec.md` 维护；一次性实施步骤不进入主规格，必要历史背景应写入

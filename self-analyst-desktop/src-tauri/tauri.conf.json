@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "identifier": "com.selfanalyst.desktop",
   "build": {
-    "frontendDist": "../self-analyst-app/src/main/resources/desktop-ui",
+    "frontendDist": "../../self-analyst-app/src/main/resources/desktop-ui",
     "devUrl": "http://localhost:5700/desktop-ui/",
     "beforeDevCommand": "",
     "beforeBuildCommand": ""
@@ -24,7 +24,17 @@
       "icons/128x128.png",
       "icons/icon.ico"
     ],
-    "resources": [],
-    "externalBin": []
+    "resources": {
+      "bundle-resources/": ""
+    },
+    "externalBin": [],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

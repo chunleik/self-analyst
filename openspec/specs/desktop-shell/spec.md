@@ -7,8 +7,10 @@
 ## Requirements
 
 ### Requirement: SPEC-DSK-ARCH-001、001a、001b、001c、001d 进程与通信边界
-桌面壳 SHALL 为每次启动生成随机 desktop token 和唯一端口文件路径，在桌面可执行文件所在目录启动
-Java 后端，并通过环境变量传递 token 与端口文件。后端 SHALL 在桌面生命周期路由可用后原子发布
+桌面壳 SHALL 为每次启动生成随机 desktop token 和唯一端口文件路径。便携模式 SHALL 从桌面可执行
+文件所在目录解析后端 JAR 与 Java runtime，并以该目录作为后端工作目录；安装模式 SHALL 从 Tauri
+resource 目录解析带安装布局标记的后端 JAR 与 Java runtime，并以当前用户的应用数据目录作为后端
+工作目录。桌面壳 SHALL 通过环境变量传递 token 与端口文件。后端 SHALL 在桌面生命周期路由可用后原子发布
 实际监听端口。业务交互 SHALL 使用该端口上的回环 HTTP；WebView MUST 加载
 `http://localhost:<actualPort>/desktop-ui/`，不得回退到硬编码端口。除 `/desktop/session` 外的
 `/desktop/*` 路由 SHALL 要求有效 header token 或会话 cookie。
@@ -24,6 +26,10 @@ Java 后端，并通过环境变量传递 token 与端口文件。后端 SHALL �
 #### Scenario: 受保护桌面请求
 - **WHEN** 请求访问 `/desktop/*` 且路径不是 `/desktop/session`
 - **THEN** 请求必须携带本次启动 token 的 header 或有效会话 cookie
+
+#### Scenario: 安装模式的数据目录
+- **WHEN** 从包含安装布局标记的 NSIS 安装目录启动桌面壳
+- **THEN** 壳从 Tauri resource 目录加载 JAR/runtime，并把后端工作目录设为当前用户应用数据目录
 
 ### Requirement: SPEC-DSK-TRAY-001 系统托盘
 系统托盘 SHALL 提供显示窗口、Web版桌面、关于和退出入口。显示入口及托盘左键点击 SHALL 显示并
@@ -57,8 +63,10 @@ WebView2 Runtime，不在便携包中捆绑固定 WebView2 版本。
 - **THEN** 新进程提示 SelfAnalyst 已在运行，并在启动 Java 后端前退出
 
 ### Requirement: SPEC-DSK-BACKEND-001、001a、001b、001c、001d、001e Java 后端管理
-桌面壳 SHALL 使用可用 Java 运行时执行同目录 `self-analyst-app.jar`，注入 desktop token 和唯一端口
-文件。壳 SHALL 最多等待 30 秒取得 `1..65535` 的十进制端口，再最多等待 30 秒以 token 调用
+桌面壳 SHALL 优先使用已解析分发根目录中的 Java runtime 执行 `self-analyst-app.jar`，仅在分发未携带
+runtime 时回退到系统 Java，并注入 desktop token 和唯一端口文件。带安装布局标记但缺少后端 JAR 的
+分发 MUST fail closed，不得回退到可执行文件目录中的其他 JAR。壳 SHALL 最多等待 30 秒取得
+`1..65535` 的十进制端口，再最多等待 30 秒以 token 调用
 `/desktop/lifecycle/health`。端口文件读取后 SHALL 清理。后端提前退出、端口非法、端口等待超时或
 健康检查超时时，桌面启动 MUST fail closed，不使用猜测端口。正常退出 SHALL 请求认证 shutdown，
 等待有限时间后终止仍存活的子进程；Windows Job Object SHALL 在壳异常终止时回收受管后端。
@@ -78,6 +86,10 @@ WebView2 Runtime，不在便携包中捆绑固定 WebView2 版本。
 #### Scenario: 后端未响应 shutdown
 - **WHEN** 正常退出请求后 Java 子进程在等待期内仍未结束
 - **THEN** 壳终止并等待该受管子进程退出
+
+#### Scenario: 安装资源不完整
+- **WHEN** 安装布局标记存在但安装 resource 目录缺少后端 JAR
+- **THEN** 壳在启动任何后端前失败，不使用相邻目录中的未知 JAR
 
 ### Requirement: SPEC-DSK-WEB-001 WebView 与浏览器认证
 WebView SHALL 从实际后端端口加载桌面 UI。初始化脚本 SHALL 只为同源且路径以 `/desktop/` 开头的 fetch 注入 `X-SelfAnalyst-Token`，MUST NOT 向外部 origin 发送 token。系统浏览器入口 SHALL 通过 `/desktop/session?token=...` 交换设置为 `HttpOnly; SameSite=Strict; Path=/desktop` 的会话 cookie，并重定向到桌面 UI；无效 token SHALL 返回 403。服务 SHALL 校验 Host 和 Origin 的回环边界，业务接口 MUST NOT 接受 query 参数 token。
@@ -116,7 +128,9 @@ WebView SHALL 从实际后端端口加载桌面 UI。初始化脚本 SHALL 只�
 ### Requirement: SPEC-DSK-BLD-001 正式构建产物
 正式 Windows 构建 SHALL 生成 `SelfAnalyst.exe` 与 `self-analyst-app.jar`；accessibility sidecar SHALL
 作为应用 JAR 资源随包提供，而不是依赖运行机器安装 Rust。便携构建 SHALL 额外包含精简 Java runtime，
-并生成免安装 ZIP；正式产物 MUST NOT 恢复已移除的 OCR 或音频工具目录。WebView2 继续由系统提供。
+生成免安装 ZIP 和 SHA-256。NSIS 构建 SHALL 把后端 JAR、精简 Java runtime 与安装布局标记放入 Tauri
+resource，并生成安装包和 SHA-256；安装、升级或卸载应用文件 MUST NOT 把用户数据库和配置放在安装
+目录中。正式产物 MUST NOT 恢复已移除的 OCR 或音频工具目录。WebView2 继续由系统提供。
 
 #### Scenario: 普通分发目录
 - **WHEN** 执行正式 dist 构建
@@ -125,6 +139,10 @@ WebView SHALL 从实际后端端口加载桌面 UI。初始化脚本 SHALL 只�
 #### Scenario: 便携分发目录
 - **WHEN** 执行 portable 构建
 - **THEN** 输出额外包含可运行 Java runtime，并可打包为免安装 ZIP
+
+#### Scenario: NSIS 安装包
+- **WHEN** 执行 installer 构建
+- **THEN** 安装包包含桌面壳、后端 JAR、Java runtime 与安装布局标记，并可完成静默安装、后端冒烟和卸载验证
 
 ### Requirement: SPEC-DSK-BLD-002 开发模式
 桌面开发模式 SHALL 使用 Node/pnpm 准备前端依赖并由 Tauri 启动桌面壳；Java 后端 JAR 和必要边车

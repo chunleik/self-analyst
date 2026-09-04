@@ -17,6 +17,8 @@ tools/
 dist/
 /dist-portable/
 /artifacts/
+/.tmp/
+/.pnpm-store/
 # 本地设计/brainstorm 临时产物（可由不同开发工具生成），不属于项目文档或仓库配置
 .superpowers/
 .worktrees/
@@ -27,6 +29,10 @@ dist/
 
 # 本机 cargo 配置（含机器相关的 linker 路径），见同目录 .example
 self-analyst-desktop/src-tauri/.cargo/config.toml
+
+# Tauri 安装包暂存的后端 JAR 与 jlink runtime；仅布局标记入库
+self-analyst-desktop/src-tauri/bundle-resources/*
+!self-analyst-desktop/src-tauri/bundle-resources/installed-layout.marker
 
 # 由 scripts/build-axsidecar.ps1 编译并暂存的边车二进制（SPEC-AXS-060），不入库
 self-analyst-content/src/main/resources/axsidecar/

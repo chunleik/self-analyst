@@ -33,20 +33,12 @@
 | `user-profile-memory` | [spec](../openspec/specs/user-profile-memory/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `web-search` | [spec](../openspec/specs/web-search/spec.md) | [旧文档](archive/legacy-specs/web-search.md) |
 
-## 已实现的设计参考
-
-- [raw-event-permanent-retention-design.md](raw-event-permanent-retention-design.md) — 合规原始采集事件永久保留、不可变分区与可重建派生层设计
-
-本节保留已实现能力的设计背景与架构取舍，不作为独立行为契约。现行行为以
-[`raw-event-retention` 主规格](../openspec/specs/raw-event-retention/spec.md)为准，实施记录见
-[归档 change](../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md)。
-
 新增、删除或重命名 OpenSpec capability 时，必须同步更新本索引。现行契约只在对应
 `openspec/specs/<capability>/spec.md` 维护；一次性实施步骤不进入主规格，必要历史背景应写入
 `docs/archive/` 并明确标注取代关系。
 
 ## 归档
 
-- [archive/design-proposals/](archive/design-proposals/) — 已被正式规格取代、但仍保留背景价值的历史设计提案
+- [archive/design-proposals/](archive/design-proposals/) — 已被正式规格取代、但仍保留背景价值的历史设计提案，包括[原始事件永久保留设计](archive/design-proposals/2026-08-30-raw-event-permanent-retention-design.md)
 - [archive/legacy-specs/](archive/legacy-specs/) — 未逐项纳入主规格的旧实施决策、测试条目和稳定 ID
 - [archive/removed-features/](archive/removed-features/) — 已移除功能的恢复基线索引

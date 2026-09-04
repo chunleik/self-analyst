@@ -53,13 +53,28 @@ struct Response {
 
 impl Response {
     fn ok(id: u64, root: AxNode) -> Self {
-        Response { id, status: "ok", root: Some(root), error: None }
+        Response {
+            id,
+            status: "ok",
+            root: Some(root),
+            error: None,
+        }
     }
     fn null(id: u64) -> Self {
-        Response { id, status: "null", root: None, error: None }
+        Response {
+            id,
+            status: "null",
+            root: None,
+            error: None,
+        }
     }
     fn error(id: u64, msg: String) -> Self {
-        Response { id, status: "error", root: None, error: Some(msg) }
+        Response {
+            id,
+            status: "error",
+            root: None,
+            error: Some(msg),
+        }
     }
 }
 
@@ -163,7 +178,11 @@ mod platform {
         let name = el.get_name().unwrap_or_default();
         let secure = el.is_password().unwrap_or(false);
         // SPEC-AXS-014b: never emit a real secret value.
-        let value = if secure { "***".to_string() } else { value_of(el) };
+        let value = if secure {
+            "***".to_string()
+        } else {
+            value_of(el)
+        };
         let bounds = el
             .get_bounding_rectangle()
             .map(|r| {
@@ -185,7 +204,14 @@ mod platform {
             }
         }
 
-        AxNode { role, name, value, secure, bounds, children }
+        AxNode {
+            role,
+            name,
+            value,
+            secure,
+            bounds,
+            children,
+        }
     }
 
     fn value_of(el: &UIElement) -> String {
@@ -255,7 +281,10 @@ mod platform {
             Backend
         }
         pub fn query(&self, id: u64, _handle: isize) -> Response {
-            Response::error(id, "accessibility backend not implemented on this OS".into())
+            Response::error(
+                id,
+                "accessibility backend not implemented on this OS".into(),
+            )
         }
     }
 }

@@ -35,7 +35,7 @@ import java.util.concurrent.TimeUnit;
  * it unchanged for an apples-to-apples equivalence check. Phase 2 renames the
  * model to a neutral {@code AccessibilityNode} (SPEC-AXS-030).
  */
-public final class AxSidecarClient {
+public final class AxSidecarClient implements AutoCloseable {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final long DEFAULT_TIMEOUT_MS = 1500L;
@@ -74,7 +74,7 @@ public final class AxSidecarClient {
     public AxSidecarClient(String binaryPath, long timeoutMs) {
         this.binaryPath = binaryPath;
         this.timeoutMs = timeoutMs;
-        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "axsidecar-shutdown"));
+        Runtime.getRuntime().addShutdownHook(new Thread(this::close, "axsidecar-shutdown"));
     }
 
     /** Returns whether a sidecar binary is configured/extractable. */
@@ -163,7 +163,8 @@ public final class AxSidecarClient {
         responses = null;
     }
 
-    private void shutdown() {
+    @Override
+    public void close() {
         synchronized (lock) {
             cleanup();
         }

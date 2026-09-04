@@ -1,11 +1,15 @@
 # 原始采集事件永久保留设计方案
 
-> 状态：设计草案，尚未实现
+> 状态：已实现，作为历史设计参考保留
 >
 > 日期：2026-08-30
 >
 > 适用模块：`self-analyst-aw`、`self-analyst-content`、`self-analyst-file`、
 > `self-analyst-wiki`、`self-analyst-app`
+>
+> 现行行为以 [`raw-event-retention` 主规格](../../../openspec/specs/raw-event-retention/spec.md)
+> 为准，实施记录见
+> [`retain-raw-events-permanently` 归档 change](../../../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md)。
 
 ## 1. 设计结论
 

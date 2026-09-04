@@ -58,6 +58,18 @@
 
 ## 3. 手动 UIA 冒烟测试
 
+### SPEC-ITEST-UIA-000：非敏感自动冒烟
+
+`SyntheticUiaSmokeTest` 仅创建一个位于屏幕外、标题随机且不含用户内容的测试窗口，取得该窗口 HWND，
+再通过真实 Windows UIAutomation sidecar 连续执行冷、热两次查询。该测试不会读取当前前台窗口，供
+Windows CI 和 release workflow 显式启用：
+
+```powershell
+.\scripts\build-axsidecar.ps1
+mvn -pl self-analyst-content -am -Dselfanalyst.synthetic.uia=true `
+  -Dtest=SyntheticUiaSmokeTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
 ### SPEC-ITEST-UIA-001：显式启用
 
 `ManualUiaSmokeTest` 默认由 JUnit 跳过。只有开发者在已知前台窗口可被读取、并确认当前桌面内容适合
@@ -86,6 +98,12 @@ mvn -pl self-analyst-app -am -Dtest=DesktopServerIntegrationTest `
 
 # Rust accessibility sidecar
 cargo test --manifest-path self-analyst-axsidecar/Cargo.toml
+
+# 打包后端的真实进程、认证、状态、静态资源和关闭冒烟
+.\scripts\check-packaged-jar.ps1
+
+# 对最新 NSIS 产物执行工作区内静默安装、重装、资源检查、后端冒烟和卸载
+.\scripts\check-installer.ps1
 ```
 
 ## 5. 资源与隐私
@@ -96,9 +114,14 @@ cargo test --manifest-path self-analyst-axsidecar/Cargo.toml
 - HTTP 服务使用随机或临时端口，并在 `@AfterEach` 中关闭。
 - 测试不得访问用户真实数据目录、真实 LLM 服务或提交密钥。
 - 自动化测试不得读取真实前台窗口；只有 `ManualUiaSmokeTest` 的显式入口可以这样做。
+- Windows CI 的 UIA 验证只允许查询测试进程自己创建的受控窗口，不得取得或遍历用户前台窗口。
 
 ### SPEC-ITEST-011：构建一致性
 
 - 根 POM 只聚合生产模块。
 - `mvn test` 不得出现承载测试代码但报告 `No tests to run` 的测试专用子模块。
 - 修复缺陷时先运行针对性测试，再运行根项目全量测试。
+- GitHub Actions 的 Windows CI SHALL 执行 OpenSpec 严格校验、Java/Node/Rust 测试、Rust 格式与
+  Clippy、可执行 JAR 打包及真实进程冒烟。
+- Windows release workflow SHALL 重建 portable ZIP 和 NSIS 安装包，校验内置 JAR/JRE、生成
+  SHA-256，并完成隔离目录中的静默安装与卸载。

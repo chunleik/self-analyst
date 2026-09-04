@@ -31,7 +31,8 @@
 |------|------|
 | `build-axsidecar.ps1` | 构建 Rust accessibility sidecar 并暂存到 Java 资源目录 |
 | `build-dist.ps1` | 构建 Java、桌面壳、sidecar，并组装 `dist/` |
-| `build-portable.ps1` | 生成单一 Windows 免安装包 `artifacts/SelfAnalyst-portable.zip` |
+| `build-portable.ps1` | 生成 Windows 免安装 ZIP 及 SHA-256 |
+| `build-installer.ps1` | 生成内含后端 JAR 与 jlink runtime 的 NSIS 安装包及 SHA-256 |
 
 OCR 与声音功能已暂时移除，因此构建脚本不下载或携带 PaddleOCR、Tesseract、Whisper 和语音模型。
 
@@ -47,6 +48,8 @@ OCR 与声音功能已暂时移除，因此构建脚本不下载或携带 Paddle
 | `check-desktop-config-editor.ps1` | TOML raw 配置编辑器 |
 | `check-desktop-i18n.ps1` | 中英文消息目录和文案接线 |
 | `check-desktop-behavior-advice.ps1` | 行为建议卡片 |
+| `check-packaged-jar.ps1` | 在无采集临时环境中验证 fat JAR 的启动、认证、状态、静态资源和关闭 |
+| `check-installer.ps1` | 在工作区临时目录中完成 NSIS 静默安装、重装、资源检查、后端冒烟和卸载 |
 
 ```powershell
 .\scripts\check-desktop-tray.ps1
@@ -55,4 +58,6 @@ OCR 与声音功能已暂时移除，因此构建脚本不下载或携带 Paddle
 .\scripts\check-desktop-config-editor.ps1
 .\scripts\check-desktop-i18n.ps1
 .\scripts\check-desktop-behavior-advice.ps1
+.\scripts\check-packaged-jar.ps1
+.\scripts\check-installer.ps1
 ```

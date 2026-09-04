@@ -124,16 +124,39 @@
                 </executions>
                 <configuration>
                     <filters>
+                        <!-- mcp-core 0.17.0 duplicates these byte-identical API classes from
+                             mcp-json. Keep the dedicated mcp-json copy in the executable JAR. -->
+                        <filter>
+                            <artifact>io.modelcontextprotocol.sdk:mcp-core</artifact>
+                            <excludes>
+                                <exclude>io/modelcontextprotocol/json/**</exclude>
+                            </excludes>
+                        </filter>
+                        <!-- jna and jna-platform carry identical license aliases. -->
+                        <filter>
+                            <artifact>net.java.dev.jna:jna-platform</artifact>
+                            <excludes>
+                                <exclude>META-INF/AL2.0</exclude>
+                                <exclude>META-INF/LGPL2.1</exclude>
+                            </excludes>
+                        </filter>
                         <filter>
                             <artifact>*:*</artifact>
                             <excludes>
                                 <exclude>META-INF/*.SF</exclude>
                                 <exclude>META-INF/*.DSA</exclude>
                                 <exclude>META-INF/*.RSA</exclude>
+                                <exclude>META-INF/MANIFEST.MF</exclude>
+                                <exclude>module-info.class</exclude>
+                                <exclude>META-INF/versions/**/module-info.class</exclude>
+                                <exclude>META-INF/versions/**/OSGI-INF/MANIFEST.MF</exclude>
+                                <exclude>META-INF/kotlin-project-structure-metadata.json</exclude>
                             </excludes>
                         </filter>
                     </filters>
                     <transformers>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheLicenseResourceTransformer"/>
+                        <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer"/>
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                             <mainClass>com.selfanalyst.App</mainClass>
                         </transformer>

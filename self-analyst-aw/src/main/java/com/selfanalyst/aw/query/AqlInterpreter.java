@@ -77,8 +77,9 @@ public class AqlInterpreter {
 
                 if (rawArgs.length > 0) {
                     Object first = resolveArg(rawArgs[0], variables, functions, ctx);
-                    if (first instanceof List<?> list && !list.isEmpty() && list.getFirst() instanceof Event) {
-                        input = (List<Event>) first;
+                    List<Event> eventList = asNonEmptyEventList(first);
+                    if (eventList != null) {
+                        input = eventList;
                     } else {
                         params.put(String.valueOf(paramIdx++), first);
                     }
@@ -107,8 +108,9 @@ public class AqlInterpreter {
                 int paramIdx = 0;
                 if (rawArgs.length > 0) {
                     Object first = resolveArg(rawArgs[0], variables, functions, ctx);
-                    if (first instanceof List<?> list && !list.isEmpty() && list.getFirst() instanceof Event) {
-                        input = (List<Event>) first;
+                    List<Event> eventList = asNonEmptyEventList(first);
+                    if (eventList != null) {
+                        input = eventList;
                     } else {
                         params.put(String.valueOf(paramIdx++), first);
                     }
@@ -216,9 +218,9 @@ public class AqlInterpreter {
                 int pIdx = 0;
                 for (int i = 0; i < nr.length; i++) {
                     Object val = resolveArg(nr[i], vars, funcs, ctx);
-                    if (i == 0 && val instanceof List<?> list && !list.isEmpty()
-                            && list.getFirst() instanceof Event) {
-                        nestedInput = (List<Event>) val;
+                    List<Event> eventList = asNonEmptyEventList(val);
+                    if (i == 0 && eventList != null) {
+                        nestedInput = eventList;
                     } else {
                         np.put(String.valueOf(pIdx++), val);
                     }
@@ -246,6 +248,20 @@ public class AqlInterpreter {
         }
         // Fallback: plain string
         return trimmed;
+    }
+
+    private static List<Event> asNonEmptyEventList(Object value) {
+        if (!(value instanceof List<?> values) || values.isEmpty()) {
+            return null;
+        }
+        List<Event> events = new ArrayList<>(values.size());
+        for (Object item : values) {
+            if (!(item instanceof Event event)) {
+                return null;
+            }
+            events.add(event);
+        }
+        return List.copyOf(events);
     }
 
     private Map<String, Object> buildObjectResponse(String jsonSpec, Map<String, List<Event>> vars) {

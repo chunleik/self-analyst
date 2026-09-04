@@ -86,10 +86,17 @@ dist-portable/
 └── data/
 
 artifacts/
-└── SelfAnalyst-portable.zip
+├── SelfAnalyst-portable.zip
+├── SelfAnalyst-portable.zip.sha256
+├── SelfAnalyst_1.0.0_x64-setup.exe
+└── SelfAnalyst_1.0.0_x64-setup.exe.sha256
 ```
 
-accessibility sidecar 随内容模块资源打包并按平台释放。发布结构没有 `tools/PaddleOCR-json`、
+NSIS 安装包把后端 JAR、jlink runtime 和安装布局标记作为 Tauri resource 安装。桌面壳识别该标记后，
+从 resource 目录启动后端，但把工作目录切换到当前用户应用数据目录；因此应用升级或卸载不会把用户
+数据库与配置当作安装文件处理。便携包仍以可执行文件目录作为工作目录。
+
+accessibility sidecar 随内容模块资源打包并按平台释放。所有发布结构都没有 `tools/PaddleOCR-json`、
 `tools/whisper` 或声音模型。
 
 ## 8. 验证
@@ -97,4 +104,6 @@ accessibility sidecar 随内容模块资源打包并按平台释放。发布结�
 - Java：`mvn test`
 - Rust sidecar：`cargo test --manifest-path self-analyst-axsidecar/Cargo.toml`
 - 便携发布：`.\scripts\build-portable.ps1`
+- NSIS 发布：`.\scripts\build-installer.ps1` 后运行 `.\scripts\check-installer.ps1`
+- 可执行 JAR：`.\scripts\check-packaged-jar.ps1`
 - 数据边界：内容策略、迁移、标题提取和配置墓碑的自动化测试

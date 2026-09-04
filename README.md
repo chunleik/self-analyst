@@ -50,7 +50,15 @@ pnpm tauri dev
 .\scripts\build-portable.ps1
 ```
 
-输出为 `artifacts/SelfAnalyst-portable.zip`。发布包不包含 PaddleOCR、Tesseract、Whisper 或语音模型。
+构建包含同一后端与 jlink JRE 的 NSIS 安装包：
+
+```powershell
+.\scripts\build-installer.ps1
+```
+
+输出位于 `artifacts/`，并为 ZIP 和安装包生成 `.sha256` 文件。安装模式把用户数据保存在 Tauri
+当前用户应用数据目录，不随应用文件升级或卸载；便携模式继续把 `data/` 放在可执行文件旁边。
+发布包不包含 PaddleOCR、Tesseract、Whisper 或语音模型。
 
 ## 核心模块
 
@@ -84,9 +92,9 @@ pnpm tauri dev
 |--------|----------|--------|
 | `llm.base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` |
 | `llm.model` | `LLM_MODEL` | `gpt-4o` |
-| `llm.api-key` | `LLM_API_KEY` | 空 |
+| `llm.api-key` | `OPENAI_API_KEY` | 空 |
 | `aw.mode` | `AW_MODE` | `embedded` |
-| `aw.port` | `AW_PORT` | `5700` |
+| `aw.port` | —（仅 `config.toml`） | `5700` |
 | `aw.collection.content` | `AW_COLLECTION_CONTENT` | `true` |
 | `aw.raw.dir` | `AW_RAW_DIR` | `{aw.data-dir}/raw` |
 | `aw.raw.query.maxRangeDays` | `AW_RAW_QUERY_MAX_RANGE_DAYS` | `31` |

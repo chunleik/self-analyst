@@ -9,6 +9,7 @@ import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.file.FileFilterConfig;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.javalin.http.Context;
@@ -37,6 +38,8 @@ public class DesktopConfigController {
 
     private static final Logger log = LoggerFactory.getLogger(DesktopConfigController.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final TypeReference<Map<String, Object>> OBJECT_MAP_TYPE =
+            new TypeReference<>() {};
 
     /** Keys that require a backend restart when changed. */
     private static final Set<String> RESTART_REQUIRED = Set.of(
@@ -91,10 +94,9 @@ public class DesktopConfigController {
      * PUT /desktop/config
      * Body: { "llm": {...}, "aw": {...}, ... }
      */
-    @SuppressWarnings("unchecked")
     public void putConfig(Context ctx) {
         try {
-            Map<String, Object> body = MAPPER.readValue(ctx.body(), Map.class);
+            Map<String, Object> body = MAPPER.readValue(ctx.body(), OBJECT_MAP_TYPE);
             StructuredSaveResult result = applyStructuredSave(body);
             ctx.json(Map.of("saved", true, "restartRequired", result.restartRequired()));
         } catch (Throwable t) {
@@ -114,7 +116,6 @@ public class DesktopConfigController {
 
     record StructuredSaveResult(List<String> restartRequired) {}
 
-    @SuppressWarnings("unchecked")
     StructuredSaveResult applyStructuredSave(Map<String, Object> body) throws IOException {
         Properties user = userStore.loadUser();
         Properties effective = userStore.load();
@@ -129,7 +130,7 @@ public class DesktopConfigController {
             }
 
             Map<String, Object> flat = new LinkedHashMap<>();
-            flattenStructuredSection("", (Map<String, Object>) sectionMap, flat);
+            flattenStructuredSection("", sectionMap, flat);
             for (var kv : flat.entrySet()) {
                 String mappedKey = mapStructuredKey(section, kv.getKey(), prefix);
                 if (DeprecatedKeys.contains(mappedKey) || !SupportedKeys.contains(mappedKey)) {
@@ -171,16 +172,14 @@ public class DesktopConfigController {
         return sectionToPrefix;
     }
 
-    private static void flattenStructuredSection(String prefix, Map<String, Object> input, Map<String, Object> output) {
+    private static void flattenStructuredSection(String prefix, Map<?, ?> input,
+                                                 Map<String, Object> output) {
         for (var entry : input.entrySet()) {
-            String key = prefix.isBlank() ? entry.getKey() : prefix + "." + entry.getKey();
+            String entryKey = String.valueOf(entry.getKey());
+            String key = prefix.isBlank() ? entryKey : prefix + "." + entryKey;
             Object value = entry.getValue();
             if (value instanceof Map<?, ?> nested) {
-                Map<String, Object> child = new LinkedHashMap<>();
-                for (var nestedEntry : nested.entrySet()) {
-                    child.put(String.valueOf(nestedEntry.getKey()), nestedEntry.getValue());
-                }
-                flattenStructuredSection(key, child, output);
+                flattenStructuredSection(key, nested, output);
             } else {
                 output.put(key, value);
             }
@@ -442,11 +441,10 @@ public class DesktopConfigController {
      * PUT /desktop/config/raw
      * Body: { "text": <string> }
      */
-    @SuppressWarnings("unchecked")
     public void putRawConfig(Context ctx) {
         String text;
         try {
-            Map<String, Object> body = MAPPER.readValue(ctx.body(), Map.class);
+            Map<String, Object> body = MAPPER.readValue(ctx.body(), OBJECT_MAP_TYPE);
             Object raw = body.get("text");
             text = raw != null ? raw.toString() : "";
         } catch (Exception e) {
@@ -500,7 +498,7 @@ public class DesktopConfigController {
         try {
             Map<String, Object> body;
             try {
-                body = MAPPER.readValue(ctx.body(), Map.class);
+                body = MAPPER.readValue(ctx.body(), OBJECT_MAP_TYPE);
             } catch (Exception e) {
                 body = Map.of();
             }
@@ -563,7 +561,7 @@ public class DesktopConfigController {
         try {
             Map<String, Object> body;
             try {
-                body = MAPPER.readValue(ctx.body(), Map.class);
+                body = MAPPER.readValue(ctx.body(), OBJECT_MAP_TYPE);
             } catch (Exception e) {
                 body = Map.of();
             }

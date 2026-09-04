@@ -20,11 +20,23 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$Root = [System.IO.Path]::GetFullPath(
+    (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))).TrimEnd('\')
 Set-Location $Root
 
 $Dist = Join-Path $Root "dist-portable"
 $Artifacts = Join-Path $Root "artifacts"
+
+function Assert-WorkspaceChild([string]$Path, [string]$Name) {
+    $resolved = [System.IO.Path]::GetFullPath($Path)
+    if (-not $resolved.StartsWith($Root + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "$Name 不在工作区内: $resolved"
+    }
+    return $resolved
+}
+
+$Dist = Assert-WorkspaceChild $Dist "便携分发目录"
+$Artifacts = Assert-WorkspaceChild $Artifacts "构建产物目录"
 
 # ── Resolve a JDK 21 with jlink ────────────────────────────────────────────────
 function Resolve-Jdk {
@@ -65,7 +77,7 @@ if (-not $SkipBuild) {
 }
 
 $JarSrc = Join-Path $Root "self-analyst-app/target/self-analyst-app-1.0.0.jar"
-$ExeSrc = Join-Path $Root "self-analyst-desktop/src-tauri/target/release/self-analyst-desktop.exe"
+$ExeSrc = Join-Path $Root "self-analyst-desktop/src-tauri/target/release/SelfAnalyst.exe"
 if (-not (Test-Path -LiteralPath $JarSrc)) { throw "Missing jar: $JarSrc (run without -SkipBuild)" }
 if (-not (Test-Path -LiteralPath $ExeSrc)) { throw "Missing exe: $ExeSrc (run without -SkipBuild)" }
 
@@ -136,7 +148,13 @@ function New-Zip([string]$name) {
     Write-Host "Zipping -> $zip ..." -ForegroundColor Cyan
     Compress-Archive -Path (Join-Path $Dist "*") -DestinationPath $zip -CompressionLevel Optimal
     $zsize = (Get-Item -LiteralPath $zip).Length / 1MB
+    $hash = Get-FileHash -LiteralPath $zip -Algorithm SHA256
+    [IO.File]::WriteAllText(
+        $zip + ".sha256",
+        "$($hash.Hash.ToLowerInvariant())  $name`n",
+        [Text.UTF8Encoding]::new($false))
     Write-Host ("Created {0} ({1:N1} MB)" -f $zip, $zsize) -ForegroundColor Green
+    Write-Host "SHA-256: $($hash.Hash.ToLowerInvariant())" -ForegroundColor DarkGray
 }
 
 Show-Sizes

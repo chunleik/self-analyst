@@ -177,3 +177,16 @@ Rust 工具链。有效 system property `content.axsidecar.path` SHALL 优先于
 #### Scenario: 没有可用边车路径
 - **WHEN** 显式路径和随包资源均不可用
 - **THEN** 无障碍查询返回空并保留系统窗口标题
+
+### Requirement: SPEC-AXS-070 非敏感 Windows 集成验证
+Windows CI 与发布候选验证 SHALL 能显式创建不含用户内容的受控测试窗口，使用其 HWND 对真实随包
+sidecar 连续执行冷、热查询，并在验证后关闭边车和窗口。该自动验证 MUST NOT 获取或遍历当前用户
+前台窗口；读取真实前台窗口的手工冒烟仍须由开发者明确启用。
+
+#### Scenario: 受控窗口查询
+- **WHEN** Windows 集成验证创建带唯一测试标题的自有窗口并取得其 HWND
+- **THEN** 冷、热两次 sidecar 查询均返回包含该测试标题的节点树，且验证结束后关闭相关进程与窗口
+
+#### Scenario: 自动验证不读取前台窗口
+- **WHEN** CI 或发布候选工作流启用非敏感 UIA 冒烟
+- **THEN** 测试仅把自建窗口 HWND 发送给 sidecar，不调用前台窗口捕获入口

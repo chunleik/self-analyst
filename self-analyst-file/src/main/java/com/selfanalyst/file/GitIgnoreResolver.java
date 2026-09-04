@@ -123,7 +123,10 @@ public final class GitIgnoreResolver {
             CachedRules cached = rulesByDirectory.get(directory);
             if (cached != null && cached.generation() == expectedGeneration
                     && cached.directoryIdentity().equals(expectedDirectory)
-                    && now - cached.checkedAtNanos() < RECHECK_NANOS) {
+                    && now - cached.checkedAtNanos() < RECHECK_NANOS
+                    && (cached.state().exists()
+                            || Files.notExists(directory.resolve(".gitignore"),
+                                    LinkOption.NOFOLLOW_LINKS))) {
                 return cached.rules();
             }
             try {

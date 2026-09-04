@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Windows 全量验证
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+
+      - name: 配置 JDK 21 与 Maven 缓存
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: 配置 Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: 配置 Rust stable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: 安装 OpenSpec CLI
+        shell: pwsh
+        run: npm install --global @fission-ai/openspec@1.11.0
+
+      - name: 校验 OpenSpec
+        shell: pwsh
+        run: openspec validate --all --strict
+
+      - name: 校验 Rust 格式
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo fmt --manifest-path self-analyst-desktop/src-tauri/Cargo.toml -- --check
+          cargo fmt --manifest-path self-analyst-axsidecar/Cargo.toml -- --check
+
+      - name: 运行 Java 与桌面 Node 测试
+        shell: pwsh
+        run: mvn --batch-mode test
+
+      - name: 运行 Rust 测试与 Clippy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo test --manifest-path self-analyst-desktop/src-tauri/Cargo.toml
+          cargo clippy --manifest-path self-analyst-desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path self-analyst-axsidecar/Cargo.toml
+          cargo clippy --manifest-path self-analyst-axsidecar/Cargo.toml --all-targets -- -D warnings
+
+      - name: 构建 accessibility sidecar
+        shell: pwsh
+        run: ./scripts/build-axsidecar.ps1
+
+      - name: 运行非敏感 Windows UIA 冒烟
+        shell: pwsh
+        run: >-
+          mvn --batch-mode -pl self-analyst-content -am
+          -Dselfanalyst.synthetic.uia=true
+          -Dtest=SyntheticUiaSmokeTest
+          -Dsurefire.failIfNoSpecifiedTests=false test
+
+      - name: 构建可执行 JAR
+        shell: pwsh
+        run: mvn --batch-mode package -DskipTests
+
+      - name: 冒烟验证打包 JAR
+        shell: pwsh
+        run: ./scripts/check-packaged-jar.ps1

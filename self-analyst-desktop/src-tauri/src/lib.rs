@@ -3,6 +3,7 @@ use std::io;
 use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
@@ -27,6 +28,8 @@ use windows_sys::Win32::{
 };
 
 const STARTUP_PHASE_TIMEOUT: Duration = Duration::from_secs(30);
+const BACKEND_JAR: &str = "self-analyst-app.jar";
+const INSTALLED_LAYOUT_MARKER: &str = "installed-layout.marker";
 
 struct JavaBackend {
     child: Mutex<Option<Child>>,
@@ -145,15 +148,13 @@ fn show_message(title: &str, message: &str) {
     }
 }
 
-fn find_java() -> Option<std::path::PathBuf> {
-    // Portable build: prefer the JRE bundled next to the exe (dist/runtime/bin/java.exe).
-    // This makes the app fully offline — no system Java required.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let bundled = dir.join("runtime").join("bin").join("java.exe");
-            if bundled.exists() {
-                return Some(bundled);
-            }
+fn find_java(distribution_root: Option<&Path>) -> Option<PathBuf> {
+    // Portable and installed builds both carry a runtime under their resolved
+    // distribution root. This keeps either form independent of system Java.
+    if let Some(root) = distribution_root {
+        let bundled = root.join("runtime").join("bin").join("java.exe");
+        if bundled.exists() {
+            return Some(bundled);
         }
     }
     // Check JAVA_HOME
@@ -188,7 +189,7 @@ fn find_java() -> Option<std::path::PathBuf> {
             }
         }
     }
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
     for (ver, java) in &candidates {
         if *ver >= 21 {
             return Some(java.clone());
@@ -197,6 +198,29 @@ fn find_java() -> Option<std::path::PathBuf> {
     // Any version if no 21+
     candidates.first().map(|(_, j)| j.clone())
     // Fallback to system PATH (handled by caller with "java")
+}
+
+fn select_distribution_root(
+    exe_dir: &Path,
+    resource_dir: Option<&Path>,
+) -> Option<(PathBuf, bool)> {
+    if let Some(resources) = resource_dir {
+        if resources.join(INSTALLED_LAYOUT_MARKER).is_file() {
+            return resources
+                .join(BACKEND_JAR)
+                .is_file()
+                .then(|| (resources.to_path_buf(), true));
+        }
+    }
+    if exe_dir.join(BACKEND_JAR).is_file() {
+        return Some((exe_dir.to_path_buf(), false));
+    }
+    resource_dir.and_then(|resources| {
+        resources
+            .join(BACKEND_JAR)
+            .is_file()
+            .then(|| (resources.to_path_buf(), true))
+    })
 }
 
 fn parse_java_version(path: &str) -> u32 {
@@ -241,10 +265,9 @@ fn lifecycle_token() -> io::Result<String> {
         )
     };
     if status < 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("BCryptGenRandom failed: {status}"),
-        ));
+        return Err(io::Error::other(format!(
+            "BCryptGenRandom failed: {status}"
+        )));
     }
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
@@ -278,21 +301,34 @@ fn create_kill_on_close_job(child: &Child) -> io::Result<isize> {
 }
 
 fn start_java(app: AppHandle) {
-    // jar is alongside the exe in dist/
     let exe_dir = std::env::current_exe()
         .unwrap_or_default()
         .parent()
-        .unwrap_or(std::path::Path::new("."))
+        .unwrap_or(Path::new("."))
         .to_path_buf();
-    let jar = exe_dir.join("self-analyst-app.jar");
+    let resource_dir = app.path().resource_dir().ok();
+    let (distribution_root, installed) =
+        select_distribution_root(&exe_dir, resource_dir.as_deref()).unwrap_or_else(|| {
+            eprintln!("JAR not found in executable or resource directory");
+            std::process::exit(1);
+        });
+    let working_dir = if installed {
+        let directory = app.path().app_local_data_dir().unwrap_or_else(|error| {
+            eprintln!("Failed to resolve application data directory: {error}");
+            std::process::exit(1);
+        });
+        std::fs::create_dir_all(&directory).unwrap_or_else(|error| {
+            eprintln!("Failed to create application data directory: {error}");
+            std::process::exit(1);
+        });
+        directory
+    } else {
+        exe_dir
+    };
+    let jar = distribution_root.join(BACKEND_JAR);
     println!("[SelfAnalyst] Jar path: {}", jar.display());
 
-    if !jar.exists() {
-        eprintln!("JAR not found: {}", jar.display());
-        std::process::exit(1);
-    }
-
-    let java = find_java().unwrap_or_else(|| std::path::PathBuf::from("java"));
+    let java = find_java(Some(&distribution_root)).unwrap_or_else(|| PathBuf::from("java"));
     eprintln!("Using Java: {}", java.display());
 
     let token = lifecycle_token().expect("Failed to create desktop lifecycle token");
@@ -302,16 +338,17 @@ fn start_java(app: AppHandle) {
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(exe_dir.join("self-analyst-backend.log"))
+        .open(working_dir.join("self-analyst-backend.log"))
         .expect("Failed to open backend log");
     let error_log = log_file
         .try_clone()
         .expect("Failed to clone backend log handle");
     let mut child = Command::new(java)
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        // Run with CWD = exe dir so the backend resolves its relative paths
-        // (./data and ./config) next to the exe.
-        .current_dir(&exe_dir)
+        // Portable mode keeps data beside the executable. Installed mode uses
+        // the per-user application data directory so upgrades/uninstalls do not
+        // overwrite the user's databases and configuration.
+        .current_dir(&working_dir)
         .env("SELF_ANALYST_DESKTOP_TOKEN", &token)
         .env("SELF_ANALYST_DESKTOP_PORT_FILE", &port_file)
         .arg("-jar")
@@ -571,7 +608,26 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{desktop_auth_script, parse_backend_port};
+    use super::{
+        desktop_auth_script, parse_backend_port, select_distribution_root, BACKEND_JAR,
+        INSTALLED_LAYOUT_MARKER,
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temporary_layout(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "self-analyst-desktop-{name}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     #[test]
     fn parses_published_backend_port() {
@@ -593,5 +649,50 @@ mod tests {
         assert!(script.contains("X-SelfAnalyst-Token"));
         assert!(script.contains("launch-secret"));
         assert!(!script.contains("url.searchParams.get('token')"));
+    }
+
+    #[test]
+    fn portable_distribution_uses_executable_directory() {
+        let root = temporary_layout("portable");
+        let executable = root.join("bin");
+        fs::create_dir_all(&executable).unwrap();
+        fs::write(executable.join(BACKEND_JAR), b"jar").unwrap();
+
+        let selected = select_distribution_root(&executable, None).unwrap();
+        assert_eq!(selected, (executable, false));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installed_distribution_uses_marked_resource_directory() {
+        let root = temporary_layout("installed");
+        let executable = root.join("bin");
+        let resources = root.join("resources");
+        fs::create_dir_all(&executable).unwrap();
+        fs::create_dir_all(&resources).unwrap();
+        fs::write(executable.join(BACKEND_JAR), b"stale portable jar").unwrap();
+        fs::write(resources.join(BACKEND_JAR), b"installed jar").unwrap();
+        fs::write(resources.join(INSTALLED_LAYOUT_MARKER), b"installed\n").unwrap();
+
+        let selected = select_distribution_root(&executable, Some(&resources)).unwrap();
+        assert_eq!(selected, (resources, true));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn corrupt_installed_distribution_fails_closed() {
+        let root = temporary_layout("corrupt-installed");
+        let executable = root.join("bin");
+        let resources = root.join("resources");
+        fs::create_dir_all(&executable).unwrap();
+        fs::create_dir_all(&resources).unwrap();
+        fs::write(executable.join(BACKEND_JAR), b"untrusted fallback").unwrap();
+        fs::write(resources.join(INSTALLED_LAYOUT_MARKER), b"installed\n").unwrap();
+
+        assert!(select_distribution_root(&executable, Some(&resources)).is_none());
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

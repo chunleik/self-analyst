@@ -85,7 +85,7 @@ Remove-LegacyToolDirectory -Name "whisper"
 Copy-Item -LiteralPath (Join-Path $Root "self-analyst-app/target/self-analyst-app-1.0.0.jar") `
     -Destination (Join-Path $Dist "self-analyst-app.jar") -Force
 
-Copy-Item -LiteralPath (Join-Path $Root "self-analyst-desktop/src-tauri/target/release/self-analyst-desktop.exe") `
+Copy-Item -LiteralPath (Join-Path $Root "self-analyst-desktop/src-tauri/target/release/SelfAnalyst.exe") `
     -Destination (Join-Path $Dist "SelfAnalyst.exe") -Force
 
 Write-Host "=== 5/5 Done ===" -ForegroundColor Green

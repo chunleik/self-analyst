@@ -1,7 +1,9 @@
 package com.selfanalyst.aw.raw;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectWriter;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.math.BigDecimal;
@@ -17,9 +19,10 @@ import java.util.TreeMap;
 /** 原始事件 data 的确定性 JSON 与 SHA-256 表示。 */
 public final class CanonicalJson {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper()
+    private static final ObjectWriter WRITER = new ObjectMapper()
             .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
-            .enable(SerializationFeature.WRITE_BIGDECIMAL_AS_PLAIN);
+            .writer()
+            .with(JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN);
 
     private CanonicalJson() {}
 
@@ -28,7 +31,7 @@ public final class CanonicalJson {
     public static Value encode(Map<String, ?> data) {
         if (data == null) throw new IllegalArgumentException("原始事件 data 不能为空");
         try {
-            String json = MAPPER.writeValueAsString(normalize(data));
+            String json = WRITER.writeValueAsString(normalize(data));
             return new Value(json, sha256(json));
         } catch (JsonProcessingException serializationFailure) {
             throw new IllegalArgumentException("无法规范化原始事件 data", serializationFailure);

@@ -66,7 +66,7 @@
         <slf4j.version>2.0.18</slf4j.version>
         <logback.version>1.5.18</logback.version>
         <junit.version>6.1.3</junit.version>
-        <lucene.version>10.4.0</lucene.version>
+        <lucene.version>10.5.1</lucene.version>
         <jgit.version>7.7.1.202607240634-r</jgit.version>
         <commons-codec.version>1.18.0</commons-codec.version>
         <commons-io.version>2.18.0</commons-io.version>

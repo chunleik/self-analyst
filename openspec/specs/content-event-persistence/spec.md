@@ -210,8 +210,9 @@ Wiki 从原始 ActivityWatch 内容事件构造事实时 SHALL 只读取标题�
 桌面状态响应的 `contentPersistence` 子对象 SHALL 返回 `schemaVersion`、`ready` 和 `status`，并只在
 迁移失败时返回经单行和长度限制处理的 `error`；完整状态响应 MAY 同时包含 backend、language、AW、
 collectors 和 LLM 等其他状态。迁移失败时 `contentPersistence.status` SHALL 为 `migration_failed`，
-上下文标题 collector SHALL 为 `degraded`。桌面 summary/timeline SHALL 从 window/AFK 事实构造响应，
-不读取或拼接无障碍正文。通用 AW events、AQL 和 export API 返回持久化事件 data，不提供额外字段投影。
+上下文标题 collector SHALL 为 `degraded`。桌面 summary/timeline SHALL 从 window/AFK 事实，或由这些
+允许事实派生的 Wiki 摘要构造响应，MUST NOT 读取或拼接无障碍正文。通用 AW events、AQL 和 export API
+返回持久化事件 data，不提供额外字段投影。
 
 #### Scenario: 桌面迁移失败状态不返回事件
 - **WHEN** 内容迁移失败且客户端请求桌面状态
@@ -219,7 +220,7 @@ collectors 和 LLM 等其他状态。迁移失败时 `contentPersistence.status`
 
 #### Scenario: 桌面摘要只使用窗口与 AFK 事实
 - **WHEN** 客户端请求当前摘要和时间线
-- **THEN** 响应由窗口标题、应用、耗时和 AFK 数据构造，不拼接隐藏控件文本
+- **THEN** 响应由窗口标题、应用、耗时、AFK 数据或由其派生的 Wiki 摘要构造，不拼接隐藏控件文本
 
 ### Requirement: SPEC-CTP-050 内容策略先于永久原始提交
 所有内容 heartbeat、events 和 import MUST 在写入永久原始事件层前执行内容事件 v2 策略。通过策略的每个原始内容事件 SHALL 永久保存其 v2 标题字段且不受后续 heartbeat 投影合并影响；策略失败的 payload MUST NOT 进入原始事件层。

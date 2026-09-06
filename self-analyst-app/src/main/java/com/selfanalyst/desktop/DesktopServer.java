@@ -10,6 +10,7 @@ import com.selfanalyst.desktop.service.BehaviorAdviceService;
 import com.selfanalyst.desktop.service.ChatSummaryService;
 import com.selfanalyst.desktop.service.MemoryExtractionService;
 import com.selfanalyst.desktop.service.SummaryService;
+import com.selfanalyst.desktop.service.SummarySnapshotStore;
 import com.selfanalyst.desktop.store.ChatSessionDeletionCoordinator;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.desktop.store.TaskStore;
@@ -109,7 +110,7 @@ public class DesktopServer {
         this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
                 contentPersistenceReady, contentMigrationError, fileWatchStore,
                 fileStateSupplier, fileSettingsApplier,
-                new UserConfigStore(Config.resolveConfigDir()));
+                new UserConfigStore(Config.resolveConfigDir()), null);
     }
 
     public DesktopServer(Javalin app,
@@ -125,6 +126,25 @@ public class DesktopServer {
                          Supplier<DesktopFileController.CollectorState> fileStateSupplier,
                          DesktopFileController.SettingsApplier fileSettingsApplier,
                          UserConfigStore userConfigStore) {
+        this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
+                contentPersistenceReady, contentMigrationError, fileWatchStore,
+                fileStateSupplier, fileSettingsApplier, userConfigStore, null);
+    }
+
+    public DesktopServer(Javalin app,
+                         Config config,
+                         SelfAnalystAgent agent,
+                         EventStore eventStore,
+                         MemoryStore memoryStore,
+                         WatcherManager watcherManager,
+                         ContentWatcher contentWatcher,
+                         boolean contentPersistenceReady,
+                         String contentMigrationError,
+                         FileWatchStore fileWatchStore,
+                         Supplier<DesktopFileController.CollectorState> fileStateSupplier,
+                         DesktopFileController.SettingsApplier fileSettingsApplier,
+                         UserConfigStore userConfigStore,
+                         com.selfanalyst.wiki.WikiStore wikiStore) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
@@ -149,7 +169,7 @@ public class DesktopServer {
                 : null;
 
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
-                config, chatSessionStore);
+                config, chatSessionStore, new SummarySnapshotStore(memoryDir), wikiStore);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.fileCtrl = new DesktopFileController(

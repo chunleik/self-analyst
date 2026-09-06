@@ -138,8 +138,12 @@ function closeConfigModal() {
 // ---- Data Loading ----
 
 function loadAll() {
-  state.loading = true;
   hideError();
+  if (state.summary && state.tab === "agent") {
+    renderBehaviorAdvice();
+    renderTimeline();
+  }
+  state.loading = !state.summary;
 
   var withTimeout = function (p, ms) {
     return new Promise(function (resolve, reject) {
@@ -168,16 +172,18 @@ function loadAll() {
     renderTasks();
   });
 
-  // Phase 2: summary can be slow (LLM calls) — update when ready
+  // Phase 2: summary may refresh the open window; keep any existing snapshot on screen.
   withTimeout(api.getSummary(), 30000)
-    .catch(function () { return null; })
     .then(function (summary) {
-      state.summary = summary;
+      if (summary) state.summary = summary;
       state.loading = false;
-      if (state.tab === "agent") {
+      if (state.tab === "agent" && state.summary) {
         renderBehaviorAdvice();
         renderTimeline();
       }
+    })
+    .catch(function () {
+      state.loading = false;
     });
 }
 
@@ -245,12 +251,13 @@ function startAutoRefresh() {
       updateStatusBar();
       renderTasks();
     });
-    // Summary refresh separately (may involve LLM)
-    api.getSummary().catch(function () { return state.summary; }).then(function (summary) {
+    // Summary refresh separately; keep the last rendered snapshot if the request fails.
+    api.getSummary().then(function (summary) {
+      if (!summary) return;
       state.summary = summary;
       renderBehaviorAdvice();
       renderTimeline();
-    });
+    }).catch(function () {});
   }, 30000);
 }
 

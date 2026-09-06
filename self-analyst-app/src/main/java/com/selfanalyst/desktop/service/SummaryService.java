@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
  * Queries window and AFK buckets, computes per-period statistics, and formats
  * them as structured "local facts" suitable for direct display or later LLM enrichment.
  */
-public class SummaryService {
+public class SummaryService implements SummaryFactSource {
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_INSTANT;
     private static final ZoneId ZONE = ZoneId.systemDefault();
@@ -42,9 +42,22 @@ public class SummaryService {
 
     /** Current activity snapshot (last ~2 hours). */
     public LocalFacts getCurrentStatus() {
-        Instant now = Instant.now();
+        return getCurrentStatus(Instant.now());
+    }
+
+    public LocalFacts getCurrentStatus(Instant now) {
         Instant twoHoursAgo = now.minus(Duration.ofHours(2));
         return computeFacts(twoHoursAgo, now, "现在");
+    }
+
+    @Override
+    public LocalFacts currentStatus(Instant now) {
+        return getCurrentStatus(now);
+    }
+
+    /** Local facts for an arbitrary period, without LLM enhancement. */
+    public LocalFacts factsFor(Instant start, Instant end, String label) {
+        return computeFacts(start, end, label);
     }
 
     /** Timeline entries for multiple periods. */
@@ -108,6 +121,11 @@ public class SummaryService {
      * Computes multi-day behavior comparison data for advice generation.
      * Compares the most recent ~3 days against the preceding ~4 days.
      */
+    @Override
+    public BehaviorData behaviorData() {
+        return getBehaviorData();
+    }
+
     public BehaviorData getBehaviorData() {
         Instant now = Instant.now();
         Instant sevenDaysAgo = now.minus(7, ChronoUnit.DAYS);

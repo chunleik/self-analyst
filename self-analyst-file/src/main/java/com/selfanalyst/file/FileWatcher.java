@@ -109,7 +109,7 @@ public class FileWatcher {
             t.setDaemon(true);
             return t;
         });
-        debounceExecutor.scheduleWithFixedDelay(this::flushDebounced, 1, 1, TimeUnit.SECONDS);
+        debounceExecutor.scheduleWithFixedDelay(this::periodicMaintenance, 1, 1, TimeUnit.SECONDS);
         watchThread = new Thread(this::registerAndWatch, "file-watcher");
         watchThread.setDaemon(true);
         watchThread.start();
@@ -253,20 +253,39 @@ public class FileWatcher {
                     handleEvent(ev.kind(), child);
                 }
             }
-            boolean valid = key.reset();
-            if (!valid) {
-                Path invalidDir = keyToDir.remove(key);
-                if (invalidDir != null) registeredDirs.remove(invalidDir);
-                if (invalidDir != null) pathFilter.invalidateIgnoreRules(invalidDir);
-                if (invalidDir != null && Files.notExists(invalidDir)) {
-                    try {
-                        store.markDeletedTree(invalidDir.toAbsolutePath().toString());
-                    } catch (RuntimeException e) {
-                        log.debug("Failed to retire invalid watch tree type={}",
-                                e.getClass().getSimpleName());
-                    }
-                }
+            if (!key.reset() && retireInvalidDir(keyToDir.get(key))) {
+                keyToDir.remove(key);
             }
+        }
+    }
+
+    /**
+     * Converges an invalidated registration (SPEC-FILE-032a). Returns true once the
+     * directory is confirmed gone and its descendants are retired; a delete still
+     * pending in the OS leaves the entry in place so a later sweep can retry.
+     */
+    private boolean retireInvalidDir(Path invalidDir) {
+        if (invalidDir == null) return true;
+        registeredDirs.remove(invalidDir);
+        pathFilter.invalidateIgnoreRules(invalidDir);
+        if (!Files.notExists(invalidDir)) return false;
+        try {
+            store.markDeletedTree(invalidDir.toAbsolutePath().toString());
+        } catch (RuntimeException e) {
+            log.debug("Failed to retire invalid watch tree type={}",
+                    e.getClass().getSimpleName());
+        }
+        return true;
+    }
+
+    /**
+     * A WatchKey can be invalidated without the service ever queueing it, so the
+     * watch loop alone cannot guarantee convergence; sweep the registrations too.
+     */
+    private void retireInvalidRegistrations() {
+        for (Map.Entry<WatchKey, Path> entry : keyToDir.entrySet()) {
+            if (entry.getKey().isValid()) continue;
+            if (retireInvalidDir(entry.getValue())) keyToDir.remove(entry.getKey());
         }
     }
 
@@ -322,6 +341,15 @@ public class FileWatcher {
     }
 
     // ── debounce flush ──
+
+    private void periodicMaintenance() {
+        try {
+            retireInvalidRegistrations();
+        } catch (RuntimeException e) {
+            log.debug("Invalid registration sweep failed type={}", e.getClass().getSimpleName());
+        }
+        flushDebounced();
+    }
 
     private void flushDebounced() {
         long now = System.currentTimeMillis();

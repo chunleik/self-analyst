@@ -10,14 +10,19 @@
 桌面壳 SHALL 为每次启动生成随机 desktop token 和唯一端口文件路径。便携模式 SHALL 从桌面可执行
 文件所在目录解析后端 JAR 与 Java runtime，并以该目录作为后端工作目录；安装模式 SHALL 从 Tauri
 resource 目录解析带安装布局标记的后端 JAR 与 Java runtime，并以当前用户的应用数据目录作为后端
-工作目录。桌面壳 SHALL 通过环境变量传递 token 与端口文件。后端 SHALL 在桌面生命周期路由可用后原子发布
-实际监听端口。业务交互 SHALL 使用该端口上的回环 HTTP；WebView MUST 加载
+工作目录。桌面壳 SHALL 通过环境变量传递 token 与端口文件。后端 SHALL 在 HTTP 服务开始接受请求之前
+注册桌面生命周期路由，MUST NOT 依赖服务启动后的追加注册；随后再原子发布实际监听端口。业务交互
+SHALL 使用该端口上的回环 HTTP；WebView MUST 加载
 `http://localhost:<actualPort>/desktop-ui/`，不得回退到硬编码端口。除 `/desktop/session` 外的
 `/desktop/*` 路由 SHALL 要求有效 header token 或会话 cookie。
 
 #### Scenario: 动态端口启动
 - **WHEN** Java 后端使用配置端口启动并发布合法端口文件
 - **THEN** 桌面壳使用该实际端口完成健康检查、创建 WebView 和托盘链接
+
+#### Scenario: 生命周期路由注册时机
+- **WHEN** 后端带 desktop token 启动并开始接受请求
+- **THEN** `/desktop/lifecycle/health` 自首个请求起即可路由，带有效 token 时不得返回 404
 
 #### Scenario: 非默认端口
 - **WHEN** 后端实际端口不是 5700

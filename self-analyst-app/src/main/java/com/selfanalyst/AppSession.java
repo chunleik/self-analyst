@@ -31,6 +31,8 @@ public class AppSession implements AutoCloseable {
     private final UsageMeter usageMeter;
     private final SelfAnalystAgent agent;
     private AwServer awServer;
+    private final String desktopToken;
+    private final Runnable desktopShutdownSignal;
     private WatcherManager watcherManager;
     private ContentWatcher contentWatcher;
     private DesktopServer desktopServer;
@@ -54,6 +56,17 @@ public class AppSession implements AutoCloseable {
     private final AtomicBoolean closed = new AtomicBoolean();
 
     public AppSession() throws IOException {
+        this(null, () -> {});
+    }
+
+    /**
+     * Desktop lifecycle routes must be in place before the HTTP server starts, so the
+     * token and shutdown signal are supplied up front rather than registered later.
+     */
+    public AppSession(String desktopToken, Runnable desktopShutdownSignal) throws IOException {
+        this.desktopToken = desktopToken;
+        this.desktopShutdownSignal =
+                desktopShutdownSignal != null ? desktopShutdownSignal : () -> {};
         this.config = Config.load();
         this.usageMeter = new UsageMeter(config, config.memoryDir());
         if (config.awEmbedded()) {
@@ -238,6 +251,7 @@ public class AppSession implements AutoCloseable {
                 log.error("内容事件标题化迁移失败，内容采集与 Wiki 已禁用: {}",
                         contentMigrationError);
             }
+            registerDesktopLifecycle();
             awServer.start(config.awPort());
             log.info("嵌入式 AW 服务已启动 (端口 {})", config.awPort());
             watcherManager = new WatcherManager(
@@ -275,7 +289,9 @@ public class AppSession implements AutoCloseable {
     public Config config() { return config; }
     public SelfAnalystAgent agent() { return agent; }
 
-    public void registerDesktopLifecycle(String token, Runnable shutdownSignal) {
+    private void registerDesktopLifecycle() {
+        String token = desktopToken;
+        Runnable shutdownSignal = desktopShutdownSignal;
         if (awServer == null || token == null || token.isBlank()) {
             return;
         }

@@ -21,8 +21,7 @@ public class App {
         CountDownLatch shutdownLatch = new CountDownLatch(1);
 
         try {
-            session = new AppSession();
-            session.registerDesktopLifecycle(
+            session = new AppSession(
                     System.getenv("SELF_ANALYST_DESKTOP_TOKEN"), shutdownLatch::countDown);
             publishDesktopPortIfRequested(session.config().awPort());
             log.info("SelfAnalyst 已启动 (http://localhost:{})", session.config().awPort());

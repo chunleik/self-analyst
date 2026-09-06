@@ -29,6 +29,21 @@ class AgentPromptsTest {
     void chinesePromptHasRespondInChinese() { // TST-007, PROMPT-002b
         String p = AgentPrompts.systemPrompt(Lang.ZH, "", true, true, true, true, FIXED);
         assertTrue(p.contains("用中文回复用户。"), "missing respond-in-Chinese directive");
+        assertTrue(p.contains("历史回顾伙伴"), "missing history-review identity");
+        assertTrue(p.contains("感知（Perceive）"), "missing perceive layer");
+        assertTrue(p.contains("认知（Understand）"), "missing understand layer");
+        assertFalse(p.contains("改进（Improve）"), "prompt must not advertise an improve layer");
+        assertFalse(p.contains("自我提升伙伴"), "prompt must not use self-improvement identity");
+    }
+
+    @Test
+    void englishPromptFocusesOnHistoryReviewNotImprovement() {
+        String p = AgentPrompts.systemPrompt(Lang.EN, "", true, true, true, true, FIXED);
+        assertTrue(p.contains("history-review partner"), "missing history-review identity");
+        assertTrue(p.contains("Perceive —"), "missing perceive layer");
+        assertTrue(p.contains("Understand —"), "missing understand layer");
+        assertFalse(p.contains("Improve —"), "prompt must not advertise an improve layer");
+        assertFalse(p.contains("self-improvement partner"), "prompt must not use self-improvement identity");
     }
 
     @Test

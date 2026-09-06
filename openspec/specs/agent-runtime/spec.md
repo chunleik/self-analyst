@@ -30,7 +30,7 @@ maxTokens 和 maxIters。对话模型 SHALL 支持流式输出；plain/summary �
 - **THEN** 本地采集和桌面服务继续启动，Agent 对话报告不可用
 
 ### Requirement: SPEC-AGT-002 动态系统上下文
-基础 system prompt SHALL 按有效语言包含 SelfAnalyst 身份、数据分析与行动指导、当前日期及已启用工具
+基础 system prompt SHALL 按有效语言包含 SelfAnalyst 身份、数据分析与历史回顾、当前日期及已启用工具
 说明。当前日期 SHALL 在 Agent 构造时生成；可变长期记忆 MUST NOT 固化到基础 prompt，而 SHALL 在
 每次 invocation 由动态记忆中间件读取最新 profile 后追加。滚动会话 summary 与本轮 desktop context
 SHALL 仅临时注入模型输入，不污染 AgentState.context。

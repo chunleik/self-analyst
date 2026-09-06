@@ -19,6 +19,13 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class FileWatcherTest {
 
+    /**
+     * Windows WatchService 的事件投递延迟在共享 CI 运行器上偶尔会远超本地水平，
+     * 20 秒预算下 FileWatcherTest 约有十分之一的概率超时。轮询命中即返回，
+     * 放宽预算不影响正常耗时，只在异常停顿时多等一会儿。
+     */
+    private static final long POLL_TIMEOUT_MS = 60_000;
+
     private FileWatchStore store;
     private FileWatcher watcher;
 
@@ -34,12 +41,12 @@ class FileWatcherTest {
         PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1);
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Path file = tmp.resolve("hello.txt");
         Files.writeString(file, "content");
 
-        FileRecord rec = pollForPending(file.toAbsolutePath().toString(), 20_000);
+        FileRecord rec = pollForPending(file.toAbsolutePath().toString(), POLL_TIMEOUT_MS);
         assertNotNull(rec, "file should be upserted PENDING after the debounce window");
         assertEquals(FileStatus.PENDING, rec.status());
 
@@ -76,13 +83,13 @@ class FileWatcherTest {
         PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Files.delete(root);
 
-        assertTrue(pollForUnavailable(20_000),
+        assertTrue(pollForUnavailable(POLL_TIMEOUT_MS),
                 "watcher health should turn false after its only WatchKey is invalidated");
-        assertTrue(pollForStatus(historicalFile.toString(), FileStatus.DELETED, 20_000),
+        assertTrue(pollForStatus(historicalFile.toString(), FileStatus.DELETED, POLL_TIMEOUT_MS),
                 "invalidated deleted root must retire descendant metadata");
     }
 
@@ -97,7 +104,7 @@ class FileWatcherTest {
 
         watcher.start();
 
-        assertTrue(pollForRegistrationComplete(20_000));
+        assertTrue(pollForRegistrationComplete(POLL_TIMEOUT_MS));
         assertFalse(watcher.isRunning());
         assertNotNull(watcher.registrationError());
     }
@@ -115,11 +122,11 @@ class FileWatcherTest {
         PathFilter filter = txtFilter();
         watcher = new FileWatcher(store, filter, List.of(root), "http://127.0.0.1:9", 1, 1);
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Files.delete(childDir);
 
-        assertTrue(pollForStatus(historicalFile.toString(), FileStatus.DELETED, 20_000));
+        assertTrue(pollForStatus(historicalFile.toString(), FileStatus.DELETED, POLL_TIMEOUT_MS));
     }
 
     @Test
@@ -134,7 +141,7 @@ class FileWatcherTest {
         watcher = new FileWatcher(store, filter, List.of(tmp), "http://127.0.0.1:9", 1, 1,
                 (root, subtree) -> reconcileRequested.countDown());
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Path ignore = Files.writeString(tmp.resolve(".gitignore"), "ignored.txt\n");
         assertTrue(reconcileRequested.await(20, TimeUnit.SECONDS));
@@ -155,13 +162,13 @@ class FileWatcherTest {
                 "http://127.0.0.1:9", 1, 1,
                 (root, subtree) -> reconciled.countDown());
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Files.writeString(ignore, "");
         assertTrue(reconciled.await(20, TimeUnit.SECONDS));
         Path included = Files.writeString(generated.resolve("included.txt"), "metadata only");
 
-        assertNotNull(pollForPending(included.toAbsolutePath().toString(), 20_000));
+        assertNotNull(pollForPending(included.toAbsolutePath().toString(), POLL_TIMEOUT_MS));
     }
 
     @Test
@@ -178,7 +185,7 @@ class FileWatcherTest {
                     if (expected != null && subtree.equals(expected)) childReconcile.countDown();
                 });
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Path moved = root.resolve("incoming").toAbsolutePath().normalize();
         expectedChild.set(moved);
@@ -199,7 +206,7 @@ class FileWatcherTest {
         watcher = new FileWatcher(store, filter, List.of(tmp),
                 "http://127.0.0.1:9", 1, 1, (root, subtree) -> reconcile.countDown());
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Files.writeString(ignore, "new.txt\n");
         watcher.handleOverflow(tmp);
@@ -219,7 +226,7 @@ class FileWatcherTest {
         watcher = new FileWatcher(store, txtFilter(), List.of(tmp),
                 "http://127.0.0.1:9", 1, 1);
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Path dependency = Files.writeString(nodeModules.resolve("dependency.txt"), "private");
         Path generatedFile = Files.writeString(generated.resolve("generated.txt"), "private");
@@ -239,10 +246,10 @@ class FileWatcherTest {
         watcher = new FileWatcher(store, txtFilter(), List.of(parent, child),
                 "http://127.0.0.1:9", 1, 1);
         watcher.start();
-        assertTrue(pollForAvailable(20_000));
+        assertTrue(pollForAvailable(POLL_TIMEOUT_MS));
 
         Path file = Files.writeString(child.resolve("notes.txt"), "private");
-        FileRecord record = pollForPending(file.toAbsolutePath().toString(), 20_000);
+        FileRecord record = pollForPending(file.toAbsolutePath().toString(), POLL_TIMEOUT_MS);
 
         assertNotNull(record);
         assertEquals(child.toAbsolutePath().normalize().toString(), record.watchRoot());

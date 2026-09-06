@@ -246,29 +246,37 @@ function setupEvents() {
   state.dom.configGrid.addEventListener("change", handleConfigFieldChange);
 
   // File collector entry and page actions.
-  state.dom.fileStatusBtn.addEventListener("click", function () { switchTab("files"); });
+  state.dom.fileStatusBtn.addEventListener("click", openFileStatusEntry);
   state.dom.fileSettingsBtn.addEventListener("click", openFileSettingsModal);
   state.dom.fileContent.addEventListener("click", function (e) {
     var action = e.target && e.target.closest ? e.target.closest("[data-file-action]") : null;
+    var remove = e.target && e.target.closest
+      ? e.target.closest("[data-file-settings-remove]") : null;
+    if (remove) {
+      removeFileSettingsPath(parseInt(remove.dataset.fileSettingsRemove, 10));
+      return;
+    }
     if (!action) return;
     if (action.dataset.fileAction === "settings") {
       openFileSettingsModal();
     } else if (action.dataset.fileAction === "retry") {
       loadFiles();
+    } else if (action.dataset.fileAction === "add-folder") {
+      addFileSettingsPath();
+    } else if (action.dataset.fileAction === "save-folders") {
+      saveFileFolders();
+    }
+  });
+  state.dom.fileContent.addEventListener("input", function (e) {
+    if (e.target && e.target.matches && e.target.matches("input[data-file-path]")) {
+      syncFileFolderDraft();
     }
   });
   state.dom.fileSettingsCloseBtn.addEventListener("click", closeFileSettingsModal);
   state.dom.fileSettingsCancelBtn.addEventListener("click", closeFileSettingsModal);
   state.dom.fileSettingsSaveBtn.addEventListener("click", saveFileSettings);
-  state.dom.fileSettingsAddBtn.addEventListener("click", addFileSettingsPath);
   state.dom.fileSettingsModal.querySelector(".config-modal-overlay")
     .addEventListener("click", closeFileSettingsModal);
-  state.dom.fileSettingsPaths.addEventListener("click", function (e) {
-    var remove = e.target && e.target.closest
-      ? e.target.closest("[data-file-settings-remove]") : null;
-    if (!remove) return;
-    removeFileSettingsPath(parseInt(remove.dataset.fileSettingsRemove, 10));
-  });
 
   // Chat drawer
   state.dom.chatCloseBtn.addEventListener("click", closeChat);

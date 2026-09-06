@@ -48,6 +48,9 @@ function updateStatusBar() {
   setStatusDotByState(state.dom.fileDot, fileStatus, t("status.file"));
   state.dom.fileText.textContent = t("status.file");
   state.dom.fileStatusBtn.title = state.dom.fileDot.title;
+  if (typeof syncFileUiVisibility === "function") {
+    syncFileUiVisibility();
+  }
 
   // Permanent raw-event storage: only diagnostic metadata is rendered.
   var raw = st.raw || { status: "unavailable" };
@@ -90,6 +93,14 @@ function setStatusDotByState(el, status, label) {
 // ---- Tab Switching ----
 
 function switchTab(tab) {
+  if (tab === "files"
+      && typeof isFileCollectionEnabled === "function"
+      && !isFileCollectionEnabled(state.filesOverview, state.status)) {
+    if (typeof openFileSettingsModal === "function") {
+      openFileSettingsModal();
+    }
+    return;
+  }
   state.tab = tab;
   state.dom.tabs.forEach(function (t) {
     t.classList.toggle("active", t.dataset.tab === tab);

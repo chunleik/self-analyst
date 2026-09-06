@@ -39,6 +39,7 @@ function cacheDom() {
     // Chat Tab
     tabChat: $("#tab-chat"),
     // Files tab
+    fileNavTab: $('[data-tab="files"]'),
     tabFiles: $("#tab-files"),
     fileTabStatus: $("#file-tab-status"),
     fileTabSubtitle: $("#file-tab-subtitle"),
@@ -48,9 +49,7 @@ function cacheDom() {
     fileSettingsCloseBtn: $("#file-settings-close-btn"),
     fileSettingsCancelBtn: $("#file-settings-cancel-btn"),
     fileSettingsSaveBtn: $("#file-settings-save-btn"),
-    fileSettingsAddBtn: $("#file-settings-add-btn"),
     fileSettingsEnabled: $("#file-settings-enabled"),
-    fileSettingsPaths: $("#file-settings-paths"),
     fileSettingsError: $("#file-settings-error"),
     chatSessionList: $("#chat-session-list"),
     chatSessionSearchInput: $("#chat-session-search-input"),

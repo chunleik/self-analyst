@@ -8,6 +8,88 @@ const read = (name) => fs.readFileSync(
   "utf8",
 );
 
+function createClassList(initial) {
+  const classes = new Set(initial || []);
+  return {
+    add(name) { classes.add(name); },
+    remove(name) { classes.delete(name); },
+    toggle(name, force) {
+      if (force === true) classes.add(name);
+      else if (force === false) classes.delete(name);
+      else if (classes.has(name)) classes.delete(name);
+      else classes.add(name);
+      return classes.has(name);
+    },
+    contains(name) { return classes.has(name); },
+  };
+}
+
+function createVisibilitySandbox(overview, status) {
+  const fileNavTab = { dataset: { tab: "files" }, classList: createClassList(["hidden"]) };
+  const fileStatusBtn = { classList: createClassList(["hidden"]) };
+  const fileSettingsModal = { classList: createClassList(["hidden"]) };
+  const state = {
+    lang: "zh",
+    tab: "agent",
+    status: status || null,
+    filesOverview: overview,
+    filesLoading: false,
+    filesError: null,
+    filesLoadRequestId: 0,
+    fileSettingsOpen: false,
+    fileSettingsPaths: [],
+    fileSettingsEnabled: false,
+    fileSettingsSaving: false,
+    fileSettingsError: null,
+    switchedTo: null,
+    settingsOpened: 0,
+    dom: {
+      fileNavTab,
+      fileStatusBtn,
+      fileContent: { innerHTML: "" },
+      fileTabStatus: { innerHTML: "" },
+      fileTabSubtitle: { textContent: "" },
+      fileSettingsModal,
+      fileSettingsEnabled: { checked: false, disabled: false },
+      fileSettingsPaths: {
+        innerHTML: "",
+        querySelector() { return null; },
+        querySelectorAll() { return []; },
+      },
+      fileSettingsAddBtn: { disabled: false },
+      fileSettingsCancelBtn: { disabled: false },
+      fileSettingsSaveBtn: { disabled: false, textContent: "" },
+      fileSettingsError: { textContent: "", classList: createClassList(["hidden"]) },
+    },
+  };
+  const sandbox = {
+    state,
+    api: {
+      getFiles() { return Promise.resolve(overview); },
+    },
+    escHtml(value) {
+      return String(value == null ? "" : value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    },
+    formatRelativeTime() { return "2分钟前"; },
+    statusBadge(statusValue) { return `<span>${statusValue}</span>`; },
+    switchTab(tab) { state.tab = tab; state.switchedTo = tab; },
+    console,
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(read("i18n.js"), sandbox);
+  vm.runInContext(read("files.js"), sandbox);
+  const originalOpen = sandbox.openFileSettingsModal;
+  sandbox.openFileSettingsModal = function () {
+    state.settingsOpened += 1;
+    if (typeof originalOpen === "function") return originalOpen();
+  };
+  return { sandbox, state, fileNavTab, fileStatusBtn };
+}
+
 function createSandbox(overview, getFiles) {
   const elements = {
     content: { innerHTML: "" },
@@ -288,4 +370,142 @@ test("file settings focus also supports an explicit nested table", () => {
   sandbox.focusConfigEditorKey("file.watch.enabled");
 
   assert.equal(editor.value.slice(editor.selectionStart, editor.selectionEnd), "enabled");
+});
+
+test("file collection tab stays hidden until enabled", () => {
+  const html = read("index.html");
+  const filesTab = html.match(/<button\b[^>]*data-tab="files"[^>]*>/);
+  assert.ok(filesTab, "files tab button exists");
+  assert.match(filesTab[0], /\bhidden\b/);
+  const statusBtn = html.match(/<button\b[^>]*id="file-status-btn"[^>]*>/);
+  assert.ok(statusBtn, "file status button exists");
+  assert.match(statusBtn[0], /\bhidden\b/);
+
+  const { sandbox, fileNavTab, fileStatusBtn } = createVisibilitySandbox({
+    enabled: false,
+    status: "disabled",
+    roots: [],
+    files: [],
+  });
+
+  assert.equal(sandbox.isFileCollectionEnabled(sandbox.state.filesOverview, sandbox.state.status), false);
+  sandbox.syncFileUiVisibility();
+  assert.equal(fileNavTab.classList.contains("hidden"), true);
+  assert.equal(fileStatusBtn.classList.contains("hidden"), true);
+  assert.equal(sandbox.state.switchedTo, null);
+});
+
+test("enabled file collection reveals the files tab", () => {
+  const { sandbox, fileNavTab, fileStatusBtn } = createVisibilitySandbox({
+    enabled: true,
+    status: "running",
+    roots: [{ path: "D:\\Docs" }],
+    files: [],
+  });
+
+  assert.equal(sandbox.isFileCollectionEnabled(sandbox.state.filesOverview, sandbox.state.status), true);
+  sandbox.syncFileUiVisibility();
+  assert.equal(fileNavTab.classList.contains("hidden"), false);
+  assert.equal(fileStatusBtn.classList.contains("hidden"), false);
+});
+
+test("disabling file collection leaves the files page", () => {
+  const { sandbox, fileNavTab, fileStatusBtn, state } = createVisibilitySandbox({
+    enabled: false,
+    status: "disabled",
+    roots: [],
+    files: [],
+  });
+  state.tab = "files";
+
+  sandbox.syncFileUiVisibility();
+
+  assert.equal(fileNavTab.classList.contains("hidden"), true);
+  assert.equal(fileStatusBtn.classList.contains("hidden"), true);
+  assert.equal(state.tab, "agent");
+  assert.equal(state.switchedTo, "agent");
+});
+
+test("file status entry opens settings when collection is disabled", () => {
+  const { sandbox, state } = createVisibilitySandbox({
+    enabled: false,
+    status: "disabled",
+    roots: [],
+    files: [],
+  });
+
+  sandbox.openFileStatusEntry();
+
+  assert.equal(state.settingsOpened, 1);
+  assert.notEqual(state.switchedTo, "files");
+});
+
+test("settings modal only manages the collection toggle", () => {
+  const html = read("index.html");
+  const modal = html.match(/id="file-settings-modal"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/)[0];
+  assert.match(modal, /id="file-settings-enabled"/);
+  assert.doesNotMatch(modal, /id="file-settings-paths"/);
+  assert.doesNotMatch(modal, /id="file-settings-add-btn"/);
+  assert.doesNotMatch(modal, /file.watchedFolders/);
+});
+
+test("enabled file page hosts watched-folder editing", () => {
+  const { sandbox, elements } = createSandbox({
+    enabled: true,
+    status: "degraded",
+    reason: "paths_unavailable",
+    totals: {},
+    roots: [],
+    files: [],
+  });
+
+  sandbox.renderFilesTab();
+
+  assert.match(elements.content.innerHTML, /data-file-action="add-folder"/);
+  assert.match(elements.content.innerHTML, /data-file-path/);
+  assert.match(elements.content.innerHTML, /data-file-action="save-folders"/);
+  assert.doesNotMatch(elements.content.innerHTML, /data-file-action="settings"/);
+});
+
+test("saving the toggle keeps current watched folders", async () => {
+  const calls = [];
+  const { sandbox, state } = createVisibilitySandbox({
+    enabled: false,
+    status: "disabled",
+    roots: [{ path: "D:\\Docs" }],
+    files: [],
+  });
+  state.dom.fileSettingsEnabled.checked = true;
+  state.fileSettingsEnabled = false;
+  sandbox.api.saveFileSettings = function (body) {
+    calls.push(body);
+    return Promise.resolve({
+      enabled: true,
+      status: "running",
+      roots: [{ path: "D:\\Docs" }],
+      files: [],
+    });
+  };
+  sandbox.api.getStatus = function () { return Promise.resolve({ collectors: { file: "running" } }); };
+  sandbox.updateStatusBar = function () {};
+
+  await sandbox.saveFileSettings();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].enabled, true);
+  assert.deepEqual(Array.from(calls[0].paths || []), ["D:\\Docs"]);
+});
+
+test("file status entry opens the files tab when collection is enabled", () => {
+  const { sandbox, state } = createVisibilitySandbox({
+    enabled: true,
+    status: "running",
+    roots: [{ path: "D:\\Docs" }],
+    files: [],
+  });
+
+  sandbox.openFileStatusEntry();
+
+  assert.equal(state.switchedTo, "files");
+  assert.equal(state.settingsOpened, 0);
 });

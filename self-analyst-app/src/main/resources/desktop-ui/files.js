@@ -3,6 +3,38 @@
    ============================================================ */
 "use strict";
 
+function isFileCollectionEnabled(overview, status) {
+  if (overview && typeof overview.enabled === "boolean") {
+    return overview.enabled;
+  }
+  var collectors = status && status.collectors;
+  var fileStatus = collectors && collectors.file;
+  return Boolean(fileStatus) && fileStatus !== "disabled";
+}
+
+function syncFileUiVisibility() {
+  var visible = isFileCollectionEnabled(state.filesOverview, state.status);
+  var nav = state.dom && state.dom.fileNavTab;
+  if (nav && nav.classList) {
+    nav.classList.toggle("hidden", !visible);
+  }
+  var statusBtn = state.dom && state.dom.fileStatusBtn;
+  if (statusBtn && statusBtn.classList) {
+    statusBtn.classList.toggle("hidden", !visible);
+  }
+  if (!visible && state.tab === "files") {
+    switchTab("agent");
+  }
+}
+
+function openFileStatusEntry() {
+  if (isFileCollectionEnabled(state.filesOverview, state.status)) {
+    switchTab("files");
+    return;
+  }
+  openFileSettingsModal();
+}
+
 function loadFiles() {
   state.filesLoadRequestId = (state.filesLoadRequestId || 0) + 1;
   var requestId = state.filesLoadRequestId;
@@ -24,6 +56,10 @@ function loadFiles() {
     .then(function () {
       if (!requestIsCurrent()) return;
       state.filesLoading = false;
+      if (!state.fileFoldersDirty) {
+        state.fileSettingsPaths = configuredWatchPaths(state.filesOverview);
+      }
+      syncFileUiVisibility();
       renderFilesTab();
     });
 }
@@ -93,11 +129,16 @@ function renderFileOverview(overview) {
         escHtml(t("file.retry")) + "</button>");
   }
 
-  if (overview.status === "degraded") {
+  if (overview.status === "degraded" && overview.reason !== "paths_unavailable") {
     html += renderFileMessage(
       "warning", fileReasonMessage(overview),
       '<button class="btn btn-sm btn-outline" type="button" data-file-action="settings">' +
         escHtml(t("file.checkSettings")) + "</button>" +
+      '<button class="btn btn-sm btn-outline" type="button" data-file-action="retry">' +
+        escHtml(t("file.retry")) + "</button>");
+  } else if (overview.status === "degraded") {
+    html += renderFileMessage(
+      "warning", fileReasonMessage(overview),
       '<button class="btn btn-sm btn-outline" type="button" data-file-action="retry">' +
         escHtml(t("file.retry")) + "</button>");
   }
@@ -120,8 +161,20 @@ function renderFileOverview(overview) {
       '<div class="file-list">' + renderRecentFiles(files) + "</div>" +
     "</section>" +
     '<aside class="card file-roots-panel">' +
-      '<div class="card-header"><h3 class="card-title">' + escHtml(t("file.roots")) + "</h3></div>" +
-      '<div class="file-roots-body">' + renderWatchRoots(roots) +
+      '<div class="card-header"><h3 class="card-title">' + escHtml(t("file.roots")) + "</h3>" +
+        '<button class="btn btn-sm btn-outline" type="button" data-file-action="add-folder"' +
+          (state.fileFoldersSaving ? " disabled" : "") + '>' +
+          escHtml(t("file.addFolder")) + "</button></div>" +
+      '<div class="file-roots-body">' +
+        '<p class="file-folders-hint">' + escHtml(t("file.foldersHint")) + "</p>" +
+        renderFileFolderEditor(overview) +
+        (state.fileFoldersError
+          ? '<div class="file-settings-error" role="alert">' + escHtml(state.fileFoldersError) + "</div>"
+          : "") +
+        '<button class="btn btn-primary" type="button" data-file-action="save-folders"' +
+          (state.fileFoldersSaving ? " disabled" : "") + '>' +
+          escHtml(state.fileFoldersSaving ? t("file.savingFolders") : t("file.saveFolders")) +
+          "</button>" +
         '<div class="file-privacy-note"><strong>' + escHtml(t("file.privacyTitle")) + "</strong> " +
           escHtml(t("file.privacyBody")) + "</div>" +
         '<div class="file-agent-hint"><strong>' + escHtml(t("file.agentHintTitle")) + "</strong>" +
@@ -154,18 +207,23 @@ function renderRecentFiles(files) {
   }).join("");
 }
 
-function renderWatchRoots(roots) {
-  if (!roots.length) return '<div class="file-list-empty">' + escHtml(t("file.noRoots")) + "</div>";
-  return roots.map(function (root) {
-    var counts = root.counts || {};
-    return '<div class="file-root-item"><div class="file-root-path" title="' + escHtml(root.path) + '">' +
-      escHtml(root.path) + '</div><div class="file-root-counts">' +
-      escHtml(t("file.rootCounts", {
-        collected: counts.collected || 0,
-        pending: counts.pending || 0,
-        failed: counts.failed || 0,
-      })) + "</div></div>";
-  }).join("");
+function configuredWatchPaths(overview) {
+  return ((overview && overview.roots) || []).map(function (root) {
+    return root && root.path ? root.path : "";
+  }).filter(Boolean);
+}
+
+function fileFolderDraftPaths() {
+  var paths = state.fileFoldersDirty
+    ? (state.fileSettingsPaths || [])
+    : configuredWatchPaths(state.filesOverview);
+  return paths.length ? paths : [""];
+}
+
+function renderFileFolderEditor() {
+  return '<div class="file-settings-paths">' +
+    renderFileSettingsPaths(fileFolderDraftPaths(), Boolean(state.fileFoldersSaving)) +
+    "</div>";
 }
 
 function fileLatestDetail(overview) {
@@ -216,19 +274,12 @@ function openFileSettingsModal() {
       if (state.filesOverview) openFileSettingsModal();
     });
   }
-  var overview = state.filesOverview;
-  state.fileSettingsEnabled = Boolean(overview.enabled);
-  state.fileSettingsPaths = (overview.roots || []).map(function (root) {
-    return root && root.path ? root.path : "";
-  });
-  if (!state.fileSettingsPaths.length) state.fileSettingsPaths.push("");
+  state.fileSettingsEnabled = Boolean(state.filesOverview.enabled);
   state.fileSettingsError = null;
   state.fileSettingsSaving = false;
   state.fileSettingsOpen = true;
   state.dom.fileSettingsModal.classList.remove("hidden");
   renderFileSettingsModal();
-  var firstInput = state.dom.fileSettingsPaths.querySelector("input[data-file-path]");
-  if (firstInput) firstInput.focus();
 }
 
 function closeFileSettingsModal() {
@@ -239,19 +290,14 @@ function closeFileSettingsModal() {
 }
 
 function syncFileSettingsDraft() {
+  if (!state.dom.fileSettingsEnabled) return;
   state.fileSettingsEnabled = Boolean(state.dom.fileSettingsEnabled.checked);
-  state.fileSettingsPaths = Array.from(
-    state.dom.fileSettingsPaths.querySelectorAll("input[data-file-path]")
-  ).map(function (input) { return input.value; });
 }
 
 function renderFileSettingsModal() {
   if (!state.dom.fileSettingsModal) return;
   state.dom.fileSettingsEnabled.checked = Boolean(state.fileSettingsEnabled);
   state.dom.fileSettingsEnabled.disabled = Boolean(state.fileSettingsSaving);
-  state.dom.fileSettingsPaths.innerHTML = renderFileSettingsPaths(
-    state.fileSettingsPaths || [], Boolean(state.fileSettingsSaving));
-  state.dom.fileSettingsAddBtn.disabled = Boolean(state.fileSettingsSaving);
   state.dom.fileSettingsCancelBtn.disabled = Boolean(state.fileSettingsSaving);
   state.dom.fileSettingsSaveBtn.disabled = Boolean(state.fileSettingsSaving);
   state.dom.fileSettingsSaveBtn.textContent = state.fileSettingsSaving
@@ -276,18 +322,60 @@ function renderFileSettingsPaths(paths, disabled) {
   }).join("");
 }
 
+function syncFileFolderDraft() {
+  var content = state.dom.fileContent;
+  if (!content) return;
+  var inputs = content.querySelectorAll("input[data-file-path]");
+  if (!inputs.length) return;
+  state.fileSettingsPaths = Array.from(inputs).map(function (input) { return input.value; });
+  state.fileFoldersDirty = true;
+}
+
 function addFileSettingsPath() {
-  syncFileSettingsDraft();
+  syncFileFolderDraft();
+  if (!state.fileSettingsPaths.length) state.fileSettingsPaths = fileFolderDraftPaths();
   state.fileSettingsPaths.push("");
-  renderFileSettingsModal();
-  var inputs = state.dom.fileSettingsPaths.querySelectorAll("input[data-file-path]");
-  if (inputs.length) inputs[inputs.length - 1].focus();
+  state.fileFoldersDirty = true;
+  renderFilesTab();
 }
 
 function removeFileSettingsPath(index) {
-  syncFileSettingsDraft();
+  syncFileFolderDraft();
+  if (!state.fileSettingsPaths.length) state.fileSettingsPaths = fileFolderDraftPaths();
   state.fileSettingsPaths.splice(index, 1);
-  renderFileSettingsModal();
+  state.fileFoldersDirty = true;
+  renderFilesTab();
+}
+
+function saveFileFolders() {
+  if (state.fileFoldersSaving) return Promise.resolve();
+  syncFileFolderDraft();
+  state.fileFoldersSaving = true;
+  state.fileFoldersError = null;
+  renderFilesTab();
+  var paths = (state.fileSettingsPaths || []).map(function (path) { return path.trim(); })
+    .filter(Boolean);
+  return api.saveFileSettings({
+    enabled: isFileCollectionEnabled(state.filesOverview, state.status),
+    paths: paths,
+  }).then(function (overview) {
+    state.filesOverview = overview || null;
+    state.fileFoldersSaving = false;
+    state.fileFoldersDirty = false;
+    state.fileSettingsPaths = configuredWatchPaths(overview);
+    syncFileUiVisibility();
+    renderFilesTab();
+    return api.getStatus().then(function (status) {
+      state.status = status || state.status;
+      if (typeof updateStatusBar === "function") updateStatusBar();
+    }).catch(function () {});
+  }).catch(function (error) {
+    state.fileFoldersSaving = false;
+    state.fileFoldersError = t("file.saveSettingsFailed", {
+      msg: error && error.message ? error.message : t("common.unknownError"),
+    });
+    renderFilesTab();
+  });
 }
 
 function saveFileSettings() {
@@ -296,19 +384,21 @@ function saveFileSettings() {
   state.fileSettingsSaving = true;
   state.fileSettingsError = null;
   renderFileSettingsModal();
-  var paths = state.fileSettingsPaths.map(function (path) { return path.trim(); })
-    .filter(function (path) { return Boolean(path); });
   return api.saveFileSettings({
     enabled: state.fileSettingsEnabled,
-    paths: paths,
+    paths: configuredWatchPaths(state.filesOverview),
   }).then(function (overview) {
     state.filesOverview = overview || null;
     state.fileSettingsSaving = false;
     closeFileSettingsModal();
+    syncFileUiVisibility();
+    if (state.fileSettingsEnabled && typeof switchTab === "function") {
+      switchTab("files");
+    }
     renderFilesTab();
     return api.getStatus().then(function (status) {
       state.status = status || state.status;
-      updateStatusBar();
+      if (typeof updateStatusBar === "function") updateStatusBar();
     }).catch(function () {});
   }).catch(function (error) {
     state.fileSettingsSaving = false;

@@ -111,6 +111,28 @@ class DesktopFileControllerTest {
     }
 
     @Test
+    void enablingWithoutWatchRootsPersistsAndLeavesCollectorDegraded(@TempDir Path dir)
+            throws Exception {
+        UserConfigStore configStore = new UserConfigStore(dir.resolve("memory"));
+        AtomicReference<DesktopFileController.CollectorState> state = new AtomicReference<>(
+                new DesktopFileController.CollectorState(false, List.of(), false, false,
+                        null, null));
+        DesktopFileController controller = new DesktopFileController(
+                null, configStore, state::get,
+                (enabled, roots) -> state.set(new DesktopFileController.CollectorState(
+                        enabled, roots, enabled, enabled, null, null)));
+
+        Map<String, Object> payload = controller.updateSettings(true, List.of());
+
+        assertEquals("true", configStore.loadUser().getProperty("file.watch.enabled"));
+        assertNull(configStore.loadUser().getProperty("file.watch.paths"));
+        assertEquals("degraded", payload.get("status"));
+        assertEquals("paths_unavailable", payload.get("reason"));
+        assertTrue((Boolean) payload.get("enabled"));
+        assertEquals(List.of(), state.get().watchRoots());
+    }
+
+    @Test
     void invalidDirectoryIsRejectedBeforePersistenceOrRuntimeApply(@TempDir Path dir) throws Exception {
         UserConfigStore configStore = new UserConfigStore(dir.resolve("memory"));
         AtomicBoolean applied = new AtomicBoolean();

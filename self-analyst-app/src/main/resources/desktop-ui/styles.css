@@ -1980,6 +1980,19 @@ input:checked + .toggle-switch::after {
   color: var(--text-secondary);
   font-size: 12px;
 }
+.file-folders-hint {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.file-roots-body .file-settings-paths { margin-bottom: 12px; }
+.file-roots-body .file-settings-error { margin-bottom: 12px; }
+.file-roots-panel .card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .file-roots-body .file-privacy-note { margin-top: 12px; }
 .file-agent-hint {
   margin-top: 14px;

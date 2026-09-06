@@ -160,9 +160,6 @@ public class DesktopFileController {
             throw new IllegalStateException("当前运行环境不支持修改文件采集设置");
         }
         List<Path> roots = normalizeWatchRoots(requestedPaths);
-        if (enabled && roots.isEmpty()) {
-            throw new IllegalArgumentException("启用文件采集前请至少添加一个监控目录");
-        }
 
         Properties user = configStore.loadUser();
         user.setProperty("file.watch.enabled", Boolean.toString(enabled));

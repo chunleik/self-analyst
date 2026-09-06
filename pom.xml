@@ -10,6 +10,40 @@
     <packaging>pom</packaging>
 
     <name>SelfAnalyst</name>
+    <description>本地优先的个人活动分析工具：在本地采集窗口标题与文件元数据，并由本地 Agent 聚合与分析。</description>
+    <url>https://github.com/chunleik/self-analyst</url>
+    <inceptionYear>2026</inceptionYear>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>chunleik</id>
+            <name>killua</name>
+            <url>https://github.com/chunleik</url>
+            <roles>
+                <role>maintainer</role>
+            </roles>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/chunleik/self-analyst.git</connection>
+        <developerConnection>scm:git:git@github.com:chunleik/self-analyst.git</developerConnection>
+        <url>https://github.com/chunleik/self-analyst</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/chunleik/self-analyst/issues</url>
+    </issueManagement>
 
     <modules>
         <module>self-analyst-aw</module>

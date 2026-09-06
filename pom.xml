@@ -63,7 +63,7 @@
         <jna.version>5.16.0</jna.version>
         <jackson.version>2.21.1</jackson.version>
         <agentscope.version>2.0.1</agentscope.version>
-        <slf4j.version>2.0.17</slf4j.version>
+        <slf4j.version>2.0.18</slf4j.version>
         <logback.version>1.5.18</logback.version>
         <junit.version>5.11.4</junit.version>
         <lucene.version>10.4.0</lucene.version>

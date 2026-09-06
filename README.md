@@ -123,7 +123,24 @@ git show archive/pre-remove-ocr-audio
 ## 文档
 
 - [架构](docs/architecture.md)
+- [文档与规格索引](docs/README.md)
+- [测试与集成验证](docs/testing.md)
 - [上下文标题采集规格](openspec/specs/title-capture/spec.md)
 - [标题最小化持久化规格](openspec/specs/content-event-persistence/spec.md)
 - [OCR 与声音模块暂时移除说明](docs/archive/removed-features/removed-ocr-audio.md)
 - [隐私说明](PRIVACY.md)
+
+## 贡献
+
+欢迎提交缺陷报告、功能建议和 PR。本项目采用规格驱动开发，行为契约以 `openspec/specs/`
+为权威来源，并对采集与持久化范围有明确红线，动手前请先阅读
+[贡献指南](CONTRIBUTING.md)，尤其是其中的数据边界红线与规格驱动流程两节。
+
+- [贡献指南](CONTRIBUTING.md)
+- [行为准则](CODE_OF_CONDUCT.md)
+- [安全策略](SECURITY.md) — 安全漏洞请勿开公开 Issue，请走私密报告渠道
+
+## 许可证
+
+本项目采用 [Apache License 2.0](LICENSE)，另见 [NOTICE](NOTICE)。依赖与随发布产物分发的
+第三方组件及其各自许可证见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

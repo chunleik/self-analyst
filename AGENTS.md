@@ -9,7 +9,7 @@ Java 代码使用 `src/main/java` 和 `src/test/java` 目录。桌面端资源�
 ## 构建、测试与开发命令
 
 - `mvn test` — 运行 JUnit 5 测试和桌面端 UI 的 Node 测试套件。
-- `mvn -pl self-analyst-app -am -Dtest=ConfigTest -Dsurefire.failIfNoSpecifiedTests=false test` — 构建依赖模块并运行一个应用测试类。
+- `mvn -pl self-analyst-app -am '-Dtest=ConfigTest' '-Dsurefire.failIfNoSpecifiedTests=false' test` — 构建依赖模块并运行一个应用测试类。PowerShell 会在第一个点号处拆开未加引号的 `-D` 参数，因此这类属性必须用单引号包裹。
 - `mvn package -DskipTests` — 构建并生成 JAR 包。
 - `cd self-analyst-desktop && pnpm install && pnpm tauri dev` — 以开发模式运行桌面端外壳。
 - `cargo test --manifest-path self-analyst-axsidecar/Cargo.toml` — 测试 Rust 边车程序。

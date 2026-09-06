@@ -66,8 +66,8 @@ Windows CI 和 release workflow 显式启用：
 
 ```powershell
 .\scripts\build-axsidecar.ps1
-mvn -pl self-analyst-content -am -Dselfanalyst.synthetic.uia=true `
-  -Dtest=SyntheticUiaSmokeTest -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl self-analyst-content -am '-Dselfanalyst.synthetic.uia=true' `
+  '-Dtest=SyntheticUiaSmokeTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
 ```
 
 ### SPEC-ITEST-UIA-001：显式启用
@@ -77,7 +77,7 @@ mvn -pl self-analyst-content -am -Dselfanalyst.synthetic.uia=true `
 
 ```powershell
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-21'
-mvn -pl self-analyst-content -Dselfanalyst.manual.uia=true -Dtest=ManualUiaSmokeTest test
+mvn -pl self-analyst-content '-Dselfanalyst.manual.uia=true' '-Dtest=ManualUiaSmokeTest' test
 ```
 
 测试输出只包含应用名、系统标题是否存在、UIA 字符计数和是否识别到上下文标题，不输出 UIA 原文
@@ -85,16 +85,20 @@ mvn -pl self-analyst-content -Dselfanalyst.manual.uia=true -Dtest=ManualUiaSmoke
 
 ## 4. 标准命令
 
+PowerShell 会在第一个点号处拆开未加引号的 `-D` 参数（例如 `-Dsurefire.failIfNoSpecifiedTests=false`
+会被拆成 `-Dsurefire` 和 `.failIfNoSpecifiedTests=false`），因此本文档和 CI 中的 Maven 属性一律用
+单引号包裹。
+
 ```powershell
 # 全部 Java、模块集成和桌面 Node 测试
 mvn test
 
 # 单独运行 AW HTTP 集成测试
-mvn -pl self-analyst-aw -Dtest=AwServerIntegrationTest test
+mvn -pl self-analyst-aw '-Dtest=AwServerIntegrationTest' test
 
 # 运行桌面 API 集成测试及其依赖（同时执行桌面 Node 测试）
-mvn -pl self-analyst-app -am -Dtest=DesktopServerIntegrationTest `
-  -Dsurefire.failIfNoSpecifiedTests=false test
+mvn -pl self-analyst-app -am '-Dtest=DesktopServerIntegrationTest' `
+  '-Dsurefire.failIfNoSpecifiedTests=false' test
 
 # Rust accessibility sidecar
 cargo test --manifest-path self-analyst-axsidecar/Cargo.toml

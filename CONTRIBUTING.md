@@ -139,7 +139,8 @@ Java 测试命名为 `*Test.java`，跨组件集成测试命名为 `*Integration
 mvn test
 
 # 单个测试类（含依赖模块）
-mvn -pl self-analyst-app -am -Dtest=ConfigTest -Dsurefire.failIfNoSpecifiedTests=false test
+# PowerShell 会在第一个点号处拆开未加引号的 -D 参数，这类属性必须用单引号包裹
+mvn -pl self-analyst-app -am '-Dtest=ConfigTest' '-Dsurefire.failIfNoSpecifiedTests=false' test
 
 # Rust
 cargo test --manifest-path self-analyst-desktop/src-tauri/Cargo.toml

@@ -65,9 +65,9 @@ jobs:
         run: |
           ./scripts/build-axsidecar.ps1
           mvn --batch-mode -pl self-analyst-content -am `
-            -Dselfanalyst.synthetic.uia=true `
-            -Dtest=SyntheticUiaSmokeTest `
-            -Dsurefire.failIfNoSpecifiedTests=false test
+            '-Dselfanalyst.synthetic.uia=true' `
+            '-Dtest=SyntheticUiaSmokeTest' `
+            '-Dsurefire.failIfNoSpecifiedTests=false' test
 
       - name: 构建并验证便携包
         shell: pwsh

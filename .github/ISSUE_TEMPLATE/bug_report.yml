@@ -1,0 +1,119 @@
+name: 缺陷报告
+description: 报告可复现的功能异常
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你花时间报告问题。
+
+        > **请勿提交个人数据。** 日志、窗口标题、文件路径和截图可能包含你或他人的隐私信息。
+        > 粘贴前请先脱敏，只保留复现问题所必需的部分。
+
+        > **安全漏洞请勿使用本模板。** 请改用
+        > [私密 Security Advisory](https://github.com/chunleik/self-analyst/security/advisories/new)。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，确认这不是重复问题
+          required: true
+        - label: 我已在最新 `main` 分支或最新发布版本上确认问题仍可复现
+          required: true
+        - label: 我已对粘贴的日志与截图脱敏，其中不包含个人隐私数据
+          required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 简要说明实际发生了什么，以及你预期的行为是什么。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-mode
+    attributes:
+      label: 运行方式
+      options:
+        - NSIS 安装包
+        - 便携包（portable ZIP）
+        - 源码构建（mvn package）
+        - 桌面开发模式（pnpm tauri dev）
+        - 直接执行 java -jar
+    validations:
+      required: true
+
+  - type: dropdown
+    id: aw-mode
+    attributes:
+      label: aw.mode
+      description: ActivityWatch 运行模式，见 config.toml。
+      options:
+        - embedded（默认）
+        - external
+        - 不确定
+    validations:
+      required: true
+
+  - type: dropdown
+    id: content-collection
+    attributes:
+      label: aw.collection.content
+      description: 是否启用上下文标题采集。
+      options:
+        - "true（默认）"
+        - "false"
+        - 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统版本
+      placeholder: "例如 Windows 11 23H2 (26100.1742)"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SelfAnalyst 版本或提交号
+      placeholder: "例如 1.0.0 或 c29d601"
+    validations:
+      required: true
+
+  - type: input
+    id: toolchain
+    attributes:
+      label: JDK / Node.js / Rust 版本
+      description: 仅源码构建或开发模式需要填写。
+      placeholder: "例如 JDK 21.0.5、Node 20.18.0、rustc 1.83.0"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志或错误输出
+      description: 请只粘贴相关片段并已脱敏。
+      render: text
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 其他信息
+      description: 相关规格、可疑改动、临时规避方式或截图。

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 报告安全漏洞
+    url: https://github.com/chunleik/self-analyst/security/advisories/new
+    about: 请不要通过公开 Issue 报告安全漏洞。请创建私密 GitHub Security Advisory，详见 SECURITY.md。
+  - name: 贡献指南
+    url: https://github.com/chunleik/self-analyst/blob/main/CONTRIBUTING.md
+    about: 提交 PR 前请先阅读数据边界红线与规格驱动流程。
+  - name: 隐私说明
+    url: https://github.com/chunleik/self-analyst/blob/main/PRIVACY.md
+    about: 想了解本地采集范围与外发数据边界，请先看这里。

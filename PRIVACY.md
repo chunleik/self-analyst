@@ -23,17 +23,17 @@ UIA 查询前会排除密码管理器和认证类敏感应用。查询失败时�
 
 | 数据 | 默认位置 |
 |------|----------|
-| ActivityWatch 事件 | `{aw.data-dir}/events.db` |
+| 活动事件 | `{aw.data-dir}/events.db` |
 | 合规原始事件 | `{aw.raw.dir}` 中的 UTC 月度 SQLite 分区；永久、只追加 |
 | Wiki 与记忆派生数据 | 用户数据目录下的相应 SQLite/索引目录 |
 | 桌面会话 | 用户数据目录下的 `chat.db` |
-| 文件元数据 | `{memory.dir}/file-watch.db`，以及本地 ActivityWatch `events.db` 中的文件元数据 heartbeat |
+| 文件元数据 | `{memory.dir}/file-watch.db`，以及本地事件服务 `events.db` 中的文件元数据 heartbeat |
 
 永久原始层只保存已经通过来源 schema 和隐私策略的事件语义，不保存 HTTP header、token 或原始请求
 字节。内容事件只允许标题字段；UIA 正文、控件树、截图、OCR 和音频从不进入原始层。文件事件只
 保存路径及文件系统元数据，不读取或保存普通文件正文、内容哈希、摘要或 embedding。
 
-永久保留仅适用于嵌入式 ActivityWatch。外部模式的数据目录不受 SelfAnalyst 控制，因此状态会明确
+永久保留仅适用于嵌入式事件服务。外部模式的数据目录不受 SelfAnalyst 控制，因此状态会明确
 显示不可用。原始数据不会因 bucket 删除、监控根移除、投影/Wiki 清理或磁盘压力而自动删除；磁盘
 空间不足时会阻止新采集，用户应扩容或通过未来的显式受审计流程处理数据。
 
@@ -45,7 +45,7 @@ OCR、音频或第三方工具历史目录。
 
 ## 联网边界
 
-本地 ActivityWatch、标题识别和 accessibility sidecar 不需要外发 UIA 内容。启用 LLM、Embedding、
+本地事件服务、标题识别和 accessibility sidecar 不需要外发 UIA 内容。启用 LLM、Embedding、
 联网搜索或其他云服务时，会把对应功能所需的输入发送到用户配置的服务端；各功能必须遵守自己的
 最小化规格。文件采集不读取或外发普通文件正文；FileTools 在本地匹配文件名、路径和时间等元数据，
 但这些元数据作为 Agent 工具结果时可能进入用户配置的 LLM 会话。当前版本不存在云端 ASR 路径。

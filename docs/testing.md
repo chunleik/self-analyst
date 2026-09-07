@@ -23,7 +23,7 @@
 
 ## 2. 自动化集成场景
 
-### SPEC-ITEST-AW-001：ActivityWatch HTTP 链路
+### SPEC-ITEST-AW-001：事件服务 HTTP 链路
 
 `EventServerIntegrationTest` 启动绑定临时端口的真实嵌入式服务，并使用临时 SQLite 目录验证：
 
@@ -37,7 +37,7 @@
 
 ### SPEC-ITEST-APP-001：桌面 API 链路
 
-`DesktopServerIntegrationTest` 使用临时配置、临时 ActivityWatch 数据库和随机端口启动真实 Javalin
+`DesktopServerIntegrationTest` 使用临时配置、临时事件服务数据库和随机端口启动真实 Javalin
 路由，验证：
 
 - 状态响应及已移除采集器不再出现；

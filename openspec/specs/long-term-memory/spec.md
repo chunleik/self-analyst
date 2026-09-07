@@ -83,8 +83,8 @@ MemoryItem 和仍有效的 legacy goals、patterns、logs。pending、rejected�
 
 ### Requirement: SPEC-LTM-DEC-007、SPEC-LTM-EXTR-002 有界提炼输入
 自动提炼输入 SHALL 限于当前会话 ID、标题、策略、最近 user/assistant turn 或有界消息窗口、相关消息 ID，
-以及 active/pending 记忆的有界摘要。输入 MUST NOT 包含配置密钥、凭据、完整历史会话库或 ActivityWatch
-原始事件流；凭据样式的聊天文本 SHALL 在调用提炼模型前被确定性拦截。
+以及 active/pending 记忆的有界摘要。输入 MUST NOT 包含配置密钥、凭据、完整历史会话库或原始采集
+事件流；凭据样式的聊天文本 SHALL 在调用提炼模型前被确定性拦截。
 
 #### Scenario: 有界 prompt
 - **WHEN** 当前消息和既有记忆内容很长
@@ -137,7 +137,7 @@ assistant 首次由 pending 转为 sent 后，系统 SHALL 在会话策略非 of
 
 ### Requirement: SPEC-LTM-EXTR-004、005 自动与待确认条件
 只有用户明确陈述、非敏感、非凭据、可长期复用、confidence 至少 8 且未重复的候选 MAY 自动 active。
-模型推断、行为模式、敏感类别、ActivityWatch 行为归纳、confidence 低于 8 或 confirm_all 会话候选
+模型推断、行为模式、敏感类别、采集事件行为归纳、confidence 低于 8 或 confirm_all 会话候选
 MUST pending。系统 MUST NOT 仅根据模型给出的 approvalPolicy 绕过确定性分级。
 
 #### Scenario: 模型把敏感候选标为 auto
@@ -252,11 +252,11 @@ UI SHALL 允许用户停用或删除错误记忆。提炼输入 MUST NOT 包含�
 - **WHEN** 用户删除一条错误或敏感记忆
 - **THEN** 该内容不再出现在存储、下一轮 Agent 上下文或自动去重依据中
 
-### Requirement: SPEC-LTM-NON-001..006 功能边界
+### Requirement: SPEC-LTM-NON-001..006 功能边界与事件来源
 长期记忆 SHALL 保持本地文件能力，不提供云同步、账号体系、跨设备合并、向量召回或 embedding 检索。
-系统 MUST NOT 自动把 ActivityWatch 原始事件或全部聊天原文复制为长期记忆；legacy goals、patterns、
+系统 MUST NOT 自动把原始采集事件或全部聊天原文复制为长期记忆；legacy goals、patterns、
 logs 不要求迁移成 MemoryItem，但 SHALL 继续兼容读取和上下文展示。
 
-#### Scenario: ActivityWatch 原始事件
+#### Scenario: 原始采集事件
 - **WHEN** 系统存在新的窗口、AFK 或内容事件
 - **THEN** 这些原始事件不会自动写入长期记忆；行为推断只能经有界候选和确认策略处理

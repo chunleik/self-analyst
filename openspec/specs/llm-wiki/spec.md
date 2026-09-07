@@ -104,7 +104,7 @@ OCR/UIA 原文。
 
 #### Scenario: Wiki 不读取永久原始层
 - **WHEN** Wiki 生成小时、半天或天级事实
-- **THEN** 系统读取 ActivityWatch 投影且不调用桌面原始事件查询 API
+- **THEN** 系统读取事件投影且不调用桌面原始事件查询 API
 
 ### Requirement: SPEC-WIKI-SRC-020 默认事实来源桶标识
 HOUR、HALF_DAY 和 DAY 的事实构建 SHALL 默认查询本机投影桶
@@ -121,10 +121,10 @@ HOUR、HALF_DAY 和 DAY 的事实构建 SHALL 默认查询本机投影桶
 - **THEN** 系统仍从该导入桶读取窗口事实，不因前缀不是 `watcher-` 而跳过
 
 ### Requirement: SPEC-WIKI-RAW-001 Wiki 派生版本与覆盖信息
-每个新生成的 Wiki 条目 SHALL 记录事实构建版本、所消费 ActivityWatch 投影版本以及各来源 bucket 的时间覆盖或缺失状态。Wiki 重建 MUST 只修改 Wiki 和语义派生数据，不得修改永久原始事件；覆盖不完整时查询结果 SHALL 能向 Agent 和桌面说明不完整性。
+每个新生成的 Wiki 条目 SHALL 记录事实构建版本、所消费事件投影版本以及各来源 bucket 的时间覆盖或缺失状态。Wiki 重建 MUST 只修改 Wiki 和语义派生数据，不得修改永久原始事件；覆盖不完整时查询结果 SHALL 能向 Agent 和桌面说明不完整性。
 
 #### Scenario: 投影版本升级后重建 Wiki
-- **WHEN** ActivityWatch 投影算法或 Wiki 事实构建版本发生变化并触发重建
+- **WHEN** 事件投影算法或 Wiki 事实构建版本发生变化并触发重建
 - **THEN** 新条目记录新版本和覆盖信息，旧 Wiki 派生数据可被替换，但永久原始事件保持不变
 
 #### Scenario: 原始完整但投影尚有延迟
@@ -249,7 +249,7 @@ level、period、summary、primaryTask 和安全 matchedText，MUST NOT 返回�
 ### Requirement: SPEC-WIKI-AGT-001..005 Agent 使用 Wiki
 Agent 指令 SHALL 说明 Wiki 用于历史复盘。用户询问明确时间段的任务、趋势或对比时，Agent SHOULD
 优先使用时间查询；只有主题而无时间范围时 SHOULD 尝试语义搜索。工具返回 pending/failed 时 MUST
-说明结果不完整。Agent MUST NOT 在 Wiki 无结果时直接声称没有数据，除非必要的 ActivityWatch 原始查询
+说明结果不完整。Agent MUST NOT 在 Wiki 无结果时直接声称没有数据，除非必要的事件原始查询
 也无可用事实。
 
 #### Scenario: Wiki 区间未完成
@@ -294,7 +294,7 @@ Wiki 数据库、单时间块、原始 bucket、LLM、embedding 或向量索引�
 ### Requirement: SPEC-WIKI-NON-001、004..006 功能边界
 当前能力 MUST NOT 依赖独立 Wiki 浏览页、手动编辑摘要、跨设备同步、账号或云端存储才能工作。
 历史摘要 SHALL 默认永久保留，除非未来显式引入保留策略。当前系统 MAY 把完成摘要投影到本地
-ActivityWatch summary bucket 供时间线消费；该行为不改变 llm-wiki.db 的摘要权威。
+事件 summary bucket 供时间线消费；该行为不改变 llm-wiki.db 的摘要权威。
 
 #### Scenario: 用户需要历史复盘
 - **WHEN** 没有独立 Wiki 页面
@@ -314,7 +314,7 @@ ActivityWatch summary bucket 供时间线消费；该行为不改变 llm-wiki.db
 - **THEN** bucket client 为 `wiki`，ID 不以 `watcher-` 开头
 
 ### Requirement: SPEC-WIKI-DSK-001 桌面时间轴消费已结束 Wiki
-桌面时间轴对已结束时段 SHALL 以 `llm-wiki.db` 中对应层级的 `SUMMARIZED` 条目为摘要权威，MUST NOT 为这些时段再次现场生成 LLM 文案。父级跨度未完成时 SHALL 拼装可用子级 `SUMMARIZED` 条目；PENDING、FAILED、SKIPPED 或缺失 MUST NOT 阻塞当前窗。该消费路径 MUST NOT 改变 Wiki worker 的发现、生成或补算职责，也不得把 ActivityWatch summary bucket 投影当作比 Wiki 更高的权威。
+桌面时间轴对已结束时段 SHALL 以 `llm-wiki.db` 中对应层级的 `SUMMARIZED` 条目为摘要权威，MUST NOT 为这些时段再次现场生成 LLM 文案。父级跨度未完成时 SHALL 拼装可用子级 `SUMMARIZED` 条目；PENDING、FAILED、SKIPPED 或缺失 MUST NOT 阻塞当前窗。该消费路径 MUST NOT 改变 Wiki worker 的发现、生成或补算职责，也不得把事件 summary bucket 投影当作比 Wiki 更高的权威。
 
 #### Scenario: 已结束日复用 Wiki
 - **WHEN** 昨天存在 SUMMARIZED DAY 条目且客户端请求桌面 summary

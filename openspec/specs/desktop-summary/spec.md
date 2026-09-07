@@ -58,7 +58,7 @@
 - **THEN** 系统复用快照中的当前窗文案，不发起新的 LLM 增强
 
 ### Requirement: SPEC-DSUM-WIKI-001 已结束时段复用 Wiki
-已结束时段的 headline、insight 与摘要文案 SHALL 优先来自 `llm-wiki.db` 中对应层级的 `SUMMARIZED` 条目。Wiki 为桌面时间轴上这些时段的摘要权威；ActivityWatch summary bucket 投影若存在，MUST NOT 取代 Wiki 权威。
+已结束时段的 headline、insight 与摘要文案 SHALL 优先来自 `llm-wiki.db` 中对应层级的 `SUMMARIZED` 条目。Wiki 为桌面时间轴上这些时段的摘要权威；事件 summary bucket 投影若存在，MUST NOT 取代 Wiki 权威。
 
 #### Scenario: 昨天已有 Wiki 日摘要
 - **WHEN** 昨天存在 `SUMMARIZED` 的 DAY 条目

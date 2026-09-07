@@ -25,7 +25,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 兼容边界：
 
 - **兼容并继续使用的协议面**：`info`、buckets、events、heartbeat、AQL、settings、export/import。
-  Agent 只通过 [EventQueryTools](../openspec/specs/activitywatch-tools/spec.md) 走 HTTP，不直连数据库。
+  Agent 只通过 [EventQueryTools](../openspec/specs/event-query-tools/spec.md) 走 HTTP，不直连数据库。
 - **本项目扩展，不属于官方 ActivityWatch**：内容事件 v2 标题策略、受桌面认证保护的原始事件查询、
   桌面 API、Wiki 摘要投影与文件元数据采集。这些能力只在嵌入式控制的写入链路上完整成立。
 - **查询语义**：现有 events / AQL / Agent 工具读取 heartbeat 合并后的投影；逐条原始 heartbeat 只经
@@ -44,7 +44,6 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 | Capability | 主规格 | 历史来源 |
 |------------|--------|----------------|
 | `accessibility-sidecar` | [spec](../openspec/specs/accessibility-sidecar/spec.md) | [旧文档](archive/legacy-specs/accessibility-sidecar.md) |
-| `activitywatch-tools` | [spec](../openspec/specs/activitywatch-tools/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `agent-context-compaction` | [spec](../openspec/specs/agent-context-compaction/spec.md) | Git 历史 |
 | `agent-runtime` | [spec](../openspec/specs/agent-runtime/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `behavior-advice` | [spec](../openspec/specs/behavior-advice/spec.md) | [旧文档](archive/legacy-specs/behavior-advice.md) |
@@ -52,6 +51,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 | `content-event-persistence` | [spec](../openspec/specs/content-event-persistence/spec.md) | Git 历史 |
 | `desktop-chat` | [spec](../openspec/specs/desktop-chat/spec.md) | Git 历史 |
 | `desktop-shell` | [spec](../openspec/specs/desktop-shell/spec.md) | Git 历史 |
+| `event-query-tools` | [spec](../openspec/specs/event-query-tools/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `file-metadata-collection` | [spec](../openspec/specs/file-metadata-collection/spec.md) | Git 历史 |
 | `internationalization` | [spec](../openspec/specs/internationalization/spec.md) | [旧文档](archive/legacy-specs/i18n.md) |
 | `llm-budget` | [spec](../openspec/specs/llm-budget/spec.md) | [旧文档](archive/legacy-specs/llm-budget.md) |

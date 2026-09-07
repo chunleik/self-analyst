@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-07
+# activitywatch-tools 的全部 requirement 迁移至 event-query-tools，旧 capability 随之退役。
+retire_capabilities: true

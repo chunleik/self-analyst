@@ -1,10 +1,9 @@
-# ActivityWatch Agent 工具规格
-
 ## Purpose
 
-定义 Agent 通过本地兼容 HTTP API 列出事件桶、查询投影事件、执行 AQL 和读取服务器信息的请求、预算与错误降级行为。
+定义 Agent 通过本地兼容 HTTP API 列出事件桶、查询投影事件、执行 AQL 和读取服务信息的请求、预算与
+错误降级行为。本 capability 由 `activitywatch-tools` 重命名而来，与实现类型 `EventQueryTools` 对齐。
 
-## Requirements
+## ADDED Requirements
 
 ### Requirement: SPEC-AW-001 base URL 与路径
 工具 SHALL 规范化构造器 baseUrl 的尾部斜杠，并把所有 API 路径直接追加到已经包含 `/api/0` 的 base URL，
@@ -16,11 +15,11 @@
 
 ### Requirement: SPEC-AW-002 工具方法
 Agent SHALL 能调用 listBuckets、queryEvents、executeAQL、getServerInfo 和 getSettings；每个工具 SHALL
-使用对应 ActivityWatch GET/POST endpoint，并返回 JSON 字符串结果。
+使用兼容 API 中对应的 GET/POST endpoint，并返回 JSON 字符串结果。
 
 #### Scenario: 列出 bucket
 - **WHEN** Agent 调用 listBuckets
-- **THEN** 工具请求 AW buckets endpoint 并返回服务端 JSON
+- **THEN** 工具请求兼容 API 的 buckets endpoint 并返回服务端 JSON
 
 ### Requirement: SPEC-AW-003 事件查询参数
 queryEvents SHALL 始终发送 limit，并将 limit 限制为最多 500；非空 start/end SHALL 作为 URL query
@@ -42,15 +41,15 @@ timeperiods 数组和 query 数组，使用 application/json，并正确 JSON �
 HTTP、IO 或中断错误 SHALL 转换为结构化 error JSON，而不是向 Agent 抛出未处理异常。InterruptedException
 处理 SHALL 恢复线程中断状态。错误结果 MUST NOT 包含配置密钥或无界响应体。
 
-#### Scenario: AW 不可达
-- **WHEN** 本地 AW 请求连接失败或超时
+#### Scenario: 事件服务不可达
+- **WHEN** 本地事件服务请求连接失败或超时
 - **THEN** 工具返回 error JSON，Agent 仍可使用其它工具
 
 ### Requirement: SPEC-AW-006 超时
 连接与每个请求 SHALL 使用配置的 aw.timeout，避免工具调用无限等待。
 
 #### Scenario: 请求超过超时
-- **WHEN** AW endpoint 未在配置时间内响应
+- **WHEN** 事件服务 endpoint 未在配置时间内响应
 - **THEN** 请求终止并返回结构化错误
 
 ### Requirement: SPEC-AW-007 Agent 工具可发现性

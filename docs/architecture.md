@@ -8,10 +8,10 @@ SelfAnalyst 使用 Java 21 Maven 多模块后端、Tauri 桌面壳和 Rust acces
 ```text
 Win32 前台窗口 ───────────────┐
 Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2 ─┐
-窗口/AFK watcher ────────────────────────────────> window/AFK ─┼─> ActivityWatch ─> Wiki 聚合
+窗口/AFK watcher ────────────────────────────────> window/AFK ─┼─> 事件服务 ─> Wiki 聚合
 
 用户配置的监控目录 ─> 文件系统元数据采集 ─> file-watch.db ─> FileTools / 桌面 API
-                                   └─> metadata-only heartbeat ─> ActivityWatch 通用历史
+                                   └─> metadata-only heartbeat ─> 事件服务通用历史
 
 通过策略的 heartbeat/events/import ─> 月度 raw SQLite（永久、只追加）
                                       └─> 幂等投影器 ─> events.db（合并、可重建）
@@ -59,7 +59,7 @@ Wiki 只能消费标题事实；文件采集器不得读取普通文件正文、
 
 ## 5. 生命周期
 
-`AppSession` 的主要顺序是：加载配置 → 初始化/验证 raw → 初始化并恢复 ActivityWatch 投影 →
+`AppSession` 的主要顺序是：加载配置 → 初始化/验证 raw → 初始化并恢复事件投影 →
 启动 HTTP → 启动窗口/AFK 与标题 watcher → 启动 Wiki/文件/Agent → 启动桌面服务。关闭时先停止
 产生新事件的 watcher，再等待 raw/投影事务完成并关闭数据库。raw 初始化失败不得启动采集器；
 投影恢复失败时只允许 raw 接收与诊断，Wiki 等依赖完整投影的消费者保持降级。

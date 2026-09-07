@@ -1,0 +1,43 @@
+name: Dependabot 自动合并
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+# 只读取元数据，不检出或执行 PR 分支代码。
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-merge:
+    name: 为 Dependabot 补丁升级启用自动合并
+    if: >-
+      github.repository == 'chunleik/self-analyst' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: 读取并验证 Dependabot 元数据
+        id: metadata
+        uses: dependabot/fetch-metadata@d7267f607e9d3fb96fc2fbe83e0af444713e90b7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 为 patch 升级启用 squash 自动合并
+        if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        # main 必须要求 Windows 全量验证通过；--auto 本身不指定必需 CI。
+        run: gh pr merge "$PR_URL" --auto --squash --match-head-commit "$PR_HEAD"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}

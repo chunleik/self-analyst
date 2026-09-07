@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 if ([string]::IsNullOrWhiteSpace($JarPath)) {
-    $JarPath = Join-Path $Root "self-analyst-app/target/self-analyst-app-1.0.0.jar"
+    $JarPath = & (Join-Path $PSScriptRoot "resolve-app-jar.ps1")
 } elseif (-not [System.IO.Path]::IsPathRooted($JarPath)) {
     $JarPath = Join-Path $Root $JarPath
 }

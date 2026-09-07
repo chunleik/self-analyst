@@ -10,7 +10,8 @@ $BinDir = "$InstallDir\bin"
 $LibDir = "$InstallDir\lib"
 $ConfigDir = "$InstallDir\config"
 $ConfigFile = "$ConfigDir\application.properties"
-$JarName = "self-analyst-app-1.0.0.jar"
+$JarPattern = "self-analyst-app-*.jar"   # 构建产物名，含版本号
+$JarName = "self-analyst-app.jar"        # 安装后的固定名，与便携包保持一致
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Resolve-Path "$ScriptDir\.."
 
@@ -91,14 +92,23 @@ if ($LASTEXITCODE -eq 0) {
 # ── 4. Build SelfAnalyst ────────────────────────────────────────
 Write-Host "[4/6] Building SelfAnalyst..." -ForegroundColor Yellow
 
-$jarSource = $null
-$targetJar = Join-Path $ProjectDir "self-analyst-app\target\$JarName"
-$rootJar = Join-Path $ProjectDir $JarName
+function Find-AppJar([string]$Directory) {
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return $null }
+    $found = Get-ChildItem -LiteralPath $Directory -Filter $JarPattern -File -ErrorAction SilentlyContinue |
+        Sort-Object -Property Name | Select-Object -First 1
+    if ($found) { return $found.FullName }
+    return $null
+}
 
-if (Test-Path $targetJar) {
+$jarSource = $null
+$targetDir = Join-Path $ProjectDir "self-analyst-app\target"
+$targetJar = Find-AppJar $targetDir
+$rootJar = Find-AppJar $ProjectDir
+
+if ($targetJar) {
     $jarSource = $targetJar
     Write-Host "  Using existing build: $targetJar"
-} elseif (Test-Path $rootJar) {
+} elseif ($rootJar) {
     $jarSource = $rootJar
     Write-Host "  Using jar from project root: $rootJar"
 } else {
@@ -118,7 +128,7 @@ if (Test-Path $targetJar) {
         try {
             & $mvnExe package -DskipTests -q 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
-                $jarSource = $targetJar
+                $jarSource = Find-AppJar $targetDir
                 Write-Host "  Build successful." -ForegroundColor Green
             } else {
                 Write-Host "ERROR: Maven build failed." -ForegroundColor Red
@@ -190,7 +200,7 @@ $launcherContent = @'
 param([string[]]$args)
 
 $InstallDir = "$env:USERPROFILE\.self-analyst"
-$Jar = "$InstallDir\lib\self-analyst-1.0.0.jar"
+$Jar = "$InstallDir\lib\self-analyst-app.jar"
 $AWUrl = "http://localhost:5600/api/0"
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8

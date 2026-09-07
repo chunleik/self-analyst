@@ -16,7 +16,18 @@ LIB_DIR="${INSTALL_DIR}/lib"
 CONFIG_DIR="${INSTALL_DIR}/config"
 MEMORY_FILE="${INSTALL_DIR}/memory.json"
 CONFIG_FILE="${CONFIG_DIR}/application.properties"
-JAR_NAME="self-analyst-app-1.0.0.jar"
+JAR_PATTERN="self-analyst-app-*.jar"   # 构建产物名，含版本号
+JAR_NAME="self-analyst-app.jar"        # 安装后的固定名，与便携包保持一致
+
+# 在指定目录中查找构建产物；shade 插件的 original-*.jar 因前缀不同自然排除。
+find_app_jar() {
+    local dir="$1"
+    [ -d "${dir}" ] || return 1
+    local found
+    found="$(find "${dir}" -maxdepth 1 -name "${JAR_PATTERN}" -type f 2>/dev/null | sort | head -n 1)"
+    [ -n "${found}" ] || return 1
+    printf '%s' "${found}"
+}
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -98,17 +109,16 @@ echo -e "${YELLOW}[4/6] Building SelfAnalyst...${NC}"
 
 # Check if jar already exists in target/
 JAR_SOURCE=""
-if [ -f "${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}" ]; then
-    JAR_SOURCE="${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}"
+TARGET_DIR="${PROJECT_DIR}/self-analyst-app/target"
+if JAR_SOURCE="$(find_app_jar "${TARGET_DIR}")"; then
     echo "  Using existing build."
-elif [ -f "${PROJECT_DIR}/${JAR_NAME}" ]; then
-    JAR_SOURCE="${PROJECT_DIR}/${JAR_NAME}"
+elif JAR_SOURCE="$(find_app_jar "${PROJECT_DIR}")"; then
     echo "  Using jar from project root."
 elif command -v mvn &>/dev/null; then
     echo "  Running: mvn package -DskipTests -q"
     cd "${PROJECT_DIR}"
     if mvn package -DskipTests -q 2>&1; then
-        JAR_SOURCE="${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}"
+        JAR_SOURCE="$(find_app_jar "${TARGET_DIR}")"
         echo -e "${GREEN}  Build successful.${NC}"
     else
         echo -e "${RED}ERROR: Maven build failed.${NC}"
@@ -118,7 +128,7 @@ elif command -v mvnw &>/dev/null; then
     echo "  Running: ./mvnw package -DskipTests -q"
     cd "${PROJECT_DIR}"
     if ./mvnw package -DskipTests -q 2>&1; then
-        JAR_SOURCE="${PROJECT_DIR}/self-analyst-app/target/${JAR_NAME}"
+        JAR_SOURCE="$(find_app_jar "${TARGET_DIR}")"
         echo -e "${GREEN}  Build successful.${NC}"
     else
         echo -e "${RED}ERROR: Maven wrapper build failed.${NC}"
@@ -184,7 +194,7 @@ echo -e "${YELLOW}[6/6] Generating launcher scripts...${NC}"
 cat > "${BIN_DIR}/self-analyst.sh" <<'LAUNCHER'
 #!/bin/bash
 INSTALL_DIR="${HOME}/.self-analyst"
-JAR="${INSTALL_DIR}/lib/self-analyst-1.0.0.jar"
+JAR="${INSTALL_DIR}/lib/self-analyst-app.jar"
 AW_URL="http://localhost:5600/api/0"
 
 # Check if ActivityWatch is running; if not, start it

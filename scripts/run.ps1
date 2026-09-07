@@ -13,7 +13,6 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectDir = Resolve-Path "$ScriptDir\.."
-$JarPath    = "$ProjectDir\self-analyst-app\target\self-analyst-app-1.0.0.jar"
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "  SelfAnalyst Dev Launcher" -ForegroundColor Cyan
@@ -38,8 +37,10 @@ if ($Build) {
 }
 
 # ── 检查 jar ──────────────────────────────────────────────────────
-if (-not (Test-Path $JarPath)) {
-    Write-Host "[ERROR] Jar 不存在: $JarPath" -ForegroundColor Red
+try {
+    $JarPath = & (Join-Path $ScriptDir "resolve-app-jar.ps1")
+} catch {
+    Write-Host "[ERROR] $_" -ForegroundColor Red
     Write-Host "  请先运行: .\scripts\run.ps1 -Build" -ForegroundColor Yellow
     exit 1
 }

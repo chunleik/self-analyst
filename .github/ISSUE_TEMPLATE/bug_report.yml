@@ -94,7 +94,7 @@ body:
     id: version
     attributes:
       label: SelfAnalyst 版本或提交号
-      placeholder: "例如 1.0.0 或 c29d601"
+      placeholder: "例如 0.1.0 或 c29d601"
     validations:
       required: true
 

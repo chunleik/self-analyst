@@ -82,7 +82,7 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 Remove-LegacyToolDirectory -Name "PaddleOCR-json"
 Remove-LegacyToolDirectory -Name "whisper"
 
-Copy-Item -LiteralPath (Join-Path $Root "self-analyst-app/target/self-analyst-app-1.0.0.jar") `
+Copy-Item -LiteralPath (& (Join-Path $PSScriptRoot "resolve-app-jar.ps1")) `
     -Destination (Join-Path $Dist "self-analyst-app.jar") -Force
 
 Copy-Item -LiteralPath (Join-Path $Root "self-analyst-desktop/src-tauri/target/release/SelfAnalyst.exe") `

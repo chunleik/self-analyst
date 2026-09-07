@@ -73,7 +73,7 @@ if (-not $lib.Contains($BackendServiceText)) {
     throw "About content must include backend service URL"
 }
 
-if ($lib.Contains('w.eval("alert(''SelfAnalyst v1.0.0'')")')) {
+if ($lib -match 'w\.eval\("alert\(''SelfAnalyst v') {
     throw "About tray menu must not depend on the webview alert"
 }
 

@@ -76,7 +76,7 @@ if (-not $SkipBuild) {
     Write-Host "=== 1-2/6 SkipBuild: reusing existing jar + exe ===" -ForegroundColor Yellow
 }
 
-$JarSrc = Join-Path $Root "self-analyst-app/target/self-analyst-app-1.0.0.jar"
+$JarSrc = & (Join-Path $PSScriptRoot "resolve-app-jar.ps1")
 $ExeSrc = Join-Path $Root "self-analyst-desktop/src-tauri/target/release/SelfAnalyst.exe"
 if (-not (Test-Path -LiteralPath $JarSrc)) { throw "Missing jar: $JarSrc (run without -SkipBuild)" }
 if (-not (Test-Path -LiteralPath $ExeSrc)) { throw "Missing exe: $ExeSrc (run without -SkipBuild)" }

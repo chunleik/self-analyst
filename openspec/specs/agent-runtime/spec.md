@@ -34,6 +34,8 @@ maxTokens 和 maxIters。对话模型 SHALL 支持流式输出；plain/summary �
 说明。当前日期 SHALL 在 Agent 构造时生成；可变长期记忆 MUST NOT 固化到基础 prompt，而 SHALL 在
 每次 invocation 由动态记忆中间件读取最新 profile 后追加。滚动会话 summary 与本轮 desktop context
 SHALL 仅临时注入模型输入，不污染 AgentState.context。
+基础 prompt 描述本地事件数据、查询工具和时间戳时 MUST NOT 使用 ActivityWatch 品牌名，SHALL 使用
+事件数据、事件查询工具等产品内用语。
 
 #### Scenario: 记忆在两轮间变化
 - **WHEN** 用户在两次聊天之间批准或修改 active 记忆
@@ -42,6 +44,10 @@ SHALL 仅临时注入模型输入，不污染 AgentState.context。
 #### Scenario: 临时桌面上下文
 - **WHEN** 当前 turn 具有 contextSnapshot
 - **THEN** 模型输入临时包含 reference-only context，持久 AgentState 不保存该临时消息
+
+#### Scenario: 系统提示不含品牌名
+- **WHEN** Agent 构造基础 system prompt
+- **THEN** 中英文提示均不包含字符串 ActivityWatch
 
 ### Requirement: SPEC-AGT-003 工具注册与顺序执行
 Agent SHALL 注册 EventQueryTools，并在相应依赖可用时注册 ConfigTools、WikiTools、FileTools 和

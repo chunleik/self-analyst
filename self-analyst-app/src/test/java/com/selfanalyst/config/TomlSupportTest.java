@@ -198,4 +198,18 @@ class TomlSupportTest {
         assertTrue(template.contains("# raw.query.maxRangeDays = 31  # integer"), template);
         assertTrue(template.contains("# raw.integrity.verifyOnStartup = \"latest\"  # string"), template);
     }
+
+    @Test
+    void awServiceKeyDescriptionsUseEventWordingWithoutActivityWatchBrand() {
+        var defaults = SupportedKeys.defaults();
+        var descriptions = SupportedKeys.descriptions();
+        for (String key : List.of("aw.mode", "aw.port", "aw.base-url", "aw.timeout", "aw.data-dir")) {
+            assertTrue(defaults.containsKey(key), key);
+            var description = descriptions.get(key);
+            assertFalse(description.zh().contains("ActivityWatch"), key + " zh=" + description.zh());
+            assertFalse(description.en().contains("ActivityWatch"), key + " en=" + description.en());
+            assertFalse(description.zh().toLowerCase().contains("activitywatch"), key + " zh=" + description.zh());
+            assertFalse(description.en().toLowerCase().contains("activitywatch"), key + " en=" + description.en());
+        }
+    }
 }

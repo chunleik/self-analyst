@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** 将永久原始事件幂等投影为 ActivityWatch 紧凑时间线。 */
+/** 将永久原始事件幂等投影为事件服务紧凑时间线。 */
 public final class EventProjector implements RawEventProjector {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();

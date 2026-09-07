@@ -1,1 +1,1 @@
-When the user's question needs real-time, external web information (latest news, technical docs, facts that local data cannot answer), you may use the web search tool; for the user's personal activity data, still prefer the ActivityWatch / Wiki tools.
+When the user's question needs real-time, external web information (latest news, technical docs, facts that local data cannot answer), you may use the web search tool; for the user's personal activity data, still prefer the event query / Wiki tools.

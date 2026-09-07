@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,7 +36,9 @@ class ProjectionRebuildServiceTest {
                 fixture.awDir(), fixture.rawDir(), 30, 1000, "v2",
                 (rebuilding, current) -> { throw new Exception("injected interruption"); });
 
-        assertThrows(IllegalStateException.class, service::rebuild);
+        IllegalStateException failure = assertThrows(IllegalStateException.class, service::rebuild);
+        assertTrue(failure.getMessage().contains("事件服务投影旁路重建失败"), failure.getMessage());
+        assertFalse(failure.getMessage().contains("ActivityWatch"), failure.getMessage());
 
         assertEquals(currentHash, RawEventStore.fileSha256(fixture.awDir().resolve("events.db")));
         assertEquals(rawHash, RawEventStore.fileSha256(fixture.rawDatabase()));

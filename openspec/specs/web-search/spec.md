@@ -18,7 +18,7 @@ SHALL 默认关闭，并支持配置开关、单一端点和可选 API key。初
 
 #### Scenario: 本地活动问题
 - **WHEN** 用户询问自己的时间线、应用使用或历史任务
-- **THEN** Agent 优先查询 ActivityWatch、Wiki 或其它本地工具，不把联网搜索当作个人事实来源
+- **THEN** Agent 优先查询事件数据、Wiki 或其它本地工具，不把联网搜索当作个人事实来源
 
 ### Requirement: SPEC-WS-ARCH-001..005 MCP 工具集成
 联网搜索 SHALL 以 MCP client 注册到 Agent 的同一串行 Toolkit，并使用 Streamable HTTP 端点。
@@ -62,12 +62,13 @@ MUST 不创建 MCP client、不得发起搜索网络请求。非空 key SHALL �
 - **THEN** 后端校验并持久化三个点分键，响应包含 restartRequired 提示
 
 ### Requirement: SPEC-WS-AGT-001..003 Agent 工具选择与降级
-Agent system prompt SHALL 说明外部实时信息可使用联网搜索，并说明个人活动数据优先本地工具。
+Agent system prompt SHALL 说明外部实时信息可使用联网搜索，并说明个人活动数据优先本地事件查询与
+Wiki 等工具；该说明 MUST NOT 使用 ActivityWatch 品牌名。
 搜索未启用或注册失败时，Agent SHALL 继续处理本地数据问题，不声称搜索工具可用。
 
 #### Scenario: 搜索工具缺失
 - **WHEN** Agent Toolkit 没有联网搜索工具
-- **THEN** 本地 ActivityWatch、Wiki、文件、配置和聊天能力不受影响
+- **THEN** 本地事件查询、Wiki、文件、配置和聊天能力不受影响
 
 ### Requirement: SPEC-WS-ERR-001..004 初始化错误隔离
 MCP client 构建、初始化或注册异常 SHALL 被捕获，失败 client SHALL 关闭或丢弃，Agent 构造 SHALL

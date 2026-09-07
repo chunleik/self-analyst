@@ -103,10 +103,26 @@ class AgentPromptsTest {
         assertTrue(system.contains("semantic retrieval.\n\n## File metadata"));
         assertTrue(system.contains("metadata is available.\n\nWhen the user's question needs"));
         assertTrue(system.contains("FileTools cannot read file contents"));
-        assertTrue(system.contains("ActivityWatch / Wiki tools.\n\n## Configuration management"));
+        assertTrue(system.contains("event query / Wiki tools.\n\n## Configuration management"));
         assertFalse(system.endsWith("\n"));
 
         assertTrue(AgentPrompts.plainCompletionPrompt(Lang.EN).endsWith("\n"));
         assertTrue(AgentPrompts.transientMemoryContext(Lang.EN, "").endsWith("\n"));
+    }
+
+    @Test
+    void systemPromptsDoNotContainActivityWatchBrandName() {
+        String en = AgentPrompts.systemPrompt(Lang.EN, "", true, true, true, true, FIXED);
+        String zh = AgentPrompts.systemPrompt(Lang.ZH, "", true, true, true, true, FIXED);
+        assertFalse(en.contains("ActivityWatch"), en);
+        assertFalse(zh.contains("ActivityWatch"), zh);
+        assertFalse(en.toLowerCase().contains("activitywatch"), en);
+        assertFalse(zh.toLowerCase().contains("activitywatch"), zh);
+        assertTrue(en.contains("based on event data"));
+        assertTrue(en.contains("Call event query tools"));
+        assertTrue(en.contains("timestamps stored by the event service"));
+        assertTrue(zh.contains("基于事件数据"));
+        assertTrue(zh.contains("调用事件查询工具"));
+        assertTrue(zh.contains("事件服务存储的所有时间戳"));
     }
 }

@@ -193,7 +193,7 @@ public class EventServer {
         try {
             db.close();
         } catch (Exception error) {
-            serverLog.error("Failed to close ActivityWatch database: " + error.getMessage());
+            serverLog.error("Failed to close event service database: " + error.getMessage());
         }
         try {
             rawEventStore.close();

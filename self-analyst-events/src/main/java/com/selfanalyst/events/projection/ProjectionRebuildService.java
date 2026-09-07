@@ -76,7 +76,7 @@ public final class ProjectionRebuildService {
             return new RebuildResult(projected, current, hadCurrent ? backup : null,
                     Instant.now());
         } catch (Exception failure) {
-            throw new IllegalStateException("ActivityWatch 投影旁路重建失败", failure);
+            throw new IllegalStateException("事件服务投影旁路重建失败", failure);
         }
     }
 

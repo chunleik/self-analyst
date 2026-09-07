@@ -52,6 +52,7 @@ class DesktopConfigControllerTest {
         assertTrue(resp.text().contains("D:\\docs"), resp.text()); // path guidance comment
         assertTrue(resp.text().contains("# 中文："), resp.text());
         assertTrue(resp.text().contains("# English:"), resp.text());
+        assertFalse(resp.text().contains("ActivityWatch"), resp.text());
         assertEquals(SupportedKeys.defaults().size(), resp.text().lines()
                 .filter(line -> line.matches("# .+ = .*  # (string|boolean|integer|float|list)"))
                 .count());

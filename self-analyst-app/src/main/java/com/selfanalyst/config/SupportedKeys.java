@@ -143,11 +143,11 @@ public final class SupportedKeys {
         describe("desktop.autoStartBackend", "启动桌面端时是否自动启动后端服务。", "Whether to start the backend service automatically with the desktop app.");
         describe("desktop.summary.maxTimelineLlm", "每次摘要最多使用 LLM 精炼的时间线条目数；0 表示禁用。", "Maximum timeline entries refined by the LLM per summary; 0 disables it.");
 
-        describe("aw.mode", "ActivityWatch 运行模式：embedded 或 external。", "ActivityWatch mode: embedded or external.");
-        describe("aw.port", "内嵌 ActivityWatch 服务监听端口。", "Listening port for the embedded ActivityWatch service.");
-        describe("aw.base-url", "ActivityWatch HTTP API 基础地址。", "Base URL of the ActivityWatch HTTP API.");
-        describe("aw.timeout", "ActivityWatch HTTP 请求超时时间（毫秒）。", "Timeout for ActivityWatch HTTP requests, in milliseconds.");
-        describe("aw.data-dir", "ActivityWatch 数据文件目录。", "Directory for ActivityWatch data files.");
+        describe("aw.mode", "事件服务运行模式：embedded 或 external。", "Event service mode: embedded or external.");
+        describe("aw.port", "内嵌事件服务监听端口。", "Listening port for the embedded event service.");
+        describe("aw.base-url", "事件服务 HTTP API 基础地址。", "Base URL of the event service HTTP API.");
+        describe("aw.timeout", "事件服务 HTTP 请求超时时间（毫秒）。", "Timeout for event service HTTP requests, in milliseconds.");
+        describe("aw.data-dir", "事件服务数据文件目录。", "Directory for event service data files.");
         describe("aw.raw.dir", "永久原始事件分区和 catalog 的保存目录。", "Directory for permanent raw-event partitions and their catalog.");
         describe("aw.raw.query.maxRangeDays", "单次原始事件查询允许的最大时间范围（天，最多 366）。", "Maximum time range allowed for one raw-event query, in days (up to 366).");
         describe("aw.raw.query.maxPageSize", "单页原始事件查询允许返回的最大事件数（最多 10000）。", "Maximum number of raw events returned on one page (up to 10000).");

@@ -83,7 +83,7 @@ final class LegacyDatabaseMigrator {
             }
         }
 
-        log.info("Migrating legacy ActivityWatch data in batches of {}", BATCH_SIZE);
+        log.info("Migrating legacy event data in batches of {}", BATCH_SIZE);
         try (Connection target = open(working)) {
             createTargetSchema(target);
             if (Files.isRegularFile(destination)) {
@@ -129,7 +129,7 @@ final class LegacyDatabaseMigrator {
         }
 
         swapIntoPlace(destination, working);
-        log.info("Legacy ActivityWatch migration completed; source databases were retained");
+        log.info("Legacy event data migration completed; source databases were retained");
     }
 
     private static void createTargetSchema(Connection connection) throws SQLException {

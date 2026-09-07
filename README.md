@@ -4,10 +4,10 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。窗口/AFK 状态
 事件服务存储并供 Wiki 聚合；用户显式配置目录中的文件系统元数据则由本地文件存储、
 FileTools 和桌面 API 提供查询，并以 metadata-only heartbeat 留存在本地事件历史中。
 
-![SelfAnalyst 桌面端会话页界面设计稿](docs/mockups/desktop-chat-tab-v1.png)
+![SelfAnalyst 桌面端会话页运行截图](docs/mockups/desktop-chat-screenshot.png)
 
-> 上图是桌面端会话页的界面设计稿，展示会话列表、对话区与上下文面板的三栏布局。当前实现已采用
-> 该布局，但图中部分元素仍在开发中，实际界面以所用版本为准。
+> 上图是桌面端会话页的实际运行截图，展示会话列表、对话区，以及包含当前状态、最近活动、
+> 可生成待办、长期记忆与上下文选项的右侧面板。
 
 嵌入式事件服务模式会先把每次通过隐私校验的原始事件永久、只追加地写入 UTC 月度
 SQLite 分区，再生成可合并、可重建的 `events.db` 投影。外部 ActivityWatch 模式不提供这项永久保留

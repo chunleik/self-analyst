@@ -122,7 +122,7 @@ public record Config(
                 ? "http://localhost:" + awPort + "/api/0"
                 : configuredAwUrl;
         Path awDataDir = Path.of(envOrProp(props, "aw.data-dir", "AW_DATA_DIR",
-                memDir + "/aw-data"));
+                memDir + "/events"));
         Path awRawDir = Path.of(envOrProp(userProps, "aw.raw.dir", "AW_RAW_DIR",
                 awDataDir.resolve("raw").toString()));
         int awRawQueryMaxRangeDays = Integer.parseInt(envOrProp(props,
@@ -371,8 +371,8 @@ public record Config(
         return new Config(
                 "", "https://api.openai.com/v1", "gpt-4o",
                 "http://localhost:5600/api/0", 15000, baseDir.resolve("memory"),
-                false, 5600, baseDir.resolve("aw-data"),
-                baseDir.resolve("aw-data/raw"), 31, 1000,
+                false, 5600, baseDir.resolve("events"),
+                baseDir.resolve("events/raw"), 31, 1000,
                 10_737_418_240L, 1_073_741_824L,
                 RawIntegrityPolicy.LATEST, 1000,
                 false, false, 60, 12000, 10,

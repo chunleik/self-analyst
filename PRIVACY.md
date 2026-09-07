@@ -23,11 +23,11 @@ UIA 查询前会排除密码管理器和认证类敏感应用。查询失败时�
 
 | 数据 | 默认位置 |
 |------|----------|
-| ActivityWatch 事件 | `{aw.data-dir}/aw.db` |
+| ActivityWatch 事件 | `{aw.data-dir}/events.db` |
 | 合规原始事件 | `{aw.raw.dir}` 中的 UTC 月度 SQLite 分区；永久、只追加 |
 | Wiki 与记忆派生数据 | 用户数据目录下的相应 SQLite/索引目录 |
 | 桌面会话 | 用户数据目录下的 `chat.db` |
-| 文件元数据 | `{memory.dir}/file-watch.db`，以及本地 ActivityWatch `aw.db` 中的文件元数据 heartbeat |
+| 文件元数据 | `{memory.dir}/file-watch.db`，以及本地 ActivityWatch `events.db` 中的文件元数据 heartbeat |
 
 永久原始层只保存已经通过来源 schema 和隐私策略的事件语义，不保存 HTTP header、token 或原始请求
 字节。内容事件只允许标题字段；UIA 正文、控件树、截图、OCR 和音频从不进入原始层。文件事件只

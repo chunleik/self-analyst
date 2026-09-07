@@ -42,7 +42,7 @@ class DesktopServerIntegrationTest {
     @BeforeEach
     void startServer() {
         Config config = Config.testDefaults(tempDir);
-        database = new Database(tempDir.resolve("aw-data"));
+        database = new Database(tempDir.resolve("events"));
         EventStore eventStore = new EventStore(database, PulseTimeConfig.DEFAULT);
         javalin = Javalin.create();
         desktop = new DesktopServer(javalin, config, null, eventStore, null, null, null,

@@ -38,8 +38,8 @@ final class LegacyDatabaseMigrator {
 
     static void migrate(Path dataDir, Runnable batchCommitted) throws Exception {
         Path legacyMetadata = dataDir.resolve("buckets.db");
-        Path destination = dataDir.resolve("aw.db");
-        Path working = dataDir.resolve("aw.db.migrating");
+        Path destination = dataDir.resolve("events.db");
+        Path working = dataDir.resolve("events.db.migrating");
         if (!Files.isRegularFile(legacyMetadata) || isMigrationComplete(destination)) {
             return;
         }
@@ -465,7 +465,7 @@ final class LegacyDatabaseMigrator {
         Path backup = null;
         if (Files.exists(destination)) {
             checkpoint(destination);
-            backup = destination.resolveSibling("aw.db.pre-legacy-migration-" + System.currentTimeMillis());
+            backup = destination.resolveSibling("events.db.pre-legacy-migration-" + System.currentTimeMillis());
             moveReplacing(destination, backup);
         }
         try {
@@ -482,7 +482,7 @@ final class LegacyDatabaseMigrator {
     private static Path latestUnifiedBackup(Path dataDir) throws IOException {
         try (var files = Files.list(dataDir)) {
             return files.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().startsWith("aw.db.pre-legacy-migration-"))
+                    .filter(path -> path.getFileName().toString().startsWith("events.db.pre-legacy-migration-"))
                     .max((left, right) -> left.getFileName().toString().compareTo(right.getFileName().toString()))
                     .orElse(null);
         }

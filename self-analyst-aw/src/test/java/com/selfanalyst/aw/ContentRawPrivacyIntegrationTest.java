@@ -35,19 +35,21 @@ class ContentRawPrivacyIntegrationTest {
         try {
             HttpClient client = HttpClient.newHttpClient();
             String origin = "http://127.0.0.1:" + server.port();
-            post(client, origin + "/api/0/buckets/aw-watcher-content_test",
+            post(client, origin + "/api/0/buckets/watcher-content_test",
+                    "{\"client\":\"watcher-content\",\"hostname\":\"host\"}");
+            post(client, origin + "/api/0/buckets/aw-watcher-content_imported",
                     "{\"client\":\"aw-watcher-content\",\"hostname\":\"host\"}");
             String forbidden = "{\"timestamp\":\"2026-09-03T12:00:00Z\",\"duration\":1,"
                     + "\"data\":{\"app\":\"editor\",\"title\":\"safe\","
                     + "\"text_content\":\"" + SECRET + "\"}}";
             List<HttpResponse<String>> responses = List.of(
-                    post(client, origin + "/api/0/buckets/aw-watcher-content_test/heartbeat",
+                    post(client, origin + "/api/0/buckets/watcher-content_test/heartbeat",
                             forbidden),
-                    post(client, origin + "/api/0/buckets/aw-watcher-content_test/events",
+                    post(client, origin + "/api/0/buckets/watcher-content_test/events",
                             "[" + forbidden + "]"),
                     post(client, origin + "/api/0/import", "{\"buckets\":[{\"id\":"
-                            + "\"aw-watcher-content_test\",\"client\":\"aw-watcher-content\"}],"
-                            + "\"events\":{\"aw-watcher-content_test\":[" + forbidden + "]}}"));
+                            + "\"aw-watcher-content_imported\",\"client\":\"aw-watcher-content\"}],"
+                            + "\"events\":{\"aw-watcher-content_imported\":[" + forbidden + "]}}"));
             responses.forEach(response -> {
                 assertEquals(422, response.statusCode());
                 assertFalse(response.body().contains(SECRET));

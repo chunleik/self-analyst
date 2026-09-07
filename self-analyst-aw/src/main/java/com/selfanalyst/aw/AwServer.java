@@ -69,7 +69,7 @@ public class AwServer {
         this.rawEventQueries = new RawEventQueryService(
                 rawDir, queryMaxRangeDays, queryMaxPageSize);
         this.rawStatus = new RawStorageStatusService(rawDir,
-                dataDir.resolve("aw.db"), lowDiskWarnBytes, lowDiskBlockBytes);
+                dataDir.resolve(Database.PROJECTION_FILENAME), lowDiskWarnBytes, lowDiskBlockBytes);
         this.db = new Database(dataDir);
         this.eventStore = new EventStore(db, pulseConfig);
         this.bucketStore = new BucketStore(db);

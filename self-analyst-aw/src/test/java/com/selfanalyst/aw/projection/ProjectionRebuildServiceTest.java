@@ -29,7 +29,7 @@ class ProjectionRebuildServiceTest {
             throws Exception {
         Fixture fixture = fixture(dir);
         String currentHash = com.selfanalyst.aw.raw.RawEventStore.fileSha256(
-                fixture.awDir().resolve("aw.db"));
+                fixture.awDir().resolve("events.db"));
         String rawHash = com.selfanalyst.aw.raw.RawEventStore.fileSha256(fixture.rawDatabase());
         ProjectionRebuildService service = new ProjectionRebuildService(
                 fixture.awDir(), fixture.rawDir(), 30, 1000, "v2",
@@ -37,10 +37,10 @@ class ProjectionRebuildServiceTest {
 
         assertThrows(IllegalStateException.class, service::rebuild);
 
-        assertEquals(currentHash, RawEventStore.fileSha256(fixture.awDir().resolve("aw.db")));
+        assertEquals(currentHash, RawEventStore.fileSha256(fixture.awDir().resolve("events.db")));
         assertEquals(rawHash, RawEventStore.fileSha256(fixture.rawDatabase()));
         assertTrue(Files.list(fixture.awDir()).anyMatch(path ->
-                path.getFileName().toString().startsWith("aw.db.rebuilding-")));
+                path.getFileName().toString().startsWith("events.db.rebuilding-")));
     }
 
     @Test

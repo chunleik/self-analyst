@@ -71,4 +71,12 @@ class ContentWatcherTest {
         assertEquals("degraded", ContentWatcher.statusOf(true, false));
         assertEquals("disabled", ContentWatcher.statusOf(false, false));
     }
+
+    @Test
+    void heartbeatTargetsProductContentBucket() {
+        assertEquals("watcher-content", ContentWatcher.CLIENT);
+        String bucketId = ContentWatcher.bucketIdForHostname("testhost");
+        assertEquals("watcher-content_testhost", bucketId);
+        assertFalse(bucketId.startsWith("aw-watcher-"));
+    }
 }

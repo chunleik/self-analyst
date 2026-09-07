@@ -45,6 +45,14 @@ public abstract class Watcher implements Runnable {
         });
     }
 
+    String name() {
+        return name;
+    }
+
+    String bucketId() {
+        return bucketId;
+    }
+
     public void start() {
         running.set(true);
         scheduler.scheduleWithFixedDelay(this, 0, intervalMs, TimeUnit.MILLISECONDS);

@@ -36,6 +36,16 @@ class FileWatcherTest {
     }
 
     @Test
+    void newWritesUseProductFileBucketId(@TempDir Path tmp) throws Exception {
+        store = new FileWatchStore(tmp.resolve("file-watch.db"));
+        watcher = new FileWatcher(store, txtFilter(), List.of(tmp), "http://127.0.0.1:9", 1, 1);
+        assertEquals("watcher-file", FileWatcher.CLIENT);
+        assertTrue(watcher.bucketId().startsWith("watcher-file_"));
+        assertFalse(watcher.bucketId().startsWith("aw-watcher-"));
+        assertEquals(FileWatcher.bucketIdForHostname("testhost"), "watcher-file_testhost");
+    }
+
+    @Test
     void createdFileBecomesPendingAfterDebounce(@TempDir Path tmp) throws Exception {
         store = new FileWatchStore(tmp.resolve("file-watch.db"));
         PathFilter filter = txtFilter();

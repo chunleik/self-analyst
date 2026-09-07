@@ -194,7 +194,7 @@ class TomlSupportTest {
             assertTrue(template.contains("# English: " + description.en()), description.en());
         }
         assertTrue(TomlSupport.parseAndFlatten(template).isEmpty());
-        assertTrue(template.contains("# raw.dir = \"./data/aw-data/raw\"  # string"), template);
+        assertTrue(template.contains("# raw.dir = \"./data/events/raw\"  # string"), template);
         assertTrue(template.contains("# raw.query.maxRangeDays = 31  # integer"), template);
         assertTrue(template.contains("# raw.integrity.verifyOnStartup = \"latest\"  # string"), template);
     }

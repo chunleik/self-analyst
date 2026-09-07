@@ -5,7 +5,7 @@ ActivityWatch 存储并供 Wiki 聚合；用户显式配置目录中的文件系
 FileTools 和桌面 API 提供查询，并以 metadata-only heartbeat 留存在本地 ActivityWatch 历史中。
 
 嵌入式 ActivityWatch 模式会先把每次通过隐私校验的原始事件永久、只追加地写入 UTC 月度
-SQLite 分区，再生成可合并、可重建的 `aw.db` 投影。外部 ActivityWatch 模式不提供这项永久保留
+SQLite 分区，再生成可合并、可重建的 `events.db` 投影。外部 ActivityWatch 模式不提供这项永久保留
 保证。磁盘低于阻断阈值时系统拒绝新采集，不会自动删除最旧分区。
 
 当前“内容采集”的严格定义是标题采集：允许在识别时临时读取完整 UIA 控件树，但最终只保存

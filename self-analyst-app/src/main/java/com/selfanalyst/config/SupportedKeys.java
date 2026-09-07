@@ -70,8 +70,8 @@ public final class SupportedKeys {
         put("aw.port", "5700", KeyType.INTEGER);
         put("aw.base-url", "http://localhost:5700/api/0", KeyType.STRING);
         put("aw.timeout", "15000", KeyType.INTEGER);
-        put("aw.data-dir", "./data/aw-data", KeyType.STRING);
-        put("aw.raw.dir", "./data/aw-data/raw", KeyType.STRING);
+        put("aw.data-dir", "./data/events", KeyType.STRING);
+        put("aw.raw.dir", "./data/events/raw", KeyType.STRING);
         put("aw.raw.query.maxRangeDays", "31", KeyType.INTEGER);
         put("aw.raw.query.maxPageSize", "1000", KeyType.INTEGER);
         put("aw.raw.lowDisk.warnBytes", "10737418240", KeyType.INTEGER);

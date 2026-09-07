@@ -1,5 +1,6 @@
 package com.selfanalyst.aw.raw;
 
+import com.selfanalyst.aw.store.Database;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -11,6 +12,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RawFirstEnablementBoundaryTest {
 
@@ -34,6 +36,12 @@ class RawFirstEnablementBoundaryTest {
             assertEquals(1, raw.count(YearMonth.of(2026, 9)));
         }
 
+        assertArrayEquals(awBefore, Files.readAllBytes(awDb));
+        assertArrayEquals(bucketBefore, Files.readAllBytes(legacyBucket));
+
+        try (Database db = new Database(dir)) {
+            assertTrue(Files.exists(dir.resolve(Database.PROJECTION_FILENAME)));
+        }
         assertArrayEquals(awBefore, Files.readAllBytes(awDb));
         assertArrayEquals(bucketBefore, Files.readAllBytes(legacyBucket));
     }

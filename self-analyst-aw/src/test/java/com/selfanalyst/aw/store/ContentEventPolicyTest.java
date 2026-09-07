@@ -24,6 +24,8 @@ class ContentEventPolicyTest {
         Map<String, Object> data = validTitleData();
 
         assertDoesNotThrow(() -> ContentEventPolicy.validate(
+                "watcher-content_test", "watcher-content", data));
+        assertDoesNotThrow(() -> ContentEventPolicy.validate(
                 "aw-watcher-content_test", "aw-watcher-content", data));
     }
 
@@ -48,13 +50,13 @@ class ContentEventPolicyTest {
         multiline.put("title", "标题\n消息正文");
         assertThrows(ContentEventPolicyViolationException.class,
                 () -> ContentEventPolicy.validate(
-                        "aw-watcher-content_test", "aw-watcher-content", multiline));
+                        "watcher-content_test", "watcher-content", multiline));
 
         Map<String, Object> oversized = validTitleData();
         oversized.put("title", "文".repeat(1025));
         assertThrows(ContentEventPolicyViolationException.class,
                 () -> ContentEventPolicy.validate(
-                        "aw-watcher-content_test", "aw-watcher-content", oversized));
+                        "watcher-content_test", "watcher-content", oversized));
     }
 
     @Test
@@ -81,7 +83,7 @@ class ContentEventPolicyTest {
             data.put("context_title", invalid);
             assertThrows(ContentEventPolicyViolationException.class,
                     () -> ContentEventPolicy.validate(
-                            "aw-watcher-content_test", "aw-watcher-content", data), invalid);
+                            "watcher-content_test", "watcher-content", data), invalid);
         }
     }
 
@@ -98,7 +100,7 @@ class ContentEventPolicyTest {
             Map<String, Object> forbidden = validTitleData();
             forbidden.put("text_content", "secret");
             assertThrows(ContentEventPolicyViolationException.class,
-                    () -> events.insertEvent("aw-watcher-content_test",
+                    () -> events.insertEvent("watcher-content_test",
                             new Event(Instant.now(), 1, forbidden)));
             assertThrows(ContentEventPolicyViolationException.class,
                     () -> events.insertEvent("custom-content",
@@ -107,7 +109,7 @@ class ContentEventPolicyTest {
             assertDoesNotThrow(() -> events.insertEvent(
                     "aw-watcher-audio_test",
                     new Event(Instant.now(), 1, Map.of("text", "audio transcript"))));
-            assertEquals(0, events.countByBucket("aw-watcher-content_test"));
+            assertEquals(0, events.countByBucket("watcher-content_test"));
             assertEquals(0, events.countByBucket("custom-content"));
             assertEquals(1, events.countByBucket("aw-watcher-audio_test"));
         }

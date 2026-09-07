@@ -30,7 +30,7 @@ class DatabaseTest {
 
     @Test
     void rejectsBucketIdsThatWouldEscapeDataDirectory(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         try (Database db = new Database(dataDir)) {
             assertThrows(IllegalArgumentException.class,
                     () -> db.bucketConnection("..\\outside"));
@@ -42,7 +42,7 @@ class DatabaseTest {
 
     @Test
     void storesBucketEventsInSingleAwDatabase(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         try (Database db = new Database(dataDir)) {
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
             events.insertEvent("bucket-a", new Event(
@@ -67,7 +67,7 @@ class DatabaseTest {
                     indexColumns(db.metaConnection(), "idx_events_app_timestamp"));
         }
 
-        assertTrue(Files.exists(dataDir.resolve("aw.db")));
+        assertTrue(Files.exists(dataDir.resolve("events.db")));
         assertFalse(Files.exists(dataDir.resolve("buckets.db")));
         assertFalse(Files.exists(dataDir.resolve("bucket-a.db")));
         assertFalse(Files.exists(dataDir.resolve("bucket-b.db")));
@@ -75,11 +75,11 @@ class DatabaseTest {
 
     @Test
     void addsAndBackfillsAppColumnForExistingUnifiedDatabase(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         Files.createDirectories(dataDir);
         Class.forName("org.sqlite.JDBC");
         try (Connection old = DriverManager.getConnection(
-                "jdbc:sqlite:" + dataDir.resolve("aw.db").toAbsolutePath());
+                "jdbc:sqlite:" + dataDir.resolve("events.db").toAbsolutePath());
              Statement statement = old.createStatement()) {
             statement.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                     + "bucket_id TEXT NOT NULL, timestamp TEXT NOT NULL, "
@@ -107,7 +107,7 @@ class DatabaseTest {
 
     @RepeatedTest(5)
     void serializesConcurrentSchemaUpgrade(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         createOldUnifiedDatabase(dataDir, 5_000);
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -127,10 +127,10 @@ class DatabaseTest {
 
     @Test
     void waitsForSchemaLockBeyondSqliteBusyTimeout(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         createOldUnifiedDatabase(dataDir, 10);
         try (Connection holder = DriverManager.getConnection(
-                "jdbc:sqlite:" + dataDir.resolve("aw.db").toAbsolutePath());
+                "jdbc:sqlite:" + dataDir.resolve("events.db").toAbsolutePath());
              Statement lock = holder.createStatement();
              var executor = Executors.newSingleThreadExecutor()) {
             lock.execute("PRAGMA journal_mode=WAL");
@@ -156,7 +156,7 @@ class DatabaseTest {
 
     @Test
     void migratesLargeLegacyLayoutWithoutLosingNewDatabaseData(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         try (Database db = new Database(dataDir)) {
             BucketStore buckets = new BucketStore(db);
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
@@ -182,15 +182,15 @@ class DatabaseTest {
 
         assertTrue(Files.exists(dataDir.resolve("buckets.db")), "legacy metadata must remain as backup");
         assertTrue(Files.exists(dataDir.resolve("legacy-bucket.db")), "legacy events must remain as backup");
-        assertFalse(Files.exists(dataDir.resolve("aw.db.migrating")));
+        assertFalse(Files.exists(dataDir.resolve("events.db.migrating")));
         try (var files = Files.list(dataDir)) {
-            assertTrue(files.anyMatch(path -> path.getFileName().toString().startsWith("aw.db.pre-legacy-migration-")));
+            assertTrue(files.anyMatch(path -> path.getFileName().toString().startsWith("events.db.pre-legacy-migration-")));
         }
     }
 
     @Test
     void resumesFromTheLastCommittedMigrationBatch(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         createLegacyLayout(dataDir, "resume-bucket", 1_205);
         int[] committedBatches = {0};
 
@@ -199,28 +199,28 @@ class DatabaseTest {
                 throw new PlannedInterruption();
             }
         }));
-        assertTrue(Files.exists(dataDir.resolve("aw.db.migrating")));
-        downgradeWorkfileToPreAppSchema(dataDir.resolve("aw.db.migrating"));
+        assertTrue(Files.exists(dataDir.resolve("events.db.migrating")));
+        downgradeWorkfileToPreAppSchema(dataDir.resolve("events.db.migrating"));
 
         try (Database db = new Database(dataDir)) {
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
             assertEquals(1_205, events.countByBucket("resume-bucket"));
             assertEquals(1_205, countStoredApps(db.metaConnection(), "LegacyApp.exe"));
         }
-        assertFalse(Files.exists(dataDir.resolve("aw.db.migrating")));
+        assertFalse(Files.exists(dataDir.resolve("events.db.migrating")));
     }
 
     @Test
     void rebuildsACompletionMarkedWorkfileWhenDerivedAppsAreDamaged(@TempDir Path dir)
             throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         createLegacyLayout(dataDir, "app-recovery-bucket", 25);
         try (Database ignored = new Database(dataDir)) {
             // Produce a fully validated migrated database first.
         }
 
-        Path destination = dataDir.resolve("aw.db");
-        Path working = dataDir.resolve("aw.db.migrating");
+        Path destination = dataDir.resolve("events.db");
+        Path working = dataDir.resolve("events.db.migrating");
         Files.copy(destination, working, StandardCopyOption.REPLACE_EXISTING);
         Files.delete(destination);
         try (Connection corrupt = DriverManager.getConnection("jdbc:sqlite:" + working.toAbsolutePath());
@@ -236,14 +236,14 @@ class DatabaseTest {
 
     @Test
     void rebuildsACompletionMarkedWorkfileWhenItsCountsAreDamaged(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         createLegacyLayout(dataDir, "recovery-bucket", 25);
         try (Database ignored = new Database(dataDir)) {
             // Produce a fully validated migrated database first.
         }
 
-        Path destination = dataDir.resolve("aw.db");
-        Path working = dataDir.resolve("aw.db.migrating");
+        Path destination = dataDir.resolve("events.db");
+        Path working = dataDir.resolve("events.db.migrating");
         Files.copy(destination, working, StandardCopyOption.REPLACE_EXISTING);
         Files.delete(destination);
         try (Connection corrupt = DriverManager.getConnection("jdbc:sqlite:" + working.toAbsolutePath());
@@ -258,15 +258,15 @@ class DatabaseTest {
 
     @Test
     void rebuildsACompletionMarkedWorkfileWhenBucketMetadataIsMissing(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         createLegacyLayout(dataDir, "events-bucket", 2);
         appendLegacyBucketMetadata(dataDir.resolve("buckets.db"), "empty-bucket");
         try (Database ignored = new Database(dataDir)) {
             // Produce a complete workfile with a zero-event bucket.
         }
 
-        Path destination = dataDir.resolve("aw.db");
-        Path working = dataDir.resolve("aw.db.migrating");
+        Path destination = dataDir.resolve("events.db");
+        Path working = dataDir.resolve("events.db.migrating");
         Files.copy(destination, working, StandardCopyOption.REPLACE_EXISTING);
         Files.delete(destination);
         try (Connection corrupt = DriverManager.getConnection("jdbc:sqlite:" + working.toAbsolutePath());
@@ -282,7 +282,7 @@ class DatabaseTest {
 
     @Test
     void restartsMigrationIfALegacySourceChangesDuringCopy(@TempDir Path dir) throws Exception {
-        Path dataDir = dir.resolve("aw-data");
+        Path dataDir = dir.resolve("events");
         createLegacyLayout(dataDir, "changing-bucket", 1_205);
         boolean[] changed = {false};
 
@@ -349,7 +349,7 @@ class DatabaseTest {
         Files.createDirectories(dataDir);
         Class.forName("org.sqlite.JDBC");
         try (Connection connection = DriverManager.getConnection(
-                "jdbc:sqlite:" + dataDir.resolve("aw.db").toAbsolutePath());
+                "jdbc:sqlite:" + dataDir.resolve("events.db").toAbsolutePath());
              Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, "
                     + "bucket_id TEXT NOT NULL, timestamp TEXT NOT NULL, "

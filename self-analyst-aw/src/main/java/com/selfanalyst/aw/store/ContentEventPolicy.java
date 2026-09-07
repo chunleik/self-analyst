@@ -9,8 +9,10 @@ import java.util.regex.Pattern;
 /** Field allowlist for persisted title-only content events. */
 public final class ContentEventPolicy {
 
-    public static final String CONTENT_BUCKET_PREFIX = "aw-watcher-content_";
-    public static final String CONTENT_CLIENT = "aw-watcher-content";
+    public static final String CONTENT_BUCKET_PREFIX = "watcher-content_";
+    public static final String LEGACY_CONTENT_BUCKET_PREFIX = "aw-watcher-content_";
+    public static final String CONTENT_CLIENT = "watcher-content";
+    public static final String LEGACY_CONTENT_CLIENT = "aw-watcher-content";
 
     private static final Set<String> ALLOWED_FIELDS = Set.of(
             "schema_version",
@@ -42,8 +44,18 @@ public final class ContentEventPolicy {
     private ContentEventPolicy() {}
 
     public static boolean isContentBucket(String bucketId, String client) {
-        return (bucketId != null && bucketId.startsWith(CONTENT_BUCKET_PREFIX))
-                || CONTENT_CLIENT.equalsIgnoreCase(client);
+        return matchesContentBucketId(bucketId) || matchesContentClient(client);
+    }
+
+    public static boolean matchesContentBucketId(String bucketId) {
+        return bucketId != null
+                && (bucketId.startsWith(CONTENT_BUCKET_PREFIX)
+                || bucketId.startsWith(LEGACY_CONTENT_BUCKET_PREFIX));
+    }
+
+    public static boolean matchesContentClient(String client) {
+        return CONTENT_CLIENT.equalsIgnoreCase(client)
+                || LEGACY_CONTENT_CLIENT.equalsIgnoreCase(client);
     }
 
     public static void validate(String bucketId, String client, Map<String, Object> data) {

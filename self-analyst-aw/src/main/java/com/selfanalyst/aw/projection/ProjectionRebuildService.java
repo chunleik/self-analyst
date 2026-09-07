@@ -12,7 +12,7 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** 在服务停止、活动连接关闭后旁路重建并原子替换 aw.db。 */
+/** 在服务停止、活动连接关闭后旁路重建并原子替换 events.db。 */
 public final class ProjectionRebuildService {
 
     private final Path awDataDir;
@@ -42,10 +42,10 @@ public final class ProjectionRebuildService {
 
     public RebuildResult rebuild() {
         String id = UUID.randomUUID().toString();
-        Path current = awDataDir.resolve("aw.db");
-        Path rebuilding = awDataDir.resolve("aw.db.rebuilding-" + id);
+        Path current = awDataDir.resolve(Database.PROJECTION_FILENAME);
+        Path rebuilding = awDataDir.resolve(Database.PROJECTION_FILENAME + ".rebuilding-" + id);
         Path stagingDir = awDataDir.resolve(".projection-rebuilding-" + id);
-        Path backup = awDataDir.resolve("aw.db.backup-" + id);
+        Path backup = awDataDir.resolve(Database.PROJECTION_FILENAME + ".backup-" + id);
         try {
             Files.createDirectories(awDataDir);
             Files.createDirectory(stagingDir);
@@ -59,7 +59,7 @@ public final class ProjectionRebuildService {
                 }
                 verifyTarget(target.metaConnection(), projected);
             }
-            moveReplacing(stagingDir.resolve("aw.db"), rebuilding);
+            moveReplacing(stagingDir.resolve(Database.PROJECTION_FILENAME), rebuilding);
             Files.deleteIfExists(stagingDir);
             observer.beforeSwitch(rebuilding, current);
 

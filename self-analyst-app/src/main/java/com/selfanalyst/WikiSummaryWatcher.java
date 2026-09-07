@@ -19,12 +19,12 @@ import java.util.Map;
 
 /**
  * Syncs WikiStore summaries into AW event buckets so they appear as readable
- * swim-lane rows in the AW timeline, replacing the dense aw-watcher-content axis.
+ * swim-lane rows in the AW timeline, replacing the dense content axis.
  *
  * Three buckets are maintained:
- *   aw-watcher-wiki-hourly_<hostname>
- *   aw-watcher-wiki-halfday_<hostname>
- *   aw-watcher-wiki-daily_<hostname>
+ *   wiki-hourly_<hostname>
+ *   wiki-halfday_<hostname>
+ *   wiki-daily_<hostname>
  *
  * Each bucket is rebuilt from the last 7 days of DONE wiki entries every
  * SYNC_INTERVAL_MS milliseconds.
@@ -34,6 +34,7 @@ public class WikiSummaryWatcher extends Thread {
     private static final Logger log = LoggerFactory.getLogger(WikiSummaryWatcher.class);
     private static final long SYNC_INTERVAL_MS = 2 * 60 * 1000L;
     private static final int LOOKBACK_DAYS = 7;
+    static final String CLIENT = "wiki";
 
     private static final Map<WikiLevel, String> LEVEL_SUFFIX = Map.of(
             WikiLevel.HOUR,     "wiki-hourly",
@@ -125,14 +126,18 @@ public class WikiSummaryWatcher extends Thread {
         if (bucketStore.get(bucketId).isEmpty()) {
             Bucket bucket = Bucket.create(bucketId,
                     "Wiki summaries (" + level.name().toLowerCase() + ")",
-                    "summary", "aw-watcher-wiki", hostname);
+                    "summary", CLIENT, hostname);
             bucketStore.create(bucket);
             log.info("WikiSummaryWatcher: created bucket {}", bucketId);
         }
     }
 
+    static String timelineBucketId(WikiLevel level, String hostname) {
+        return LEVEL_SUFFIX.get(level) + "_" + hostname;
+    }
+
     private String bucketId(WikiLevel level) {
-        return "aw-watcher-" + LEVEL_SUFFIX.get(level) + "_" + hostname;
+        return timelineBucketId(level, hostname);
     }
 
     private static String truncate(String s, int max) {

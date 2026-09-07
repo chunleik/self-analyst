@@ -27,29 +27,37 @@ class AwServerBucketVisibilityTest {
         int port = freePort();
         AwServer server = new AwServer(dataDir, port, null);
         server.bucketStore().create(Bucket.create(
-                "aw-watcher-content_test-host",
+                "watcher-content_test-host",
                 "content-watcher bucket",
                 "listening",
-                "aw-watcher-content",
+                "watcher-content",
                 "test-host"));
         server.bucketStore().create(Bucket.create(
-                "aw-watcher-window_test-host",
+                "aw-watcher-content_imported-host",
+                "imported content",
+                "listening",
+                "aw-watcher-content",
+                "imported-host"));
+        server.bucketStore().create(Bucket.create(
+                "watcher-window_test-host",
                 "window-watcher bucket",
                 "currentwindow",
-                "aw-watcher-window",
+                "watcher-window",
                 "test-host"));
         server.start();
         try {
             HttpClient client = HttpClient.newHttpClient();
 
             Map<String, Object> visible = get(client, port, "/api/0/buckets/");
-            assertTrue(visible.containsKey("aw-watcher-window_test-host"));
-            assertFalse(visible.containsKey("aw-watcher-content_test-host"));
+            assertTrue(visible.containsKey("watcher-window_test-host"));
+            assertFalse(visible.containsKey("watcher-content_test-host"));
+            assertFalse(visible.containsKey("aw-watcher-content_imported-host"));
 
             Map<String, Object> complete = get(
                     client, port, "/api/0/buckets/?include_hidden=true");
-            assertTrue(complete.containsKey("aw-watcher-window_test-host"));
-            assertTrue(complete.containsKey("aw-watcher-content_test-host"));
+            assertTrue(complete.containsKey("watcher-window_test-host"));
+            assertTrue(complete.containsKey("watcher-content_test-host"));
+            assertTrue(complete.containsKey("aw-watcher-content_imported-host"));
         } finally {
             server.stop();
         }

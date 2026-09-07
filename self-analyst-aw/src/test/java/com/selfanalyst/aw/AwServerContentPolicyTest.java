@@ -28,9 +28,9 @@ class AwServerContentPolicyTest {
             throws Exception {
         int port = freePort();
         AwServer server = new AwServer(dataDir, port, null);
-        String bucketId = "aw-watcher-content_test";
+        String bucketId = "watcher-content_test";
         server.bucketStore().create(Bucket.create(
-                bucketId, "Content", "listening", "aw-watcher-content", "test"));
+                bucketId, "Content", "listening", "watcher-content", "test"));
         server.start();
         try {
             HttpClient client = HttpClient.newHttpClient();

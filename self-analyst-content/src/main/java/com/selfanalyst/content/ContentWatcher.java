@@ -34,6 +34,7 @@ public class ContentWatcher extends Thread {
 
     private static final Logger log = LoggerFactory.getLogger(ContentWatcher.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    static final String CLIENT = "watcher-content";
 
     private final PlatformCapture platform;
     private final TitleCapture capture;
@@ -72,7 +73,7 @@ public class ContentWatcher extends Thread {
             .connectTimeout(Duration.ofSeconds(5))
             .build();
         this.hostname = getHostname();
-        this.bucketId = "aw-watcher-content_" + hostname;
+        this.bucketId = bucketIdForHostname(hostname);
         this.platform = detectPlatform();
         this.capture = new TitleCapture();
         setDaemon(true);
@@ -286,7 +287,7 @@ public class ContentWatcher extends Thread {
             body.put("id", bucketId);
             body.put("name", "content-watcher bucket");
             body.put("type", "listening");
-            body.put("client", "aw-watcher-content");
+            body.put("client", CLIENT);
             body.put("hostname", hostname);
             body.put("created", Instant.now().toString());
 
@@ -301,6 +302,10 @@ public class ContentWatcher extends Thread {
         } catch (Exception e) {
             // Bucket likely already exists
         }
+    }
+
+    static String bucketIdForHostname(String hostname) {
+        return "watcher-content_" + hostname;
     }
 
     private static String getHostname() {

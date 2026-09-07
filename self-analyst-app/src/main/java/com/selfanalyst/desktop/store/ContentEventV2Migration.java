@@ -109,7 +109,8 @@ public final class ContentEventV2Migration {
                 FROM events e
                 LEFT JOIN buckets b ON b.id = e.bucket_id
                 WHERE e.id > ?
-                  AND (e.bucket_id LIKE ? OR b.client = ?)
+                  AND (e.bucket_id LIKE ? OR e.bucket_id LIKE ?
+                       OR b.client = ? OR b.client = ?)
                 ORDER BY e.id
                 LIMIT ?
                 """;
@@ -117,8 +118,10 @@ public final class ContentEventV2Migration {
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setLong(1, afterId);
             statement.setString(2, ContentEventPolicy.CONTENT_BUCKET_PREFIX + "%");
-            statement.setString(3, ContentEventPolicy.CONTENT_CLIENT);
-            statement.setInt(4, PAGE_SIZE);
+            statement.setString(3, ContentEventPolicy.LEGACY_CONTENT_BUCKET_PREFIX + "%");
+            statement.setString(4, ContentEventPolicy.CONTENT_CLIENT);
+            statement.setString(5, ContentEventPolicy.LEGACY_CONTENT_CLIENT);
+            statement.setInt(6, PAGE_SIZE);
             try (ResultSet result = statement.executeQuery()) {
                 while (result.next()) {
                     rows.add(new Row(
@@ -344,9 +347,11 @@ public final class ContentEventV2Migration {
             Database database, Connection connection) throws Exception {
         List<String> contentBucketIds = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT id FROM buckets WHERE id LIKE ? OR client = ?")) {
+                "SELECT id FROM buckets WHERE id LIKE ? OR id LIKE ? OR client = ? OR client = ?")) {
             statement.setString(1, ContentEventPolicy.CONTENT_BUCKET_PREFIX + "%");
-            statement.setString(2, ContentEventPolicy.CONTENT_CLIENT);
+            statement.setString(2, ContentEventPolicy.LEGACY_CONTENT_BUCKET_PREFIX + "%");
+            statement.setString(3, ContentEventPolicy.CONTENT_CLIENT);
+            statement.setString(4, ContentEventPolicy.LEGACY_CONTENT_CLIENT);
             try (ResultSet result = statement.executeQuery()) {
                 while (result.next()) contentBucketIds.add(result.getString(1));
             }
@@ -367,9 +372,9 @@ public final class ContentEventV2Migration {
                     .filter(Files::isRegularFile)
                     .filter(path -> {
                         String name = path.getFileName().toString();
-                        return name.equals("aw.db.migrating")
-                                || name.startsWith("aw.db.migrating-")
-                                || name.startsWith("aw.db.pre-legacy-migration-");
+                        return name.equals("events.db.migrating")
+                                || name.startsWith("events.db.migrating-")
+                                || name.startsWith("events.db.pre-legacy-migration-");
                     })
                     .toList();
             for (Path path : staleCopies) deleteDatabaseFiles(dataDir, path);
@@ -380,7 +385,7 @@ public final class ContentEventV2Migration {
         Path normalized = path.toAbsolutePath().normalize();
         if (!normalized.startsWith(dataDir)
                 || !dataDir.equals(normalized.getParent())
-                || normalized.equals(dataDir.resolve("aw.db"))
+                || normalized.equals(dataDir.resolve("events.db"))
                 || normalized.equals(dataDir.resolve("buckets.db"))) {
             throw new IllegalStateException("Refusing to delete database outside legacy cleanup scope");
         }

@@ -44,6 +44,7 @@ public class FileWatcher {
 
     private static final Logger log = LoggerFactory.getLogger(FileWatcher.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    static final String CLIENT = "watcher-file";
     /** Must exceed vis-timeline's 1s filterShortEvents threshold. */
     private static final double HEARTBEAT_DURATION_S = 2.0;
     private static final double PULSETIME_S = 30.0;
@@ -93,7 +94,7 @@ public class FileWatcher {
                 ? reconcileRequester : (root, subtree) -> {};
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         this.hostname = getHostname();
-        this.bucketId = "aw-watcher-file_" + hostname;
+        this.bucketId = bucketIdForHostname(hostname);
     }
 
     public void start() {
@@ -456,7 +457,7 @@ public class FileWatcher {
             body.put("id", bucketId);
             body.put("name", "file-watcher bucket");
             body.put("type", "file.changes");
-            body.put("client", "aw-watcher-file");
+            body.put("client", CLIENT);
             body.put("hostname", hostname);
             body.put("created", Instant.now().toString());
             String json = MAPPER.writeValueAsString(body);
@@ -470,6 +471,14 @@ public class FileWatcher {
         } catch (Exception e) {
             // bucket likely exists
         }
+    }
+
+    String bucketId() {
+        return bucketId;
+    }
+
+    static String bucketIdForHostname(String hostname) {
+        return "watcher-file_" + hostname;
     }
 
     private static String getHostname() {

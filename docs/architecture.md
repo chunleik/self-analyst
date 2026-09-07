@@ -14,7 +14,7 @@ Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2
                                    └─> metadata-only heartbeat ─> ActivityWatch 通用历史
 
 通过策略的 heartbeat/events/import ─> 月度 raw SQLite（永久、只追加）
-                                      └─> 幂等投影器 ─> aw.db（合并、可重建）
+                                      └─> 幂等投影器 ─> events.db（合并、可重建）
 ```
 
 OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
@@ -46,7 +46,7 @@ UIA，将整棵树作为单次调用内的临时输入，依次尝试应用专�
 嵌入式模式以 `{aw.raw.dir}/<yyyy>/raw-events-<yyyy-MM>.db` 作为事实源，按服务端 `receivedAt`
 的 UTC 月份分区。catalog 和封存 manifest 记录计数、边界、schema 版本与 SHA-256；封存分区只读。
 写入顺序固定为隐私校验、raw 事务提交、幂等投影与 checkpoint。投影失败只产生 pending 状态，
-不得回滚或删除已经提交的 raw 事实。`aw.db`、Wiki 与语义索引都是可删除、可重建的派生数据。
+不得回滚或删除已经提交的 raw 事实。`events.db`、Wiki 与语义索引都是可删除、可重建的派生数据。
 
 内容事件 v2 允许 `app`、`title`、可选 `context_title/context_kind`、`title_source`、可选
 `title_confidence`、`uia_chars` 和时间元数据。共享写入策略覆盖 HTTP heartbeat/events、导入和

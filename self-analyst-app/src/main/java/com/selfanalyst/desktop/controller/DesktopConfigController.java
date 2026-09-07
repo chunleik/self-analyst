@@ -650,7 +650,7 @@ public class DesktopConfigController {
         m.put("mode", field("mode", eff.getProperty("aw.mode", "embedded")));
         m.put("port", field("port", eff.getProperty("aw.port", "5700")));
         m.put("dataDir", field("dataDir", eff.getProperty("aw.data-dir",
-                System.getProperty("user.home") + "/.self-analyst/aw-data")));
+                System.getProperty("user.home") + "/.self-analyst/events")));
         m.put("webUrl", field("webUrl", "http://localhost:" + eff.getProperty("aw.port", "5700") + "/"));
         return m;
     }

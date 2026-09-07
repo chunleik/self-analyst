@@ -36,7 +36,7 @@ class WikiWorkerTest {
     @Test
     void runningWorkerEnqueuesRecentlyCompletedPeriodsWithoutBackfill(@TempDir Path dir) {
         store = new WikiStore(dir.resolve("llm-wiki.db"));
-        awDatabase = new Database(dir.resolve("aw-data"));
+        awDatabase = new Database(dir.resolve("events"));
         EventStore eventStore = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
         WikiFactBuilder factBuilder = new WikiFactBuilder(eventStore, 12_000);
         WikiSummarizer summarizer = new WikiSummarizer(prompt -> {
@@ -64,7 +64,7 @@ class WikiWorkerTest {
     @Test
     void delayedRoundCatchesUpEveryCompletedHourExactlyOnce(@TempDir Path dir) {
         store = new WikiStore(dir.resolve("llm-wiki.db"));
-        awDatabase = new Database(dir.resolve("aw-data"));
+        awDatabase = new Database(dir.resolve("events"));
         EventStore eventStore = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
         WikiFactBuilder factBuilder = new WikiFactBuilder(eventStore, 12_000);
         WikiSummarizer summarizer = new WikiSummarizer(prompt -> {
@@ -90,7 +90,7 @@ class WikiWorkerTest {
     @Test
     void parentWaitsUntilEveryExpectedChildPeriodExists(@TempDir Path dir) throws Exception {
         store = new WikiStore(dir.resolve("llm-wiki.db"));
-        awDatabase = new Database(dir.resolve("aw-data"));
+        awDatabase = new Database(dir.resolve("events"));
         EventStore eventStore = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
         worker = new WikiWorker(store, new WikiFactBuilder(eventStore, 12_000),
                 new WikiSummarizer(prompt -> "{}"), ZoneId.of("UTC"),
@@ -119,7 +119,7 @@ class WikiWorkerTest {
     @Test
     void failedStartupBackfillIsRetriedFromTheOriginalCursor(@TempDir Path dir) {
         store = new FailFirstQueryWikiStore(dir.resolve("llm-wiki.db"));
-        awDatabase = new Database(dir.resolve("aw-data"));
+        awDatabase = new Database(dir.resolve("events"));
         EventStore eventStore = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
         AtomicReference<Instant> now = new AtomicReference<>(
                 Instant.parse("2026-08-20T03:05:00Z"));
@@ -141,7 +141,7 @@ class WikiWorkerTest {
     @Test
     void parentSummaryUsesOnlyChildrenFromItsOwnTimezone(@TempDir Path dir) throws Exception {
         store = new WikiStore(dir.resolve("llm-wiki.db"));
-        awDatabase = new Database(dir.resolve("aw-data"));
+        awDatabase = new Database(dir.resolve("events"));
         EventStore eventStore = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
         AtomicReference<String> capturedPrompt = new AtomicReference<>();
         WikiSummarizer summarizer = new WikiSummarizer(prompt -> {
@@ -182,7 +182,7 @@ class WikiWorkerTest {
     @Test
     void incompleteFailedParentDoesNotBlockRetryableChild(@TempDir Path dir) {
         store = new WikiStore(dir.resolve("llm-wiki.db"));
-        awDatabase = new Database(dir.resolve("aw-data"));
+        awDatabase = new Database(dir.resolve("events"));
         EventStore eventStore = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
         AtomicReference<Instant> now = new AtomicReference<>(
                 Instant.parse("2026-08-20T03:05:00Z"));

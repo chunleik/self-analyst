@@ -35,7 +35,7 @@ public class ActivityWatchTools {
     @Tool(description = "从指定的 bucket 获取 heartbeat 合并后的 ActivityWatch 投影事件。limit 控制返回条数，" +
             "startTime 和 endTime 为 UTC 时间的 ISO-8601 格式（如 2026-06-14T16:00:00 对应北京时间6月15日0点），可选")
     public String queryEvents(
-            @ToolParam(name = "bucketId", description = "bucket ID，如 aw-watcher-window_<hostname>")
+            @ToolParam(name = "bucketId", description = "bucket ID，如 watcher-window_<hostname>")
             String bucketId,
             @ToolParam(name = "limit", description = "返回事件数上限，默认 100")
             int limit,

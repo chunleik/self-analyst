@@ -35,13 +35,9 @@ public class WikiFactBuilder {
     }
 
     public WikiFacts buildFacts(WikiPeriod period) {
-        String windowBucket = "aw-watcher-window_" + hostname;
-        String afkBucket = "aw-watcher-afk_" + hostname;
-        String contentBucket = "aw-watcher-content_" + hostname;
-
-        QueryResult window = safeQuery(windowBucket, period.start(), period.end());
-        QueryResult afk = safeQuery(afkBucket, period.start(), period.end());
-        QueryResult content = safeQuery(contentBucket, period.start(), period.end());
+        QueryResult window = queryKind("window", period.start(), period.end());
+        QueryResult afk = queryKind("afk", period.start(), period.end());
+        QueryResult content = queryKind("content", period.start(), period.end());
         List<Event> windowEvents = window.events();
         List<Event> afkEvents = afk.events();
         List<Event> contentEvents = content.events();
@@ -101,6 +97,12 @@ public class WikiFactBuilder {
                 topApps, List.of(), List.of(), summaries, FACT_BUILDER_VERSION,
                 childEntries.stream().map(WikiEntry::projectorVersion)
                         .filter(Objects::nonNull).findFirst().orElse(null), coverage);
+    }
+
+    private QueryResult queryKind(String kind, Instant start, Instant end) {
+        QueryResult primary = safeQuery("watcher-" + kind + "_" + hostname, start, end);
+        if (!"missing".equals(primary.status())) return primary;
+        return safeQuery("aw-watcher-" + kind + "_" + hostname, start, end);
     }
 
     private QueryResult safeQuery(String bucketId, Instant start, Instant end) {

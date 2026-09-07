@@ -18,8 +18,8 @@ public class AfkWatcher extends Watcher {
     private static final long AFK_THRESHOLD_MS = 180_000; // 3 minutes
 
     public AfkWatcher(String serverUrl) {
-        super("aw-watcher-afk",
-              "aw-watcher-afk_" + getHostname(),
+        super("watcher-afk",
+              "watcher-afk_" + getHostname(),
               2000,
               serverUrl);
         this.tracker = createPlatformTracker();

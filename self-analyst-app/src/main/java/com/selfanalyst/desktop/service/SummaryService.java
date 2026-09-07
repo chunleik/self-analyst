@@ -34,8 +34,16 @@ public class SummaryService implements SummaryFactSource {
         this.eventStore = eventStore;
         this.memoryStore = memoryStore;
         String host = getHostname();
-        this.windowBucket = "aw-watcher-window_" + host;
-        this.afkBucket = "aw-watcher-afk_" + host;
+        this.windowBucket = "watcher-window_" + host;
+        this.afkBucket = "watcher-afk_" + host;
+    }
+
+    String windowBucket() {
+        return windowBucket;
+    }
+
+    String afkBucket() {
+        return afkBucket;
     }
 
     // ── Public API ───────────────────────────────────────────────

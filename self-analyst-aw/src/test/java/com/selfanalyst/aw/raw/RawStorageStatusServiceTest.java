@@ -35,7 +35,7 @@ class RawStorageStatusServiceTest {
                     now, now, 2, Map.of("title", "PRIVATE_TITLE"), null, null));
         }
         try (RawStorageStatusService status = new RawStorageStatusService(
-                dir.resolve("raw"), dir.resolve("aw.db"), 1, 1)) {
+                dir.resolve("raw"), dir.resolve("events.db"), 1, 1)) {
             String text = status.snapshot().toString();
             assertFalse(text.contains("PRIVATE_TITLE"));
             assertFalse(text.contains(dir.toString()));

@@ -69,7 +69,7 @@ class RawImmutabilityIntegrationTest {
 
         new ProjectionRebuildService(awDir, rawDir, 30, 1000, "v2").rebuild();
         try (RawStorageStatusService warning = new RawStorageStatusService(
-                rawDir, awDir.resolve("aw.db"), Long.MAX_VALUE, 1)) {
+                rawDir, awDir.resolve("events.db"), Long.MAX_VALUE, 1)) {
             warning.snapshot();
         }
 

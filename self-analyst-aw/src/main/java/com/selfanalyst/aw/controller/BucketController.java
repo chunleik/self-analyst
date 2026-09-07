@@ -26,7 +26,9 @@ public class BucketController {
     }
 
     /** Bucket ID prefixes hidden from the AW web UI timeline (too dense to read). */
-    private static final List<String> HIDDEN_PREFIXES = List.of("aw-watcher-content_");
+    private static final List<String> HIDDEN_PREFIXES = List.of(
+            ContentEventPolicy.CONTENT_BUCKET_PREFIX,
+            ContentEventPolicy.LEGACY_CONTENT_BUCKET_PREFIX);
 
     public void list(Context ctx) {
         try {

@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.util.Optional;
 
-/** 与投影写入使用同一 aw.db 事务的单调 checkpoint 存储。 */
+/** 与投影写入使用同一 events.db 事务的单调 checkpoint 存储。 */
 public final class ProjectionCheckpointStore {
 
     private final Connection connection;

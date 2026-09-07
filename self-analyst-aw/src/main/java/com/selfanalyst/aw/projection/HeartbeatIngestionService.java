@@ -37,8 +37,10 @@ public final class HeartbeatIngestionService {
     public Result ingest(Bucket bucket, Event event, String sourceEventId) {
         Objects.requireNonNull(bucket, "bucket");
         Objects.requireNonNull(event, "event");
-        RawEvent raw = RawEvent.create(ids, sourceEventId, bucket.id(), sourceOf(bucket),
-                schemaVersion(bucket), RawIngestKind.HEARTBEAT,
+        RawEventSource source = RawEventSource.fromBucket(bucket.id(), bucket.client());
+        int schemaVersion = source == RawEventSource.CONTENT ? 2 : 1;
+        RawEvent raw = RawEvent.create(ids, sourceEventId, bucket.id(), source,
+                schemaVersion, RawIngestKind.HEARTBEAT,
                 event.timestamp(), Instant.now(clock), event.duration(), event.data(), null, null);
         RawEvent stored = rawAppender.append(raw);
         try {
@@ -47,20 +49,6 @@ public final class HeartbeatIngestionService {
         } catch (RuntimeException projectionFailure) {
             return new Result(stored, null, ProjectionStatus.PENDING);
         }
-    }
-
-    private static RawEventSource sourceOf(Bucket bucket) {
-        String id = bucket.id().toLowerCase(java.util.Locale.ROOT);
-        String client = bucket.client().toLowerCase(java.util.Locale.ROOT);
-        if (id.startsWith("aw-watcher-window_") || client.contains("window")) return RawEventSource.WINDOW;
-        if (id.startsWith("aw-watcher-afk_") || client.contains("afk")) return RawEventSource.AFK;
-        if (id.startsWith("aw-watcher-content_") || client.contains("content")) return RawEventSource.CONTENT;
-        if (id.startsWith("aw-watcher-file_") || client.contains("file")) return RawEventSource.FILE;
-        return RawEventSource.THIRD_PARTY;
-    }
-
-    private static int schemaVersion(Bucket bucket) {
-        return sourceOf(bucket) == RawEventSource.CONTENT ? 2 : 1;
     }
 
     public record Result(RawEvent rawEvent, Long projectionEventId,

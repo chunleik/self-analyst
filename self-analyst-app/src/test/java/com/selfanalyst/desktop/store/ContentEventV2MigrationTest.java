@@ -31,16 +31,16 @@ class ContentEventV2MigrationTest {
 
     @Test
     void sanitizesLegacyRowsExtractsTitleAndPhysicallyRemovesBody() throws Exception {
-        Path dataDir = tempDir.resolve("aw-data");
-        Path dbPath = dataDir.resolve("aw.db");
+        Path dataDir = tempDir.resolve("events");
+        Path dbPath = dataDir.resolve("events.db");
         try (Database db = new Database(dataDir)) {
             BucketStore buckets = new BucketStore(db);
             String bucketId = "aw-watcher-content_test";
             buckets.create(Bucket.create(
                     bucketId, "Content", "listening", "aw-watcher-content", "test"));
             Path legacyContentDb = dataDir.resolve(bucketId + ".db");
-            Path legacyUnifiedBackup = dataDir.resolve("aw.db.pre-legacy-migration-123");
-            Path staleWorkFile = dataDir.resolve("aw.db.migrating");
+            Path legacyUnifiedBackup = dataDir.resolve("events.db.pre-legacy-migration-123");
+            Path staleWorkFile = dataDir.resolve("events.db.migrating");
             Files.writeString(legacyContentDb, FORBIDDEN);
             Files.writeString(legacyUnifiedBackup, FORBIDDEN);
             Files.writeString(staleWorkFile, FORBIDDEN);
@@ -134,7 +134,7 @@ class ContentEventV2MigrationTest {
             assertThrows(IllegalStateException.class,
                     () -> ContentEventV2Migration.migrate(db));
             assertTrue(Files.exists(outside));
-            assertTrue(Files.exists(dataDir.resolve("aw.db")));
+            assertTrue(Files.exists(dataDir.resolve("events.db")));
         }
     }
 
@@ -185,7 +185,7 @@ class ContentEventV2MigrationTest {
     @Test
     void failedPhysicalCompactionLeavesDirtyStateForNextStartupRetry() throws Exception {
         Path dataDir = tempDir.resolve("compact-retry");
-        Path dbPath = dataDir.resolve("aw.db");
+        Path dbPath = dataDir.resolve("events.db");
         try (Database db = new Database(dataDir)) {
             String bucketId = "aw-watcher-content_retry";
             new BucketStore(db).create(Bucket.create(

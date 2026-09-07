@@ -4,6 +4,7 @@ import com.selfanalyst.aw.model.Bucket;
 import com.selfanalyst.aw.model.Event;
 import com.selfanalyst.aw.raw.RawEvent;
 import com.selfanalyst.aw.raw.RawEventAppender;
+import com.selfanalyst.aw.raw.RawEventSource;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -33,6 +34,33 @@ class EventIngestionServiceTest {
         assertEquals(2, stored.size());
         assertEquals(2, projections.get());
         assertEquals(2, result.rawEvents().size());
+    }
+
+    @Test
+    void productAndImportedWatcherPrefixesMapToTheSameSource() {
+        List<RawEvent> stored = new ArrayList<>();
+        EventIngestionService service = new EventIngestionService(
+                new BatchAppender(stored, false), event -> null);
+        Bucket product = new Bucket("watcher-window_host", "Window", "currentwindow",
+                "watcher-window", "host", Instant.EPOCH, Instant.EPOCH);
+        Bucket imported = new Bucket("aw-watcher-window_host", "Window", "currentwindow",
+                "aw-watcher-window", "host", Instant.EPOCH, Instant.EPOCH);
+        assertEquals(RawEventSource.WINDOW,
+                service.ingest(product, submissions()).rawEvents().getFirst().source());
+        assertEquals(RawEventSource.WINDOW,
+                service.ingest(imported, submissions()).rawEvents().getFirst().source());
+        assertEquals(RawEventSource.CONTENT, RawEventSource.fromBucket(
+                "watcher-content_host", "watcher-content"));
+        assertEquals(RawEventSource.CONTENT, RawEventSource.fromBucket(
+                "aw-watcher-content_host", "aw-watcher-content"));
+        assertEquals(RawEventSource.FILE, RawEventSource.fromBucket(
+                "watcher-file_host", "watcher-file"));
+        assertEquals(RawEventSource.FILE, RawEventSource.fromBucket(
+                "aw-watcher-file_host", "aw-watcher-file"));
+        assertEquals(RawEventSource.AFK, RawEventSource.fromBucket(
+                "watcher-afk_host", "watcher-afk"));
+        assertEquals(RawEventSource.THIRD_PARTY, RawEventSource.fromBucket(
+                "wiki-hourly_host", "wiki"));
     }
 
     @Test

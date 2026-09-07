@@ -24,10 +24,10 @@ class WikiFactBuilderTest {
 
     @Test
     void samplesContextTitlesAndNeverLegacyBodyText() throws Exception {
-        try (Database db = new Database(tempDir.resolve("aw-data"))) {
+        try (Database db = new Database(tempDir.resolve("events"))) {
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
             String host = java.net.InetAddress.getLocalHost().getHostName();
-            String bucketId = "aw-watcher-content_" + host;
+            String bucketId = "watcher-content_" + host;
             Instant start = Instant.parse("2026-08-30T01:00:00Z");
 
             Map<String, Object> titleEvent = new LinkedHashMap<>();
@@ -72,7 +72,7 @@ class WikiFactBuilderTest {
             assertEquals(42L,
                     lagging.sourceCoverage().get("content").projectionLagSeconds());
 
-            String windowBucket = "aw-watcher-window_" + host;
+            String windowBucket = "watcher-window_" + host;
             events.insertEvent(windowBucket, new Event(
                     start.plusSeconds(20), 2,
                     Map.of("app", "editor.exe", "title", "窗口标题样本")));
@@ -82,6 +82,23 @@ class WikiFactBuilderTest {
                     + bounded.contextTitleSamples().stream().mapToInt(String::length).sum();
             assertTrue(sampleChars <= 20,
                     "window and context title samples must share one character budget");
+        }
+    }
+
+    @Test
+    void importedAwWatcherWindowBucketIsStillRecognized() throws Exception {
+        try (Database db = new Database(tempDir.resolve("imported"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            String host = java.net.InetAddress.getLocalHost().getHostName();
+            Instant start = Instant.parse("2026-08-30T01:00:00Z");
+            events.insertEvent("aw-watcher-window_" + host, new Event(
+                    start.plusSeconds(20), 2,
+                    Map.of("app", "editor.exe", "title", "导入窗口")));
+
+            WikiFactBuilder.WikiFacts facts = new WikiFactBuilder(events, 12_000).buildFacts(
+                    new WikiPeriod(WikiLevel.HOUR, start, start.plusSeconds(3600), "UTC"));
+            assertEquals("complete", facts.sourceCoverage().get("window").status());
+            assertTrue(facts.titleSamples().contains("导入窗口"));
         }
     }
 }

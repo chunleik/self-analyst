@@ -18,8 +18,8 @@ public class WindowWatcher extends Watcher {
     private Instant lastChangeTime = Instant.now();
 
     public WindowWatcher(String serverUrl) {
-        super("aw-watcher-window",
-              "aw-watcher-window_" + getHostname(),
+        super("watcher-window",
+              "watcher-window_" + getHostname(),
               2000, // poll every 2 seconds
               serverUrl);
         this.tracker = createPlatformTracker();

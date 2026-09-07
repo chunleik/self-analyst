@@ -39,7 +39,8 @@ class ConfigTest {
         assertEquals("true", props.getProperty("agent.compaction.enabled"));
         assertEquals("30", props.getProperty("agent.compaction.triggerMessages"));
         assertEquals("60000", props.getProperty("agent.compaction.triggerTokens"));
-        assertEquals("./data/aw-data/raw", props.getProperty("aw.raw.dir"));
+        assertEquals("./data/events", props.getProperty("aw.data-dir"));
+        assertEquals("./data/events/raw", props.getProperty("aw.raw.dir"));
         assertEquals("31", props.getProperty("aw.raw.query.maxRangeDays"));
         assertEquals("1000", props.getProperty("aw.raw.query.maxPageSize"));
         assertEquals("10737418240", props.getProperty("aw.raw.lowDisk.warnBytes"));
@@ -197,7 +198,8 @@ class ConfigTest {
     @Test
     void rawEventSettingsUseDefaultsAndParseTomlOverrides(@TempDir Path dir) throws Exception {
         Config defaults = Config.testDefaults(dir);
-        assertEquals(dir.resolve("aw-data/raw"), defaults.awRawDir());
+        assertEquals(dir.resolve("events"), defaults.awDataDir());
+        assertEquals(dir.resolve("events/raw"), defaults.awRawDir());
         assertEquals(31, defaults.awRawQueryMaxRangeDays());
         assertEquals(1000, defaults.awRawQueryMaxPageSize());
         assertEquals(10_737_418_240L, defaults.awRawLowDiskWarnBytes());

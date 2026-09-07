@@ -21,6 +21,8 @@ public class Database implements AutoCloseable {
     private static final int SQLITE_BUSY_TIMEOUT_MS = 250;
     private static final long LOCK_RETRY_MS = 100;
 
+    public static final String PROJECTION_FILENAME = "events.db";
+
     private final Path dataDir;
     private final Path dbPath;
     private final ConcurrentHashMap<String, Connection> bucketConns = new ConcurrentHashMap<>();
@@ -28,7 +30,7 @@ public class Database implements AutoCloseable {
 
     public Database(Path dataDir) {
         this.dataDir = dataDir;
-        this.dbPath = dataDir.resolve("aw.db");
+        this.dbPath = dataDir.resolve(PROJECTION_FILENAME);
         try {
             Files.createDirectories(dataDir);
             Class.forName("org.sqlite.JDBC");

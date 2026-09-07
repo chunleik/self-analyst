@@ -27,7 +27,7 @@ class AwServerInitializationOrderTest {
 
         try {
             assertThrows(IllegalStateException.class, () -> new AwServer(data, 0, null));
-            assertFalse(Files.exists(data.resolve("aw.db")));
+            assertFalse(Files.exists(data.resolve("events.db")));
         } finally {
             try {
                 Files.deleteIfExists(raw);

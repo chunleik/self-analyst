@@ -271,7 +271,7 @@ class DesktopConfigControllerTest {
     void rawDirectoryCannotChangeAfterCatalogContainsPartition(@TempDir Path dir)
             throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
-        String original = "[aw.raw]\ndir = '" + dir.resolve("aw-data/raw") + "'\n";
+        String original = "[aw.raw]\ndir = '" + dir.resolve("events/raw") + "'\n";
         store.saveRaw(original);
         Config config = Config.testDefaults(dir);
         try (RawPartitionCatalog catalog = new RawPartitionCatalog(config.awRawDir())) {

@@ -12,7 +12,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 
 /** `/events` 单条和批量请求的原始优先事务边界。 */
@@ -37,7 +36,7 @@ public final class EventIngestionService {
             return new Result(List.of(), false);
         }
         Instant receivedAt = Instant.now(clock);
-        RawEventSource source = sourceOf(bucket);
+        RawEventSource source = RawEventSource.fromBucket(bucket.id(), bucket.client());
         int schemaVersion = source == RawEventSource.CONTENT ? 2 : 1;
         List<RawEvent> rawEvents = new ArrayList<>(submissions.size());
         for (Submission submission : submissions) {
@@ -56,16 +55,6 @@ public final class EventIngestionService {
             }
         }
         return new Result(stored, pending);
-    }
-
-    private static RawEventSource sourceOf(Bucket bucket) {
-        String id = bucket.id().toLowerCase(Locale.ROOT);
-        String client = bucket.client().toLowerCase(Locale.ROOT);
-        if (id.startsWith("aw-watcher-window_") || client.contains("window")) return RawEventSource.WINDOW;
-        if (id.startsWith("aw-watcher-afk_") || client.contains("afk")) return RawEventSource.AFK;
-        if (id.startsWith("aw-watcher-content_") || client.contains("content")) return RawEventSource.CONTENT;
-        if (id.startsWith("aw-watcher-file_") || client.contains("file")) return RawEventSource.FILE;
-        return RawEventSource.THIRD_PARTY;
     }
 
     public record Submission(Event event, String sourceEventId) {}

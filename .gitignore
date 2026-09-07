@@ -39,4 +39,4 @@ self-analyst-content/src/main/resources/axsidecar/
 
 # ActivityWatch aw-webui（MPL-2.0）预编译产物，仅本地自测用、不随仓库分发。
 # 缺失时 WebUiHandler 优雅返回 404，CLI/桌面端/REST API 不受影响。
-self-analyst-aw/src/main/resources/webui/
+self-analyst-events/src/main/resources/webui/

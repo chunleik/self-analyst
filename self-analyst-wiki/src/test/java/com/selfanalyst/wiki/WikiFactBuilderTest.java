@@ -1,9 +1,9 @@
 package com.selfanalyst.wiki;
 
-import com.selfanalyst.aw.model.Event;
-import com.selfanalyst.aw.store.Database;
-import com.selfanalyst.aw.store.EventStore;
-import com.selfanalyst.aw.store.PulseTimeConfig;
+import com.selfanalyst.events.model.Event;
+import com.selfanalyst.events.store.Database;
+import com.selfanalyst.events.store.EventStore;
+import com.selfanalyst.events.store.PulseTimeConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 

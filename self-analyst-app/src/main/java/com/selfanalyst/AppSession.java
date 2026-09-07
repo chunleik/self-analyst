@@ -1,8 +1,8 @@
 package com.selfanalyst;
 
 import com.selfanalyst.agent.SelfAnalystAgent;
-import com.selfanalyst.aw.AwServer;
-import com.selfanalyst.aw.watcher.WatcherManager;
+import com.selfanalyst.events.EventServer;
+import com.selfanalyst.events.watcher.WatcherManager;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.desktop.DesktopServer;
@@ -30,7 +30,7 @@ public class AppSession implements AutoCloseable {
     private final Config config;
     private final UsageMeter usageMeter;
     private final SelfAnalystAgent agent;
-    private AwServer awServer;
+    private EventServer eventServer;
     private final String desktopToken;
     private final Runnable desktopShutdownSignal;
     private WatcherManager watcherManager;
@@ -181,12 +181,12 @@ public class AppSession implements AutoCloseable {
         }
 
         // Wiki summarization worker
-        if (wikiStore != null && a != null && awServer != null
-                && contentPersistenceReady && awServer.projectionReady()) {
+        if (wikiStore != null && a != null && eventServer != null
+                && contentPersistenceReady && eventServer.projectionReady()) {
             try {
                 WikiFactBuilder factBuilder = new WikiFactBuilder(
-                        awServer.eventStore(), config.wikiPromptMaxContentChars(), () -> {
-                            Object lag = awServer.rawStatus().get("projectionLagSeconds");
+                        eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> {
+                            Object lag = eventServer.rawStatus().get("projectionLagSeconds");
                             return lag instanceof Number number ? number.longValue() : null;
                         });
                 WikiSummarizer summarizer = new WikiSummarizer(a.wikiLLMClient());
@@ -204,10 +204,10 @@ public class AppSession implements AutoCloseable {
         }
 
         // Wiki summary buckets (feeds hourly/halfday/daily axes in AW timeline)
-        if (wikiStore != null && awServer != null && awServer.projectionReady()) {
+        if (wikiStore != null && eventServer != null && eventServer.projectionReady()) {
             try {
                 wikiSummaryWatcher = new WikiSummaryWatcher(wikiStore,
-                        awServer.bucketStore(), awServer.eventStore());
+                        eventServer.bucketStore(), eventServer.eventStore());
                 wikiSummaryWatcher.start();
                 log.info("WikiSummaryWatcher 已启动");
             } catch (Exception e) {
@@ -218,30 +218,30 @@ public class AppSession implements AutoCloseable {
         // Metadata-only workers do not depend on Agent or LLM availability.
         applyFileWatchSettings(fileWatchEnabled, fileWatchRoots);
 
-        if (awServer != null && awServer.app() != null) {
+        if (eventServer != null && eventServer.app() != null) {
             var memoryStore = agent != null ? agent.memory() : null;
-            desktopServer = new DesktopServer(awServer.app(), config, agent,
-                    awServer.eventStore(), memoryStore,
+            desktopServer = new DesktopServer(eventServer.app(), config, agent,
+                    eventServer.eventStore(), memoryStore,
                     watcherManager, contentWatcher,
                     contentPersistenceReady, contentMigrationError,
                     fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings,
                     userConfigStore, wikiStore);
-            desktopServer.statusController().setRawStatusSupplier(awServer::rawStatus);
+            desktopServer.statusController().setRawStatusSupplier(eventServer::rawStatus);
             desktopServer.start();
-            awServer.registerWebUi();
+            eventServer.registerWebUi();
             log.info(desktopUiStartupLogMessage(config.awPort()));
         }
     }
 
     private void startEmbeddedAW() {
         try {
-            awServer = new AwServer(
+            eventServer = new EventServer(
                     config.awDataDir(), config.awRawDir(), config.awPort(),
                     config.awRawQueryMaxRangeDays(), config.awRawQueryMaxPageSize(),
                     config.awRawLowDiskWarnBytes(), config.awRawLowDiskBlockBytes(),
                     config.awRawProjectorBatchSize());
             try {
-                var migration = ContentEventV2Migration.migrate(awServer.db());
+                var migration = ContentEventV2Migration.migrate(eventServer.db());
                 contentPersistenceReady = migration.ready();
                 log.info("内容事件标题化迁移完成 (scanned={}, sanitized={})",
                         migration.scanned(), migration.sanitized());
@@ -252,7 +252,7 @@ public class AppSession implements AutoCloseable {
                         contentMigrationError);
             }
             registerDesktopLifecycle();
-            awServer.start(config.awPort());
+            eventServer.start(config.awPort());
             log.info("嵌入式 AW 服务已启动 (端口 {})", config.awPort());
             watcherManager = new WatcherManager(
                     "http://localhost:" + config.awPort());
@@ -292,10 +292,10 @@ public class AppSession implements AutoCloseable {
     private void registerDesktopLifecycle() {
         String token = desktopToken;
         Runnable shutdownSignal = desktopShutdownSignal;
-        if (awServer == null || token == null || token.isBlank()) {
+        if (eventServer == null || token == null || token.isBlank()) {
             return;
         }
-        awServer.app().get("/desktop/session", ctx -> {
+        eventServer.app().get("/desktop/session", ctx -> {
             if (!token.equals(ctx.queryParam("token"))) {
                 ctx.status(403).json(java.util.Map.of("error", "Invalid desktop session token"));
                 return;
@@ -303,14 +303,14 @@ public class AppSession implements AutoCloseable {
             ctx.header("Set-Cookie", desktopSessionCookie(token));
             ctx.redirect("/desktop-ui/");
         });
-        awServer.app().get("/desktop/lifecycle/health", ctx -> {
+        eventServer.app().get("/desktop/lifecycle/health", ctx -> {
             if (!token.equals(ctx.header("X-SelfAnalyst-Token"))) {
                 ctx.status(403);
                 return;
             }
             ctx.status(204);
         });
-        awServer.app().post("/desktop/lifecycle/shutdown", ctx -> {
+        eventServer.app().post("/desktop/lifecycle/shutdown", ctx -> {
             if (!token.equals(ctx.header("X-SelfAnalyst-Token"))) {
                 ctx.status(403);
                 return;
@@ -472,8 +472,8 @@ public class AppSession implements AutoCloseable {
         if (watcherManager != null) {
             watcherManager.stopAll();
         }
-        if (awServer != null) {
-            awServer.stop();
+        if (eventServer != null) {
+            eventServer.stop();
         }
     }
 

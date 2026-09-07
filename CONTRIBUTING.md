@@ -57,7 +57,7 @@ test runner。
 
 | 模块 | 职责 |
 |------|------|
-| `self-analyst-aw` | 嵌入式 ActivityWatch、事件策略、原始事件永久保留与历史迁移 |
+| `self-analyst-events` | 嵌入式事件服务、事件策略、原始事件永久保留与历史迁移 |
 | `self-analyst-content` | 前台窗口、UIA 临时查询、上下文标题提取 |
 | `self-analyst-file` | 用户显式配置目录中的文件系统元数据采集 |
 | `self-analyst-wiki` | 标题事实的时间聚合、摘要与语义索引 |

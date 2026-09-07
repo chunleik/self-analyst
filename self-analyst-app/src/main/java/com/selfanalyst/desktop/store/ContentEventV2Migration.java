@@ -2,8 +2,8 @@ package com.selfanalyst.desktop.store;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.selfanalyst.aw.store.ContentEventPolicy;
-import com.selfanalyst.aw.store.Database;
+import com.selfanalyst.events.store.ContentEventPolicy;
+import com.selfanalyst.events.store.Database;
 import com.selfanalyst.content.capture.ContextTitleCandidate;
 import com.selfanalyst.content.capture.ContextTitleExtractor;
 

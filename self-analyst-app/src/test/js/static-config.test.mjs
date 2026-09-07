@@ -11,8 +11,8 @@ const appProps = fs.readFileSync(
 );
 const readme = fs.readFileSync(new URL("../../../../README.md", import.meta.url), "utf8");
 const appPom = fs.readFileSync(new URL("../../../pom.xml", import.meta.url), "utf8");
-const awServer = fs.readFileSync(
-  new URL("../../../../self-analyst-aw/src/main/java/com/selfanalyst/aw/AwServer.java", import.meta.url),
+const eventServer = fs.readFileSync(
+  new URL("../../../../self-analyst-events/src/main/java/com/selfanalyst/events/EventServer.java", import.meta.url),
   "utf8",
 );
 const portableBuild = fs.readFileSync(
@@ -36,6 +36,6 @@ assert.match(appPom, /<phase>test<\/phase>/);
 assert.match(appPom, /<executable>node<\/executable>/);
 assert.match(appPom, /<skip>\$\{skipTests\}<\/skip>/);
 
-assert.match(awServer, /\.start\("127\.0\.0\.1", port\)/);
+assert.match(eventServer, /\.start\("127\.0\.0\.1", port\)/);
 assert.match(portableBuild, /data\/config\/config\.toml/);
 assert.match(portableBuild, /\[Text\.UTF8Encoding\]::new\(\$false\)/);

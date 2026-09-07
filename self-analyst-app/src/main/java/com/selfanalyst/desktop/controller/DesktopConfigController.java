@@ -1,6 +1,6 @@
 package com.selfanalyst.desktop.controller;
 
-import com.selfanalyst.aw.raw.RawPartitionCatalog;
+import com.selfanalyst.events.raw.RawPartitionCatalog;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.RawConfigValidator;

@@ -16,5 +16,5 @@
 该结果用于开发期容量回归，不代表不同磁盘、杀毒软件或文件系统上的性能承诺。日常测试默认跳过该基准；使用以下命令显式运行：
 
 ```powershell
-mvn -pl self-analyst-aw -am '-Dtest=RawEventStoreBenchmarkTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Draw.benchmark=true' test
+mvn -pl self-analyst-events -am '-Dtest=RawEventStoreBenchmarkTest' '-Dsurefire.failIfNoSpecifiedTests=false' '-Draw.benchmark=true' test
 ```

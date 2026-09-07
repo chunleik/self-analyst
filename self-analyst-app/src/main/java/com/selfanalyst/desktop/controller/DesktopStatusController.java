@@ -2,8 +2,8 @@ package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
-import com.selfanalyst.aw.watcher.Watcher;
-import com.selfanalyst.aw.watcher.WatcherManager;
+import com.selfanalyst.events.watcher.Watcher;
+import com.selfanalyst.events.watcher.WatcherManager;
 import io.javalin.http.Context;
 
 import java.net.URI;

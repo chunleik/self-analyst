@@ -2,9 +2,9 @@ package com.selfanalyst.desktop;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.selfanalyst.aw.store.Database;
-import com.selfanalyst.aw.store.EventStore;
-import com.selfanalyst.aw.store.PulseTimeConfig;
+import com.selfanalyst.events.store.Database;
+import com.selfanalyst.events.store.EventStore;
+import com.selfanalyst.events.store.PulseTimeConfig;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import io.javalin.Javalin;

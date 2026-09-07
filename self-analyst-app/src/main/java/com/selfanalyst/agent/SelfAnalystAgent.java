@@ -4,7 +4,7 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.i18n.Lang;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.memory.MemoryStore;
-import com.selfanalyst.tools.ActivityWatchTools;
+import com.selfanalyst.tools.EventQueryTools;
 import com.selfanalyst.tools.ConfigTools;
 import com.selfanalyst.usage.UsageMeter;
 import com.selfanalyst.wiki.WikiStore;
@@ -66,7 +66,7 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final ReActAgent agent;
     private final OpenAIChatModel plainModel;
     private final MemoryStore memory;
-    private final ActivityWatchTools tools;
+    private final EventQueryTools tools;
     private final WikiStore wikiStore;
     private final boolean semanticEnabled;
     private final boolean hasConfigTools;
@@ -109,7 +109,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         this.hasConfigTools = userConfigStore != null;
         this.hasFileTools = fileTools != null;
         this.memory = MemoryStore.load(config.memoryDir());
-        this.tools = new ActivityWatchTools(config.awBaseUrl(), config.awTimeout());
+        this.tools = new EventQueryTools(config.awBaseUrl(), config.awTimeout());
 
         // AgentScope 2.x executes multiple tool calls in parallel by default. Keep the
         // 1.x sequential semantics because several tools share local stores/connections.

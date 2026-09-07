@@ -1,7 +1,7 @@
 package com.selfanalyst.desktop.service;
 
-import com.selfanalyst.aw.model.Event;
-import com.selfanalyst.aw.store.EventStore;
+import com.selfanalyst.events.model.Event;
+import com.selfanalyst.events.store.EventStore;
 import com.selfanalyst.memory.GrowthProfile;
 import com.selfanalyst.memory.MemoryStore;
 

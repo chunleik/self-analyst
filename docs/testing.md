@@ -25,7 +25,7 @@
 
 ### SPEC-ITEST-AW-001：ActivityWatch HTTP 链路
 
-`AwServerIntegrationTest` 启动绑定临时端口的真实嵌入式服务，并使用临时 SQLite 目录验证：
+`EventServerIntegrationTest` 启动绑定临时端口的真实嵌入式服务，并使用临时 SQLite 目录验证：
 
 - bucket 创建与查询；
 - HTTP 批量事件写入；
@@ -93,8 +93,8 @@ PowerShell 会在第一个点号处拆开未加引号的 `-D` 参数（例如 `-
 # 全部 Java、模块集成和桌面 Node 测试
 mvn test
 
-# 单独运行 AW HTTP 集成测试
-mvn -pl self-analyst-aw '-Dtest=AwServerIntegrationTest' test
+# 单独运行事件服务 HTTP 集成测试
+mvn -pl self-analyst-events '-Dtest=EventServerIntegrationTest' test
 
 # 运行桌面 API 集成测试及其依赖（同时执行桌面 Node 测试）
 mvn -pl self-analyst-app -am '-Dtest=DesktopServerIntegrationTest' `

@@ -1,10 +1,10 @@
 package com.selfanalyst.desktop.store;
 
-import com.selfanalyst.aw.model.Bucket;
-import com.selfanalyst.aw.store.BucketStore;
-import com.selfanalyst.aw.store.Database;
-import com.selfanalyst.aw.store.EventStore;
-import com.selfanalyst.aw.store.PulseTimeConfig;
+import com.selfanalyst.events.model.Bucket;
+import com.selfanalyst.events.store.BucketStore;
+import com.selfanalyst.events.store.Database;
+import com.selfanalyst.events.store.EventStore;
+import com.selfanalyst.events.store.PulseTimeConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -237,7 +237,7 @@ class ContentEventV2MigrationTest {
             ContentEventV2Migration.migrate(db);
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
             for (int i = 0; i < 100; i++) {
-                events.insertEvent("aw-watcher-window_test", new com.selfanalyst.aw.model.Event(
+                events.insertEvent("aw-watcher-window_test", new com.selfanalyst.events.model.Event(
                         Instant.parse("2026-08-30T01:00:00Z").plusSeconds(i), 1,
                         Map.of("app", "editor.exe", "title", "Document " + i)));
             }

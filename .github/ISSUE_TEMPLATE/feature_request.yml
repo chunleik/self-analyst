@@ -45,7 +45,7 @@ body:
       label: 主要影响的模块
       multiple: true
       options:
-        - self-analyst-aw（ActivityWatch、事件策略、原始事件保留）
+        - self-analyst-events（事件服务、事件策略、原始事件保留）
         - self-analyst-content（前台窗口、UIA、标题提取）
         - self-analyst-file（文件元数据采集）
         - self-analyst-wiki（聚合、摘要、语义索引）

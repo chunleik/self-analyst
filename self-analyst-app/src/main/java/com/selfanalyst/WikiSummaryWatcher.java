@@ -1,9 +1,9 @@
 package com.selfanalyst;
 
-import com.selfanalyst.aw.model.Bucket;
-import com.selfanalyst.aw.model.Event;
-import com.selfanalyst.aw.store.BucketStore;
-import com.selfanalyst.aw.store.EventStore;
+import com.selfanalyst.events.model.Bucket;
+import com.selfanalyst.events.model.Event;
+import com.selfanalyst.events.store.BucketStore;
+import com.selfanalyst.events.store.EventStore;
 import com.selfanalyst.wiki.WikiEntry;
 import com.selfanalyst.wiki.WikiLevel;
 import com.selfanalyst.wiki.WikiStatus;

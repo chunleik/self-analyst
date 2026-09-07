@@ -24,7 +24,7 @@ OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
 
 | 模块 | 边界 |
 |------|------|
-| `self-analyst-aw` | 嵌入式 ActivityWatch 服务、SQLite 事件存储、内容事件策略和迁移 |
+| `self-analyst-events` | 嵌入式事件服务、SQLite 事件存储、内容事件策略和迁移 |
 | `self-analyst-content` | 前台窗口查询、UIA 临时读取、标题候选提取和 heartbeat |
 | `self-analyst-file` | 文件监控及文件名、路径、大小、创建/修改时间等元数据；除解析 `.gitignore` 过滤规则外禁止读取正文 |
 | `self-analyst-wiki` | 按小时/天/月/年聚合标题事实和派生摘要 |

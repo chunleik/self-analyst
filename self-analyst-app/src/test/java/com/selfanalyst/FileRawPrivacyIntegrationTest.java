@@ -1,11 +1,11 @@
 package com.selfanalyst;
 
-import com.selfanalyst.aw.AwServer;
-import com.selfanalyst.aw.raw.RawEvent;
-import com.selfanalyst.aw.raw.RawEventIdGenerator;
-import com.selfanalyst.aw.raw.RawEventSource;
-import com.selfanalyst.aw.raw.RawEventStore;
-import com.selfanalyst.aw.raw.RawIngestKind;
+import com.selfanalyst.events.EventServer;
+import com.selfanalyst.events.raw.RawEvent;
+import com.selfanalyst.events.raw.RawEventIdGenerator;
+import com.selfanalyst.events.raw.RawEventSource;
+import com.selfanalyst.events.raw.RawEventStore;
+import com.selfanalyst.events.raw.RawIngestKind;
 import com.selfanalyst.file.FileFilterConfig;
 import com.selfanalyst.file.FileWatchStore;
 import com.selfanalyst.file.FileWatcher;
@@ -33,7 +33,7 @@ class FileRawPrivacyIntegrationTest {
             throws Exception {
         Path rawDir = dir.resolve("raw");
         seedManifest(rawDir);
-        AwServer server = new AwServer(dir.resolve("aw"), rawDir, 0,
+        EventServer server = new EventServer(dir.resolve("aw"), rawDir, 0,
                 31, 1000, 1, 1, 1000);
         server.start(0);
         Path watched = Files.createDirectory(dir.resolve("watched"));

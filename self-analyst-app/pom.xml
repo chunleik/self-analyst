@@ -19,7 +19,7 @@
     <dependencies>
         <dependency>
             <groupId>com.selfanalyst</groupId>
-            <artifactId>self-analyst-aw</artifactId>
+            <artifactId>self-analyst-events</artifactId>
         </dependency>
         <dependency>
             <groupId>com.selfanalyst</groupId>

@@ -1,8 +1,8 @@
 package com.selfanalyst.desktop;
 
 import com.selfanalyst.agent.SelfAnalystAgent;
-import com.selfanalyst.aw.store.EventStore;
-import com.selfanalyst.aw.watcher.WatcherManager;
+import com.selfanalyst.events.store.EventStore;
+import com.selfanalyst.events.watcher.WatcherManager;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.desktop.controller.*;
@@ -30,19 +30,19 @@ import java.util.function.Supplier;
  * Desktop dashboard API server.
  * <p>
  * Registers {@code /desktop/*} routes on the <b>existing</b> Javalin instance
- * shared with {@code AwServer} — no separate port is opened.
+ * shared with {@code EventServer} — no separate port is opened.
  * <p>
  * Typical wiring:
  * <pre>{@code
- *   AwServer awServer = new AwServer(dataDir, port);
- *   Javalin app = awServer.app(); // need a getter on AwServer
+ *   EventServer eventServer = new EventServer(dataDir, port);
+ *   Javalin app = eventServer.app(); // need a getter on EventServer
  *   SelfAnalystAgent agent = new SelfAnalystAgent(config);
  *   DesktopServer desktop = new DesktopServer(app, config, agent,
- *           awServer.eventStore(),
+ *           eventServer.eventStore(),
  *           agent.memory(),
  *           watcherManager, contentWatcher);
  *   desktop.start(); // registers routes, no listen()
- *   awServer.start();
+ *   eventServer.start();
  * }</pre>
  */
 public class DesktopServer {
@@ -62,7 +62,7 @@ public class DesktopServer {
     /**
      * Create and register all desktop API routes.
      *
-     * @param app            existing Javalin instance (shared with AwServer)
+     * @param app            existing Javalin instance (shared with EventServer)
      * @param config         application configuration
      * @param agent          LLM agent (nullable – chat/summary enhancement disabled when null)
      * @param eventStore     AW event store for querying activity data
@@ -191,7 +191,7 @@ public class DesktopServer {
 
     /**
      * Register all routes on the shared Javalin instance.
-     * Call this <b>before</b> {@code AwServer.start()}.
+     * Call this <b>before</b> {@code EventServer.start()}.
      */
     public void start() {
         // ── Desktop frontend static files (from classpath) ───

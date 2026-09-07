@@ -7,7 +7,7 @@
 ## 与 ActivityWatch 的关系
 
 SelfAnalyst 不是 [ActivityWatch](https://activitywatch.net) 的分支、发行版或包装器，仓库与默认
-发布包也不包含 ActivityWatch 源代码或完整 `aw-webui`。`self-analyst-aw` 是独立的 Java 实现：
+发布包也不包含 ActivityWatch 源代码或完整 `aw-webui`。`self-analyst-events` 是独立的 Java 实现：
 数据格式和 HTTP API（`/api/0` 与 aw-client 使用的 `/0`）兼容 ActivityWatch（MPL-2.0），以便沿用
 其 bucket、heartbeat 合并和 AQL 时间线模型。许可证与兼容性说明见
 [THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)。
@@ -25,7 +25,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 兼容边界：
 
 - **兼容并继续使用的协议面**：`info`、buckets、events、heartbeat、AQL、settings、export/import。
-  Agent 只通过 [ActivityWatchTools](../openspec/specs/activitywatch-tools/spec.md) 走 HTTP，不直连数据库。
+  Agent 只通过 [EventQueryTools](../openspec/specs/activitywatch-tools/spec.md) 走 HTTP，不直连数据库。
 - **本项目扩展，不属于官方 ActivityWatch**：内容事件 v2 标题策略、受桌面认证保护的原始事件查询、
   桌面 API、Wiki 摘要投影与文件元数据采集。这些能力只在嵌入式控制的写入链路上完整成立。
 - **查询语义**：现有 events / AQL / Agent 工具读取 heartbeat 合并后的投影；逐条原始 heartbeat 只经

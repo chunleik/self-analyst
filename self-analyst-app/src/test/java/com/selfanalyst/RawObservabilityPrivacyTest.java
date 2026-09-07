@@ -18,14 +18,14 @@ class RawObservabilityPrivacyTest {
     void collectionAndProjectionSourcesDoNotLogPayloadPathsTokensOrPrompts()
             throws Exception {
         Path root = Path.of("").toAbsolutePath();
-        while (root != null && !Files.isDirectory(root.resolve("self-analyst-aw"))) {
+        while (root != null && !Files.isDirectory(root.resolve("self-analyst-events"))) {
             root = root.getParent();
         }
         if (root == null) throw new IllegalStateException("无法定位多模块仓库根目录");
         for (Path sourceRoot : List.of(
-                root.resolve("self-analyst-aw/src/main/java/com/selfanalyst/aw/raw"),
-                root.resolve("self-analyst-aw/src/main/java/com/selfanalyst/aw/projection"),
-                root.resolve("self-analyst-aw/src/main/java/com/selfanalyst/aw/watcher"),
+                root.resolve("self-analyst-events/src/main/java/com/selfanalyst/events/raw"),
+                root.resolve("self-analyst-events/src/main/java/com/selfanalyst/events/projection"),
+                root.resolve("self-analyst-events/src/main/java/com/selfanalyst/events/watcher"),
                 root.resolve("self-analyst-content/src/main/java"),
                 root.resolve("self-analyst-file/src/main/java"))) {
             try (var files = Files.walk(sourceRoot)) {

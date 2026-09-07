@@ -46,7 +46,7 @@
     </issueManagement>
 
     <modules>
-        <module>self-analyst-aw</module>
+        <module>self-analyst-events</module>
         <module>self-analyst-app</module>
         <module>self-analyst-content</module>
         <module>self-analyst-wiki</module>
@@ -79,7 +79,7 @@
         <dependencies>
             <dependency>
                 <groupId>com.selfanalyst</groupId>
-                <artifactId>self-analyst-aw</artifactId>
+                <artifactId>self-analyst-events</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

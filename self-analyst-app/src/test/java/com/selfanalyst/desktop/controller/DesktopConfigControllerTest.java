@@ -1,8 +1,8 @@
 package com.selfanalyst.desktop.controller;
 
-import com.selfanalyst.aw.raw.RawPartitionCatalog;
-import com.selfanalyst.aw.raw.RawPartitionMetadata;
-import com.selfanalyst.aw.raw.RawPartitionStatus;
+import com.selfanalyst.events.raw.RawPartitionCatalog;
+import com.selfanalyst.events.raw.RawPartitionMetadata;
+import com.selfanalyst.events.raw.RawPartitionStatus;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.SupportedKeys;

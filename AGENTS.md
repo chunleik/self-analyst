@@ -6,6 +6,16 @@ SelfAnalyst 是一个使用 Java 21 的 Maven 多模块项目。`self-analyst-ev
 
 Java 代码使用 `src/main/java` 和 `src/test/java` 目录。桌面端资源和 Node 测试分别位于 `self-analyst-app/src/main/resources/desktop-ui/` 和 `src/test/js/`。现行行为规格位于 `openspec/specs/`；历史文档位于 `docs/archive/`；运行时目录和构建目录均为输出目录。
 
+## OpenSpec 开发方式
+
+当前项目统一采用 OpenSpec 开发方式。所有开发变更，包括功能开发、缺陷修复、重构、配置、测试和文档调整，都必须纳入 OpenSpec change；不得因改动较小而跳过流程，或先修改实现再补提案。仅进行只读调查、需求讨论或方案探索时，可使用 `openspec-explore`，待进入变更阶段再创建 change。
+
+1. 开始前运行 `openspec list --json`，检查已有 change，并阅读 `openspec/config.yaml` 和相关主规格。已有对应 change 时继续该变更，避免重复创建。
+2. 新变更使用 `openspec-propose`，通过 `openspec new change` 创建骨架，按 CLI 返回的模板和要求维护提案、增量规格及任务清单；设计文档按项目规则和变更需要编写，不手工创建 change 目录。
+3. 实施前确保所需规划产物就绪，使用 `openspec-apply-change` 按任务清单推进，并及时记录完成情况。范围或设计发生变化时，先使用 `openspec-update-change` 更新相关规划产物，再继续实施。
+4. 完成后运行与变更相匹配的测试和 OpenSpec 严格校验。行为契约发生变化时，使用 `openspec-sync-specs` 同步相关主规格，并更新必要的用户文档。
+5. 任务完成、验证通过且主规格同步后，使用 `openspec-archive-change` 归档。提交或拉取请求中注明对应 change 及验证结果。
+
 ## 构建、测试与开发命令
 
 - `mvn test` — 运行 JUnit 5 测试和桌面端 UI 的 Node 测试套件。

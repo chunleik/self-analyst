@@ -65,6 +65,49 @@ pnpm tauri dev
 当前用户应用数据目录，不随应用文件升级或卸载；便携模式继续把 `data/` 放在可执行文件旁边。
 发布包不包含 PaddleOCR、Tesseract、Whisper 或语音模型。
 
+## 开机自启动与托盘
+
+右键点击 SelfAnalyst 托盘图标，勾选“开机自启动”，即可注册当前 Windows 用户登录后的启动入口。
+首次安装默认关闭。自动启动后只驻留托盘，不弹出主窗口，后台按已有配置运行；点击托盘图标或再次
+手动打开程序可恢复窗口。关闭主窗口只隐藏到托盘，托盘“退出”才会结束应用和受管后端。
+
+取消勾选只影响下次登录，不结束本次运行。勾选状态表示当前程序路径的启动项已注册；Windows 的
+启动应用设置或组织策略仍可能阻止运行，系统也不保证登录后立即执行。状态读取或设置失败会明确显示，
+可重新打开托盘菜单检查。此设置由桌面壳管理，不写入 `config.toml`。
+
+启动异常时，桌面壳的早期阶段记录在 `%LOCALAPPDATA%/com.selfanalyst.desktop/self-analyst-shell.log`，
+可用于区分未进入程序、单实例初始化失败和后端启动失败。该日志只记录阶段、时间、进程号及错误位置，
+不记录桌面认证 token 或业务内容，超过 1 MiB 后从新记录开始。后端详细日志仍为运行目录中的
+`self-analyst-backend.log`。
+
+同一用户只有一个 SelfAnalyst 自启动入口。便携目录移动后，从新位置手动打开并重新开启即可更新路径；
+若已有其他路径，菜单会说明开启将替换它。路径过长无法注册时会报错，可移至较短目录重试。安装版原位置
+升级保留开关选择，卸载仅清理指向自身的入口。回退到旧版本前请先关闭自启动；已回退时可在系统启动项
+管理中禁用 SelfAnalystDesktop，并清理其遗留入口。
+
+开发验证（在测试账户或可恢复环境运行）：
+
+```powershell
+cargo test --manifest-path self-analyst-desktop/src-tauri/Cargo.toml
+pwsh -File scripts/check-desktop-autostart.ps1
+pwsh -File scripts/check-installer.ps1 -InstallerPath <安装包路径> -VerifyAutostart
+```
+
+便携冒烟使用独立临时数据并关闭采集，不修改系统启动项；安装验证仅在指定 `-VerifyAutostart` 时临时
+修改启动项，并在结束时恢复原值。真实注销/登录及托盘交互仍需在 Windows 桌面进行验收。
+登录验收应从 Windows 文件资源管理器独立启动应用并开启自启动，再通过 Windows `StdRegProv` 或
+`Win32_StartupCommand` 核对系统可见入口。部分工具运行上下文会呈现不同的注册表视图，同一环境中的
+写入和回读成功不足以证明 Windows 登录流程能够读到该项。
+
+原生菜单视觉验收可在 Windows 桌面分别运行以下命令，截图后按 Esc 结束当前场景。脚本需 Windows SDK
+的 `mt.exe`，仅为测试 EXE 准备公共控件清单；复用正式菜单，不读写系统启动项、不启动业务后端。
+
+```powershell
+pwsh -File scripts/check-native-tray-menu.ps1 -Case unavailable
+pwsh -File scripts/check-native-tray-menu.ps1 -Case other
+pwsh -File scripts/check-native-tray-menu.ps1 -Case enabled
+```
+
 ## 核心模块
 
 | 模块 | 职责 |

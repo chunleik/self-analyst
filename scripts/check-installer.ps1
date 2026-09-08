@@ -3,7 +3,8 @@
 
 param(
     [string]$InstallerPath,
-    [int]$ProcessTimeoutSeconds = 180
+    [int]$ProcessTimeoutSeconds = 180,
+    [switch]$VerifyAutostart
 )
 
 $ErrorActionPreference = "Stop"
@@ -62,8 +63,22 @@ function Invoke-HiddenProcess {
     }
 }
 
+$RunKey = $null
+$StartupBefore = $null
+$StartupKind = $null
+if ($VerifyAutostart) {
+    # 显式选择时才修改真实入口；保存原值和类型并在 finally 恢复。
+    $RunKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
+    $StartupBefore = $RunKey.GetValue('SelfAnalystDesktop', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    if ($null -ne $StartupBefore) { $StartupKind = $RunKey.GetValueKind('SelfAnalystDesktop') }
+    $RunKey.DeleteValue('SelfAnalystDesktop', $false)
+}
+
 try {
     Invoke-HiddenProcess -FilePath $InstallerPath -Arguments @("/S", "/D=$InstallRoot")
+    if ($VerifyAutostart -and $null -ne $RunKey.GetValue('SelfAnalystDesktop')) {
+        throw '首次安装擅自创建自启动项'
+    }
 
     $DesktopExe = Join-Path $InstallRoot "SelfAnalyst.exe"
     $Jar = Join-Path $InstallRoot "self-analyst-app.jar"
@@ -75,6 +90,13 @@ try {
         }
     }
     $FirstJarHash = (Get-FileHash -LiteralPath $Jar -Algorithm SHA256).Hash
+    $StartupCommand = '"' + $DesktopExe + '" --autostart'
+    if ($VerifyAutostart) {
+        # 关闭状态升级不应创建入口。
+        Invoke-HiddenProcess -FilePath $InstallerPath -Arguments @('/S', '/UPDATE', "/D=$InstallRoot")
+        if ($null -ne $RunKey.GetValue('SelfAnalystDesktop')) { throw '关闭状态升级擅自创建自启动项' }
+        $RunKey.SetValue('SelfAnalystDesktop', $StartupCommand, [Microsoft.Win32.RegistryValueKind]::String)
+    }
 
     # 同版本静默重装走与升级相同的资源替换路径，必须保持完整布局。
     Invoke-HiddenProcess -FilePath $InstallerPath -Arguments @("/S", "/D=$InstallRoot")
@@ -87,6 +109,13 @@ try {
     if ($SecondJarHash -ne $FirstJarHash) {
         throw "同版本重装改变了后端 JAR 内容"
     }
+    if ($VerifyAutostart -and $RunKey.GetValue('SelfAnalystDesktop') -cne $StartupCommand) {
+        throw '原位置重装未保留自启动项'
+    }
+    if ($VerifyAutostart) {
+        Invoke-HiddenProcess -FilePath $InstallerPath -Arguments @('/S', '/UPDATE', "/D=$InstallRoot")
+        if ($RunKey.GetValue('SelfAnalystDesktop') -cne $StartupCommand) { throw '更新模式未保留自启动项' }
+    }
 
     & (Join-Path $Root "scripts/check-packaged-jar.ps1") -JarPath $Jar -JavaPath $Java
 
@@ -95,7 +124,7 @@ try {
     if (-not $Uninstaller) {
         throw "安装结果缺少卸载程序: $InstallRoot"
     }
-    Invoke-HiddenProcess -FilePath $Uninstaller.FullName -Arguments @("/S")
+    Invoke-HiddenProcess -FilePath $Uninstaller.FullName -Arguments @("/S", "_?=$InstallRoot")
 
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     while ([DateTime]::UtcNow -lt $deadline -and (Test-Path -LiteralPath $DesktopExe)) {
@@ -104,9 +133,28 @@ try {
     if (Test-Path -LiteralPath $DesktopExe) {
         throw "静默卸载后桌面可执行文件仍然存在: $DesktopExe"
     }
+    if ($VerifyAutostart) {
+        if ($null -ne $RunKey.GetValue('SelfAnalystDesktop')) { throw '卸载未移除所属启动项' }
+        # 安装和卸载其他分发不能删除指向便携版的入口。
+        $OtherCommand = '"' + (Join-Path $ScratchBase '便携 路径\SelfAnalyst.exe') + '" --autostart'
+        $RunKey.SetValue('SelfAnalystDesktop', $OtherCommand, [Microsoft.Win32.RegistryValueKind]::String)
+        Invoke-HiddenProcess -FilePath $InstallerPath -Arguments @('/S', "/D=$InstallRoot")
+        $Uninstaller = Get-ChildItem -LiteralPath $InstallRoot -Filter 'uninstall*.exe' -File | Select-Object -First 1
+        Invoke-HiddenProcess -FilePath $Uninstaller.FullName -Arguments @("/S", "_?=$InstallRoot")
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        while ([DateTime]::UtcNow -lt $deadline -and (Test-Path -LiteralPath $DesktopExe)) { Start-Sleep -Milliseconds 200 }
+        if (Test-Path -LiteralPath $DesktopExe) { throw '第二次卸载未结束' }
+        if ($RunKey.GetValue('SelfAnalystDesktop') -cne $OtherCommand) { throw '卸载误删其他分发启动项' }
+    }
 
     Write-Host "NSIS 安装、重装、资源、后端与卸载验证通过: $InstallerPath" -ForegroundColor Green
 } finally {
+    if ($null -ne $RunKey) {
+        try {
+            if ($null -eq $StartupBefore) { $RunKey.DeleteValue('SelfAnalystDesktop', $false) }
+            else { $RunKey.SetValue('SelfAnalystDesktop', $StartupBefore, $StartupKind) }
+        } finally { $RunKey.Dispose() }
+    }
     if (Test-Path -LiteralPath $InstallRoot) {
         Remove-Item -LiteralPath $InstallRoot -Recurse -Force
     }

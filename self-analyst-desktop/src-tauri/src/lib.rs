@@ -1,3 +1,7 @@
+mod autostart;
+mod instance;
+mod startup_log;
+
 use std::fs::OpenOptions;
 use std::io;
 use std::mem::size_of;
@@ -9,20 +13,17 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE},
+    Foundation::{CloseHandle, HANDLE},
     Security::Cryptography::{BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG},
-    System::{
-        JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        },
-        Threading::CreateMutexW,
+    System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     },
     UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND},
 };
@@ -84,45 +85,6 @@ impl Drop for JavaBackend {
         }
         let _ = std::fs::remove_file(&self.port_file);
     }
-}
-
-struct SingleInstanceGuard(HANDLE);
-
-impl Drop for SingleInstanceGuard {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe {
-                let _ = CloseHandle(self.0);
-            }
-        }
-    }
-}
-
-fn acquire_single_instance() -> Option<SingleInstanceGuard> {
-    let name: Vec<u16> = "Local\\SelfAnalystDesktopSingleInstance"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
-    unsafe {
-        let handle = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
-        if handle.is_null() {
-            eprintln!("Failed to create SelfAnalyst single-instance mutex");
-            return None;
-        }
-
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            let _ = CloseHandle(handle);
-            show_already_running_message();
-            return None;
-        }
-
-        Some(SingleInstanceGuard(handle))
-    }
-}
-
-fn show_already_running_message() {
-    show_message("SelfAnalyst", "SelfAnalyst 已在运行");
 }
 
 fn show_about_message(port: u16) {
@@ -300,7 +262,8 @@ fn create_kill_on_close_job(child: &Child) -> io::Result<isize> {
     }
 }
 
-fn start_java(app: AppHandle) {
+fn start_java(app: AppHandle, automatic: bool) {
+    startup_log::write("backend preparation started");
     let exe_dir = std::env::current_exe()
         .unwrap_or_default()
         .parent()
@@ -326,6 +289,7 @@ fn start_java(app: AppHandle) {
         exe_dir
     };
     let jar = distribution_root.join(BACKEND_JAR);
+    startup_log::write(&format!("distribution resolved installed={installed}"));
     println!("[SelfAnalyst] Jar path: {}", jar.display());
 
     let java = find_java(Some(&distribution_root)).unwrap_or_else(|| PathBuf::from("java"));
@@ -358,6 +322,7 @@ fn start_java(app: AppHandle) {
         .stderr(Stdio::from(error_log))
         .spawn()
         .expect("Failed to start Java backend");
+    startup_log::write("backend process spawned");
 
     let job = create_kill_on_close_job(&child).unwrap_or_else(|error| {
         let _ = child.kill();
@@ -431,6 +396,7 @@ fn start_java(app: AppHandle) {
                 .is_ok()
             {
                 println!("Java backend ready");
+                startup_log::write("backend healthy");
                 let window_handle = handle.clone();
                 let window_token = health_token.clone();
                 if let Err(error) = handle.run_on_main_thread(move || {
@@ -439,7 +405,9 @@ fn start_java(app: AppHandle) {
                         window_handle.exit(1);
                         return;
                     }
-                    if let Err(error) = create_main_window(&window_handle, port, &window_token) {
+                    if let Err(error) =
+                        create_main_window(&window_handle, port, &window_token, automatic)
+                    {
                         eprintln!("Failed to create desktop window: {error}");
                         window_handle.exit(1);
                     }
@@ -477,7 +445,12 @@ fn backend_exited(app: &AppHandle) -> bool {
     false
 }
 
-fn create_main_window(app: &AppHandle, port: u16, token: &str) -> tauri::Result<()> {
+fn create_main_window(
+    app: &AppHandle,
+    port: u16,
+    token: &str,
+    automatic: bool,
+) -> tauri::Result<()> {
     let auth_script = desktop_auth_script(token);
 
     WebviewWindowBuilder::new(
@@ -489,9 +462,80 @@ fn create_main_window(app: &AppHandle, port: u16, token: &str) -> tauri::Result<
     .inner_size(1200.0, 800.0)
     .min_inner_size(800.0, 600.0)
     .center()
+    .visible(!automatic)
+    .focused(!automatic)
     .initialization_script(auth_script)
     .build()?;
+    startup_log::write(&format!("main window created automatic={automatic}"));
+    let visible = app
+        .state::<Mutex<instance::WindowIntent>>()
+        .lock()
+        .unwrap()
+        .ready(automatic);
+    if visible {
+        restore_main_window(app);
+    }
     Ok(())
+}
+
+fn restore_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn request_main_window(app: &AppHandle) {
+    let ready = app
+        .state::<Mutex<instance::WindowIntent>>()
+        .lock()
+        .unwrap()
+        .request();
+    if ready {
+        restore_main_window(app);
+    }
+}
+
+fn current_autostart_status() -> io::Result<autostart::Status> {
+    autostart::status(&autostart::RegistryStore, &std::env::current_exe()?)
+}
+
+fn refresh_autostart(item: &CheckMenuItem<tauri::Wry>) {
+    let _ = apply_autostart_status(item, current_autostart_status());
+}
+
+fn apply_autostart_status(
+    item: &CheckMenuItem<tauri::Wry>,
+    status: io::Result<autostart::Status>,
+) -> tauri::Result<()> {
+    let (label, enabled, checked) = match status {
+        Ok(autostart::Status::Enabled) => ("开机自启动", true, true),
+        Ok(autostart::Status::Disabled) => ("开机自启动", true, false),
+        Ok(autostart::Status::OtherDistribution) => {
+            ("开机自启动（开启将替换其他路径）", true, false)
+        }
+        Err(_) => ("开机自启动（状态不可用）", false, false),
+    };
+    item.set_text(label)?;
+    item.set_enabled(enabled)?;
+    item.set_checked(checked)
+}
+
+fn toggle_autostart(item: &CheckMenuItem<tauri::Wry>) {
+    let result = (|| {
+        let exe = std::env::current_exe()?;
+        let enabled =
+            autostart::status(&autostart::RegistryStore, &exe)? == autostart::Status::Enabled;
+        autostart::set_enabled(&autostart::RegistryStore, &exe, !enabled)
+    })();
+    refresh_autostart(item);
+    if let Err(error) = result {
+        show_message(
+            "开机自启动设置失败",
+            &format!("无法确认设置已生效：{error}"),
+        );
+    }
 }
 
 fn desktop_auth_script(token: &str) -> String {
@@ -516,15 +560,32 @@ fn desktop_auth_script(token: &str) -> String {
     )
 }
 
-fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::tray::TrayIcon> {
+fn create_tray_menu(
+    app: &AppHandle,
+) -> tauri::Result<(Menu<tauri::Wry>, CheckMenuItem<tauri::Wry>)> {
     let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
     let web_desktop_item = MenuItem::with_id(app, "web_desktop", "Web版桌面", true, None::<&str>)?;
     let about_item = MenuItem::with_id(app, "about", "关于", true, None::<&str>)?;
+    let autostart_item =
+        CheckMenuItem::with_id(app, "autostart", "开机自启动", true, false, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[&show_item, &web_desktop_item, &about_item, &quit_item],
+        &[
+            &show_item,
+            &web_desktop_item,
+            &autostart_item,
+            &about_item,
+            &quit_item,
+        ],
     )?;
+    Ok((menu, autostart_item))
+}
+
+fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::tray::TrayIcon> {
+    let (menu, autostart_item) = create_tray_menu(app)?;
+    refresh_autostart(&autostart_item);
+    let toggle_item = autostart_item.clone();
 
     let desktop_session_url = format!("{}?token={}", backend_url(port, "/desktop/session"), token);
     TrayIconBuilder::new()
@@ -533,14 +594,13 @@ fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::
                 .cloned()
                 .expect("default window icon missing"),
         )
-        .menu(&menu)
+        // Open the menu ourselves so the registry is read before it is displayed.
+        .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
+                request_main_window(app);
             }
+            "autostart" => toggle_autostart(&toggle_item),
             "web_desktop" => {
                 let _ = open::that(&desktop_session_url);
             }
@@ -552,7 +612,7 @@ fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::
             }
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
+        .on_tray_icon_event(move |tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -560,9 +620,16 @@ fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::
             } = event
             {
                 let app = tray.app_handle();
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
+                request_main_window(app);
+            } else if let TrayIconEvent::Click {
+                button: MouseButton::Right,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                refresh_autostart(&autostart_item);
+                if let Some(window) = tray.app_handle().get_webview_window("main") {
+                    let _ = window.popup_menu(&menu);
                 }
             }
         })
@@ -571,25 +638,57 @@ fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _single_instance = match acquire_single_instance() {
-        Some(guard) => guard,
-        None => return,
+    startup_log::install_panic_hook();
+    let automatic = std::env::args_os()
+        .skip(1)
+        .any(|arg| arg == autostart::ARGUMENT);
+    startup_log::write(&format!("launch automatic={automatic}"));
+    let single_instance = match instance::Instance::acquire(automatic) {
+        Ok(Some(guard)) => guard,
+        Ok(None) => {
+            startup_log::write("secondary instance finished");
+            return;
+        }
+        Err(error) => {
+            eprintln!("Single-instance startup failed: {error}");
+            startup_log::write(&format!("single-instance setup failed: {error}"));
+            if !automatic {
+                show_message("无法打开 SelfAnalyst", &error.to_string());
+            }
+            return;
+        }
     };
+    startup_log::write("primary instance acquired");
 
     // Portable build relies on the system-provided (Evergreen) WebView2 runtime
     // — it is intentionally NOT bundled.
 
-    tauri::Builder::default()
+    // The current Windows runtime converts RequestExit(code) to ControlFlow::Exit,
+    // losing the requested code. Preserve it across run_return for process callers.
+    let requested_exit = std::rc::Rc::new(std::cell::Cell::new(None));
+    let exit_state = requested_exit.clone();
+    let runtime_exit = tauri::Builder::default()
+        .manage(Mutex::new(instance::WindowIntent::default()))
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
-            start_java(app.handle().clone());
+        .setup(move |app| {
+            startup_log::write("tauri setup started");
+            let handle = app.handle().clone();
+            let listener = single_instance.listen(move || {
+                let window_handle = handle.clone();
+                let _ = handle.run_on_main_thread(move || request_main_window(&window_handle));
+            })?;
+            app.manage(Mutex::new(listener));
+            app.manage(single_instance);
+            start_java(app.handle().clone(), automatic);
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error building app")
-        .run(|app, event| {
-            if let RunEvent::ExitRequested { .. } = event {
+        .run_return(move |app, event| {
+            if let RunEvent::ExitRequested { code, .. } = event {
+                startup_log::write(&format!("exit requested code={code:?}"));
+                exit_state.set(code);
                 if let Some(state) = app.try_state::<JavaBackend>() {
                     state.shutdown_gracefully();
                 }
@@ -604,10 +703,80 @@ pub fn run() {
                 }
             }
         });
+    std::process::exit(requested_exit.get().unwrap_or(runtime_exit));
 }
 
 #[cfg(test)]
 mod tests {
+    // 手动调用的原生菜单验收：复用正式菜单，不启动后端、不访问注册表。
+    // SELF_ANALYST_MENU_REVIEW_CASE 可选 enabled / unavailable / other。
+    #[test]
+    #[cfg(feature = "native-menu-review")]
+    #[ignore = "需要交互式 Windows 桌面进行原生菜单截图验收"]
+    fn native_tray_menu_review() {
+        let case =
+            std::env::var("SELF_ANALYST_MENU_REVIEW_CASE").unwrap_or_else(|_| "enabled".into());
+        let (status, expected_text, expected_enabled, expected_checked) = match case.as_str() {
+            "unavailable" => (
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "test",
+                )),
+                "开机自启动（状态不可用）",
+                false,
+                false,
+            ),
+            "other" => (
+                Ok(super::autostart::Status::OtherDistribution),
+                "开机自启动（开启将替换其他路径）",
+                true,
+                false,
+            ),
+            "enabled" => (
+                Ok(super::autostart::Status::Enabled),
+                "开机自启动",
+                true,
+                true,
+            ),
+            _ => panic!("未知菜单验收场景"),
+        };
+        let app = tauri::Builder::default()
+            .any_thread()
+            .setup(move |app| {
+                let window = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "menu-review",
+                    tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+                )
+                .title(format!("SelfAnalyst 托盘菜单验收 - {case}"))
+                .inner_size(900.0, 600.0)
+                .center()
+                .build()?;
+                let (menu, item) = super::create_tray_menu(app.handle())?;
+                super::apply_autostart_status(&item, status)?;
+                assert_eq!(item.text()?, expected_text);
+                assert_eq!(item.is_enabled()?, expected_enabled);
+                assert_eq!(item.is_checked()?, expected_checked);
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    let exit_handle = handle.clone();
+                    handle
+                        .run_on_main_thread(move || {
+                            window
+                                .popup_menu_at(&menu, tauri::PhysicalPosition::new(60, 80))
+                                .unwrap();
+                            exit_handle.exit(0);
+                        })
+                        .unwrap();
+                });
+                Ok(())
+            })
+            .build(tauri::generate_context!())
+            .unwrap();
+        assert_eq!(app.run_return(|_, _| {}), 0);
+    }
+
     use super::{
         desktop_auth_script, parse_backend_port, select_distribution_root, BACKEND_JAR,
         INSTALLED_LAYOUT_MARKER,

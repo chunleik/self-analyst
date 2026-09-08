@@ -109,8 +109,8 @@ dist-portable/
 artifacts/
 ├── SelfAnalyst-portable.zip
 ├── SelfAnalyst-portable.zip.sha256
-├── SelfAnalyst_0.1.0_x64-setup.exe
-└── SelfAnalyst_0.1.0_x64-setup.exe.sha256
+├── SelfAnalyst_0.2.0_x64-setup.exe
+└── SelfAnalyst_0.2.0_x64-setup.exe.sha256
 ```
 
 NSIS 安装包把后端 JAR、jlink runtime 和安装布局标记作为 Tauri resource 安装。桌面壳识别该标记后，

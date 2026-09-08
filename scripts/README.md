@@ -14,7 +14,7 @@
 .\scripts\run.ps1 -Build -SkipTests
 ```
 
-默认访问 `http://localhost:5700`；若 `config.toml` 修改了 `aw.port`，使用实际配置端口。
+默认访问 `http://localhost:5700`；若 `config.toml` 修改了 `events.port`，使用实际配置端口。
 
 ## 安装与卸载
 

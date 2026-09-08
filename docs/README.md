@@ -19,8 +19,8 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 
 | 模式 | 配置 | 本项目做什么 | 不做 / 不保证什么 |
 |------|------|--------------|-------------------|
-| `embedded`（默认） | `aw.mode=embedded`，端口由 `aw.port` 决定（默认 `5700`） | 进程内启动兼容服务与窗口/AFK watcher；合规事件先写入月度 raw SQLite，再投影为可重建的 `events.db` | 不是官方 `aw-server`；不随包分发官方 Web UI |
-| `external` | `aw.mode=external`，查询 `aw.base-url`（默认 `http://localhost:5600/api/0`） | 不启动内嵌服务；Agent 通过兼容 HTTP API 访问已有 ActivityWatch | 不控制外部数据目录；[原始事件永久保留](../openspec/specs/raw-event-retention/spec.md) 不可用，也不得声称外部事件已被本项目永久层保存 |
+| `embedded`（默认） | `events.mode=embedded`，端口由 `events.port` 决定（默认 `5700`） | 进程内启动兼容服务与窗口/AFK watcher；合规事件先写入月度 raw SQLite，再投影为可重建的 `events.db` | 不是官方 `aw-server`；不随包分发官方 Web UI |
+| `external` | `events.mode=external`，查询 `events.base-url`（默认 `http://localhost:5600/api/0`） | 不启动内嵌服务；Agent 通过兼容 HTTP API 访问已有 ActivityWatch | 不控制外部数据目录；[原始事件永久保留](../openspec/specs/raw-event-retention/spec.md) 不可用，也不得声称外部事件已被本项目永久层保存 |
 
 兼容边界：
 

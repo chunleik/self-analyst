@@ -17,7 +17,11 @@ public final class RawConfigValidator {
             "aw.raw.enabled",
             "aw.raw.retentionDays",
             "aw.raw.maxPartitions",
-            "aw.raw.autoDelete");
+            "aw.raw.autoDelete",
+            "events.raw.enabled",
+            "events.raw.retentionDays",
+            "events.raw.maxPartitions",
+            "events.raw.autoDelete");
 
     private RawConfigValidator() {}
 
@@ -32,26 +36,26 @@ public final class RawConfigValidator {
 
         Path dir;
         try {
-            String value = effective.getProperty("aw.raw.dir", "").trim();
+            String value = effective.getProperty("events.raw.dir", "").trim();
             if (value.isEmpty()) {
-                throw new IllegalArgumentException("aw.raw.dir 不能为空");
+                throw new IllegalArgumentException("events.raw.dir 不能为空");
             }
             dir = Path.of(value);
         } catch (InvalidPathException invalidPath) {
-            throw new IllegalArgumentException("aw.raw.dir 不是可解析的本地路径", invalidPath);
+            throw new IllegalArgumentException("events.raw.dir 不是可解析的本地路径", invalidPath);
         }
 
-        int maxRangeDays = positiveInt(effective, "aw.raw.query.maxRangeDays",
+        int maxRangeDays = positiveInt(effective, "events.raw.query.maxRangeDays",
                 MAX_QUERY_RANGE_DAYS);
-        int maxPageSize = positiveInt(effective, "aw.raw.query.maxPageSize",
+        int maxPageSize = positiveInt(effective, "events.raw.query.maxPageSize",
                 MAX_QUERY_PAGE_SIZE);
-        long warnBytes = positiveLong(effective, "aw.raw.lowDisk.warnBytes",
+        long warnBytes = positiveLong(effective, "events.raw.lowDisk.warnBytes",
                 MAX_LOW_DISK_THRESHOLD_BYTES);
-        long blockBytes = positiveLong(effective, "aw.raw.lowDisk.blockBytes",
+        long blockBytes = positiveLong(effective, "events.raw.lowDisk.blockBytes",
                 MAX_LOW_DISK_THRESHOLD_BYTES);
         RawIntegrityPolicy integrityPolicy = RawIntegrityPolicy.parse(
-                effective.getProperty("aw.raw.integrity.verifyOnStartup"));
-        int projectorBatchSize = positiveInt(effective, "aw.raw.projector.batchSize",
+                effective.getProperty("events.raw.integrity.startupScope"));
+        int projectorBatchSize = positiveInt(effective, "events.raw.projector.batchSize",
                 MAX_PROJECTOR_BATCH_SIZE);
         validate(dir, maxRangeDays, maxPageSize, warnBytes, blockBytes,
                 integrityPolicy, projectorBatchSize);
@@ -63,23 +67,23 @@ public final class RawConfigValidator {
                                 RawIntegrityPolicy integrityPolicy,
                                 int projectorBatchSize) {
         if (dir == null) {
-            throw new IllegalArgumentException("aw.raw.dir 不能为空");
+            throw new IllegalArgumentException("events.raw.dir 不能为空");
         }
-        requireRange("aw.raw.query.maxRangeDays", maxRangeDays, MAX_QUERY_RANGE_DAYS);
-        requireRange("aw.raw.query.maxPageSize", maxPageSize, MAX_QUERY_PAGE_SIZE);
-        requireRange("aw.raw.lowDisk.warnBytes", warnBytes,
+        requireRange("events.raw.query.maxRangeDays", maxRangeDays, MAX_QUERY_RANGE_DAYS);
+        requireRange("events.raw.query.maxPageSize", maxPageSize, MAX_QUERY_PAGE_SIZE);
+        requireRange("events.raw.lowDisk.warnBytes", warnBytes,
                 MAX_LOW_DISK_THRESHOLD_BYTES);
-        requireRange("aw.raw.lowDisk.blockBytes", blockBytes,
+        requireRange("events.raw.lowDisk.blockBytes", blockBytes,
                 MAX_LOW_DISK_THRESHOLD_BYTES);
         if (blockBytes >= warnBytes) {
             throw new IllegalArgumentException(
-                    "aw.raw.lowDisk.blockBytes 必须小于 aw.raw.lowDisk.warnBytes");
+                    "events.raw.lowDisk.blockBytes 必须小于 events.raw.lowDisk.warnBytes");
         }
         if (integrityPolicy == null) {
             throw new IllegalArgumentException(
-                    "aw.raw.integrity.verifyOnStartup 必须是 latest 或 all");
+                    "events.raw.integrity.startupScope 必须是 latest 或 all");
         }
-        requireRange("aw.raw.projector.batchSize", projectorBatchSize,
+        requireRange("events.raw.projector.batchSize", projectorBatchSize,
                 MAX_PROJECTOR_BATCH_SIZE);
     }
 

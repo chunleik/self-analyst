@@ -9,17 +9,17 @@ public final class ConfigResolver {
             Map.entry("llm.base-url", "LLM_BASE_URL"),
             Map.entry("llm.model", "LLM_MODEL"),
             Map.entry("llm.temperature", "LLM_TEMPERATURE"),
-            Map.entry("aw.base-url", "AW_BASE_URL"),
-            Map.entry("aw.timeout", "AW_TIMEOUT"),
-            Map.entry("aw.mode", "AW_MODE"),
-            Map.entry("aw.data-dir", "AW_DATA_DIR"),
-            Map.entry("aw.raw.dir", "AW_RAW_DIR"),
-            Map.entry("aw.raw.query.maxRangeDays", "AW_RAW_QUERY_MAX_RANGE_DAYS"),
-            Map.entry("aw.raw.query.maxPageSize", "AW_RAW_QUERY_MAX_PAGE_SIZE"),
-            Map.entry("aw.raw.lowDisk.warnBytes", "AW_RAW_LOW_DISK_WARN_BYTES"),
-            Map.entry("aw.raw.lowDisk.blockBytes", "AW_RAW_LOW_DISK_BLOCK_BYTES"),
-            Map.entry("aw.raw.integrity.verifyOnStartup", "AW_RAW_INTEGRITY_VERIFY_ON_STARTUP"),
-            Map.entry("aw.raw.projector.batchSize", "AW_RAW_PROJECTOR_BATCH_SIZE"),
+            Map.entry("events.base-url", "EVENTS_BASE_URL"),
+            Map.entry("events.timeout", "EVENTS_TIMEOUT"),
+            Map.entry("events.mode", "EVENTS_MODE"),
+            Map.entry("events.data-dir", "EVENTS_DATA_DIR"),
+            Map.entry("events.raw.dir", "EVENTS_RAW_DIR"),
+            Map.entry("events.raw.query.maxRangeDays", "EVENTS_RAW_QUERY_MAX_RANGE_DAYS"),
+            Map.entry("events.raw.query.maxPageSize", "EVENTS_RAW_QUERY_MAX_PAGE_SIZE"),
+            Map.entry("events.raw.lowDisk.warnBytes", "EVENTS_RAW_LOW_DISK_WARN_BYTES"),
+            Map.entry("events.raw.lowDisk.blockBytes", "EVENTS_RAW_LOW_DISK_BLOCK_BYTES"),
+            Map.entry("events.raw.integrity.startupScope", "EVENTS_RAW_INTEGRITY_STARTUP_SCOPE"),
+            Map.entry("events.raw.projector.batchSize", "EVENTS_RAW_PROJECTOR_BATCH_SIZE"),
             Map.entry("wiki.enabled", "WIKI_ENABLED"),
             Map.entry("wiki.backfill.enabled", "WIKI_BACKFILL_ENABLED"),
             Map.entry("wiki.worker.intervalSeconds", "WIKI_WORKER_INTERVAL_SECONDS"),
@@ -34,10 +34,10 @@ public final class ConfigResolver {
             Map.entry("embedding.model", "EMBEDDING_MODEL"),
             Map.entry("embedding.dimensions", "EMBEDDING_DIMENSIONS"),
             Map.entry("embedding.send-encoding-format", "EMBEDDING_SEND_ENCODING_FORMAT"),
-            Map.entry("aw.collection.content.pollMs", "AW_CONTENT_POLL_MS"),
-            Map.entry("aw.collection.window", "AW_COLLECTION_WINDOW"),
-            Map.entry("aw.collection.afk", "AW_COLLECTION_AFK"),
-            Map.entry("aw.collection.content", "AW_COLLECTION_CONTENT"),
+            Map.entry("events.collection.title.pollMs", "EVENTS_COLLECTION_TITLE_POLL_MS"),
+            Map.entry("events.collection.window", "EVENTS_COLLECTION_WINDOW"),
+            Map.entry("events.collection.afk", "EVENTS_COLLECTION_AFK"),
+            Map.entry("events.collection.title.enabled", "EVENTS_COLLECTION_TITLE_ENABLED"),
             Map.entry("file.watch.enabled", "FILE_WATCH_ENABLED"),
             Map.entry("file.watch.paths", "FILE_WATCH_PATHS"),
             Map.entry("file.watch.maxFileSizeKb", "FILE_WATCH_MAX_FILE_SIZE_KB"),
@@ -93,6 +93,7 @@ public final class ConfigResolver {
     }
 
     public ConfigResolver(Properties user, Map<String, String> environment) {
+        RemovedEventConfig.validate(user, environment);
         this.user = new Properties();
         this.user.putAll(user);
         this.environment = Map.copyOf(environment);
@@ -114,8 +115,8 @@ public final class ConfigResolver {
         resolver.project(config);
         if (inheritedKey) resolver.values.put("embedding.api-key",
                 new Value(config.embeddingApiKey(), "inherited", "llm.api-key"));
-        if (config.awEmbedded()) resolver.values.put("aw.base-url",
-                new Value(config.awBaseUrl(), "inherited", "aw.port"));
+        if (config.eventsEmbedded()) resolver.values.put("events.base-url",
+                new Value(config.eventsBaseUrl(), "inherited", "events.port"));
         return new Snapshot(config, Collections.unmodifiableMap(new LinkedHashMap<>(resolver.values)));
     }
 
@@ -123,18 +124,18 @@ public final class ConfigResolver {
         effective("llm.api-key", String.valueOf(config.llmApiKey()));
         effective("llm.base-url", String.valueOf(config.llmBaseUrl()));
         effective("llm.model", String.valueOf(config.llmModel()));
-        effective("aw.base-url", String.valueOf(config.awBaseUrl()));
-        effective("aw.timeout", String.valueOf(config.awTimeout()));
+        effective("events.base-url", String.valueOf(config.eventsBaseUrl()));
+        effective("events.timeout", String.valueOf(config.eventsTimeout()));
         effective("memory.dir", String.valueOf(config.memoryDir()));
-        effective("aw.port", String.valueOf(config.awPort()));
-        effective("aw.data-dir", String.valueOf(config.awDataDir()));
-        effective("aw.raw.dir", String.valueOf(config.awRawDir()));
-        effective("aw.raw.query.maxRangeDays", String.valueOf(config.awRawQueryMaxRangeDays()));
-        effective("aw.raw.query.maxPageSize", String.valueOf(config.awRawQueryMaxPageSize()));
-        effective("aw.raw.lowDisk.warnBytes", String.valueOf(config.awRawLowDiskWarnBytes()));
-        effective("aw.raw.lowDisk.blockBytes", String.valueOf(config.awRawLowDiskBlockBytes()));
-        effective("aw.raw.integrity.verifyOnStartup", String.valueOf(config.awRawIntegrityVerifyOnStartup()));
-        effective("aw.raw.projector.batchSize", String.valueOf(config.awRawProjectorBatchSize()));
+        effective("events.port", String.valueOf(config.eventsPort()));
+        effective("events.data-dir", String.valueOf(config.eventsDataDir()));
+        effective("events.raw.dir", String.valueOf(config.eventsRawDir()));
+        effective("events.raw.query.maxRangeDays", String.valueOf(config.eventsRawQueryMaxRangeDays()));
+        effective("events.raw.query.maxPageSize", String.valueOf(config.eventsRawQueryMaxPageSize()));
+        effective("events.raw.lowDisk.warnBytes", String.valueOf(config.eventsRawLowDiskWarnBytes()));
+        effective("events.raw.lowDisk.blockBytes", String.valueOf(config.eventsRawLowDiskBlockBytes()));
+        effective("events.raw.integrity.startupScope", String.valueOf(config.eventsRawIntegrityStartupScope()));
+        effective("events.raw.projector.batchSize", String.valueOf(config.eventsRawProjectorBatchSize()));
         effective("wiki.enabled", String.valueOf(config.wikiEnabled()));
         effective("wiki.backfill.enabled", String.valueOf(config.wikiBackfillEnabled()));
         effective("wiki.worker.intervalSeconds", String.valueOf(config.wikiWorkerIntervalSeconds()));
@@ -149,14 +150,14 @@ public final class ConfigResolver {
         effective("embedding.model", String.valueOf(config.embeddingModel()));
         effective("embedding.dimensions", String.valueOf(config.embeddingDimensions()));
         effective("embedding.send-encoding-format", String.valueOf(config.embeddingSendEncodingFormat()));
-        effective("aw.collection.content.pollMs", String.valueOf(config.contentPollIntervalMs()));
+        effective("events.collection.title.pollMs", String.valueOf(config.titlePollIntervalMs()));
         effective("websearch.enabled", String.valueOf(config.webSearchEnabled()));
         effective("websearch.mcp-url", String.valueOf(config.webSearchMcpUrl()));
         effective("websearch.api-key", String.valueOf(config.webSearchApiKey()));
         effective("llm.temperature", String.valueOf(config.llmTemperature()));
-        effective("aw.collection.window", String.valueOf(config.collectWindow()));
-        effective("aw.collection.afk", String.valueOf(config.collectAfk()));
-        effective("aw.collection.content", String.valueOf(config.collectContent()));
+        effective("events.collection.window", String.valueOf(config.collectWindow()));
+        effective("events.collection.afk", String.valueOf(config.collectAfk()));
+        effective("events.collection.title.enabled", String.valueOf(config.collectTitle()));
         effective("file.watch.enabled", String.valueOf(config.fileWatchEnabled()));
         effective("file.watch.paths", String.valueOf(config.fileWatchPaths()));
         effective("file.watch.maxFileSizeKb", String.valueOf(config.fileWatchMaxFileSizeKb()));
@@ -180,7 +181,7 @@ public final class ConfigResolver {
         effective("llm.budget.dailyTokens", String.valueOf(config.budgetDailyTokens()));
         effective("llm.budget.warnRatio", String.valueOf(config.budgetWarnRatio()));
         effective("app.language", String.valueOf(config.appLanguage()));
-        effective("aw.mode", config.awEmbedded() ? "embedded" : "external");
+        effective("events.mode", config.eventsEmbedded() ? "embedded" : "external");
     }
     public static Properties runtimeProperties(Config config) {
         ConfigResolver resolver = new ConfigResolver(new Properties(), Map.of());

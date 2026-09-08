@@ -1,11 +1,11 @@
 package com.selfanalyst.desktop.controller;
 
-import com.selfanalyst.events.raw.RawPartitionCatalog;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.config.ConfigApplicationService;
 import com.selfanalyst.config.ConfigPolicy;
 import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.RawConfigValidator;
+import com.selfanalyst.config.RemovedEventConfig;
 import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 import com.selfanalyst.config.TomlValidationException;
@@ -73,7 +73,7 @@ public class DesktopConfigController {
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("llm", buildLlmSection(defaults));
-        response.put("aw", buildAwSection(defaults));
+        response.put("events", buildEventsSection(defaults));
         response.put("collection", buildCollectionSection(defaults));
         response.put("agent", buildAgentSection(defaults));
         response.put("desktop", buildDesktopSection(defaults));
@@ -108,13 +108,15 @@ public class DesktopConfigController {
 
     /**
      * PUT /desktop/config
-     * Body: { "llm": {...}, "aw": {...}, ... }
+     * Body: { "llm": {...}, "events": {...}, ... }
      */
     public void putConfig(Context ctx) {
         try {
             Map<String, Object> body = MAPPER.readValue(ctx.body(), OBJECT_MAP_TYPE);
             StructuredSaveResult result = applyStructuredSave(body);
             ctx.json(result.result().payload());
+        } catch (TomlValidationException invalid) {
+            ctx.status(400).json(Map.of("error", invalid.getMessage()));
         } catch (Throwable t) {
             log.error("配置保存失败 ({})", t.getClass().getSimpleName());
             try {
@@ -135,6 +137,7 @@ public class DesktopConfigController {
     }
 
     StructuredSaveResult applyStructuredSave(Map<String, Object> body) throws IOException {
+        rejectRemovedStructuredKeys(body);
         Map<String, String> changes = new LinkedHashMap<>();
         for (var entry : sectionToPrefix().entrySet()) {
             Object sectionData = body.get(entry.getKey());
@@ -143,11 +146,38 @@ public class DesktopConfigController {
             flattenStructuredSection("", sectionMap, flat);
             for (var kv : flat.entrySet()) {
                 String key = mapStructuredKey(entry.getKey(), kv.getKey(), entry.getValue());
+                rejectUnsupportedEventKeys(List.of(key));
                 if (DeprecatedKeys.contains(key) || !SupportedKeys.contains(key)) continue;
                 changes.put(key, kv.getValue() == null ? "" : kv.getValue().toString());
             }
         }
         return new StructuredSaveResult(configuration.update(changes));
+    }
+
+    private static void rejectRemovedStructuredKeys(Map<String, Object> body) {
+        Map<String, Object> flat = new LinkedHashMap<>();
+        flattenStructuredSection("", body, flat);
+        List<String> keys = new ArrayList<>();
+        for (String key : flat.keySet()) {
+            keys.add(switch (key) {
+                case "aw.dataDir" -> "aw.data-dir";
+                case "collection.content" -> "aw.collection.content";
+                case "collection.content.pollMs" -> "aw.collection.content.pollMs";
+                default -> key;
+            });
+        }
+        rejectUnsupportedEventKeys(keys);
+    }
+
+    private static void rejectUnsupportedEventKeys(Collection<String> keys) {
+        RemovedEventConfig.rejectKeys(keys);
+        Properties names = new Properties();
+        keys.forEach(key -> names.setProperty(key, ""));
+        try {
+            RawConfigValidator.rejectUnsupportedRetentionKeys(names);
+        } catch (IllegalArgumentException invalid) {
+            throw new TomlValidationException(List.of(invalid.getMessage()));
+        }
     }
 
     public void getEffectiveConfig(Context ctx) {
@@ -157,8 +187,8 @@ public class DesktopConfigController {
     private static Map<String, String> sectionToPrefix() {
         Map<String, String> sectionToPrefix = new LinkedHashMap<>();
         sectionToPrefix.put("llm", "llm.");
-        sectionToPrefix.put("aw", "aw.");
-        sectionToPrefix.put("collection", "aw.collection.");
+        sectionToPrefix.put("events", "events.");
+        sectionToPrefix.put("collection", "events.collection.");
         sectionToPrefix.put("agent", "agent.");
         sectionToPrefix.put("desktop", "desktop.");
         sectionToPrefix.put("embedding", "embedding.");
@@ -190,7 +220,7 @@ public class DesktopConfigController {
                     "baseUrl", "base-url",
                     "model", "model",
                     "temperature", "temperature");
-            case "aw" -> mapKey(rawKey, prefix,
+            case "events" -> mapKey(rawKey, prefix,
                     "mode", "mode",
                     "port", "port",
                     "dataDir", "data-dir");
@@ -199,7 +229,8 @@ public class DesktopConfigController {
                     : mapKey(rawKey, prefix,
                             "window", "window",
                             "afk", "afk",
-                            "content", "content");
+                            "title.enabled", "title.enabled",
+                            "title.pollMs", "title.pollMs");
             case "agent" -> mapKey(rawKey, prefix,
                     "summaryRefreshMinutes", "summaryRefreshMinutes",
                     "refresh_interval", "summaryRefreshMinutes",
@@ -354,6 +385,7 @@ public class DesktopConfigController {
     RawSaveResult applyRawSave(String text) throws IOException {
         // Syntax + structure (throws with line/col); then lenient known-key types.
         LinkedHashMap<String, String> flat = TomlSupport.parseAndFlatten(text);
+        RemovedEventConfig.rejectKeys(flat.keySet());
         List<String> typeViolations = TomlSupport.validateTypes(flat, SupportedKeys.types());
         if (!typeViolations.isEmpty()) {
             throw new TomlValidationException(typeViolations);
@@ -389,31 +421,6 @@ public class DesktopConfigController {
         }
     }
 
-    private void validateRawDirectoryChange(Properties newUserProperties) {
-        Path current = config.awRawDir().toAbsolutePath().normalize();
-        Path proposed = proposedRawDirectory(newUserProperties).toAbsolutePath().normalize();
-        if (!current.equals(proposed) && RawPartitionCatalog.hasExistingPartitions(current)) {
-            throw new TomlValidationException(List.of(
-                    "aw.raw.dir 已有原始分区，普通配置保存不能修改；请使用独立的显式转存流程"));
-        }
-    }
-
-    private Path proposedRawDirectory(Properties newUserProperties) {
-        String envRawDir = System.getenv("AW_RAW_DIR");
-        String configuredRawDir = newUserProperties.getProperty("aw.raw.dir");
-        if (configuredRawDir != null && !configuredRawDir.isBlank()) {
-            return Path.of(configuredRawDir.replace(
-                    "${user.home}", System.getProperty("user.home")));
-        }
-        if (!newUserProperties.containsKey("aw.raw.dir")
-                && envRawDir != null && !envRawDir.isBlank()) return Path.of(envRawDir);
-        String envAwDataDir = System.getenv("AW_DATA_DIR");
-        String awDataDir = newUserProperties.getProperty("aw.data-dir",
-                envAwDataDir != null && !envAwDataDir.isBlank()
-                        ? envAwDataDir : SupportedKeys.defaults().get("aw.data-dir"));
-        return Path.of(awDataDir.replace(
-                "${user.home}", System.getProperty("user.home"))).resolve("raw");
-    }
 
     /**
      * GET /desktop/config/raw
@@ -532,6 +539,8 @@ public class DesktopConfigController {
                 ctx.json(Map.of("ok", false,
                         "error", "HTTP " + resp.statusCode()));
             }
+        } catch (TomlValidationException invalid) {
+            ctx.status(400).json(Map.of("error", invalid.getMessage()));
         } catch (Throwable e) {
             ctx.status(200).json(Map.of("ok", false, "error",
                     "连接测试失败 (" + e.getClass().getSimpleName() + ")"));
@@ -602,6 +611,8 @@ public class DesktopConfigController {
                 ctx.json(Map.of("ok", false,
                         "error", "HTTP " + resp.statusCode()));
             }
+        } catch (TomlValidationException invalid) {
+            ctx.status(400).json(Map.of("error", invalid.getMessage()));
         } catch (Throwable e) {
             ctx.status(200).json(Map.of("ok", false, "error",
                     "连接测试失败 (" + e.getClass().getSimpleName() + ")"));
@@ -611,6 +622,7 @@ public class DesktopConfigController {
     private Config testConfiguration(Map<String, Object> body) {
         if (!body.containsKey("text")) return configuration.saved().config();
         var flat = TomlSupport.parseAndFlatten(String.valueOf(body.get("text")));
+        RemovedEventConfig.rejectKeys(flat.keySet());
         var violations = TomlSupport.validateTypes(flat, SupportedKeys.types());
         if (!violations.isEmpty()) throw new TomlValidationException(violations);
         // 兼容缺省参数沿用已保存配置；显式空值必须保留。
@@ -632,21 +644,24 @@ public class DesktopConfigController {
         return m;
     }
 
-    private Map<String, Map<String, Object>> buildAwSection(Properties eff) {
+    private Map<String, Map<String, Object>> buildEventsSection(Properties eff) {
         var m = new LinkedHashMap<String, Map<String, Object>>();
-        m.put("mode", field("mode", eff.getProperty("aw.mode", "embedded")));
-        m.put("port", field("port", eff.getProperty("aw.port", "5700")));
-        m.put("dataDir", field("dataDir", eff.getProperty("aw.data-dir",
+        m.put("mode", field("mode", eff.getProperty("events.mode", "embedded")));
+        m.put("port", field("port", eff.getProperty("events.port", "5700")));
+        m.put("dataDir", field("dataDir", eff.getProperty("events.data-dir",
                 System.getProperty("user.home") + "/.self-analyst/events")));
-        m.put("webUrl", field("webUrl", "http://localhost:" + eff.getProperty("aw.port", "5700") + "/"));
+        m.put("webUrl", field("webUrl", "http://localhost:" + eff.getProperty("events.port", "5700") + "/"));
         return m;
     }
 
     private Map<String, Map<String, Object>> buildCollectionSection(Properties eff) {
         var m = new LinkedHashMap<String, Map<String, Object>>();
-        m.put("window", field("window", eff.getProperty("aw.collection.window", "true")));
-        m.put("afk", field("afk", eff.getProperty("aw.collection.afk", "true")));
-        m.put("content", field("content", eff.getProperty("aw.collection.content", "true")));
+        m.put("window", field("window", eff.getProperty("events.collection.window", "true")));
+        m.put("afk", field("afk", eff.getProperty("events.collection.afk", "true")));
+        Map<String, Object> title = new LinkedHashMap<>();
+        title.put("enabled", field("enabled", eff.getProperty("events.collection.title.enabled", "true")));
+        title.put("pollMs", field("pollMs", eff.getProperty("events.collection.title.pollMs", "500")));
+        m.put("title", title);
         return m;
     }
 
@@ -728,7 +743,7 @@ public class DesktopConfigController {
      * Try to find user-saved value by searching common key prefixes.
      */
     private String findUserValue(Properties user, String name) {
-        String[] prefixes = {"llm.", "aw.", "aw.collection.", "agent.", "desktop.", "embedding.", "websearch."};
+        String[] prefixes = {"llm.", "events.", "events.collection.", "agent.", "desktop.", "embedding.", "websearch."};
         for (String prefix : prefixes) {
             String val = user.getProperty(prefix + name);
             if (val != null) return val;

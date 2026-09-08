@@ -90,7 +90,7 @@ class DesktopStatusControllerTest {
                     controller.statusPayload().get("raw");
             assertEquals("unavailable", raw.get("status"));
             assertEquals("external_aw", raw.get("reason"));
-            assertFalse(java.nio.file.Files.exists(external.awRawDir()));
+            assertFalse(java.nio.file.Files.exists(external.eventsRawDir()));
         } finally {
             controller.close();
         }

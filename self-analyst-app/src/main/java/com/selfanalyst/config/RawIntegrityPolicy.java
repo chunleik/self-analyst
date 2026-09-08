@@ -20,13 +20,13 @@ public enum RawIntegrityPolicy {
     public static RawIntegrityPolicy parse(String value) {
         if (value == null) {
             throw new IllegalArgumentException(
-                    "aw.raw.integrity.verifyOnStartup 必须是 latest 或 all");
+                    "events.raw.integrity.startupScope 必须是 latest 或 all");
         }
         return switch (value.trim().toLowerCase(Locale.ROOT)) {
             case "latest" -> LATEST;
             case "all" -> ALL;
             default -> throw new IllegalArgumentException(
-                    "aw.raw.integrity.verifyOnStartup 必须是 latest 或 all");
+                    "events.raw.integrity.startupScope 必须是 latest 或 all");
         };
     }
 }

@@ -1,6 +1,8 @@
 package com.selfanalyst.tools;
 
 import com.selfanalyst.desktop.store.UserConfigStore;
+import com.selfanalyst.config.RemovedEventConfig;
+import com.selfanalyst.config.TomlValidationException;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 
@@ -16,8 +18,8 @@ public class ConfigTools {
     private static final Set<String> ALLOWED_KEYS = Set.of(
             "app.language",
             "llm.api-key", "llm.base-url", "llm.model", "llm.temperature",
-            "aw.mode", "aw.port",
-            "aw.collection.window", "aw.collection.afk", "aw.collection.content",
+            "events.mode", "events.port",
+            "events.collection.window", "events.collection.afk", "events.collection.title.enabled",
             "agent.summaryRefreshMinutes", "agent.allowAgentTasks", "agent.cacheSummaries",
             "desktop.hideToTray", "desktop.autoOpenWindow", "desktop.autoStartBackend",
             "embedding.enabled", "embedding.base-url", "embedding.api-key",
@@ -40,7 +42,7 @@ public class ConfigTools {
             "websearch.enabled、websearch.mcp-url、websearch.api-key；" +
             "agent.summaryRefreshMinutes、agent.allowAgentTasks、agent.cacheSummaries；" +
             "desktop.hideToTray、desktop.autoOpenWindow、desktop.autoStartBackend；" +
-            "aw.collection.window、aw.collection.afk、aw.collection.content；" +
+            "events.collection.window、events.collection.afk、events.collection.title.enabled；" +
             "embedding.enabled、embedding.model、embedding.base-url、embedding.api-key；" +
             "token 用量限制 llm.max-tokens、llm.agent.maxIters、desktop.summary.maxTimelineLlm、" +
             "llm.budget.mode（off/warn/block）、llm.budget.dailyTokens、llm.budget.warnRatio。")
@@ -73,9 +75,9 @@ public class ConfigTools {
                 {"desktop.autoStartBackend", eff.getProperty("desktop.autoStartBackend", "true"), null},
         });
         appendSection(sb, "采集", new String[][]{
-                {"aw.collection.window",  eff.getProperty("aw.collection.window",  "true"),  null},
-                {"aw.collection.afk",     eff.getProperty("aw.collection.afk",     "true"),  null},
-                {"aw.collection.content", eff.getProperty("aw.collection.content", "true"),  null},
+                {"events.collection.window",  eff.getProperty("events.collection.window",  "true"),  null},
+                {"events.collection.afk",     eff.getProperty("events.collection.afk",     "true"),  null},
+                {"events.collection.title.enabled", eff.getProperty("events.collection.title.enabled", "true"),  null},
         });
         appendSection(sb, "Embedding", new String[][]{
                 {"embedding.enabled",  eff.getProperty("embedding.enabled",  "true"),                          null},
@@ -110,6 +112,11 @@ public class ConfigTools {
         if (key == null || key.isBlank()) {
             return "错误：配置键不能为空。";
         }
+        try {
+            RemovedEventConfig.rejectKeys(java.util.List.of(key));
+        } catch (TomlValidationException invalid) {
+            return "错误：" + invalid.getMessage();
+        }
         if (!ALLOWED_KEYS.contains(key)) {
             return "不支持修改配置键 '" + key + "'。支持的键：" +
                     String.join("、", ALLOWED_KEYS.stream().sorted().toList()) + "。";
@@ -119,6 +126,8 @@ public class ConfigTools {
             return "配置已保存：" + key + "\n应用结果：" + result.application()
                     + (result.restartRequired().isEmpty() ? "" : "\n需重启：" + result.restartRequired());
 
+        } catch (TomlValidationException invalid) {
+            return "保存失败：" + invalid.getMessage();
         } catch (Exception e) {
             return "保存失败：请检查配置参数或文件写入权限。";
         }

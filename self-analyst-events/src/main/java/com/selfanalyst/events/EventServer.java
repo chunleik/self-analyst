@@ -42,9 +42,17 @@ public class EventServer {
                     int queryMaxRangeDays, int queryMaxPageSize,
                     long lowDiskWarnBytes, long lowDiskBlockBytes,
                     int projectorBatchSize) {
+        this(dataDir, rawDir, port, queryMaxRangeDays, queryMaxPageSize,
+                lowDiskWarnBytes, lowDiskBlockBytes, projectorBatchSize, false);
+    }
+
+    public EventServer(Path dataDir, Path rawDir, int port,
+                       int queryMaxRangeDays, int queryMaxPageSize,
+                       long lowDiskWarnBytes, long lowDiskBlockBytes,
+                       int projectorBatchSize, boolean verifyAllOnStartup) {
         this(dataDir, rawDir, port, System.getenv("SELF_ANALYST_DESKTOP_TOKEN"),
                 null, queryMaxRangeDays, queryMaxPageSize,
-                lowDiskWarnBytes, lowDiskBlockBytes, projectorBatchSize);
+                lowDiskWarnBytes, lowDiskBlockBytes, projectorBatchSize, verifyAllOnStartup);
     }
 
     EventServer(Path dataDir, int port, String desktopToken) {
@@ -54,18 +62,24 @@ public class EventServer {
     EventServer(Path dataDir, int port, String desktopToken,
              RawEventProjector projectorOverride) {
         this(dataDir, dataDir.resolve("raw"), port, desktopToken, projectorOverride,
-                31, 1000, 10_737_418_240L, 1_073_741_824L, 1000);
+                31, 1000, 10_737_418_240L, 1_073_741_824L, 1000, false);
     }
 
     private EventServer(Path dataDir, Path rawDir, int port, String desktopToken,
                      RawEventProjector projectorOverride,
                      int queryMaxRangeDays, int queryMaxPageSize,
                      long lowDiskWarnBytes, long lowDiskBlockBytes,
-                     int projectorBatchSize) {
+                     int projectorBatchSize, boolean verifyAllOnStartup) {
         this.port = port;
         this.desktopToken = desktopToken;
         PulseTimeConfig pulseConfig = PulseTimeConfig.DEFAULT;
         this.rawEventStore = new RawEventStore(rawDir);
+        try {
+            rawEventStore.verifyOnStartup(verifyAllOnStartup);
+        } catch (com.selfanalyst.events.raw.RawStartupIntegrityException invalid) {
+            try { rawEventStore.close(); } catch (Exception ignored) { }
+            throw invalid;
+        }
         this.rawEventQueries = new RawEventQueryService(
                 rawDir, queryMaxRangeDays, queryMaxPageSize);
         this.rawStatus = new RawStorageStatusService(rawDir,

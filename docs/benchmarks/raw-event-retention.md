@@ -1,5 +1,9 @@
 # 原始事件永久保留基准
 
+启动完整性检查由 `events.raw.integrity.startupScope` 控制，默认 `latest` 检查最新分区，`all` 检查全部
+分区。下述历史写入与查询基准不包含新增启动检查耗时；评估多月历史的启动成本时，应单独记录范围、
+分区数、数据大小及耗时，不能把写入吞吐直接当作启动检查性能。
+
 ## 2026-09-03 单月等价基准
 
 使用 `RawEventStoreBenchmarkTest` 在本地 Windows/JDK 21 环境执行 30 天、每 5 秒一次 heartbeat 的等价负载：

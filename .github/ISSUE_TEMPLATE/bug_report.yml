@@ -61,7 +61,7 @@ body:
   - type: dropdown
     id: aw-mode
     attributes:
-      label: aw.mode
+      label: events.mode
       description: ActivityWatch 运行模式，见 config.toml。
       options:
         - embedded（默认）
@@ -73,7 +73,7 @@ body:
   - type: dropdown
     id: content-collection
     attributes:
-      label: aw.collection.content
+      label: events.collection.title.enabled
       description: 是否启用上下文标题采集。
       options:
         - "true（默认）"

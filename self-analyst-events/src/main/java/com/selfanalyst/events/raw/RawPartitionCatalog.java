@@ -263,6 +263,18 @@ public final class RawPartitionCatalog implements AutoCloseable {
         }
     }
 
+    /** 记录最近检查时间，不更新原始分区、封存摘要或统计。 */
+    public void markVerified(String partitionMonth, Instant verifiedAt) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE raw_partitions SET verified_at = ? WHERE partition_month = ? AND status IN ('ACTIVE', 'SEALED')")) {
+            setInstant(statement, 1, verifiedAt);
+            statement.setString(2, partitionMonth);
+            if (statement.executeUpdate() != 1) throw new IllegalStateException("分区不可校验");
+        } catch (SQLException failure) {
+            throw new IllegalStateException("无法记录原始分区检查时间", failure);
+        }
+    }
+
     public void updateStatus(String partitionMonth, RawPartitionStatus status) {
         try (PreparedStatement statement = connection.prepareStatement(
                 "UPDATE raw_partitions SET status = ? WHERE partition_month = ?")) {

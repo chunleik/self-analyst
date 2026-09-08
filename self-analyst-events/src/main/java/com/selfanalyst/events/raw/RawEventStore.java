@@ -65,6 +65,95 @@ public final class RawEventStore implements RawEventAppender, AutoCloseable {
         recoverInterruptedSeals();
     }
 
+    /** 启动时只读校验选定分区；失败只改变 catalog 隔离状态。 */
+    public synchronized void verifyOnStartup(boolean verifyAll) {
+        List<RawPartitionMetadata> partitions;
+        try {
+            partitions = catalog.listAll();
+        } catch (RuntimeException failure) {
+            throw new RawStartupIntegrityException(null);
+        }
+        if (!verifyAll && !partitions.isEmpty()) partitions = List.of(partitions.getLast());
+        for (RawPartitionMetadata partition : partitions) {
+            try {
+                verifyPartition(partition);
+                catalog.markVerified(partition.partitionMonth(), Instant.now());
+            } catch (Exception failure) {
+                try {
+                    catalog.updateStatus(partition.partitionMonth(), RawPartitionStatus.QUARANTINED);
+                } catch (RuntimeException unavailableCatalog) {
+                    // 原始文件保持不动，不能因记录隔离失败继续启动。
+                }
+                throw new RawStartupIntegrityException(partition.partitionMonth());
+            }
+        }
+    }
+
+    private void verifyPartition(RawPartitionMetadata partition) throws Exception {
+        if (partition.status() != RawPartitionStatus.ACTIVE && partition.status() != RawPartitionStatus.SEALED) {
+            throw new IllegalStateException("分区不可读");
+        }
+        if (partition.schemaVersion() != RAW_SCHEMA_VERSION) throw new IllegalStateException("分区版本不匹配");
+        Path path = catalog.resolvePartitionPath(partition.relativePath());
+        if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            throw new IllegalStateException("分区文件缺失");
+        }
+        PartitionStats stats;
+        try (Connection readOnly = DriverManager.getConnection("jdbc:sqlite:" + path.toUri() + "?mode=ro");
+             Statement statement = readOnly.createStatement()) {
+            statement.execute("PRAGMA busy_timeout=" + SQLITE_BUSY_TIMEOUT_MS);
+            try (ResultSet integrity = statement.executeQuery("PRAGMA integrity_check")) {
+                if (!integrity.next() || !"ok".equalsIgnoreCase(integrity.getString(1)) || integrity.next()) {
+                    throw new IllegalStateException("SQLite 完整性检查未通过");
+                }
+            }
+            stats = readStats(readOnly);
+        }
+        if (partition.eventCount() != stats.eventCount()
+                || !Objects.equals(partition.firstEventId(), stats.firstEventId())
+                || !Objects.equals(partition.lastEventId(), stats.lastEventId())
+                || !Objects.equals(partition.receivedStart(), stats.receivedStart())
+                || !Objects.equals(partition.receivedEnd(), stats.receivedEnd())) {
+            throw new IllegalStateException("catalog 与原始分区统计不一致");
+        }
+        if (partition.status() == RawPartitionStatus.SEALED) verifySealedManifest(partition, path, stats);
+    }
+
+    private void verifySealedManifest(RawPartitionMetadata partition, Path path, PartitionStats stats) throws Exception {
+        Path manifest = catalog.resolvePartitionPath(
+                catalog.rawRoot().relativize(manifestPath(path)).toString());
+        if (!Files.isRegularFile(manifest, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                || Files.size(manifest) > 65_536) throw new IllegalStateException("封存清单缺失或无效");
+        var json = MAPPER.readTree(Files.readString(manifest, StandardCharsets.UTF_8));
+        long size = Files.size(path);
+        String sha256 = fileSha256(path);
+        if (json == null || !json.isObject()
+                || !manifestNumber(json, "manifestVersion", 1)
+                || !manifestNumber(json, "schemaVersion", RAW_SCHEMA_VERSION)
+                || !manifestNumber(json, "eventCount", stats.eventCount())
+                || !manifestNumber(json, "fileSizeBytes", size)
+                || !manifestText(json, "partitionMonth", partition.partitionMonth())
+                || !manifestText(json, "databaseFile", path.getFileName().toString())
+                || !manifestText(json, "firstEventId", stats.firstEventId())
+                || !manifestText(json, "lastEventId", stats.lastEventId())
+                || !json.has("receivedStart") || !json.has("receivedEnd")
+                || !Objects.equals(parseInstant(json.path("receivedStart").textValue()), stats.receivedStart())
+                || !Objects.equals(parseInstant(json.path("receivedEnd").textValue()), stats.receivedEnd())
+                || !manifestText(json, "fileSha256", sha256)
+                || partition.sizeBytes() != size || !Objects.equals(partition.fileSha256(), sha256)) {
+            throw new IllegalStateException("封存清单与原始分区不一致");
+        }
+    }
+
+    private static boolean manifestNumber(com.fasterxml.jackson.databind.JsonNode json, String name, long expected) {
+        var value = json.path(name);
+        return value.isIntegralNumber() && value.canConvertToLong() && value.longValue() == expected;
+    }
+
+    private static boolean manifestText(com.fasterxml.jackson.databind.JsonNode json, String name, String expected) {
+        return json.has(name) && (expected == null ? json.path(name).isNull()
+                : json.path(name).isTextual() && expected.equals(json.path(name).textValue()));
+    }
     @Override
     public synchronized RawEvent append(RawEvent event) {
         return appendBatch(List.of(event)).getFirst();

@@ -13,12 +13,12 @@ class AppSessionLlmRecoveryTest {
         var store = new UserConfigStore(dir.resolve("config"));
         store.saveRaw("""
                 memory.dir = '%s'
-                [aw]
+                [events]
                 mode = 'external'
-                [aw.collection]
+                [events.collection]
                 window = false
                 afk = false
-                content = false
+                title.enabled = false
                 [llm]
                 api-key = ''
                 [wiki]

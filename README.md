@@ -16,9 +16,6 @@ SQLite 分区，再生成可合并、可重建的 `events.db` 投影。外部 Ac
 当前“内容采集”的严格定义是标题采集：允许在识别时临时读取完整 UIA 控件树，但最终只保存
 系统窗口标题、微信对话人、文章/文档/页面标题及来源、置信度和时间等元数据，禁止保存 UIA 正文。
 
-OCR、截图样本、麦克风/系统声音采集和语音转写已暂时从代码与产品入口中移除。详细范围、旧配置
-兼容和恢复方式见 [OCR 与声音模块暂时移除说明](docs/archive/removed-features/removed-ocr-audio.md)。
-
 ## 环境要求
 
 - JDK 21
@@ -65,49 +62,6 @@ pnpm tauri dev
 当前用户应用数据目录，不随应用文件升级或卸载；便携模式继续把 `data/` 放在可执行文件旁边。
 发布包不包含 PaddleOCR、Tesseract、Whisper 或语音模型。
 
-## 开机自启动与托盘
-
-右键点击 SelfAnalyst 托盘图标，勾选“开机自启动”，即可注册当前 Windows 用户登录后的启动入口。
-首次安装默认关闭。自动启动后只驻留托盘，不弹出主窗口，后台按已有配置运行；点击托盘图标或再次
-手动打开程序可恢复窗口。关闭主窗口只隐藏到托盘，托盘“退出”才会结束应用和受管后端。
-
-取消勾选只影响下次登录，不结束本次运行。勾选状态表示当前程序路径的启动项已注册；Windows 的
-启动应用设置或组织策略仍可能阻止运行，系统也不保证登录后立即执行。状态读取或设置失败会明确显示，
-可重新打开托盘菜单检查。此设置由桌面壳管理，不写入 `config.toml`。
-
-启动异常时，桌面壳的早期阶段记录在 `%LOCALAPPDATA%/com.selfanalyst.desktop/self-analyst-shell.log`，
-可用于区分未进入程序、单实例初始化失败和后端启动失败。该日志只记录阶段、时间、进程号及错误位置，
-不记录桌面认证 token 或业务内容，超过 1 MiB 后从新记录开始。后端详细日志仍为运行目录中的
-`self-analyst-backend.log`。
-
-同一用户只有一个 SelfAnalyst 自启动入口。便携目录移动后，从新位置手动打开并重新开启即可更新路径；
-若已有其他路径，菜单会说明开启将替换它。路径过长无法注册时会报错，可移至较短目录重试。安装版原位置
-升级保留开关选择，卸载仅清理指向自身的入口。回退到旧版本前请先关闭自启动；已回退时可在系统启动项
-管理中禁用 SelfAnalystDesktop，并清理其遗留入口。
-
-开发验证（在测试账户或可恢复环境运行）：
-
-```powershell
-cargo test --manifest-path self-analyst-desktop/src-tauri/Cargo.toml
-pwsh -File scripts/check-desktop-autostart.ps1
-pwsh -File scripts/check-installer.ps1 -InstallerPath <安装包路径> -VerifyAutostart
-```
-
-便携冒烟使用独立临时数据并关闭采集，不修改系统启动项；安装验证仅在指定 `-VerifyAutostart` 时临时
-修改启动项，并在结束时恢复原值。真实注销/登录及托盘交互仍需在 Windows 桌面进行验收。
-登录验收应从 Windows 文件资源管理器独立启动应用并开启自启动，再通过 Windows `StdRegProv` 或
-`Win32_StartupCommand` 核对系统可见入口。部分工具运行上下文会呈现不同的注册表视图，同一环境中的
-写入和回读成功不足以证明 Windows 登录流程能够读到该项。
-
-原生菜单视觉验收可在 Windows 桌面分别运行以下命令，截图后按 Esc 结束当前场景。脚本需 Windows SDK
-的 `mt.exe`，仅为测试 EXE 准备公共控件清单；复用正式菜单，不读写系统启动项、不启动业务后端。
-
-```powershell
-pwsh -File scripts/check-native-tray-menu.ps1 -Case unavailable
-pwsh -File scripts/check-native-tray-menu.ps1 -Case other
-pwsh -File scripts/check-native-tray-menu.ps1 -Case enabled
-```
-
 ## 核心模块
 
 | 模块 | 职责 |
@@ -127,7 +81,6 @@ pwsh -File scripts/check-native-tray-menu.ps1 -Case enabled
 - 敏感应用会跳过 UIA 查询。
 - 文件模块只采集文件名、路径、大小和创建/修改时间等文件系统元数据；除安全解析 `.gitignore` 外，
   不读取普通文件正文，不计算内容哈希，也不生成摘要、主题或向量。
-- OCR/音频旧配置键被识别并忽略；旧数据库和用户目录不会自动删除。
 
 隐私细节见 [PRIVACY.md](PRIVACY.md)，现行规格索引见 [docs/README.md](docs/README.md)。
 
@@ -170,55 +123,7 @@ llm.api-key、llm.base-url、llm.model、llm.temperature、llm.max-tokens。正�
 [移除说明](docs/archive/removed-features/removed-ocr-audio.md) 中列出的旧 OCR 键和所有 `aw.audio.*` 不再是受支持配置。
 加载旧文件时这些键不会导致启动失败，但不会产生任何功能。
 
-### 事件配置名称更新
 
-事件服务配置已统一使用 `events.*` 与 `EVENTS_*`。旧名称已移除，不提供兼容别名或自动改写；已有配置、启动脚本和环境变量需要按下表手动更新。只要旧名称仍存在，即使与新名称同时配置或旧值为空，启动或配置提交也会报错，并指出对应新名称。
-
-| 旧配置键 | 新配置键 | 旧环境变量 | 新环境变量 |
-|---|---|---|---|
-| `aw.mode` | `events.mode` | `AW_MODE` | `EVENTS_MODE` |
-| `aw.port` | `events.port` | — | — |
-| `aw.base-url` | `events.base-url` | `AW_BASE_URL` | `EVENTS_BASE_URL` |
-| `aw.timeout` | `events.timeout` | `AW_TIMEOUT` | `EVENTS_TIMEOUT` |
-| `aw.data-dir` | `events.data-dir` | `AW_DATA_DIR` | `EVENTS_DATA_DIR` |
-| `aw.raw.dir` | `events.raw.dir` | `AW_RAW_DIR` | `EVENTS_RAW_DIR` |
-| `aw.raw.query.maxRangeDays` | `events.raw.query.maxRangeDays` | `AW_RAW_QUERY_MAX_RANGE_DAYS` | `EVENTS_RAW_QUERY_MAX_RANGE_DAYS` |
-| `aw.raw.query.maxPageSize` | `events.raw.query.maxPageSize` | `AW_RAW_QUERY_MAX_PAGE_SIZE` | `EVENTS_RAW_QUERY_MAX_PAGE_SIZE` |
-| `aw.raw.lowDisk.warnBytes` | `events.raw.lowDisk.warnBytes` | `AW_RAW_LOW_DISK_WARN_BYTES` | `EVENTS_RAW_LOW_DISK_WARN_BYTES` |
-| `aw.raw.lowDisk.blockBytes` | `events.raw.lowDisk.blockBytes` | `AW_RAW_LOW_DISK_BLOCK_BYTES` | `EVENTS_RAW_LOW_DISK_BLOCK_BYTES` |
-| `aw.raw.integrity.verifyOnStartup` | `events.raw.integrity.startupScope` | `AW_RAW_INTEGRITY_VERIFY_ON_STARTUP` | `EVENTS_RAW_INTEGRITY_STARTUP_SCOPE` |
-| `aw.raw.projector.batchSize` | `events.raw.projector.batchSize` | `AW_RAW_PROJECTOR_BATCH_SIZE` | `EVENTS_RAW_PROJECTOR_BATCH_SIZE` |
-| `aw.collection.window` | `events.collection.window` | `AW_COLLECTION_WINDOW` | `EVENTS_COLLECTION_WINDOW` |
-| `aw.collection.afk` | `events.collection.afk` | `AW_COLLECTION_AFK` | `EVENTS_COLLECTION_AFK` |
-| `aw.collection.content` | `events.collection.title.enabled` | `AW_COLLECTION_CONTENT` | `EVENTS_COLLECTION_TITLE_ENABLED` |
-| `aw.collection.content.pollMs` | `events.collection.title.pollMs` | `AW_CONTENT_POLL_MS` | `EVENTS_COLLECTION_TITLE_POLL_MS` |
-
-修改时保留原有路径和值，并同时更新实际启动环境。保持工作目录、数据目录和原始目录不变时，应用会继续使用已有 `events.db` 和原始分区，不迁移或重建数据。端口仍只从 TOML 或默认值读取，`EVENTS_PORT` 不生效。
-
-标题开关使用 `enabled` 叶子，允许与轮询间隔一起配置：
-
-```toml
-[events.collection.title]
-enabled = false
-pollMs = 800
-
-[events.raw.integrity]
-startupScope = 'all'
-```
-
-结构化配置 API 的事件服务分组同步由 `aw` 改为 `events`，标题配置为 `collection.title.enabled/pollMs`。原有 OCR/音频废弃键继续忽略，不按本表重命名；真实第三方 ActivityWatch 启动脚本名称不受本次调整影响。
-
-`startupScope` 现已接入启动检查：默认 `latest` 只检查月份最新的原始分区，`all` 检查全部已登记分区；封存分区还会核对 manifest、大小与文件摘要。检查失败会隔离对应分区并阻止启动，错误指出月份；原始文件保持不变，不自动修复或删除。`all` 的启动耗时会随历史数据量增加。
-
-## 恢复基线
-
-移除 OCR 与声音模块前已建立带注释 Git 标签：
-
-```powershell
-git show archive/pre-remove-ocr-audio
-```
-
-重新引入功能时应从该标签开独立分支重新设计数据边界，不应直接把旧实现合回当前主线。
 
 ## 文档
 

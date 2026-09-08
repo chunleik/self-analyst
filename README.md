@@ -137,6 +137,17 @@ pwsh -File scripts/check-native-tray-menu.ps1 -Case enabled
 环境变量，未配置的键才使用环境变量兜底，最后使用内置默认值。删除配置项可恢复兜底。
 memory.dir 的显式 JVM 参数仍具有最高优先级；aw.port 不接受环境变量覆盖。完整键表以 [用户配置规格](openspec/specs/user-configuration/spec.md) 和 `SupportedKeys` 为准。
 
+在桌面配置页或 Agent 配置工具中保存以下参数后，新一轮聊天及新摘要任务立即采用新配置：
+llm.api-key、llm.base-url、llm.model、llm.temperature、llm.max-tokens。正在进行的一轮聊天（包括上下文
+压缩和工具调用）继续使用原配置，历史与当日用量不会重置。摘要与压缩仍保持低温策略。
+首次未填写密钥也能启动本地服务，补填后可开始聊天；清空有效密钥后，新 LLM 工作显示未配置。
+
+配置页显示已保存值、配置来源和生效状态。出现“新任务已生效，当前回答继续使用原配置”时无需重启；
+“需要重启后端”仅针对所列组件。端口、存储目录、预算策略、maxIters、压缩阈值和 Embedding 客户端
+仍按启动期配置处理；Embedding 继承 LLM 密钥时，密钥变化会单独提示其重启需求。
+外部编辑器直接修改 TOML 不触发自动热更新，可在应用内保存或重启后端应用。
+连接测试使用当前编辑文本，测试成功不代表运行配置已切换，也不保证所选模型能完成聊天。
+
 | 配置键 | 环境变量 | 默认值 |
 |--------|----------|--------|
 | `llm.base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` |

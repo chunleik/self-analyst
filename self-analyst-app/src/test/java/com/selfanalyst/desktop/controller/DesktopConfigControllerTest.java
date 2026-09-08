@@ -79,6 +79,25 @@ class DesktopConfigControllerTest {
             var payload = mapper.readTree(embeddingBody.get());
             assertEquals("saved-embedding", payload.path("model").asText());
             assertFalse(payload.has("encoding_format"));
+            String savedText = store.readRaw();
+            String draft = "[llm]\napi-key='draft-key'\nbase-url='" + base + "/v1'\nmodel='draft'";
+            var draftRequest = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + "/test-llm"))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(Map.of("text", draft))))
+                    .build();
+            var tested = mapper.readTree(client.send(draftRequest, java.net.http.HttpResponse.BodyHandlers.ofString()).body());
+            assertTrue(tested.path("ok").asBoolean());
+            assertEquals("draft", tested.path("model").asText());
+            assertEquals("Bearer draft-key", authorization.get());
+            assertEquals(savedText, store.readRaw());
+            var emptyKey = java.net.http.HttpRequest.newBuilder(java.net.URI.create(base + "/test-llm"))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(
+                            Map.of("text", draft.replace("draft-key", "")))))
+                    .build();
+            var unavailable = mapper.readTree(client.send(emptyKey, java.net.http.HttpResponse.BodyHandlers.ofString()).body());
+            assertFalse(unavailable.path("ok").asBoolean());
+            assertEquals("Bearer draft-key", authorization.get(), "explicit blank must not send saved credentials");
+            assertEquals(0L, store.application().effectivePayload().get("revision"));
+
         } finally {
             app.stop();
         }
@@ -378,7 +397,7 @@ class DesktopConfigControllerTest {
         var ctrl = controller(dir, store);
 
         var r1 = ctrl.applyRawSave("[llm]\nmodel = \"gpt-4o-mini\"\n");
-        assertTrue(r1.restartRequired().contains("llm.model"));
+        assertFalse(r1.restartRequired().contains("llm.model"));
 
         var r2 = ctrl.applyRawSave("[llm]\nmodel = \"gpt-4o-mini\"\napi-key = \"sk-x\"\n");
         assertFalse(r2.restartRequired().contains("llm.api-key"));

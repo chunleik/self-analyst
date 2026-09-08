@@ -94,17 +94,18 @@ public class DesktopAgentController {
      */
     public void getSummary(Context ctx) {
         try {
-            boolean llmAvailable = agent != null && config != null
-                    && config.llmApiKey() != null && !config.llmApiKey().isBlank()
-                    && !config.llmApiKey().contains("CHANGE_ME")
+            boolean llmAvailable = agent != null && agent.isLlmAvailable()
                     && !agent.isBudgetBlocked();
+            try (var task = llmAvailable ? agent.plainTask() : null) {
+            llmAvailable = task != null && task.available();
             SummaryPromptService.SummaryTextClient summaryClient =
-                    llmAvailable ? agent::completePlain : null;
+                    llmAvailable ? task::complete : null;
             com.selfanalyst.i18n.Lang lang = config != null
                     ? config.effectiveLanguage() : com.selfanalyst.i18n.Lang.ZH;
             int llmCap = config != null ? config.desktopSummaryMaxTimelineLlm() : 0;
             ctx.json(summaryAssembler.assemble(new DesktopSummaryAssembler.Request(
                     llmAvailable, llmCap, lang, summaryClient)));
+            }
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", "Failed to generate summary: " + e.getMessage()));
         }
@@ -371,6 +372,9 @@ public class DesktopAgentController {
         }
         if (hasAgentStillRunning(e)) {
             return new ChatError(409, "上一条消息仍在处理中，请稍后再试...");
+        }
+        if (hasCause(e, com.selfanalyst.wiki.usage.LlmUnavailableException.class)) {
+            return new ChatError(503, "LLM 未配置，请在配置页面设置 API Key");
         }
         if (e instanceof IllegalArgumentException) {
             return new ChatError(400,

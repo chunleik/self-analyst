@@ -142,6 +142,7 @@ function closeConfigModal() {
     return;
   }
   state.configOpen = false;
+  if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   state.configDirty = false;
   state.dom.configModal.classList.add("hidden");
 }
@@ -209,6 +210,7 @@ function loadConfig() {
       state.configSaveResult = null;
       state.configSaving = false;
       renderConfigTab();
+      if (typeof refreshConfigRuntime === "function") return refreshConfigRuntime();
     })
     .catch(function (err) {
       // Load failed → read-only error state, no saving on unknown content.

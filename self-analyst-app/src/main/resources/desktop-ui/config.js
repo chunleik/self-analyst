@@ -20,7 +20,8 @@ function renderConfigTab() {
     +   '<button id="test-llm-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.testLlm")) + '</button>'
     +   '<button id="test-embedding-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.testEmbedding")) + '</button>'
     + '</div>'
-    + renderConfigActionBar();
+    + renderConfigActionBar()
+    + '<div id="config-runtime-status" class="config-runtime-status" aria-live="polite">' + renderConfigRuntime() + "</div>";
 
   if (state.configLoadError) {
     html += '<div class="config-load-error">' + escHtml(t("config.loadErrorReadonly")) + '</div>';
@@ -259,11 +260,88 @@ function saveAllConfig() {
       msg += t("config.unknownKeysSuffix", { keys: resp.unknownKeys.join(", ") });
     }
     state.configSaveResult = { type: "success", msg: msg };
+    if (resp && resp.application) state.configRuntime = { application: resp.application };
     renderConfigTab();
+    refreshConfigRuntime();
   }).catch(function (err) {
     // Save failed: keep dirty state and baseline untouched. SPEC-CFGUI-UI-003f.
     state.configSaving = false;
     state.configSaveResult = { type: "error", msg: t("config.saveFailed", { msg: err.message || t("common.unknownError") }) };
     updateConfigActionBar();
+  });
+}
+
+
+// 只刷新只读运行状态，绝不重新渲染或覆盖正在编辑的 TOML。
+var configRuntimeTimer = null;
+var configRuntimeRequest = 0;
+
+function stopConfigRuntimeRefresh() {
+  if (configRuntimeTimer !== null) clearTimeout(configRuntimeTimer);
+  configRuntimeTimer = null;
+  configRuntimeRequest++;
+}
+
+function renderConfigRuntime() {
+  if (state.configRuntimeError) return '<p>' + escHtml(t("config.runtimeLoadFailed")) + '</p>';
+  var data = state.configRuntime;
+  if (!data) return "";
+  var application = data.application || {};
+  var html = '<strong>' + escHtml(t("config.runtimeTitle")) + '</strong><ul>';
+  Object.keys(application).forEach(function (component) {
+    var item = application[component];
+    html += '<li>' + escHtml(component) + ': ' + escHtml(t("config.runtime." + item.status));
+    if (item.changedKeys && item.changedKeys.length) html += ' (' + escHtml(item.changedKeys.join(", ")) + ')';
+    html += '</li>';
+  });
+  html += '</ul>';
+  if (data.configured) {
+    html += '<details><summary>' + escHtml(t("config.sourcesTitle")) + '</summary><table><thead><tr>'
+      + '<th>' + escHtml(t("config.key")) + '</th><th>' + escHtml(t("config.savedValue")) + '</th>'
+      + '<th>' + escHtml(t("config.runningValue")) + '</th><th>' + escHtml(t("config.source")) + '</th></tr></thead><tbody>';
+    ["llm.api-key", "llm.base-url", "llm.model", "llm.temperature", "llm.max-tokens"].forEach(function (key) {
+      var value = data.configured[key];
+      if (!value) return;
+      html += '<tr><td>' + escHtml(key) + '</td><td>' + escHtml(value.value) + '</td><td>'
+        + escHtml(data.running && data.running[key] != null ? String(data.running[key]) : "")
+        + '</td><td>' + escHtml(t("config.source." + value.source)) + '</td></tr>';
+    });
+    html += '</tbody></table></details>';
+  }
+  return html;
+}
+
+function refreshConfigRuntime(remaining) {
+  if (!api.getEffectiveConfig) return Promise.resolve();
+  stopConfigRuntimeRefresh();
+  var request = configRuntimeRequest;
+  var attempts = typeof remaining === "number" ? remaining : 300;
+  return api.getEffectiveConfig().then(function (data) {
+    if (request !== configRuntimeRequest || !state.configOpen) return;
+    var changed = state.configRuntimeError || JSON.stringify(state.configRuntime) !== JSON.stringify(data);
+    state.configRuntime = data;
+    state.configRuntimeError = false;
+    var target = document.getElementById("config-runtime-status");
+    if (target && changed) {
+      var details = target.querySelector ? target.querySelector("details") : null;
+      var expanded = details && details.open;
+      target.innerHTML = renderConfigRuntime();
+      if (expanded && target.querySelector) {
+        details = target.querySelector("details");
+        if (details) details.open = true;
+      }
+    }
+    var application = data.application || {};
+    var draining = Object.keys(application).some(function (key) {
+      return application[key].activeWorkCount > 0;
+    });
+    if (draining && attempts > 0) {
+      configRuntimeTimer = setTimeout(function () { refreshConfigRuntime(attempts - 1); }, 2000);
+    }
+  }).catch(function () {
+    if (request !== configRuntimeRequest || !state.configOpen) return;
+    state.configRuntimeError = true;
+    var target = document.getElementById("config-runtime-status");
+    if (target) target.innerHTML = renderConfigRuntime();
   });
 }

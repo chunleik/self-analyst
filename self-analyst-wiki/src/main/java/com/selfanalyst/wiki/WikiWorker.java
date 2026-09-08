@@ -263,9 +263,9 @@ public class WikiWorker {
                         .stream().filter(e -> e.id().equals(id)).findFirst();
                 summarized.ifPresent(embeddingWorker::enqueueEntry);
             }
-        } catch (com.selfanalyst.wiki.usage.BudgetExceededException be) {
+        } catch (com.selfanalyst.wiki.usage.BudgetExceededException | com.selfanalyst.wiki.usage.LlmUnavailableException be) {
             // 达到每日 token 预算：保持 PENDING，下个周期/次日重试，不计入失败重试次数
-            log.debug("Wiki entry {} 因 token 预算暂停，保持 PENDING 稍后重试", id);
+            log.debug("Wiki entry {} 因模型未就绪或预算暂停，保持 PENDING 稍后重试", id);
         } catch (Exception e) {
             log.warn("Wiki entry {} failed: {}", id, e.getMessage());
             int retryCount = entry.retryCount() + 1;

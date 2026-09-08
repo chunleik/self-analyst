@@ -92,55 +92,49 @@ public record Config(
     }
 
     static Config load(Path configDir, Map<String, String> environment) {
-        Properties props = new Properties(loadClasspathProps());
+        return ConfigResolver.resolve(loadUserConfig(configDir), environment).config();
+    }
 
-        // The portable config location is independent from memory.dir, so config.toml
-        // can choose where memory and indexes are stored without a bootstrap cycle.
-        Properties userProps = loadUserConfig(configDir);
-        props.putAll(userProps);
-        String memDir = memoryDirOf(props, environment);
+    static Config parse(ConfigResolver values) {
+        Properties userProps = values.user();
+        Properties props = values.properties();
+        String memDir = values.memoryDir();
 
-        String apiKey = envOrProp(props, environment, "llm.api-key", "OPENAI_API_KEY", "")
+        String apiKey = values.get("llm.api-key", "")
                 .replace("${OPENAI_API_KEY:CHANGE_ME}", "CHANGE_ME")
                 .replace("${OPENAI_API_KEY:}", "");
-        String baseUrl = envOrProp(props, environment, "llm.base-url", "LLM_BASE_URL",
+        String baseUrl = values.get("llm.base-url",
                 "https://api.openai.com/v1");
-        String model = envOrProp(props, environment, "llm.model", "LLM_MODEL", "gpt-4o");
+        String model = values.get("llm.model", "gpt-4o");
         double llmTemperature = parseDoubleOr(
-                envOrProp(props, environment, "llm.temperature", "LLM_TEMPERATURE", "0.7"), 0.7);
+                values.get("llm.temperature", "0.7"), 0.7);
         if (llmTemperature < 0 || llmTemperature > 2) {
             llmTemperature = 0.7;
         }
-        String configuredAwUrl = envOrProp(props, environment, "aw.base-url", "AW_BASE_URL",
+        String configuredAwUrl = values.get("aw.base-url",
                 "http://localhost:5600/api/0");
         int awTimeout = Integer.parseInt(
-                envOrProp(props, environment, "aw.timeout", "AW_TIMEOUT", "15000"));
+                values.get("aw.timeout", "15000"));
 
         boolean awEmbedded = "embedded".equalsIgnoreCase(
-                envOrProp(props, environment, "aw.mode", "AW_MODE", "embedded"));
+                values.get("aw.mode", "embedded"));
         // config.toml is the single user-controlled source for the embedded server port.
         // The Tauri parent learns the effective value from the Java startup handshake.
-        int awPort = Integer.parseInt(props.getProperty("aw.port", "5700"));
+        int awPort = Integer.parseInt(values.get("aw.port", "5700"));
         String awUrl = awEmbedded
                 ? "http://localhost:" + awPort + "/api/0"
                 : configuredAwUrl;
-        Path awDataDir = Path.of(envOrProp(props, environment, "aw.data-dir", "AW_DATA_DIR",
+        Path awDataDir = Path.of(values.get("aw.data-dir",
                 memDir + "/events"));
-        Path awRawDir = Path.of(envOrProp(userProps, environment, "aw.raw.dir", "AW_RAW_DIR",
+        Path awRawDir = Path.of(values.explicit("aw.raw.dir",
                 awDataDir.resolve("raw").toString()));
-        int awRawQueryMaxRangeDays = Integer.parseInt(envOrProp(props, environment,
-                "aw.raw.query.maxRangeDays", "AW_RAW_QUERY_MAX_RANGE_DAYS", "31"));
-        int awRawQueryMaxPageSize = Integer.parseInt(envOrProp(props, environment,
-                "aw.raw.query.maxPageSize", "AW_RAW_QUERY_MAX_PAGE_SIZE", "1000"));
-        long awRawLowDiskWarnBytes = Long.parseLong(envOrProp(props, environment,
-                "aw.raw.lowDisk.warnBytes", "AW_RAW_LOW_DISK_WARN_BYTES", "10737418240"));
-        long awRawLowDiskBlockBytes = Long.parseLong(envOrProp(props, environment,
-                "aw.raw.lowDisk.blockBytes", "AW_RAW_LOW_DISK_BLOCK_BYTES", "1073741824"));
+        int awRawQueryMaxRangeDays = Integer.parseInt(values.get("aw.raw.query.maxRangeDays", "31"));
+        int awRawQueryMaxPageSize = Integer.parseInt(values.get("aw.raw.query.maxPageSize", "1000"));
+        long awRawLowDiskWarnBytes = Long.parseLong(values.get("aw.raw.lowDisk.warnBytes", "10737418240"));
+        long awRawLowDiskBlockBytes = Long.parseLong(values.get("aw.raw.lowDisk.blockBytes", "1073741824"));
         RawIntegrityPolicy awRawIntegrityVerifyOnStartup = RawIntegrityPolicy.parse(
-                envOrProp(props, environment, "aw.raw.integrity.verifyOnStartup",
-                        "AW_RAW_INTEGRITY_VERIFY_ON_STARTUP", "latest"));
-        int awRawProjectorBatchSize = Integer.parseInt(envOrProp(props, environment,
-                "aw.raw.projector.batchSize", "AW_RAW_PROJECTOR_BATCH_SIZE", "1000"));
+                values.get("aw.raw.integrity.verifyOnStartup", "latest"));
+        int awRawProjectorBatchSize = Integer.parseInt(values.get("aw.raw.projector.batchSize", "1000"));
         RawConfigValidator.rejectUnsupportedRetentionKeys(userProps);
         RawConfigValidator.validate(awRawDir, awRawQueryMaxRangeDays,
                 awRawQueryMaxPageSize, awRawLowDiskWarnBytes,
@@ -148,79 +142,75 @@ public record Config(
                 awRawProjectorBatchSize);
 
         boolean wikiEnabled = Boolean.parseBoolean(
-                envOrProp(props, environment, "wiki.enabled", "WIKI_ENABLED", "false"));
+                values.get("wiki.enabled", "false"));
         boolean wikiBackfillEnabled = Boolean.parseBoolean(
-                envOrProp(props, environment, "wiki.backfill.enabled", "WIKI_BACKFILL_ENABLED", "false"));
+                values.get("wiki.backfill.enabled", "false"));
         int wikiWorkerIntervalSeconds = Integer.parseInt(
-                envOrProp(props, environment, "wiki.worker.intervalSeconds", "WIKI_WORKER_INTERVAL_SECONDS", "60"));
+                values.get("wiki.worker.intervalSeconds", "60"));
         int wikiPromptMaxContentChars = Integer.parseInt(
-                envOrProp(props, environment, "wiki.prompt.maxContentChars", "WIKI_PROMPT_MAX_CONTENT_CHARS", "12000"));
+                values.get("wiki.prompt.maxContentChars", "12000"));
         if (wikiPromptMaxContentChars < 1000) {
             wikiPromptMaxContentChars = 12000;
         }
         int wikiTopAppsLimit = Integer.parseInt(
-                envOrProp(props, environment, "wiki.topApps.limit", "WIKI_TOP_APPS_LIMIT", "10"));
+                values.get("wiki.topApps.limit", "10"));
 
         boolean wikiSemanticEnabled = Boolean.parseBoolean(
-                envOrProp(props, environment, "wiki.semantic.enabled", "WIKI_SEMANTIC_ENABLED", "true"));
-        Path wikiSemanticIndexDir = Path.of(envOrProp(props, environment, "wiki.semantic.index-dir",
-                "WIKI_SEMANTIC_INDEX_DIR", memDir + "/wiki-semantic-index"));
+                values.get("wiki.semantic.enabled", "true"));
+        Path wikiSemanticIndexDir = Path.of(values.get("wiki.semantic.index-dir", memDir + "/wiki-semantic-index"));
         int wikiSemanticTopK = parseIntOr(props,
-                envOrProp(props, environment, "wiki.semantic.topK", "WIKI_SEMANTIC_TOP_K", "8"), 8);
+                values.get("wiki.semantic.topK", "8"), 8);
         if (wikiSemanticTopK < 1 || wikiSemanticTopK > 50) {
             wikiSemanticTopK = 8;
         }
 
         boolean embeddingEnabled = Boolean.parseBoolean(
-                envOrProp(props, environment, "embedding.enabled", "EMBEDDING_ENABLED", "false"));
-        String embeddingBaseUrl = envOrProp(props, environment, "embedding.base-url", "EMBEDDING_BASE_URL",
+                values.get("embedding.enabled", "false"));
+        String embeddingBaseUrl = values.get("embedding.base-url",
                 "https://api.openai.com/v1");
-        String embeddingApiKey = envOrProp(props, environment, "embedding.api-key", "EMBEDDING_API_KEY",
+        String embeddingApiKey = values.get("embedding.api-key",
                 apiKey)
                 .replace("${EMBEDDING_API_KEY:}", "");
         if (embeddingApiKey == null || embeddingApiKey.isBlank()) {
             embeddingApiKey = apiKey;
         }
-        String embeddingModel = envOrProp(props, environment, "embedding.model", "EMBEDDING_MODEL",
+        String embeddingModel = values.get("embedding.model",
                 "text-embedding-3-small");
         int embeddingDimensions = parseIntOr(props,
-                envOrProp(props, environment, "embedding.dimensions", "EMBEDDING_DIMENSIONS", "1024"), 1024);
+                values.get("embedding.dimensions", "1024"), 1024);
         if (embeddingDimensions <= 0 || embeddingDimensions > 1024) {
             embeddingDimensions = 1024;
         }
         boolean embeddingSendEncodingFormat = Boolean.parseBoolean(
-                envOrProp(props, environment, "embedding.send-encoding-format", "EMBEDDING_SEND_ENCODING_FORMAT", "true"));
+                values.get("embedding.send-encoding-format", "true"));
 
         int contentPollIntervalMs = parseIntOr(props,
-                envOrProp(props, environment, "aw.collection.content.pollMs", "AW_CONTENT_POLL_MS", "500"), 500);
+                values.get("aw.collection.content.pollMs", "500"), 500);
         if (contentPollIntervalMs < 100 || contentPollIntervalMs > 10000) {
             contentPollIntervalMs = 500;
         }
 
         boolean collectWindow = Boolean.parseBoolean(
-                envOrProp(props, environment, "aw.collection.window", "AW_COLLECTION_WINDOW", "true"));
+                values.get("aw.collection.window", "true"));
         boolean collectAfk = Boolean.parseBoolean(
-                envOrProp(props, environment, "aw.collection.afk", "AW_COLLECTION_AFK", "true"));
+                values.get("aw.collection.afk", "true"));
         boolean collectContent = Boolean.parseBoolean(
-                envOrProp(props, environment, "aw.collection.content", "AW_COLLECTION_CONTENT", "true"));
+                values.get("aw.collection.content", "true"));
         // ── File Watch (SPEC-FILE-*) ──
         boolean fileWatchEnabled = Boolean.parseBoolean(
-                envOrProp(props, environment, "file.watch.enabled", "FILE_WATCH_ENABLED", "false"));
-        String fileWatchPaths = envOrProp(props, environment, "file.watch.paths", "FILE_WATCH_PATHS", "");
-        String fileWatchMaxFileSizeRaw = envOrPropAllowBlank(props, environment,
-                "file.watch.maxFileSizeKb", "FILE_WATCH_MAX_FILE_SIZE_KB", "0");
+                values.get("file.watch.enabled", "false"));
+        String fileWatchPaths = values.get("file.watch.paths", "");
+        String fileWatchMaxFileSizeRaw = values.allowBlank("file.watch.maxFileSizeKb", "0");
         int fileWatchWorkerIntervalSeconds = parseIntOr(props,
-                envOrProp(props, environment, "file.watch.worker.intervalSeconds", "FILE_WATCH_WORKER_INTERVAL_SECONDS", "60"), 60);
+                values.get("file.watch.worker.intervalSeconds", "60"), 60);
         int fileWatchDebounceSeconds = parseIntOr(props,
-                envOrProp(props, environment, "file.watch.debounceSeconds", "FILE_WATCH_DEBOUNCE_SECONDS", "5"), 5);
+                values.get("file.watch.debounceSeconds", "5"), 5);
         int fileWatchHeartbeatThrottleSeconds = parseIntOr(props,
-                envOrProp(props, environment, "file.watch.heartbeatThrottleSeconds", "FILE_WATCH_HEARTBEAT_THROTTLE_SECONDS", "5"), 5);
-        String fileWatchExtensions = envOrPropAllowBlank(props, environment, "file.watch.extensions",
-                "FILE_WATCH_EXTENSIONS", FileFilterConfig.DEFAULT_EXTENSIONS_CSV);
-        String fileWatchExcludeDirs = envOrProp(props, environment, "file.watch.excludeDirs", "FILE_WATCH_EXCLUDE_DIRS", "");
-        String fileWatchExcludeGlobs = envOrProp(props, environment, "file.watch.excludeGlobs", "FILE_WATCH_EXCLUDE_GLOBS", "");
-        String fileWatchRespectGitIgnoreRaw = envOrPropAllowBlank(props, environment,
-                "file.watch.respectGitIgnore", "FILE_WATCH_RESPECT_GITIGNORE", "true");
+                values.get("file.watch.heartbeatThrottleSeconds", "5"), 5);
+        String fileWatchExtensions = values.allowBlank("file.watch.extensions", FileFilterConfig.DEFAULT_EXTENSIONS_CSV);
+        String fileWatchExcludeDirs = values.get("file.watch.excludeDirs", "");
+        String fileWatchExcludeGlobs = values.get("file.watch.excludeGlobs", "");
+        String fileWatchRespectGitIgnoreRaw = values.allowBlank("file.watch.respectGitIgnore", "true");
         long fileWatchMaxFileSizeKb = 0;
         boolean fileWatchRespectGitIgnore = true;
         String fileWatchConfigurationError = null;
@@ -236,29 +226,26 @@ public record Config(
         } catch (RuntimeException invalidFileFilter) {
             fileWatchConfigurationError = invalidFileFilter.getMessage();
         }
-        Path legacyFileSemanticIndexDir = Path.of(envOrProp(props, environment, "file.watch.semantic.index-dir",
-                "FILE_WATCH_SEMANTIC_INDEX_DIR", memDir + "/file-semantic-index"));
+        Path legacyFileSemanticIndexDir = Path.of(values.get("file.watch.semantic.index-dir", memDir + "/file-semantic-index"));
 
         // ── Token 用量限制 / 预算 (SPEC-BUDGET-*) ──
         int llmMaxTokens = parseIntOr(props,
-                envOrProp(props, environment, "llm.max-tokens", "LLM_MAX_TOKENS", "2048"), 2048);
+                values.get("llm.max-tokens", "2048"), 2048);
         if (llmMaxTokens < 0) llmMaxTokens = 0; // 0 = 不限
         int agentMaxIters = parseIntOr(props,
-                envOrProp(props, environment, "llm.agent.maxIters", "LLM_AGENT_MAX_ITERS", "8"), 8);
+                values.get("llm.agent.maxIters", "8"), 8);
         if (agentMaxIters < 1) agentMaxIters = 8;
         boolean agentCompactionEnabled = Boolean.parseBoolean(
-                envOrProp(props, environment, "agent.compaction.enabled", "AGENT_COMPACTION_ENABLED", "true"));
+                values.get("agent.compaction.enabled", "true"));
         int agentCompactionTriggerMessages = parseIntOr(props,
-                envOrProp(props, environment, "agent.compaction.triggerMessages",
-                        "AGENT_COMPACTION_TRIGGER_MESSAGES", "30"), 30);
+                values.get("agent.compaction.triggerMessages", "30"), 30);
         if (agentCompactionTriggerMessages < 0
                 || (agentCompactionTriggerMessages > 0 && agentCompactionTriggerMessages < 3)
                 || agentCompactionTriggerMessages > 10000) {
             agentCompactionTriggerMessages = 30;
         }
         int agentCompactionTriggerTokens = parseIntOr(props,
-                envOrProp(props, environment, "agent.compaction.triggerTokens",
-                        "AGENT_COMPACTION_TRIGGER_TOKENS", "60000"), 60000);
+                values.get("agent.compaction.triggerTokens", "60000"), 60000);
         if (agentCompactionTriggerTokens < 0
                 || (agentCompactionTriggerTokens > 0 && agentCompactionTriggerTokens < 4000)) {
             agentCompactionTriggerTokens = 60000;
@@ -270,8 +257,7 @@ public record Config(
             agentCompactionTriggerTokens = 60000;
         }
         int agentCompactionKeepMessages = parseIntOr(props,
-                envOrProp(props, environment, "agent.compaction.keepMessages",
-                        "AGENT_COMPACTION_KEEP_MESSAGES", "10"), 10);
+                values.get("agent.compaction.keepMessages", "10"), 10);
         if (agentCompactionKeepMessages < 2
                 || agentCompactionKeepMessages > 100
                 || (agentCompactionTriggerMessages > 0
@@ -281,8 +267,7 @@ public record Config(
                     : agentCompactionTriggerMessages == 3 ? 2 : 10;
         }
         int agentCompactionKeepTokens = parseIntOr(props,
-                envOrProp(props, environment, "agent.compaction.keepTokens",
-                        "AGENT_COMPACTION_KEEP_TOKENS", "12000"), 12000);
+                values.get("agent.compaction.keepTokens", "12000"), 12000);
         if (agentCompactionTriggerTokens == 0) {
             // AgentScope chooses token-based retention whenever keepTokens > 0. In a
             // message-only configuration that can make an oversized token window yield a
@@ -302,28 +287,28 @@ public record Config(
             }
         }
         int desktopSummaryMaxTimelineLlm = parseIntOr(props,
-                envOrProp(props, environment, "desktop.summary.maxTimelineLlm", "DESKTOP_SUMMARY_MAX_TIMELINE_LLM", "4"), 4);
+                values.get("desktop.summary.maxTimelineLlm", "4"), 4);
         if (desktopSummaryMaxTimelineLlm < 0) desktopSummaryMaxTimelineLlm = 0;
-        String budgetMode = envOrProp(props, environment, "llm.budget.mode", "LLM_BUDGET_MODE", "warn")
+        String budgetMode = values.get("llm.budget.mode", "warn")
                 .trim().toLowerCase();
         if (!budgetMode.equals("off") && !budgetMode.equals("warn") && !budgetMode.equals("block")) {
             budgetMode = "warn";
         }
         long budgetDailyTokens = parseLongOr(
-                envOrProp(props, environment, "llm.budget.dailyTokens", "LLM_BUDGET_DAILY_TOKENS", "100000000"), 100000000L);
+                values.get("llm.budget.dailyTokens", "100000000"), 100000000L);
         if (budgetDailyTokens < 0) budgetDailyTokens = 0; // 0 = 不限
         double budgetWarnRatio = parseDoubleOr(
-                envOrProp(props, environment, "llm.budget.warnRatio", "LLM_BUDGET_WARN_RATIO", "0.8"), 0.8);
+                values.get("llm.budget.warnRatio", "0.8"), 0.8);
         if (budgetWarnRatio <= 0 || budgetWarnRatio > 1) budgetWarnRatio = 0.8;
 
         boolean webSearchEnabled = Boolean.parseBoolean(
-                envOrProp(props, environment, "websearch.enabled", "WEBSEARCH_ENABLED", "false"));
-        String webSearchMcpUrl = envOrProp(props, environment, "websearch.mcp-url", "WEBSEARCH_MCP_URL",
+                values.get("websearch.enabled", "false"));
+        String webSearchMcpUrl = values.get("websearch.mcp-url",
                 "https://search.parallel.ai/mcp");
-        String webSearchApiKey = envOrProp(props, environment, "websearch.api-key", "WEBSEARCH_API_KEY", "");
+        String webSearchApiKey = values.get("websearch.api-key", "");
 
         // ── 应用语言 (SPEC-I18N-CFG-001) ──
-        String appLanguage = envOrProp(props, environment, "app.language", "APP_LANGUAGE", "auto");
+        String appLanguage = values.get("app.language", "auto");
 
         return new Config(apiKey, baseUrl, model, awUrl, awTimeout,
                 Path.of(memDir), awEmbedded, awPort, awDataDir,
@@ -392,7 +377,7 @@ public record Config(
     }
 
     /** Load the classpath {@code application.properties} defaults (empty if absent). */
-    private static Properties loadClasspathProps() {
+    static Properties loadClasspathProps() {
         Properties props = new Properties();
         try (InputStream in = Config.class.getClassLoader()
                 .getResourceAsStream("application.properties")) {
@@ -401,16 +386,6 @@ public record Config(
             }
         } catch (IOException ignored) {}
         return props;
-    }
-
-    /** Resolve memory.dir: system property > user TOML > env {@code MEMORY_DIR} > classpath default. */
-    private static String memoryDirOf(Properties props, Map<String, String> environment) {
-        String systemProp = System.getProperty("memory.dir");
-        if (systemProp != null && !systemProp.isBlank()) {
-            return systemProp;
-        }
-        return envOrProp(props, environment, "memory.dir", "MEMORY_DIR",
-                System.getProperty("user.home") + "/.self-analyst");
     }
 
     /** Portable user configuration directory, relative to the executable working directory. */
@@ -440,35 +415,6 @@ public record Config(
             }
         }
         return user;
-    }
-
-    private static String envOrProp(Properties props, Map<String, String> environment, String propKey,
-                                     String envKey, String defaultValue) {
-        // containsKey 只检查用户显式值，classpath 默认值位于 Properties.defaults。
-        if (props.containsKey(propKey)) {
-            String value = props.getProperty(propKey);
-            return value.isBlank() ? defaultValue
-                    : value.replace("${user.home}", System.getProperty("user.home"));
-        }
-        String env = environment.get(envKey);
-        if (env != null && !env.isBlank()) return env;
-        String prop = props.getProperty(propKey, defaultValue);
-        if (prop != null && !prop.isBlank()) {
-            return prop.replace("${user.home}", System.getProperty("user.home"));
-        }
-        return defaultValue;
-    }
-
-    /** Variant used by fail-closed settings where an explicit blank is meaningful. */
-    private static String envOrPropAllowBlank(Properties props, Map<String, String> environment, String propKey,
-                                               String envKey, String defaultValue) {
-        // containsKey 只检查用户显式值，classpath 默认值位于 Properties.defaults。
-        if (props.containsKey(propKey)) {
-            return props.getProperty(propKey).replace("${user.home}", System.getProperty("user.home"));
-        }
-        String env = environment.get(envKey);
-        if (env != null) return env;
-        return props.getProperty(propKey, defaultValue);
     }
 
     private static int parseIntOr(Properties props, String value, int defaultValue) {

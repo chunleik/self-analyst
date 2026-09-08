@@ -69,6 +69,17 @@ class EventServerSecurityTest {
                     .GET().build(), HttpResponse.BodyHandlers.ofString());
             assertFalse(credentialAccepted.statusCode() == 401);
 
+            String effectiveUrl = "http://127.0.0.1:" + port + "/desktop/config/effective";
+            assertEquals(401, client.send(HttpRequest.newBuilder(URI.create(effectiveUrl))
+                    .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertEquals(403, client.send(HttpRequest.newBuilder(URI.create(effectiveUrl))
+                    .header("X-SelfAnalyst-Token", "launch-secret")
+                    .header("Origin", "https://untrusted.example").GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode());
+            assertFalse(client.send(HttpRequest.newBuilder(URI.create(effectiveUrl))
+                    .header("X-SelfAnalyst-Token", "launch-secret").GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).statusCode() == 401);
+
             String rawUrl = "http://127.0.0.1:" + port
                     + "/desktop/raw-events?bucketId=secret-bucket";
             assertEquals(401, client.send(HttpRequest.newBuilder(URI.create(rawUrl))

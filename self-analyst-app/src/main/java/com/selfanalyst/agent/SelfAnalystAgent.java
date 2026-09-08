@@ -1,6 +1,9 @@
 package com.selfanalyst.agent;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.ConfigApplicationService;
+import com.selfanalyst.config.LlmSettings;
+import com.selfanalyst.config.LlmRuntimeManager;
 import com.selfanalyst.i18n.Lang;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.memory.MemoryStore;
@@ -63,8 +66,16 @@ public class SelfAnalystAgent implements AutoCloseable {
     private static final Pattern DESKTOP_SESSION_ID = Pattern.compile("^[a-f0-9]{32}$");
     private static final Pattern DESKTOP_MESSAGE_ID = Pattern.compile("^[a-f0-9]{12}$");
 
-    private final ReActAgent agent;
-    private final OpenAIChatModel plainModel;
+    private volatile ReActAgent agent;
+    private final Config startupConfig;
+    private final Toolkit toolkit;
+    private final ConfigApplicationService configuration;
+    private final LlmRuntimeManager<AgentRuntime> runtimes;
+    private final AtomicBoolean closed = new AtomicBoolean();
+    private record AgentRuntime(ReActAgent agent, OpenAIChatModel plain,
+                                TransactionalAgentStateCompactor compactor) implements AutoCloseable {
+        @Override public void close() { agent.close(); }
+    }
     private final MemoryStore memory;
     private final EventQueryTools tools;
     private final WikiStore wikiStore;
@@ -74,11 +85,13 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final UsageMeter usageMeter;
     private final McpClientWrapper webSearchMcpClient;
     private final AgentStateStore agentStateStore;
-    private final TransactionalAgentStateCompactor stateCompactor;
+    private volatile TransactionalAgentStateCompactor stateCompactor;
     private final Lang lang;
     private final AtomicBoolean chatRunning = new AtomicBoolean();
     private final AtomicReference<ActiveDesktopChat> activeDesktopChat = new AtomicReference<>();
     private volatile boolean usageMissingLogged;
+    // 仅在既有应用级 gate 内设置，整轮（包括工具内保存）保持不变。
+    private volatile boolean runtimesForChatAvailable;
 
     public SelfAnalystAgent(Config config) throws IOException {
         this(config, null, null, null, null, null);
@@ -102,6 +115,8 @@ public class SelfAnalystAgent implements AutoCloseable {
     public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter) throws IOException {
+        this.startupConfig = config;
+        this.configuration = userConfigStore == null ? null : userConfigStore.application(config);
         this.usageMeter = usageMeter;
         this.lang = config.effectiveLanguage();
         this.wikiStore = wikiStore;
@@ -113,7 +128,7 @@ public class SelfAnalystAgent implements AutoCloseable {
 
         // AgentScope 2.x executes multiple tool calls in parallel by default. Keep the
         // 1.x sequential semantics because several tools share local stores/connections.
-        Toolkit toolkit = new Toolkit(ToolkitConfig.builder().parallel(false).build());
+        this.toolkit = new Toolkit(ToolkitConfig.builder().parallel(false).build());
         toolkit.registerTool(tools);
         if (wikiTools != null) {
             toolkit.registerTool(wikiTools);
@@ -128,18 +143,34 @@ public class SelfAnalystAgent implements AutoCloseable {
         AgentStateStore builtStateStore = new JsonFileAgentStateStore(stateRoot);
         McpClientWrapper registeredWebSearchMcpClient = registerWebSearchMcp(toolkit, config);
 
+        this.webSearchMcpClient = registeredWebSearchMcpClient;
+        this.agentStateStore = builtStateStore;
+        try {
+            this.runtimes = new LlmRuntimeManager<>(
+                    configuration == null ? new Object() : configuration.commitLock(),
+                    LlmSettings.from(config), this::buildRuntime);
+            try (var lease = runtimes.acquire()) { selectRuntime(lease); }
+            if (configuration != null) configuration.attach(runtimes);
+        } catch (RuntimeException | Error failure) {
+            if (registeredWebSearchMcpClient != null) registeredWebSearchMcpClient.close();
+            builtStateStore.close();
+            throw failure;
+        }
+    }
+
+    private AgentRuntime buildRuntime(LlmSettings settings) {
+        Config config = startupConfig;
         OpenAIChatModel builtPlainModel;
         ReActAgent builtAgent;
-        try {
-            Integer maxTokens = config.llmMaxTokens() > 0 ? config.llmMaxTokens() : null;
-            String llmBaseUrl = config.llmBaseUrl();
+            Integer maxTokens = settings.maxTokens() > 0 ? settings.maxTokens() : null;
+            String llmBaseUrl = settings.baseUrl();
 
             GenerateOptions.Builder chatOpts = GenerateOptions.builder()
-                    .temperature(config.llmTemperature());
+                    .temperature(settings.temperature());
             if (maxTokens != null) chatOpts.maxTokens(maxTokens);
             OpenAIChatModel chatModel = OpenAIChatModel.builder()
-                    .apiKey(config.llmApiKey())
-                    .modelName(config.llmModel())
+                    .apiKey((settings.available() ? settings.apiKey() : "UNCONFIGURED"))
+                    .modelName(settings.model())
                     .baseUrl(llmBaseUrl)
                     .generateOptions(chatOpts.build())
                     .build();
@@ -149,8 +180,8 @@ public class SelfAnalystAgent implements AutoCloseable {
                     .stream(false);
             if (maxTokens != null) plainOpts.maxTokens(maxTokens);
             builtPlainModel = OpenAIChatModel.builder()
-                    .apiKey(config.llmApiKey())
-                    .modelName(config.llmModel())
+                    .apiKey((settings.available() ? settings.apiKey() : "UNCONFIGURED"))
+                    .modelName(settings.model())
                     .baseUrl(llmBaseUrl)
                     .stream(false)
                     .generateOptions(plainOpts.build())
@@ -166,7 +197,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                             new DynamicMemoryContextMiddleware(
                                     lang, () -> memory.profile().buildContextSummary()),
                             new PlanMiddleware(usageMeter)))
-                    .stateStore(builtStateStore)
+                    .stateStore(agentStateStore)
                     .defaultSessionId(LEGACY_SESSION_ID)
                     .maxIters(config.agentMaxIters())
                     .modelExecutionConfig(ExecutionConfig.builder()
@@ -174,25 +205,9 @@ public class SelfAnalystAgent implements AutoCloseable {
                             .maxAttempts(1)
                             .build())
                     .build();
-        } catch (RuntimeException | Error failure) {
-            if (registeredWebSearchMcpClient != null) {
-                try {
-                    registeredWebSearchMcpClient.close();
-                } catch (RuntimeException closeFailure) {
-                    failure.addSuppressed(closeFailure);
-                }
-            }
-            try {
-                builtStateStore.close();
-            } catch (RuntimeException closeFailure) {
-                failure.addSuppressed(closeFailure);
-            }
-            throw failure;
-        }
-        this.plainModel = builtPlainModel;
-        this.agent = builtAgent;
-        this.webSearchMcpClient = registeredWebSearchMcpClient;
-        this.agentStateStore = builtStateStore;
+
+        TransactionalAgentStateCompactor compactor;
+        try {
         if (config.agentCompactionEnabled()) {
             io.agentscope.core.model.Model compactionModel = new UsageMeteredModel(
                     builtPlainModel, usageMeter, UsageMeter.Category.SUMMARY);
@@ -205,15 +220,30 @@ public class SelfAnalystAgent implements AutoCloseable {
                     .offloadBeforeCompact(false)
                     .model(compactionModel)
                     .build();
-            this.stateCompactor = new TransactionalAgentStateCompactor(
+            compactor = new TransactionalAgentStateCompactor(
                     builtAgent,
                     config.memoryDir().resolve("agent-workspace").resolve("self-analyst-chat"),
                     compactionModel,
                     compactionConfig);
         } else {
-            this.stateCompactor = null;
+            compactor = null;
+        }
+            return new AgentRuntime(builtAgent, builtPlainModel, compactor);
+        } catch (RuntimeException | Error failure) {
+            builtAgent.close();
+            throw failure;
         }
     }
+
+    private void selectRuntime(LlmRuntimeManager<AgentRuntime>.Lease lease) {
+        agent = lease.resource().agent();
+        stateCompactor = lease.resource().compactor();
+        runtimesForChatAvailable = lease.settings().available();
+    }
+
+    public LlmSettings llmSettings() { return runtimes.settings(); }
+    public boolean isLlmAvailable() { return runtimes.available(); }
+    public ConfigApplicationService configuration() { return configuration; }
 
     /**
      * 接入 Parallel Search MCP 联网搜索。默认走匿名端点，无需 API key；
@@ -382,6 +412,10 @@ public class SelfAnalystAgent implements AutoCloseable {
                 agent.clearStateCache(DESKTOP_USER_ID, sessionId);
                 return Flux.just(ChatStreamEvent.result(prepared.completedReply()));
             }
+            if (!runtimesForChatAvailable) {
+                agent.clearStateCache(DESKTOP_USER_ID, sessionId);
+                return Flux.error(new com.selfanalyst.wiki.usage.LlmUnavailableException());
+            }
             Mono<Boolean> compact = stateCompactor != null
                     ? stateCompactor.compactIfNeeded(DESKTOP_USER_ID, sessionId)
                     : Mono.just(false);
@@ -410,6 +444,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                                 () -> context,
                                 activeContext -> agent.streamEvents(
                                                 prepared.messages(), activeContext)
+                                        .onErrorMap(SelfAnalystAgent::safeModelFailure)
                                         .handle((event, sink) -> {
                                             if (event instanceof AgentResultEvent) {
                                                 if (activeChat.completeModelCall()) {
@@ -695,10 +730,19 @@ public class SelfAnalystAgent implements AutoCloseable {
                     if (!chatRunning.compareAndSet(false, true)) {
                         throw new IllegalStateException("Agent is still running");
                     }
-                    return Boolean.TRUE;
+                    try {
+                        var lease = runtimes.acquire();
+                        selectRuntime(lease);
+                        return lease;
+                    } catch (RuntimeException failure) {
+                        chatRunning.set(false);
+                        throw failure;
+                    }
                 },
                 ignored -> Mono.defer(action),
-                ignored -> chatRunning.set(false),
+                lease -> {
+                    try { lease.close(); } finally { chatRunning.set(false); }
+                },
                 true);
     }
 
@@ -717,10 +761,18 @@ public class SelfAnalystAgent implements AutoCloseable {
                         chatRunning.set(false);
                         throw new IllegalStateException("Agent is still running");
                     }
-                    return Boolean.TRUE;
+                    try {
+                        var lease = runtimes.acquire();
+                        selectRuntime(lease);
+                        return lease;
+                    } catch (RuntimeException failure) {
+                        if (desktopChat != null) activeDesktopChat.compareAndSet(desktopChat, null);
+                        chatRunning.set(false);
+                        throw failure;
+                    }
                 },
                 ignored -> Flux.defer(action),
-                ignored -> {
+                lease -> {
                     boolean cancelled = desktopChat != null && desktopChat.close();
                     try {
                         if (cancelled) {
@@ -732,7 +784,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                             agent.clearStateCache(DESKTOP_USER_ID, desktopChat.sessionId);
                             activeDesktopChat.compareAndSet(desktopChat, null);
                         }
-                        chatRunning.set(false);
+                        try { lease.close(); } finally { chatRunning.set(false); }
                     }
                 },
                 true);
@@ -852,7 +904,23 @@ public class SelfAnalystAgent implements AutoCloseable {
                 : java.util.Map.of("mode", "off", "status", "ok");
     }
 
+    public final class PlainTask implements AutoCloseable {
+        private final LlmRuntimeManager<AgentRuntime>.Lease lease = runtimes.acquire();
+        public String complete(String input, Duration timeout) {
+            if (!lease.settings().available()) throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
+            return completePlain(lease.resource().plain(), input, timeout);
+        }
+        public boolean available() { return lease.settings().available(); }
+        @Override public void close() { lease.close(); }
+    }
+
+    public PlainTask plainTask() { return new PlainTask(); }
+
     public String completePlain(String userInput, Duration timeout) {
+        try (PlainTask task = plainTask()) { return task.complete(userInput, timeout); }
+    }
+
+    private String completePlain(OpenAIChatModel plainModel, String userInput, Duration timeout) {
         if (usageMeter != null) {
             usageMeter.enforce(UsageMeter.Category.SUMMARY);
         }
@@ -904,10 +972,16 @@ public class SelfAnalystAgent implements AutoCloseable {
         } catch (TimeoutException e) {
             throw new RuntimeException("LLM call timed out after " + timeout, e);
         } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof RuntimeException re) throw re;
-            throw new RuntimeException("LLM call failed", cause);
+            throw safeModelFailure(e.getCause());
         }
+    }
+
+    private static RuntimeException safeModelFailure(Throwable failure) {
+        if (failure instanceof ChatCancelledException cancelled) return cancelled;
+        String message = failure == null ? "" : String.valueOf(failure.getMessage());
+        var status = Pattern.compile("\\b(400|401|403|404|408|429|500|502|503|504)\\b").matcher(message);
+        return new RuntimeException(status.find() ? "LLM 调用失败 (HTTP " + status.group(1) + ")"
+                : "LLM 调用失败，请检查模型配置或网络连接");
     }
 
     /** jtokkit (cl100k_base) 精确计数，仅用于响应未带 usage 时的回退计量。 */
@@ -936,22 +1010,25 @@ public class SelfAnalystAgent implements AutoCloseable {
         memory.save();
     }
 
+    public void beginShutdown() {
+        if (configuration != null) configuration.close();
+        runtimes.close();
+        ActiveDesktopChat active = activeDesktopChat.get();
+        if (active != null) {
+            active.cancel(() -> agent.interrupt(DESKTOP_USER_ID, active.sessionId,
+                    Msg.builder().name("user").role(MsgRole.USER).textContent("应用正在关闭").build()));
+        }
+    }
+
     @Override
     public void close() {
+        if (!closed.compareAndSet(false, true)) return;
+        beginShutdown();
+        runtimes.awaitIdle();
         try {
-            agent.close();
+            if (webSearchMcpClient != null) webSearchMcpClient.close();
         } finally {
-            try {
-                if (webSearchMcpClient != null) {
-                    try {
-                        webSearchMcpClient.close();
-                    } catch (RuntimeException closeFailure) {
-                        log.warn("关闭联网搜索 MCP 客户端时出错: {}", closeFailure.getMessage());
-                    }
-                }
-            } finally {
-                agentStateStore.close();
-            }
+            agentStateStore.close();
         }
     }
 }

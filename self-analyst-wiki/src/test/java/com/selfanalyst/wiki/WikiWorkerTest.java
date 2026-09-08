@@ -217,6 +217,35 @@ class WikiWorkerTest {
                 "a retryable child must run even when an incomplete failed parent sorts first");
     }
 
+    @Test
+    void unconfiguredModelStaysPendingAndRecoversNextAttempt(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("llm-wiki.db"));
+        awDatabase = new Database(dir.resolve("events"));
+        var ready = new java.util.concurrent.atomic.AtomicBoolean();
+        worker = new WikiWorker(store,
+                new WikiFactBuilder(new EventStore(awDatabase, PulseTimeConfig.DEFAULT), 12_000),
+                new WikiSummarizer(prompt -> {
+                    if (!ready.get()) throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
+                    return "{\"summary\":\"recovered\",\"primaryTask\":\"task\",\"taskSegments\":[],\"metrics\":{}}";
+                }), ZoneId.of("UTC"), Duration.ofSeconds(5), 3_600, false, null);
+        Instant start = Instant.parse("2026-08-10T00:00:00Z");
+        WikiEntry week = entry("waiting-week", WikiLevel.WEEK, start, start.plus(7, ChronoUnit.DAYS), WikiStatus.PENDING);
+        store.upsert(week);
+        for (int day = 0; day < 7; day++) {
+            Instant dayStart = start.plus(day, ChronoUnit.DAYS);
+            store.upsert(summarizedEntry("child-" + day, dayStart, dayStart.plus(1, ChronoUnit.DAYS), "UTC", "task", 1));
+        }
+        Method process = WikiWorker.class.getDeclaredMethod("processEntry", WikiEntry.class);
+        process.setAccessible(true);
+        process.invoke(worker, week);
+        var waiting = store.query(start, week.periodEnd(), WikiLevel.WEEK).get(0);
+        assertEquals(WikiStatus.PENDING, waiting.status());
+        assertEquals(0, waiting.retryCount());
+        ready.set(true);
+        process.invoke(worker, waiting);
+        assertEquals(WikiStatus.SUMMARIZED, store.query(start, week.periodEnd(), WikiLevel.WEEK).get(0).status());
+    }
+
     private static WikiEntry entry(String id, WikiLevel level, Instant start,
                                    Instant end, WikiStatus status) {
         return new WikiEntry(id, level, start, end, "UTC", status,

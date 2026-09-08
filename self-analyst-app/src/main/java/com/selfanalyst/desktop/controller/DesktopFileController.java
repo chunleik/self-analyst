@@ -161,18 +161,16 @@ public class DesktopFileController {
         }
         List<Path> roots = normalizeWatchRoots(requestedPaths);
 
-        Properties user = configStore.loadUser();
-        user.setProperty("file.watch.enabled", Boolean.toString(enabled));
-        if (roots.isEmpty()) {
-            user.remove("file.watch.paths");
-        } else {
-            user.setProperty("file.watch.paths", roots.stream()
-                    .map(Path::toString)
-                    .reduce((left, right) -> left + "," + right)
-                    .orElse(""));
+        var application = configStore.application();
+        synchronized (application.commitLock()) {
+            Map<String, String> updates = new LinkedHashMap<>();
+            updates.put("file.watch.enabled", Boolean.toString(enabled));
+            updates.put("file.watch.paths", roots.stream().map(Path::toString)
+                    .collect(java.util.stream.Collectors.joining(",")));
+            application.update(updates);
+            settingsApplier.apply(enabled, roots);
+            application.markApplied(updates.keySet());
         }
-        configStore.save(user);
-        settingsApplier.apply(enabled, roots);
         return overviewPayload(DEFAULT_LIMIT);
     }
 

@@ -35,6 +35,15 @@ public class UserConfigStore {
 
     private final Path filePath;
     private final Properties defaults;
+    private com.selfanalyst.config.ConfigApplicationService application;
+
+    public synchronized com.selfanalyst.config.ConfigApplicationService application(com.selfanalyst.config.Config initial) {
+        if (application == null) application = new com.selfanalyst.config.ConfigApplicationService(this, initial);
+        return application;
+    }
+    public com.selfanalyst.config.ConfigApplicationService application() {
+        return application(com.selfanalyst.config.Config.load(filePath.getParent()));
+    }
 
     public UserConfigStore(Path configDir) {
         this.filePath = configDir.resolve("config.toml");

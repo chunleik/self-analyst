@@ -357,12 +357,13 @@ public class DesktopChatSessionController {
             ChatSessionStore.Session session = store.getSession(id);
             if (session == null) return; // deleted mid-flight
             // LLM availability computed exactly as DesktopAgentController.getSummary.
-            boolean llmAvailable = agent != null && config != null
-                    && config.llmApiKey() != null && !config.llmApiKey().isBlank()
-                    && !config.llmApiKey().contains("CHANGE_ME")
+            boolean llmAvailable = agent != null && agent.isLlmAvailable()
                     && !agent.isBudgetBlocked();
-            SummaryPromptService.SummaryTextClient client = llmAvailable ? agent::completePlain : null;
-            String summary = summaryService.summarize(session, client);
+            String summary;
+            try (var task = llmAvailable ? agent.plainTask() : null) {
+                SummaryPromptService.SummaryTextClient client = task != null && task.available() ? task::complete : null;
+                summary = summaryService.summarize(session, client);
+            }
             if (summary != null && !summary.isBlank()) {
                 store.writeSummary(id, summary);
             }
@@ -395,8 +396,10 @@ public class DesktopChatSessionController {
                     }
                 }
                 if (assistant == null || user == null) return;
-                SummaryPromptService.SummaryTextClient client = llmAvailable() ? agent::completePlain : null;
-                memoryExtractionService.extractAfterAssistantSent(session, user, assistant, client);
+                try (var task = llmAvailable() ? agent.plainTask() : null) {
+                    SummaryPromptService.SummaryTextClient client = task != null && task.available() ? task::complete : null;
+                    memoryExtractionService.extractAfterAssistantSent(session, user, assistant, client);
+                }
             } catch (Exception e) {
                 log.warn("Memory extraction failed for session {}: {}", sessionId, e.getMessage());
             }
@@ -404,9 +407,7 @@ public class DesktopChatSessionController {
     }
 
     private boolean llmAvailable() {
-        return agent != null && config != null
-                && config.llmApiKey() != null && !config.llmApiKey().isBlank()
-                && !config.llmApiKey().contains("CHANGE_ME")
+        return agent != null && agent.isLlmAvailable()
                 && !agent.isBudgetBlocked();
     }
 

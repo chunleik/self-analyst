@@ -27,15 +27,7 @@ public class ConfigTools {
             "llm.budget.mode", "llm.budget.dailyTokens", "llm.budget.warnRatio"
     );
 
-    private static final Set<String> RESTART_REQUIRED = Set.of(
-            "app.language",
-            "llm.model", "llm.temperature", "aw.mode", "aw.port",
-            "aw.collection.window", "aw.collection.afk", "aw.collection.content",
-            "agent.summaryRefreshMinutes", "desktop.autoStartBackend",
-            "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
-            "llm.max-tokens", "llm.agent.maxIters", "desktop.summary.maxTimelineLlm",
-            "llm.budget.mode", "llm.budget.dailyTokens", "llm.budget.warnRatio"
-    );
+
 
     private final UserConfigStore userStore;
     public ConfigTools(UserConfigStore userStore) {
@@ -53,7 +45,7 @@ public class ConfigTools {
             "token 用量限制 llm.max-tokens、llm.agent.maxIters、desktop.summary.maxTimelineLlm、" +
             "llm.budget.mode（off/warn/block）、llm.budget.dailyTokens、llm.budget.warnRatio。")
     public String getConfig() {
-        Properties eff = userStore.load();
+        Properties eff = userStore.application().saved().properties();
         StringBuilder sb = new StringBuilder("当前 SelfAnalyst 配置：\n\n");
 
         appendSection(sb, "应用", new String[][]{
@@ -100,14 +92,15 @@ public class ConfigTools {
                 {"llm.budget.warnRatio",            eff.getProperty("llm.budget.warnRatio",            "0.8"),     null},
         });
 
+        sb.append("\n配置来源：").append(userStore.application().sourceSummary());
         return sb.toString();
     }
 
     @Tool(description = "更新 SelfAnalyst 的一个配置项并持久化到文件。" +
             "key 为点分配置键（如 llm.model、websearch.enabled）；" +
             "value 为新值，布尔值用 true/false，数字直接写数字，字符串直接写值。" +
-            "部分配置项（如 llm.model、websearch.enabled 等）需重启后生效，返回信息中会注明。" +
-            "value 为空字符串时删除用户覆盖，回退到默认值。")
+            "LLM 配置在新一轮生效，部分其它配置（如 websearch.enabled）需重启，返回信息中会注明。" +
+            "value 为空字符串时删除用户覆盖，回退到环境变量或默认值。")
     public String setConfigValue(
             @ToolParam(name = "key", description = "配置键，如 llm.model、websearch.enabled、agent.summaryRefreshMinutes")
             String key,
@@ -122,15 +115,12 @@ public class ConfigTools {
                     String.join("、", ALLOWED_KEYS.stream().sorted().toList()) + "。";
         }
         try {
-            userStore.set(key, value == null ? "" : value);
-            boolean restartNeeded = RESTART_REQUIRED.contains(key);
-            String displayValue = key.contains("api-key") ? maskKey(value) : value;
-            return "配置已保存：" + key + " = " + displayValue +
-                    (restartNeeded
-                            ? "\n注意：该配置项需重启 SelfAnalyst 后才能生效。"
-                            : "\n该配置已持久化，下次读取时生效。");
+            var result = userStore.application().update(java.util.Map.of(key, value == null ? "" : value));
+            return "配置已保存：" + key + "\n应用结果：" + result.application()
+                    + (result.restartRequired().isEmpty() ? "" : "\n需重启：" + result.restartRequired());
+
         } catch (Exception e) {
-            return "保存失败：" + e.getMessage();
+            return "保存失败：请检查配置参数或文件写入权限。";
         }
     }
 

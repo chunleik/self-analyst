@@ -2,6 +2,8 @@ package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.events.raw.RawPartitionCatalog;
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.ConfigApplicationService;
+import com.selfanalyst.config.ConfigPolicy;
 import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.RawConfigValidator;
 import com.selfanalyst.config.SupportedKeys;
@@ -41,31 +43,19 @@ public class DesktopConfigController {
     private static final TypeReference<Map<String, Object>> OBJECT_MAP_TYPE =
             new TypeReference<>() {};
 
-    /** Keys that require a backend restart when changed. */
-    private static final Set<String> RESTART_REQUIRED = Set.of(
-            "llm.model", "aw.mode", "aw.port", "aw.data-dir",
-            "memory.dir", "agent.summaryRefreshMinutes", "desktop.autoStartBackend",
-            "agent.compaction.enabled", "agent.compaction.triggerMessages",
-            "agent.compaction.triggerTokens", "agent.compaction.keepMessages",
-            "agent.compaction.keepTokens",
-            "file.watch.enabled", "file.watch.paths",
-            "file.watch.maxFileSizeKb",
-            "file.watch.worker.intervalSeconds", "file.watch.debounceSeconds",
-            "file.watch.heartbeatThrottleSeconds", "file.watch.extensions",
-            "file.watch.excludeDirs", "file.watch.excludeGlobs",
-            "file.watch.respectGitIgnore",
-            "websearch.enabled", "websearch.mcp-url", "websearch.api-key"
-    );
+
 
     // Supported config keys, defaults and declared types live in the shared
     // com.selfanalyst.config.SupportedKeys (single source of truth for the raw-edit
     // template, unknown-key detection, type validation, and TOML generation).
 
     private final Config config;
+    private final ConfigApplicationService configuration;
     private final UserConfigStore userStore;
 
     public DesktopConfigController(Config config, UserConfigStore userStore) {
         this.config = config;
+        this.configuration = userStore.application(config);
         this.userStore = userStore;
     }
 
@@ -77,7 +67,9 @@ public class DesktopConfigController {
     }
 
     Map<String, Object> configPayload() {
-        Properties defaults = userStore.load(); // merged classpath + user
+        synchronized (configuration.commitLock()) {
+        var snapshot = configuration.saved();
+        Properties defaults = snapshot.properties();
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("llm", buildLlmSection(defaults));
@@ -87,7 +79,31 @@ public class DesktopConfigController {
         response.put("desktop", buildDesktopSection(defaults));
         response.put("embedding", buildEmbeddingSection(defaults));
         response.put("websearch", buildWebSearchSection(defaults));
+        Properties user = userStore.loadUser();
+        response.forEach((section, fields) -> enrichFields(section, "", fields, snapshot, user));
         return response;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void enrichFields(String section, String path, Object node,
+                              com.selfanalyst.config.ConfigResolver.Snapshot snapshot, Properties user) {
+        if (!(node instanceof Map<?, ?> raw)) return;
+        Map<String, Object> fields = (Map<String, Object>) raw;
+        if (!fields.containsKey("effectiveValue")) {
+            fields.forEach((name, child) -> enrichFields(section,
+                    path.isEmpty() ? name : path + "." + name, child, snapshot, user));
+            return;
+        }
+        String key = mapStructuredKey(section, path, sectionToPrefix().get(section));
+        var value = snapshot.values().get(key);
+        if (value == null) return;
+        boolean sensitive = com.selfanalyst.config.ConfigResolver.sensitive(key);
+        String saved = user.getProperty(key);
+        fields.put("savedValue", saved == null ? null : sensitive ? maskKey(saved) : saved);
+        fields.put("source", value.source().equals("toml") ? "user_config" : value.source());
+        fields.put("overridden", saved != null && !Objects.equals(saved, value.value()));
+        fields.put("restartRequiredOnChange", ConfigPolicy.requiresRestart(key));
     }
 
     /**
@@ -98,11 +114,11 @@ public class DesktopConfigController {
         try {
             Map<String, Object> body = MAPPER.readValue(ctx.body(), OBJECT_MAP_TYPE);
             StructuredSaveResult result = applyStructuredSave(body);
-            ctx.json(Map.of("saved", true, "restartRequired", result.restartRequired()));
+            ctx.json(result.result().payload());
         } catch (Throwable t) {
-            log.error("Failed to save config", t);
+            log.error("配置保存失败 ({})", t.getClass().getSimpleName());
             try {
-                String msg = t.getMessage();
+                String msg = "配置保存或应用失败";
                 if (msg == null) msg = t.getClass().getName();
                 ctx.status(500).result("{\"error\":\"Save config failed: " + escapeJson(msg) + "\"}").contentType("application/json");
             } catch (Throwable suppressed) {
@@ -114,50 +130,28 @@ public class DesktopConfigController {
         }
     }
 
-    record StructuredSaveResult(List<String> restartRequired) {}
+    record StructuredSaveResult(ConfigApplicationService.SaveResult result) {
+        List<String> restartRequired() { return result.restartRequired(); }
+    }
 
     StructuredSaveResult applyStructuredSave(Map<String, Object> body) throws IOException {
-        Properties user = userStore.loadUser();
-        Properties effective = userStore.load();
-        Set<String> restartKeys = new LinkedHashSet<>();
-
+        Map<String, String> changes = new LinkedHashMap<>();
         for (var entry : sectionToPrefix().entrySet()) {
-            String section = entry.getKey();
-            String prefix = entry.getValue();
-            Object sectionData = body.get(section);
-            if (!(sectionData instanceof Map<?, ?> sectionMap)) {
-                continue;
-            }
-
+            Object sectionData = body.get(entry.getKey());
+            if (!(sectionData instanceof Map<?, ?> sectionMap)) continue;
             Map<String, Object> flat = new LinkedHashMap<>();
             flattenStructuredSection("", sectionMap, flat);
             for (var kv : flat.entrySet()) {
-                String mappedKey = mapStructuredKey(section, kv.getKey(), prefix);
-                if (DeprecatedKeys.contains(mappedKey) || !SupportedKeys.contains(mappedKey)) {
-                    continue;
-                }
-                String value = kv.getValue() != null ? kv.getValue().toString() : "";
-                String oldEffective = effective.getProperty(mappedKey, "");
-                boolean hasUserOverride = user.containsKey(mappedKey);
-
-                if (value.isBlank()) {
-                    if (hasUserOverride && effectiveWouldChangeAfterRemoval(mappedKey, oldEffective)) {
-                        addRestartIfNeeded(restartKeys, mappedKey);
-                    }
-                    user.remove(mappedKey);
-                } else {
-                    if (!Objects.equals(value, oldEffective)) {
-                        addRestartIfNeeded(restartKeys, mappedKey);
-                    }
-                    if (hasUserOverride || !Objects.equals(value, oldEffective)) {
-                        user.setProperty(mappedKey, value);
-                    }
-                }
+                String key = mapStructuredKey(entry.getKey(), kv.getKey(), entry.getValue());
+                if (DeprecatedKeys.contains(key) || !SupportedKeys.contains(key)) continue;
+                changes.put(key, kv.getValue() == null ? "" : kv.getValue().toString());
             }
         }
+        return new StructuredSaveResult(configuration.update(changes));
+    }
 
-        userStore.save(user);
-        return new StructuredSaveResult(new ArrayList<>(restartKeys));
+    public void getEffectiveConfig(Context ctx) {
+        ctx.json(configuration.effectivePayload());
     }
 
     private static Map<String, String> sectionToPrefix() {
@@ -247,7 +241,7 @@ public class DesktopConfigController {
     }
 
     private static void addRestartIfNeeded(Set<String> restartKeys, String mappedKey) {
-        if (RESTART_REQUIRED.contains(mappedKey)) {
+        if (ConfigPolicy.requiresRestart(mappedKey)) {
             restartKeys.add(mappedKey);
         }
     }
@@ -276,7 +270,7 @@ public class DesktopConfigController {
         keys.addAll(newP.stringPropertyNames());
         List<String> result = new ArrayList<>();
         for (String key : keys) {
-            if (!RESTART_REQUIRED.contains(key)) continue;
+            if (!ConfigPolicy.requiresRestart(key)) continue;
             if (!Objects.equals(oldP.getProperty(key), newP.getProperty(key))) {
                 result.add(key);
             }
@@ -345,7 +339,10 @@ public class DesktopConfigController {
     }
 
     /** PUT /desktop/config/raw result payload. */
-    record RawSaveResult(List<String> restartRequired, List<String> unknownKeys) {}
+    record RawSaveResult(ConfigApplicationService.SaveResult result) {
+        List<String> restartRequired() { return result.restartRequired(); }
+        List<String> unknownKeys() { return result.unknownKeys(); }
+    }
 
     /**
      * Validate as TOML v1.0 (syntax + structure + known-key types), then atomically
@@ -364,12 +361,7 @@ public class DesktopConfigController {
         Properties newP = toProperties(flat);
         validateFileFilterSettings(newP);
         validateRawSettings(newP);
-        Properties oldP = userStore.loadUser();
-        validateRawDirectoryChange(newP);
-        List<String> restart = computeRestartRequired(oldP, newP);
-        List<String> unknown = computeUnknownKeys(newP);
-        userStore.saveRaw(text);
-        return new RawSaveResult(restart, unknown);
+        return new RawSaveResult(configuration.saveRaw(text));
     }
 
     static void validateFileFilterSettings(Properties userProperties) {
@@ -431,7 +423,7 @@ public class DesktopConfigController {
             ctx.json(buildRawResponse());
         } catch (Throwable t) {
             log.error("Failed to read raw config", t);
-            String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getName();
+            String msg = "配置读写失败";
             ctx.status(500).result("{\"error\":\"Read raw config failed: " + escapeJson(msg) + "\"}")
                     .contentType("application/json");
         }
@@ -454,9 +446,7 @@ public class DesktopConfigController {
         }
         try {
             RawSaveResult r = applyRawSave(text);
-            ctx.json(Map.of("saved", true,
-                    "restartRequired", r.restartRequired(),
-                    "unknownKeys", r.unknownKeys()));
+            ctx.json(r.result().payload());
         } catch (TomlValidationException e) {
             // TOML syntax/structure/type failure → 400 with line/col + violating keys,
             // nothing written to disk. SPEC-TOML-API-001b/c, SPEC-TOML-GOAL-005.
@@ -465,8 +455,8 @@ public class DesktopConfigController {
                     .contentType("application/json");
         } catch (Throwable t) {
             // IO/other failures → 500 (disk write happens only after validation passes).
-            log.error("Failed to save raw config", t);
-            String msg = t.getMessage() != null ? t.getMessage() : t.getClass().getName();
+            log.error("配置保存失败 ({})", t.getClass().getSimpleName());
+            String msg = "配置读写失败";
             ctx.status(500).result("{\"error\":\"Save raw config failed: " + escapeJson(msg) + "\"}")
                     .contentType("application/json");
         }
@@ -503,8 +493,8 @@ public class DesktopConfigController {
                 body = Map.of();
             }
 
-            Config effective = Config.load(userStore.filePath().getParent());
-            String userProvidedKey = stringOr(body.get("apiKey"), null);
+            Config effective = testConfiguration(body);
+            String userProvidedKey = body.containsKey("text") ? null : stringOr(body.get("apiKey"), null);
             // If frontend sends a masked key (user didn't type a new one), use stored key
             if (userProvidedKey == null || userProvidedKey.contains("****")) {
                 userProvidedKey = null;
@@ -540,11 +530,11 @@ public class DesktopConfigController {
                 ctx.json(Map.of("ok", true, "model", model));
             } else {
                 ctx.json(Map.of("ok", false,
-                        "error", "HTTP " + resp.statusCode() + ": " + truncate(resp.body(), 200)));
+                        "error", "HTTP " + resp.statusCode()));
             }
         } catch (Throwable e) {
             ctx.status(200).json(Map.of("ok", false, "error",
-                    e.getClass().getSimpleName() + ": " + e.getMessage()));
+                    "连接测试失败 (" + e.getClass().getSimpleName() + ")"));
         }
     }
 
@@ -560,8 +550,8 @@ public class DesktopConfigController {
                 body = Map.of();
             }
 
-            Config effective = Config.load(userStore.filePath().getParent());
-            String userProvidedKey = stringOr(body.get("embeddingApiKey"), null);
+            Config effective = testConfiguration(body);
+            String userProvidedKey = body.containsKey("text") ? null : stringOr(body.get("embeddingApiKey"), null);
             if (userProvidedKey == null || userProvidedKey.contains("****")) {
                 userProvidedKey = null;
             }
@@ -610,12 +600,23 @@ public class DesktopConfigController {
                 ctx.json(Map.of("ok", true, "model", model));
             } else {
                 ctx.json(Map.of("ok", false,
-                        "error", "HTTP " + resp.statusCode() + ": " + truncate(resp.body(), 200)));
+                        "error", "HTTP " + resp.statusCode()));
             }
         } catch (Throwable e) {
             ctx.status(200).json(Map.of("ok", false, "error",
-                    e.getClass().getSimpleName() + ": " + e.getMessage()));
+                    "连接测试失败 (" + e.getClass().getSimpleName() + ")"));
         }
+    }
+
+    private Config testConfiguration(Map<String, Object> body) {
+        if (!body.containsKey("text")) return configuration.saved().config();
+        var flat = TomlSupport.parseAndFlatten(String.valueOf(body.get("text")));
+        var violations = TomlSupport.validateTypes(flat, SupportedKeys.types());
+        if (!violations.isEmpty()) throw new TomlValidationException(violations);
+        // 兼容缺省参数沿用已保存配置；显式空值必须保留。
+        Properties user = userStore.loadUser();
+        flat.forEach(user::setProperty);
+        return configuration.resolve(user).config();
     }
 
     // ── Section builders ─────────────────────────────────────────
@@ -705,31 +706,22 @@ public class DesktopConfigController {
     }
 
     private Map<String, Object> field(String name, String effectiveValue, boolean sensitive) {
-        Properties user = userStore.loadUser();
-
-        // Determine the dotted key for this field
-        // (section builders use the visual name; we need to map to actual keys)
-        // We store user keys with prefixes, but effective comes from merged.
-        // For simplicity, source is "default" unless key exists in user file.
-
-        Map<String, Object> f = new LinkedHashMap<>();
-        f.put("effectiveValue", sensitive ? maskKey(effectiveValue) : effectiveValue);
-
-        // Attempt to find saved value — search common key patterns
-        String savedRaw = findUserValue(user, name);
-        f.put("savedValue", savedRaw == null ? null : (sensitive ? maskKey(savedRaw) : savedRaw));
-
-        boolean hasUserOverride = savedRaw != null;
-        f.put("overridden", hasUserOverride && !Objects.equals(savedRaw, effectiveValue));
-        f.put("source", hasUserOverride ? "user_config" : "default");
-        f.put("restartRequiredOnChange",
-                RESTART_REQUIRED.contains("llm." + name)
-                        || RESTART_REQUIRED.contains("aw." + name)
-                        || RESTART_REQUIRED.contains("agent." + name)
-                        || RESTART_REQUIRED.contains("desktop." + name)
-                        || RESTART_REQUIRED.contains("embedding." + name)
-                        || RESTART_REQUIRED.contains(name));
-        return f;
+        Map<String, Object> field = new LinkedHashMap<>();
+        field.put("effectiveValue", sensitive ? maskKey(effectiveValue) : effectiveValue);
+        field.put("savedValue", null);
+        field.put("source", "default");
+        field.put("overridden", false);
+        field.put("restartRequiredOnChange", false);
+        // 完整点分键也供独立 section builder 的调用方使用。
+        if (SupportedKeys.contains(name)) {
+            String saved = userStore.loadUser().getProperty(name);
+            var resolved = configuration.saved().values().get(name);
+            field.put("savedValue", saved == null ? null : sensitive ? maskKey(saved) : saved);
+            field.put("source", resolved.source().equals("toml") ? "user_config" : resolved.source());
+            field.put("overridden", saved != null && !Objects.equals(saved, effectiveValue));
+            field.put("restartRequiredOnChange", ConfigPolicy.requiresRestart(name));
+        }
+        return field;
     }
 
     /**

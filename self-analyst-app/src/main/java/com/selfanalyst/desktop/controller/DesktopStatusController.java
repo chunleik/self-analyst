@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.LlmSettings;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.events.watcher.Watcher;
 import com.selfanalyst.events.watcher.WatcherManager;
@@ -29,6 +30,14 @@ import java.util.function.Supplier;
 public class DesktopStatusController implements AutoCloseable {
 
     private final Config config;
+    private volatile Supplier<LlmSettings> llmSettings;
+    private volatile LlmSettings checkedSettings;
+    private final AtomicBoolean checkRunning = new AtomicBoolean();
+
+    public void setLlmSettingsSupplier(Supplier<LlmSettings> supplier) { llmSettings = supplier; }
+    private LlmSettings modelSettings() {
+        return llmSettings == null ? LlmSettings.from(config) : llmSettings.get();
+    }
     private final WatcherManager watcherManager;
     private final ContentWatcher contentWatcher;
     private final boolean contentPersistenceReady;
@@ -79,11 +88,16 @@ public class DesktopStatusController implements AutoCloseable {
     }
 
     private void refreshLlmAvailability() {
-        boolean configured = config.llmApiKey() != null
-                && !config.llmApiKey().isBlank()
-                && !config.llmApiKey().contains("CHANGE_ME");
-        llmAvailableCache.set(configured && doCheckLlmAvailability());
-        llmCacheUpdatedAt.set(System.currentTimeMillis());
+        if (!checkRunning.compareAndSet(false, true)) return;
+        try {
+            LlmSettings settings = modelSettings();
+            boolean available = settings.available() && doCheckLlmAvailability(settings);
+            if (settings.equals(modelSettings())) {
+                llmAvailableCache.set(available);
+                checkedSettings = settings;
+                llmCacheUpdatedAt.set(System.currentTimeMillis());
+            }
+        } finally { checkRunning.set(false); }
     }
 
     /**
@@ -129,7 +143,11 @@ public class DesktopStatusController implements AutoCloseable {
         status.put("contentPersistence", contentPersistence);
 
         // LLM section
-        status.put("llm", buildLlmStatus(llmAvailableCache.get()));
+        LlmSettings settings = modelSettings();
+        boolean checked = settings.equals(checkedSettings);
+        status.put("llm", buildLlmStatus(checked && llmAvailableCache.get()));
+        if (!checked && !checkRunning.get() && !llmChecker.isShutdown())
+            llmChecker.execute(this::refreshLlmAvailability);
 
         return status;
     }
@@ -152,18 +170,16 @@ public class DesktopStatusController implements AutoCloseable {
 
     Map<String, Object> buildLlmStatus(boolean available) {
         Map<String, Object> llm = new LinkedHashMap<>();
-        boolean configured = config.llmApiKey() != null
-                && !config.llmApiKey().isBlank()
-                && !config.llmApiKey().contains("CHANGE_ME");
-        llm.put("configured", configured);
+        LlmSettings settings = modelSettings();
+        llm.put("configured", settings.available());
         llm.put("available", available);
-        llm.put("model", config.llmModel());
-        llm.put("baseUrl", config.llmBaseUrl());
+        llm.put("model", settings.model());
+        llm.put("baseUrl", settings.baseUrl());
         return llm;
     }
 
     String effectiveBaseUrlForAvailabilityCheck() {
-        return config.llmBaseUrl();
+        return modelSettings().baseUrl();
     }
 
     private String watcherStatus(String type) {
@@ -199,9 +215,9 @@ public class DesktopStatusController implements AutoCloseable {
         return singleLine.length() <= 200 ? singleLine : singleLine.substring(0, 197) + "...";
     }
 
-    private boolean doCheckLlmAvailability() {
+    private boolean doCheckLlmAvailability(LlmSettings settings) {
         try {
-            String baseUrl = effectiveBaseUrlForAvailabilityCheck();
+            String baseUrl = settings.baseUrl();
             String url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
             HttpClient client = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
@@ -209,7 +225,7 @@ public class DesktopStatusController implements AutoCloseable {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(10))
-                    .header("Authorization", "Bearer " + config.llmApiKey())
+                    .header("Authorization", "Bearer " + settings.apiKey())
                     .GET()
                     .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());

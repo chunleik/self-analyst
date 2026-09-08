@@ -89,6 +89,24 @@ class DesktopServerIntegrationTest {
     }
 
     @Test
+    void effectiveConfigurationIsRegisteredAndCredentialsAreMasked() throws Exception {
+        String key = "private-test-key-987654";
+        Map<String, Object> saved = put("/desktop/config",
+                MAPPER.writeValueAsString(Map.of("llm", Map.of("apiKey", key, "model", "saved"))),
+                new TypeReference<>() {});
+        assertTrue(saved.containsKey("revision"));
+        assertTrue(saved.containsKey("application"));
+        Map<String, Object> effective = get("/desktop/config/effective", new TypeReference<>() {});
+        Map<?, ?> configured = (Map<?, ?>) effective.get("configured");
+        assertEquals("saved", ((Map<?, ?>) configured.get("llm.model")).get("value"));
+        assertEquals("toml", ((Map<?, ?>) configured.get("llm.model")).get("source"));
+        assertEquals("****", ((Map<?, ?>) configured.get("llm.api-key")).get("value"));
+        assertFalse(MAPPER.writeValueAsString(effective).contains(key));
+        Map<String, Object> raw = get("/desktop/config/raw", new TypeReference<>() {});
+        assertTrue(raw.get("text").toString().contains(key), "raw editing must preserve the actual user text");
+    }
+
+    @Test
     void taskCrudLifecycleRunsThroughHttpRoutes() throws Exception {
         Map<String, Object> created = post(
                 "/desktop/tasks",

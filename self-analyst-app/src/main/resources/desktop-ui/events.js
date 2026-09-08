@@ -186,7 +186,7 @@ function setupEvents() {
       target.disabled = true;
       target.textContent = t("config.testing");
       api
-        .testLlm(llmConfig)
+        .testLlm({ text: currentEditorText() })
         .then(function (resp) {
           state.configSaveResult = {
             type: "success",
@@ -216,7 +216,7 @@ function setupEvents() {
       target.disabled = true;
       target.textContent = t("config.testing");
       api
-        .testEmbedding(embeddingConfig)
+        .testEmbedding({ text: currentEditorText() })
         .then(function (resp) {
           state.configSaveResult = {
             type: "success",

@@ -64,10 +64,16 @@ public class AppSession implements AutoCloseable {
      * token and shutdown signal are supplied up front rather than registered later.
      */
     public AppSession(String desktopToken, Runnable desktopShutdownSignal) throws IOException {
+        this(desktopToken, desktopShutdownSignal, Config.load(),
+                new UserConfigStore(Config.resolveConfigDir()));
+    }
+
+    AppSession(String desktopToken, Runnable desktopShutdownSignal, Config initialConfig,
+               UserConfigStore userConfigStore) throws IOException {
         this.desktopToken = desktopToken;
         this.desktopShutdownSignal =
                 desktopShutdownSignal != null ? desktopShutdownSignal : () -> {};
-        this.config = Config.load();
+        this.config = initialConfig;
         this.usageMeter = new UsageMeter(config, config.memoryDir());
         if (config.awEmbedded()) {
             startEmbeddedAW();
@@ -116,7 +122,7 @@ public class AppSession implements AutoCloseable {
                     config.wikiSemanticTopK());
         }
 
-        UserConfigStore userConfigStore = new UserConfigStore(Config.resolveConfigDir());
+
 
         // Metadata-only file store + tools (SPEC-FILE-001/050/060).
         fileTools = null;
@@ -422,6 +428,7 @@ public class AppSession implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        if (agent != null) agent.beginShutdown();
         try {
             try {
                 if (agent != null) {

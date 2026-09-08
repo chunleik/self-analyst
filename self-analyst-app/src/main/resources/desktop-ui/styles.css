@@ -2280,3 +2280,10 @@ input:checked + .toggle-switch::after {
     justify-content: flex-end;
   }
 }
+
+.config-runtime-status { padding: 12px 0; overflow-x: auto; font-size: 13px; }
+.config-runtime-status:empty { display: none; }
+.config-runtime-status ul { margin: 6px 0; padding-left: 20px; }
+.config-runtime-status summary { cursor: pointer; }
+.config-runtime-status table { width: 100%; margin-top: 8px; border-collapse: collapse; }
+.config-runtime-status th, .config-runtime-status td { padding: 6px 8px; text-align: left; word-break: break-word; }

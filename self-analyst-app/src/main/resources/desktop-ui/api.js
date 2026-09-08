@@ -350,6 +350,13 @@ var api = {
       });
     });
   },
+  getEffectiveConfig: function () {
+    return fetch(API_BASE + "/desktop/config/effective").then(function (r) {
+      if (!r.ok) throw new Error("Effective config fetch failed: " + r.status);
+      return r.json();
+    });
+  },
+
   getRawConfig: function () {
     return fetch(API_BASE + "/desktop/config/raw").then(function (r) {
       if (!r.ok) throw new Error("Raw config fetch failed: " + r.status);

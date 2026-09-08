@@ -179,6 +179,7 @@ public class DesktopServer {
                 config, watcherManager, contentWatcher,
                 contentPersistenceReady, contentMigrationError,
                 fileCtrl::collectorStatus);
+        if (agent != null) this.statusCtrl.setLlmSettingsSupplier(agent::llmSettings);
         this.memoryCtrl = longTermMemoryService != null
                 ? new DesktopMemoryController(longTermMemoryService)
                 : null;
@@ -222,6 +223,7 @@ public class DesktopServer {
 
         // ── Config tab ───────────────────────────────────────
         app.get("/desktop/config", configCtrl::getConfig);
+        app.get("/desktop/config/effective", configCtrl::getEffectiveConfig);
         app.put("/desktop/config", configCtrl::putConfig);
         app.get("/desktop/config/raw", configCtrl::getRawConfig);
         app.put("/desktop/config/raw", configCtrl::putRawConfig);

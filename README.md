@@ -135,7 +135,7 @@ pwsh -File scripts/check-native-tray-menu.ps1 -Case enabled
 
 首次启动会在数据目录创建 `config.toml`。桌面“配置”页可编辑当前受支持字段；显式保存的 TOML 配置优先于
 环境变量，未配置的键才使用环境变量兜底，最后使用内置默认值。删除配置项可恢复兜底。
-memory.dir 的显式 JVM 参数仍具有最高优先级；aw.port 不接受环境变量覆盖。完整键表以 [用户配置规格](openspec/specs/user-configuration/spec.md) 和 `SupportedKeys` 为准。
+memory.dir 的显式 JVM 参数仍具有最高优先级；events.port 不接受环境变量覆盖。完整键表以 [用户配置规格](openspec/specs/user-configuration/spec.md) 和 `SupportedKeys` 为准。
 
 在桌面配置页或 Agent 配置工具中保存以下参数后，新一轮聊天及新摘要任务立即采用新配置：
 llm.api-key、llm.base-url、llm.model、llm.temperature、llm.max-tokens。正在进行的一轮聊天（包括上下文
@@ -153,22 +153,62 @@ llm.api-key、llm.base-url、llm.model、llm.temperature、llm.max-tokens。正�
 | `llm.base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` |
 | `llm.model` | `LLM_MODEL` | `gpt-4o` |
 | `llm.api-key` | `OPENAI_API_KEY` | 空 |
-| `aw.mode` | `AW_MODE` | `embedded` |
-| `aw.port` | —（仅 `config.toml`） | `5700` |
-| `aw.collection.content` | `AW_COLLECTION_CONTENT` | `true` |
-| `aw.raw.dir` | `AW_RAW_DIR` | `{aw.data-dir}/raw` |
-| `aw.raw.query.maxRangeDays` | `AW_RAW_QUERY_MAX_RANGE_DAYS` | `31` |
-| `aw.raw.query.maxPageSize` | `AW_RAW_QUERY_MAX_PAGE_SIZE` | `1000` |
-| `aw.raw.lowDisk.warnBytes` | `AW_RAW_LOW_DISK_WARN_BYTES` | `10737418240` |
-| `aw.raw.lowDisk.blockBytes` | `AW_RAW_LOW_DISK_BLOCK_BYTES` | `1073741824` |
-| `aw.raw.integrity.verifyOnStartup` | `AW_RAW_INTEGRITY_VERIFY_ON_STARTUP` | `latest` |
-| `aw.raw.projector.batchSize` | `AW_RAW_PROJECTOR_BATCH_SIZE` | `1000` |
+| `events.mode` | `EVENTS_MODE` | `embedded` |
+| `events.port` | —（仅 `config.toml`） | `5700` |
+| `events.collection.title.enabled` | `EVENTS_COLLECTION_TITLE_ENABLED` | `true` |
+| `events.raw.dir` | `EVENTS_RAW_DIR` | `{events.data-dir}/raw` |
+| `events.raw.query.maxRangeDays` | `EVENTS_RAW_QUERY_MAX_RANGE_DAYS` | `31` |
+| `events.raw.query.maxPageSize` | `EVENTS_RAW_QUERY_MAX_PAGE_SIZE` | `1000` |
+| `events.raw.lowDisk.warnBytes` | `EVENTS_RAW_LOW_DISK_WARN_BYTES` | `10737418240` |
+| `events.raw.lowDisk.blockBytes` | `EVENTS_RAW_LOW_DISK_BLOCK_BYTES` | `1073741824` |
+| `events.raw.integrity.startupScope` | `EVENTS_RAW_INTEGRITY_STARTUP_SCOPE` | `latest` |
+| `events.raw.projector.batchSize` | `EVENTS_RAW_PROJECTOR_BATCH_SIZE` | `1000` |
 
 嵌入式模式的永久原始层固定启用，不支持 TTL、最大分区数或自动删除配置。产生分区后，普通配置
-保存不能修改 `aw.raw.dir`；目录迁移需要独立的显式转存流程。
+保存不能修改 `events.raw.dir`；目录迁移需要独立的显式转存流程。
 
 [移除说明](docs/archive/removed-features/removed-ocr-audio.md) 中列出的旧 OCR 键和所有 `aw.audio.*` 不再是受支持配置。
 加载旧文件时这些键不会导致启动失败，但不会产生任何功能。
+
+### 事件配置名称更新
+
+事件服务配置已统一使用 `events.*` 与 `EVENTS_*`。旧名称已移除，不提供兼容别名或自动改写；已有配置、启动脚本和环境变量需要按下表手动更新。只要旧名称仍存在，即使与新名称同时配置或旧值为空，启动或配置提交也会报错，并指出对应新名称。
+
+| 旧配置键 | 新配置键 | 旧环境变量 | 新环境变量 |
+|---|---|---|---|
+| `aw.mode` | `events.mode` | `AW_MODE` | `EVENTS_MODE` |
+| `aw.port` | `events.port` | — | — |
+| `aw.base-url` | `events.base-url` | `AW_BASE_URL` | `EVENTS_BASE_URL` |
+| `aw.timeout` | `events.timeout` | `AW_TIMEOUT` | `EVENTS_TIMEOUT` |
+| `aw.data-dir` | `events.data-dir` | `AW_DATA_DIR` | `EVENTS_DATA_DIR` |
+| `aw.raw.dir` | `events.raw.dir` | `AW_RAW_DIR` | `EVENTS_RAW_DIR` |
+| `aw.raw.query.maxRangeDays` | `events.raw.query.maxRangeDays` | `AW_RAW_QUERY_MAX_RANGE_DAYS` | `EVENTS_RAW_QUERY_MAX_RANGE_DAYS` |
+| `aw.raw.query.maxPageSize` | `events.raw.query.maxPageSize` | `AW_RAW_QUERY_MAX_PAGE_SIZE` | `EVENTS_RAW_QUERY_MAX_PAGE_SIZE` |
+| `aw.raw.lowDisk.warnBytes` | `events.raw.lowDisk.warnBytes` | `AW_RAW_LOW_DISK_WARN_BYTES` | `EVENTS_RAW_LOW_DISK_WARN_BYTES` |
+| `aw.raw.lowDisk.blockBytes` | `events.raw.lowDisk.blockBytes` | `AW_RAW_LOW_DISK_BLOCK_BYTES` | `EVENTS_RAW_LOW_DISK_BLOCK_BYTES` |
+| `aw.raw.integrity.verifyOnStartup` | `events.raw.integrity.startupScope` | `AW_RAW_INTEGRITY_VERIFY_ON_STARTUP` | `EVENTS_RAW_INTEGRITY_STARTUP_SCOPE` |
+| `aw.raw.projector.batchSize` | `events.raw.projector.batchSize` | `AW_RAW_PROJECTOR_BATCH_SIZE` | `EVENTS_RAW_PROJECTOR_BATCH_SIZE` |
+| `aw.collection.window` | `events.collection.window` | `AW_COLLECTION_WINDOW` | `EVENTS_COLLECTION_WINDOW` |
+| `aw.collection.afk` | `events.collection.afk` | `AW_COLLECTION_AFK` | `EVENTS_COLLECTION_AFK` |
+| `aw.collection.content` | `events.collection.title.enabled` | `AW_COLLECTION_CONTENT` | `EVENTS_COLLECTION_TITLE_ENABLED` |
+| `aw.collection.content.pollMs` | `events.collection.title.pollMs` | `AW_CONTENT_POLL_MS` | `EVENTS_COLLECTION_TITLE_POLL_MS` |
+
+修改时保留原有路径和值，并同时更新实际启动环境。保持工作目录、数据目录和原始目录不变时，应用会继续使用已有 `events.db` 和原始分区，不迁移或重建数据。端口仍只从 TOML 或默认值读取，`EVENTS_PORT` 不生效。
+
+标题开关使用 `enabled` 叶子，允许与轮询间隔一起配置：
+
+```toml
+[events.collection.title]
+enabled = false
+pollMs = 800
+
+[events.raw.integrity]
+startupScope = 'all'
+```
+
+结构化配置 API 的事件服务分组同步由 `aw` 改为 `events`，标题配置为 `collection.title.enabled/pollMs`。原有 OCR/音频废弃键继续忽略，不按本表重命名；真实第三方 ActivityWatch 启动脚本名称不受本次调整影响。
+
+`startupScope` 现已接入启动检查：默认 `latest` 只检查月份最新的原始分区，`all` 检查全部已登记分区；封存分区还会核对 manifest、大小与文件摘要。检查失败会隔离对应分区并阻止启动，错误指出月份；原始文件保持不变，不自动修复或删除。`all` 的启动耗时会随历史数据量增加。
 
 ## 恢复基线
 

@@ -68,6 +68,7 @@ public final class ConfigApplicationService implements AutoCloseable {
     }
     public SaveResult update(Map<String, String> changes) throws IOException {
         synchronized (lock) {
+            RemovedEventConfig.rejectKeys(changes.keySet());
             Properties user = store.loadUser();
             changes.forEach((key, value) -> {
                 if (!SupportedKeys.contains(key)) throw new IllegalArgumentException("不支持的配置键：" + key);
@@ -92,6 +93,7 @@ public final class ConfigApplicationService implements AutoCloseable {
     private SaveResult commit(String text) throws IOException {
         if (closed) throw new IllegalStateException("应用正在关闭，无法保存配置");
         var flat = TomlSupport.parseAndFlatten(text);
+        RemovedEventConfig.rejectKeys(flat.keySet());
         var violations = TomlSupport.validateTypes(flat, SupportedKeys.types());
         if (!violations.isEmpty()) throw new TomlValidationException(violations);
         Properties user = new Properties();
@@ -109,10 +111,10 @@ public final class ConfigApplicationService implements AutoCloseable {
             throw new TomlValidationException(List.of("配置语义无效，请检查模型参数、原始事件及文件过滤设置"));
         }
         ConfigResolver.Snapshot proposed = resolve(user);
-        if (!startup.awRawDir().toAbsolutePath().normalize()
-                .equals(proposed.config().awRawDir().toAbsolutePath().normalize())
-                && RawPartitionCatalog.hasExistingPartitions(startup.awRawDir())) {
-            throw new TomlValidationException(List.of("aw.raw.dir 已有原始分区，请使用独立的显式转存流程"));
+        if (!startup.eventsRawDir().toAbsolutePath().normalize()
+                .equals(proposed.config().eventsRawDir().toAbsolutePath().normalize())
+                && RawPartitionCatalog.hasExistingPartitions(startup.eventsRawDir())) {
+            throw new TomlValidationException(List.of("events.raw.dir 已有原始分区，请使用独立的显式转存流程"));
         }
         LlmSettings llm = LlmSettings.from(proposed.config());
         Pending pending = null;

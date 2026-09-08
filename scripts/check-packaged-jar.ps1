@@ -60,7 +60,7 @@ $ConfigDirectory = Join-Path $SmokeRoot "data/config"
 New-Item -ItemType Directory -Path $ConfigDirectory -Force | Out-Null
 [System.IO.File]::WriteAllText(
     (Join-Path $ConfigDirectory "config.toml"),
-    "[aw]`nport = $Port`n",
+    "[events]`nport = $Port`n",
     [System.Text.UTF8Encoding]::new($false))
 $process = $null
 $stdoutTask = $null
@@ -99,16 +99,20 @@ try {
     $info.CreateNoWindow = $true
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
+    # 仅清理测试子进程继承的已移除配置，不改写用户或系统环境。
+    foreach ($legacy in @('AW_MODE', 'AW_BASE_URL', 'AW_TIMEOUT', 'AW_DATA_DIR', 'AW_RAW_DIR', 'AW_RAW_QUERY_MAX_RANGE_DAYS', 'AW_RAW_QUERY_MAX_PAGE_SIZE', 'AW_RAW_LOW_DISK_WARN_BYTES', 'AW_RAW_LOW_DISK_BLOCK_BYTES', 'AW_RAW_INTEGRITY_VERIFY_ON_STARTUP', 'AW_RAW_PROJECTOR_BATCH_SIZE', 'AW_COLLECTION_WINDOW', 'AW_COLLECTION_AFK', 'AW_COLLECTION_CONTENT', 'AW_CONTENT_POLL_MS')) {
+        $info.Environment.Remove($legacy) | Out-Null
+    }
     $info.Environment["SELF_ANALYST_DESKTOP_TOKEN"] = $Token
     $info.Environment["SELF_ANALYST_DESKTOP_PORT_FILE"] = $PortFile
-    $info.Environment["AW_MODE"] = "embedded"
-    $info.Environment["AW_BASE_URL"] = "http://127.0.0.1:$Port/api/0"
-    $info.Environment["AW_DATA_DIR"] = (Join-Path $SmokeRoot "data/aw-data")
-    $info.Environment["AW_RAW_DIR"] = (Join-Path $SmokeRoot "data/aw-data/raw")
+    $info.Environment["EVENTS_MODE"] = "embedded"
+    $info.Environment["EVENTS_BASE_URL"] = "http://127.0.0.1:$Port/api/0"
+    $info.Environment["EVENTS_DATA_DIR"] = (Join-Path $SmokeRoot "data/aw-data")
+    $info.Environment["EVENTS_RAW_DIR"] = (Join-Path $SmokeRoot "data/aw-data/raw")
     $info.Environment["MEMORY_DIR"] = (Join-Path $SmokeRoot "data/memory")
-    $info.Environment["AW_COLLECTION_WINDOW"] = "false"
-    $info.Environment["AW_COLLECTION_AFK"] = "false"
-    $info.Environment["AW_COLLECTION_CONTENT"] = "false"
+    $info.Environment["EVENTS_COLLECTION_WINDOW"] = "false"
+    $info.Environment["EVENTS_COLLECTION_AFK"] = "false"
+    $info.Environment["EVENTS_COLLECTION_TITLE_ENABLED"] = "false"
     $info.Environment["FILE_WATCH_ENABLED"] = "false"
     $info.Environment["WIKI_ENABLED"] = "false"
     $info.Environment["EMBEDDING_ENABLED"] = "false"

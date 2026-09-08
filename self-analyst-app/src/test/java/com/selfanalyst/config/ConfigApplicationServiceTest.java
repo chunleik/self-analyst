@@ -11,6 +11,35 @@ import java.util.concurrent.atomic.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ConfigApplicationServiceTest {
+
+    @Test void parentDirectoryChangeCannotRedirectExistingRawPartitions() throws Exception {
+        var store = new UserConfigStore(dir.resolve("config"));
+        Path events = dir.resolve("events");
+        store.saveRaw("[events]\ndata-dir='" + events + "'\n");
+        var service = service(store);
+        Path raw = service.saved().config().eventsRawDir();
+        try (var catalog = new com.selfanalyst.events.raw.RawPartitionCatalog(raw)) {
+            catalog.insert(new com.selfanalyst.events.raw.RawPartitionMetadata(
+                    "2026-09", "2026/raw-events-2026-09.db", java.time.Instant.parse("2026-09-01T00:00:00Z"),
+                    null, com.selfanalyst.events.raw.RawPartitionStatus.ACTIVE, 0, null, null,
+                    0, null, null, 1));
+        }
+        String before = store.readRaw();
+        assertThrows(TomlValidationException.class,
+                () -> service.update(Map.of("events.data-dir", dir.resolve("new-parent").toString())));
+        assertEquals(before, store.readRaw());
+        assertThrows(TomlValidationException.class,
+                () -> service.update(Map.of("events.raw.dir", dir.resolve("new-raw").toString())));
+        assertEquals(before, store.readRaw());
+        assertEquals(raw, service.saved().config().eventsRawDir());
+
+        // 显式原始目录优先于父目录，父目录更改不应误判为原始目录迁移。
+        Map<String, String> env = Map.of("EVENTS_RAW_DIR", raw.toString());
+        var fixed = new ConfigApplicationService(store, ConfigResolver.resolve(store.loadUser(), env).config(), env);
+        assertTrue(fixed.update(Map.of("events.data-dir", dir.resolve("new-parent").toString())).restartRequired()
+                .contains("events.data-dir"));
+        assertEquals(raw, fixed.saved().config().eventsRawDir());
+    }
     @TempDir Path dir;
     private ConfigApplicationService service(UserConfigStore store) {
         Config initial = ConfigResolver.resolve(store.loadUser(), Map.of()).config();
@@ -30,15 +59,15 @@ class ConfigApplicationServiceTest {
         var service = service(store);
         try (var runtime = attach(service, new AtomicInteger())) {
             var result = service.update(Map.of("llm.model", "new", "llm.api-key", "secret",
-                    "aw.port", "5799", "agent.compaction.triggerTokens", "8000"));
+                    "events.port", "5799", "agent.compaction.triggerTokens", "8000"));
             assertEquals("new", runtime.settings().model());
-            assertTrue(result.restartRequired().contains("aw.port"));
+            assertTrue(result.restartRequired().contains("events.port"));
             assertFalse(result.restartRequired().contains("llm.model"));
             long generation = result.llmRevision();
             assertEquals(generation, service.saveRaw(store.readRaw() + "\n# comment").llmRevision());
-            assertTrue(service.update(Map.of("llm.temperature", "0.4")).restartRequired().contains("aw.port"));
-            String port = ConfigResolver.resolve(new Properties(), Map.of()).config().awPort() + "";
-            assertFalse(service.update(Map.of("aw.port", port)).restartRequired().contains("aw.port"));
+            assertTrue(service.update(Map.of("llm.temperature", "0.4")).restartRequired().contains("events.port"));
+            String port = ConfigResolver.resolve(new Properties(), Map.of()).config().eventsPort() + "";
+            assertFalse(service.update(Map.of("events.port", port)).restartRequired().contains("events.port"));
             assertFalse(service.effectivePayload().toString().contains("secret"));
         }
     }

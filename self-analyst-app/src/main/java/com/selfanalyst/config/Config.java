@@ -20,19 +20,19 @@ public record Config(
         String llmApiKey,
         String llmBaseUrl,
         String llmModel,
-        String awBaseUrl,
-        int awTimeout,
+        String eventsBaseUrl,
+        int eventsTimeout,
         Path memoryDir,
-        boolean awEmbedded,
-        int awPort,
-        Path awDataDir,
-        Path awRawDir,
-        int awRawQueryMaxRangeDays,
-        int awRawQueryMaxPageSize,
-        long awRawLowDiskWarnBytes,
-        long awRawLowDiskBlockBytes,
-        RawIntegrityPolicy awRawIntegrityVerifyOnStartup,
-        int awRawProjectorBatchSize,
+        boolean eventsEmbedded,
+        int eventsPort,
+        Path eventsDataDir,
+        Path eventsRawDir,
+        int eventsRawQueryMaxRangeDays,
+        int eventsRawQueryMaxPageSize,
+        long eventsRawLowDiskWarnBytes,
+        long eventsRawLowDiskBlockBytes,
+        RawIntegrityPolicy eventsRawIntegrityStartupScope,
+        int eventsRawProjectorBatchSize,
         boolean wikiEnabled,
         boolean wikiBackfillEnabled,
         int wikiWorkerIntervalSeconds,
@@ -47,14 +47,14 @@ public record Config(
         String embeddingModel,
         int embeddingDimensions,
         boolean embeddingSendEncodingFormat,
-        int contentPollIntervalMs,
+        int titlePollIntervalMs,
         boolean webSearchEnabled,
         String webSearchMcpUrl,
         String webSearchApiKey,
         double llmTemperature,
         boolean collectWindow,
         boolean collectAfk,
-        boolean collectContent,
+        boolean collectTitle,
         boolean fileWatchEnabled,
         String fileWatchPaths,
         long fileWatchMaxFileSizeKb,
@@ -111,35 +111,35 @@ public record Config(
         if (llmTemperature < 0 || llmTemperature > 2) {
             llmTemperature = 0.7;
         }
-        String configuredAwUrl = values.get("aw.base-url",
+        String configuredEventsUrl = values.get("events.base-url",
                 "http://localhost:5600/api/0");
-        int awTimeout = Integer.parseInt(
-                values.get("aw.timeout", "15000"));
+        int eventsTimeout = Integer.parseInt(
+                values.get("events.timeout", "15000"));
 
-        boolean awEmbedded = "embedded".equalsIgnoreCase(
-                values.get("aw.mode", "embedded"));
+        boolean eventsEmbedded = "embedded".equalsIgnoreCase(
+                values.get("events.mode", "embedded"));
         // config.toml is the single user-controlled source for the embedded server port.
         // The Tauri parent learns the effective value from the Java startup handshake.
-        int awPort = Integer.parseInt(values.get("aw.port", "5700"));
-        String awUrl = awEmbedded
-                ? "http://localhost:" + awPort + "/api/0"
-                : configuredAwUrl;
-        Path awDataDir = Path.of(values.get("aw.data-dir",
+        int eventsPort = Integer.parseInt(values.get("events.port", "5700"));
+        String eventsUrl = eventsEmbedded
+                ? "http://localhost:" + eventsPort + "/api/0"
+                : configuredEventsUrl;
+        Path eventsDataDir = Path.of(values.get("events.data-dir",
                 memDir + "/events"));
-        Path awRawDir = Path.of(values.explicit("aw.raw.dir",
-                awDataDir.resolve("raw").toString()));
-        int awRawQueryMaxRangeDays = Integer.parseInt(values.get("aw.raw.query.maxRangeDays", "31"));
-        int awRawQueryMaxPageSize = Integer.parseInt(values.get("aw.raw.query.maxPageSize", "1000"));
-        long awRawLowDiskWarnBytes = Long.parseLong(values.get("aw.raw.lowDisk.warnBytes", "10737418240"));
-        long awRawLowDiskBlockBytes = Long.parseLong(values.get("aw.raw.lowDisk.blockBytes", "1073741824"));
-        RawIntegrityPolicy awRawIntegrityVerifyOnStartup = RawIntegrityPolicy.parse(
-                values.get("aw.raw.integrity.verifyOnStartup", "latest"));
-        int awRawProjectorBatchSize = Integer.parseInt(values.get("aw.raw.projector.batchSize", "1000"));
+        Path eventsRawDir = Path.of(values.explicit("events.raw.dir",
+                eventsDataDir.resolve("raw").toString()));
+        int eventsRawQueryMaxRangeDays = Integer.parseInt(values.get("events.raw.query.maxRangeDays", "31"));
+        int eventsRawQueryMaxPageSize = Integer.parseInt(values.get("events.raw.query.maxPageSize", "1000"));
+        long eventsRawLowDiskWarnBytes = Long.parseLong(values.get("events.raw.lowDisk.warnBytes", "10737418240"));
+        long eventsRawLowDiskBlockBytes = Long.parseLong(values.get("events.raw.lowDisk.blockBytes", "1073741824"));
+        RawIntegrityPolicy eventsRawIntegrityStartupScope = RawIntegrityPolicy.parse(
+                values.get("events.raw.integrity.startupScope", "latest"));
+        int eventsRawProjectorBatchSize = Integer.parseInt(values.get("events.raw.projector.batchSize", "1000"));
         RawConfigValidator.rejectUnsupportedRetentionKeys(userProps);
-        RawConfigValidator.validate(awRawDir, awRawQueryMaxRangeDays,
-                awRawQueryMaxPageSize, awRawLowDiskWarnBytes,
-                awRawLowDiskBlockBytes, awRawIntegrityVerifyOnStartup,
-                awRawProjectorBatchSize);
+        RawConfigValidator.validate(eventsRawDir, eventsRawQueryMaxRangeDays,
+                eventsRawQueryMaxPageSize, eventsRawLowDiskWarnBytes,
+                eventsRawLowDiskBlockBytes, eventsRawIntegrityStartupScope,
+                eventsRawProjectorBatchSize);
 
         boolean wikiEnabled = Boolean.parseBoolean(
                 values.get("wiki.enabled", "false"));
@@ -184,18 +184,18 @@ public record Config(
         boolean embeddingSendEncodingFormat = Boolean.parseBoolean(
                 values.get("embedding.send-encoding-format", "true"));
 
-        int contentPollIntervalMs = parseIntOr(props,
-                values.get("aw.collection.content.pollMs", "500"), 500);
-        if (contentPollIntervalMs < 100 || contentPollIntervalMs > 10000) {
-            contentPollIntervalMs = 500;
+        int titlePollIntervalMs = parseIntOr(props,
+                values.get("events.collection.title.pollMs", "500"), 500);
+        if (titlePollIntervalMs < 100 || titlePollIntervalMs > 10000) {
+            titlePollIntervalMs = 500;
         }
 
         boolean collectWindow = Boolean.parseBoolean(
-                values.get("aw.collection.window", "true"));
+                values.get("events.collection.window", "true"));
         boolean collectAfk = Boolean.parseBoolean(
-                values.get("aw.collection.afk", "true"));
-        boolean collectContent = Boolean.parseBoolean(
-                values.get("aw.collection.content", "true"));
+                values.get("events.collection.afk", "true"));
+        boolean collectTitle = Boolean.parseBoolean(
+                values.get("events.collection.title.enabled", "true"));
         // ── File Watch (SPEC-FILE-*) ──
         boolean fileWatchEnabled = Boolean.parseBoolean(
                 values.get("file.watch.enabled", "false"));
@@ -310,19 +310,19 @@ public record Config(
         // ── 应用语言 (SPEC-I18N-CFG-001) ──
         String appLanguage = values.get("app.language", "auto");
 
-        return new Config(apiKey, baseUrl, model, awUrl, awTimeout,
-                Path.of(memDir), awEmbedded, awPort, awDataDir,
-                awRawDir, awRawQueryMaxRangeDays, awRawQueryMaxPageSize,
-                awRawLowDiskWarnBytes, awRawLowDiskBlockBytes,
-                awRawIntegrityVerifyOnStartup, awRawProjectorBatchSize,
+        return new Config(apiKey, baseUrl, model, eventsUrl, eventsTimeout,
+                Path.of(memDir), eventsEmbedded, eventsPort, eventsDataDir,
+                eventsRawDir, eventsRawQueryMaxRangeDays, eventsRawQueryMaxPageSize,
+                eventsRawLowDiskWarnBytes, eventsRawLowDiskBlockBytes,
+                eventsRawIntegrityStartupScope, eventsRawProjectorBatchSize,
                 wikiEnabled, wikiBackfillEnabled, wikiWorkerIntervalSeconds,
                 wikiPromptMaxContentChars, wikiTopAppsLimit,
                 wikiSemanticEnabled, wikiSemanticIndexDir, wikiSemanticTopK,
                 embeddingEnabled, embeddingBaseUrl, embeddingApiKey,
                 embeddingModel, embeddingDimensions,
-                embeddingSendEncodingFormat, contentPollIntervalMs,
+                embeddingSendEncodingFormat, titlePollIntervalMs,
                 webSearchEnabled, webSearchMcpUrl, webSearchApiKey,
-                llmTemperature, collectWindow, collectAfk, collectContent,
+                llmTemperature, collectWindow, collectAfk, collectTitle,
                 fileWatchEnabled, fileWatchPaths, fileWatchMaxFileSizeKb,
                 fileWatchWorkerIntervalSeconds, fileWatchDebounceSeconds,
                 fileWatchHeartbeatThrottleSeconds, fileWatchExtensions,

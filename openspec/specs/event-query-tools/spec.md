@@ -47,7 +47,7 @@ HTTP、IO 或中断错误 SHALL 转换为结构化 error JSON，而不是向 Age
 - **THEN** 工具返回 error JSON，Agent 仍可使用其它工具
 
 ### Requirement: SPEC-AW-006 超时
-连接与每个请求 SHALL 使用配置的 aw.timeout，避免工具调用无限等待。
+连接与每个请求 SHALL 使用配置的 events.timeout，避免工具调用无限等待。
 
 #### Scenario: 请求超过超时
 - **WHEN** 事件服务 endpoint 未在配置时间内响应

@@ -95,14 +95,14 @@ class ConfigTest {
         assertEquals("true", props.getProperty("agent.compaction.enabled"));
         assertEquals("30", props.getProperty("agent.compaction.triggerMessages"));
         assertEquals("60000", props.getProperty("agent.compaction.triggerTokens"));
-        assertEquals("./data/events", props.getProperty("aw.data-dir"));
-        assertEquals("./data/events/raw", props.getProperty("aw.raw.dir"));
-        assertEquals("31", props.getProperty("aw.raw.query.maxRangeDays"));
-        assertEquals("1000", props.getProperty("aw.raw.query.maxPageSize"));
-        assertEquals("10737418240", props.getProperty("aw.raw.lowDisk.warnBytes"));
-        assertEquals("1073741824", props.getProperty("aw.raw.lowDisk.blockBytes"));
-        assertEquals("latest", props.getProperty("aw.raw.integrity.verifyOnStartup"));
-        assertEquals("1000", props.getProperty("aw.raw.projector.batchSize"));
+        assertEquals("./data/events", props.getProperty("events.data-dir"));
+        assertEquals("./data/events/raw", props.getProperty("events.raw.dir"));
+        assertEquals("31", props.getProperty("events.raw.query.maxRangeDays"));
+        assertEquals("1000", props.getProperty("events.raw.query.maxPageSize"));
+        assertEquals("10737418240", props.getProperty("events.raw.lowDisk.warnBytes"));
+        assertEquals("1073741824", props.getProperty("events.raw.lowDisk.blockBytes"));
+        assertEquals("latest", props.getProperty("events.raw.integrity.startupScope"));
+        assertEquals("1000", props.getProperty("events.raw.projector.batchSize"));
     }
 
     @Test
@@ -241,53 +241,53 @@ class ConfigTest {
 
     @Test
     void configuredAwPortComesFromToml(@TempDir Path dir) throws Exception {
-        Files.writeString(dir.resolve("config.toml"), "[aw]\nport = 45731\n",
+        Files.writeString(dir.resolve("config.toml"), "[events]\nport = 45731\n",
                 StandardCharsets.UTF_8);
 
         withConfigDir(dir, () -> {
             Config config = Config.load(dir);
-            assertEquals(45731, config.awPort());
-            assertEquals("http://localhost:45731/api/0", config.awBaseUrl());
+            assertEquals(45731, config.eventsPort());
+            assertEquals("http://localhost:45731/api/0", config.eventsBaseUrl());
         });
     }
 
     @Test
     void rawEventSettingsUseDefaultsAndParseTomlOverrides(@TempDir Path dir) throws Exception {
         Config defaults = Config.testDefaults(dir);
-        assertEquals(dir.resolve("events"), defaults.awDataDir());
-        assertEquals(dir.resolve("events/raw"), defaults.awRawDir());
-        assertEquals(31, defaults.awRawQueryMaxRangeDays());
-        assertEquals(1000, defaults.awRawQueryMaxPageSize());
-        assertEquals(10_737_418_240L, defaults.awRawLowDiskWarnBytes());
-        assertEquals(1_073_741_824L, defaults.awRawLowDiskBlockBytes());
-        assertEquals(RawIntegrityPolicy.LATEST, defaults.awRawIntegrityVerifyOnStartup());
-        assertEquals(1000, defaults.awRawProjectorBatchSize());
+        assertEquals(dir.resolve("events"), defaults.eventsDataDir());
+        assertEquals(dir.resolve("events/raw"), defaults.eventsRawDir());
+        assertEquals(31, defaults.eventsRawQueryMaxRangeDays());
+        assertEquals(1000, defaults.eventsRawQueryMaxPageSize());
+        assertEquals(10_737_418_240L, defaults.eventsRawLowDiskWarnBytes());
+        assertEquals(1_073_741_824L, defaults.eventsRawLowDiskBlockBytes());
+        assertEquals(RawIntegrityPolicy.LATEST, defaults.eventsRawIntegrityStartupScope());
+        assertEquals(1000, defaults.eventsRawProjectorBatchSize());
 
         Path rawDir = dir.resolve("永久原始事件");
         Files.writeString(dir.resolve("config.toml"), """
-                [aw.raw]
+                [events.raw]
                 dir = '%s'
-                [aw.raw.query]
+                [events.raw.query]
                 maxRangeDays = 7
                 maxPageSize = 250
-                [aw.raw.lowDisk]
+                [events.raw.lowDisk]
                 warnBytes = 8589934592
                 blockBytes = 536870912
-                [aw.raw.integrity]
-                verifyOnStartup = "all"
-                [aw.raw.projector]
+                [events.raw.integrity]
+                startupScope = "all"
+                [events.raw.projector]
                 batchSize = 128
                 """.formatted(rawDir),
                 StandardCharsets.UTF_8);
 
         Config configured = Config.load(dir);
-        assertEquals(rawDir, configured.awRawDir());
-        assertEquals(7, configured.awRawQueryMaxRangeDays());
-        assertEquals(250, configured.awRawQueryMaxPageSize());
-        assertEquals(8_589_934_592L, configured.awRawLowDiskWarnBytes());
-        assertEquals(536_870_912L, configured.awRawLowDiskBlockBytes());
-        assertEquals(RawIntegrityPolicy.ALL, configured.awRawIntegrityVerifyOnStartup());
-        assertEquals(128, configured.awRawProjectorBatchSize());
+        assertEquals(rawDir, configured.eventsRawDir());
+        assertEquals(7, configured.eventsRawQueryMaxRangeDays());
+        assertEquals(250, configured.eventsRawQueryMaxPageSize());
+        assertEquals(8_589_934_592L, configured.eventsRawLowDiskWarnBytes());
+        assertEquals(536_870_912L, configured.eventsRawLowDiskBlockBytes());
+        assertEquals(RawIntegrityPolicy.ALL, configured.eventsRawIntegrityStartupScope());
+        assertEquals(128, configured.eventsRawProjectorBatchSize());
     }
 
     @Test
@@ -301,17 +301,17 @@ class ConfigTest {
     void rawDirectoryDefaultsUnderConfiguredAwDataDirectory(@TempDir Path dir) throws Exception {
         Path awDir = dir.resolve("自定义-aw");
         Files.writeString(dir.resolve("config.toml"),
-                "[aw]\ndata-dir = '" + awDir + "'\n", StandardCharsets.UTF_8);
+                "[events]\ndata-dir = '" + awDir + "'\n", StandardCharsets.UTF_8);
 
         Config configured = Config.load(dir);
 
-        assertEquals(awDir.resolve("raw"), configured.awRawDir());
+        assertEquals(awDir.resolve("raw"), configured.eventsRawDir());
     }
 
     @Test
     void invalidRawRuntimeSettingsAreRejected(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("config.toml"), """
-                [aw.raw.lowDisk]
+                [events.raw.lowDisk]
                 warnBytes = 1024
                 blockBytes = 1024
                 """, StandardCharsets.UTF_8);
@@ -324,14 +324,14 @@ class ConfigTest {
     @Test
     void externalAwModeKeepsConfiguredBaseUrl(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("config.toml"), """
-                [aw]
+                [events]
                 mode = "external"
                 port = 45731
                 base-url = "http://example.test:5600/api/0"
                 """, StandardCharsets.UTF_8);
 
         withConfigDir(dir, () ->
-                assertEquals("http://example.test:5600/api/0", Config.load(dir).awBaseUrl()));
+                assertEquals("http://example.test:5600/api/0", Config.load(dir).eventsBaseUrl()));
     }
 
     @Test
@@ -348,12 +348,12 @@ class ConfigTest {
     void chineseTomlValueRoundTripsThroughOverlay(@TempDir Path dir) throws Exception {
         // SPEC-TOML-TST-011 load half: UTF-8 中文 value survives parse + overlay.
         Files.writeString(dir.resolve("config.toml"),
-                "[aw]\ndata-dir = 'D:\\数据\\中文'\n", StandardCharsets.UTF_8);
+                "[events]\ndata-dir = 'D:\\数据\\中文'\n", StandardCharsets.UTF_8);
 
         Properties props = new Properties();
         Config.overlayUserConfig(props, dir);
 
-        assertEquals("D:\\数据\\中文", props.getProperty("aw.data-dir"));
+        assertEquals("D:\\数据\\中文", props.getProperty("events.data-dir"));
     }
 
     @Test

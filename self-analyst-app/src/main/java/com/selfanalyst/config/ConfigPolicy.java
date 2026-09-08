@@ -16,7 +16,7 @@ public final class ConfigPolicy {
         if (LLM.contains(key)) return "llm";
         if (key.startsWith("embedding.")) return "embedding";
         if (key.startsWith("file.")) return "file";
-        if (key.startsWith("aw.")) return "events";
+        if (key.startsWith("events.")) return "events";
         if (key.startsWith("llm.budget.")) return "budget";
         if (key.startsWith("websearch.")) return "websearch";
         return "application";

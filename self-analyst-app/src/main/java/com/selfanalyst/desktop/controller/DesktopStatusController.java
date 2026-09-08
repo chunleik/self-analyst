@@ -115,9 +115,9 @@ public class DesktopStatusController implements AutoCloseable {
 
         // AW section
         Map<String, Object> aw = new LinkedHashMap<>();
-        aw.put("mode", config.awEmbedded() ? "embedded" : "external");
-        aw.put("port", config.awPort());
-        aw.put("webUrl", "http://localhost:" + config.awPort() + "/");
+        aw.put("mode", config.eventsEmbedded() ? "embedded" : "external");
+        aw.put("port", config.eventsPort());
+        aw.put("webUrl", "http://localhost:" + config.eventsPort() + "/");
         status.put("aw", aw);
         status.put("raw", rawStatus());
 
@@ -157,7 +157,7 @@ public class DesktopStatusController implements AutoCloseable {
     }
 
     private Map<String, Object> rawStatus() {
-        if (!config.awEmbedded()) return Map.of("status", "unavailable", "reason", "external_aw");
+        if (!config.eventsEmbedded()) return Map.of("status", "unavailable", "reason", "external_aw");
         Supplier<Map<String, Object>> supplier = rawStatusSupplier;
         if (supplier == null) return Map.of("status", "unavailable", "reason", "not_initialized");
         try {

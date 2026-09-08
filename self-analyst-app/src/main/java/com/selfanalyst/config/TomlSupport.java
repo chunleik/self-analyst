@@ -45,7 +45,7 @@ public final class TomlSupport {
      * prefix are emitted as top-level dotted assignments before the first table.
      */
     static final List<String> SECTION_ORDER = List.of(
-            "llm.", "aw.", "wiki.", "embedding.", "agent.", "desktop.", "websearch.", "file.");
+            "llm.", "events.", "wiki.", "embedding.", "agent.", "desktop.", "websearch.", "file.");
 
     // ── Parse + flatten + normalize (SPEC-TOML-FMT-002/003) ──────────────
 
@@ -67,7 +67,7 @@ public final class TomlSupport {
         LinkedHashMap<String, String> flat = new LinkedHashMap<>();
         List<String> structureErrors = new ArrayList<>();
         // keyPathSet(false): leaf value paths only, tables already descended into,
-        // so [aw.collection] window ≡ aw.collection.window (SPEC-TOML-FMT-002a).
+        // so [events.collection] window ≡ events.collection.window (SPEC-TOML-FMT-002a).
         for (List<String> path : result.keyPathSet(false)) {
             String dotted = String.join(".", path);
             flat.put(dotted, normalizeValue(dotted, result.get(path), structureErrors));

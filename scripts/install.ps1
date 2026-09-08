@@ -182,8 +182,8 @@ llm.base-url=$apiBaseUrl
 llm.model=$apiModel
 
 # ActivityWatch
-aw.base-url=http://localhost:5600/api/0
-aw.timeout=15000
+events.base-url=http://localhost:5600/api/0
+events.timeout=15000
 
 # Memory
 memory.dir=${env:USERPROFILE}\.self-analyst

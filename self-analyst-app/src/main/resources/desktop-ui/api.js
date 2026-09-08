@@ -391,8 +391,10 @@ var api = {
       body: JSON.stringify(c),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("LLM test failed: " + r.status);
-      return r.json();
+      return r.json().then(function (payload) {
+        if (!r.ok) throw new Error(payload.error || "LLM test failed: " + r.status);
+        return payload;
+      });
     });
   },
   testEmbedding: function (c) {
@@ -401,8 +403,10 @@ var api = {
       body: JSON.stringify(c),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("Embedding test failed: " + r.status);
-      return r.json();
+      return r.json().then(function (payload) {
+        if (!r.ok) throw new Error(payload.error || "Embedding test failed: " + r.status);
+        return payload;
+      });
     });
   },
 };

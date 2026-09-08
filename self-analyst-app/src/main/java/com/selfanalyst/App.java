@@ -23,8 +23,8 @@ public class App {
         try {
             session = new AppSession(
                     System.getenv("SELF_ANALYST_DESKTOP_TOKEN"), shutdownLatch::countDown);
-            publishDesktopPortIfRequested(session.config().awPort());
-            log.info("SelfAnalyst 已启动 (http://localhost:{})", session.config().awPort());
+            publishDesktopPortIfRequested(session.config().eventsPort());
+            log.info("SelfAnalyst 已启动 (http://localhost:{})", session.config().eventsPort());
 
             // Register shutdown hook for clean close on Ctrl+C
             AppSession finalSession = session;

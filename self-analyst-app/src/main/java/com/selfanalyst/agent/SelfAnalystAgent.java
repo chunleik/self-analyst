@@ -124,7 +124,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         this.hasConfigTools = userConfigStore != null;
         this.hasFileTools = fileTools != null;
         this.memory = MemoryStore.load(config.memoryDir());
-        this.tools = new EventQueryTools(config.awBaseUrl(), config.awTimeout());
+        this.tools = new EventQueryTools(config.eventsBaseUrl(), config.eventsTimeout());
 
         // AgentScope 2.x executes multiple tool calls in parallel by default. Keep the
         // 1.x sequential semantics because several tools share local stores/connections.

@@ -75,7 +75,7 @@ public class AppSession implements AutoCloseable {
                 desktopShutdownSignal != null ? desktopShutdownSignal : () -> {};
         this.config = initialConfig;
         this.usageMeter = new UsageMeter(config, config.memoryDir());
-        if (config.awEmbedded()) {
+        if (config.eventsEmbedded()) {
             startEmbeddedAW();
         }
         if (config.llmApiKey() == null || config.llmApiKey().isBlank()
@@ -235,17 +235,18 @@ public class AppSession implements AutoCloseable {
             desktopServer.statusController().setRawStatusSupplier(eventServer::rawStatus);
             desktopServer.start();
             eventServer.registerWebUi();
-            log.info(desktopUiStartupLogMessage(config.awPort()));
+            log.info(desktopUiStartupLogMessage(config.eventsPort()));
         }
     }
 
     private void startEmbeddedAW() {
         try {
             eventServer = new EventServer(
-                    config.awDataDir(), config.awRawDir(), config.awPort(),
-                    config.awRawQueryMaxRangeDays(), config.awRawQueryMaxPageSize(),
-                    config.awRawLowDiskWarnBytes(), config.awRawLowDiskBlockBytes(),
-                    config.awRawProjectorBatchSize());
+                    config.eventsDataDir(), config.eventsRawDir(), config.eventsPort(),
+                    config.eventsRawQueryMaxRangeDays(), config.eventsRawQueryMaxPageSize(),
+                    config.eventsRawLowDiskWarnBytes(), config.eventsRawLowDiskBlockBytes(),
+                    config.eventsRawProjectorBatchSize(),
+                    config.eventsRawIntegrityStartupScope() == com.selfanalyst.config.RawIntegrityPolicy.ALL);
             try {
                 var migration = ContentEventV2Migration.migrate(eventServer.db());
                 contentPersistenceReady = migration.ready();
@@ -258,10 +259,10 @@ public class AppSession implements AutoCloseable {
                         contentMigrationError);
             }
             registerDesktopLifecycle();
-            eventServer.start(config.awPort());
-            log.info("嵌入式 AW 服务已启动 (端口 {})", config.awPort());
+            eventServer.start(config.eventsPort());
+            log.info("嵌入式 AW 服务已启动 (端口 {})", config.eventsPort());
             watcherManager = new WatcherManager(
-                    "http://localhost:" + config.awPort());
+                    "http://localhost:" + config.eventsPort());
             if (config.collectWindow()) {
                 watcherManager.addWindowWatcher();
             }
@@ -270,20 +271,23 @@ public class AppSession implements AutoCloseable {
             }
             watcherManager.startAll();
             try {
-                if (config.collectContent() && contentPersistenceReady) {
-                    contentWatcher = new ContentWatcher("http://localhost:" + config.awPort(),
-                            config.contentPollIntervalMs());
+                if (config.collectTitle() && contentPersistenceReady) {
+                    contentWatcher = new ContentWatcher("http://localhost:" + config.eventsPort(),
+                            config.titlePollIntervalMs());
                     contentWatcher.start();
                     log.info("上下文标题识别已启动 (UIA)");
                 } else if (!contentPersistenceReady) {
                     log.warn("上下文标题识别因历史数据迁移失败而禁用");
                 } else {
-                    log.info("上下文标题识别已按配置禁用 (aw.collection.content=false)");
+                    log.info("上下文标题识别已按配置禁用 (events.collection.title.enabled=false)");
                 }
             } catch (Exception e2) {
                 log.warn("上下文标题识别未启动: {}", e2.getMessage());
             }
         } catch (Exception e) {
+            if (e instanceof com.selfanalyst.events.raw.RawStartupIntegrityException integrityFailure) {
+                throw integrityFailure;
+            }
             log.warn("嵌入式 AW 启动失败: {}", e.getMessage());
         }
     }
@@ -377,7 +381,7 @@ public class AppSession implements AutoCloseable {
                     fileWatchRoots, config.fileWatchWorkerIntervalSeconds());
             fileIndexWorker.start();
 
-            String fileHeartbeatUrl = "http://localhost:" + config.awPort();
+            String fileHeartbeatUrl = "http://localhost:" + config.eventsPort();
             fileWatcher = new FileWatcher(fileWatchStore, filePathFilter, fileWatchRoots,
                     fileHeartbeatUrl, config.fileWatchDebounceSeconds(),
                     config.fileWatchHeartbeatThrottleSeconds(),

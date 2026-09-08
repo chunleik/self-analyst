@@ -24,12 +24,12 @@ $Socket.Start()
 $Port = $Socket.LocalEndpoint.Port
 $Socket.Stop()
 $TestConfig = @"
-[aw]
+[events]
 port = $Port
-[aw.collection]
+[events.collection]
 window = false
 afk = false
-content = false
+title.enabled = false
 [file.watch]
 enabled = false
 [wiki]
@@ -58,13 +58,17 @@ function Start-TestDesktop([string[]]$Arguments) {
     $info.RedirectStandardError = $true
     $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
     foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
-    foreach ($setting in @('AW_COLLECTION_WINDOW', 'AW_COLLECTION_AFK', 'AW_COLLECTION_CONTENT',
+    # 仅清理测试子进程继承的已移除配置，不改写用户或系统环境。
+    foreach ($legacy in @('AW_MODE', 'AW_BASE_URL', 'AW_TIMEOUT', 'AW_DATA_DIR', 'AW_RAW_DIR', 'AW_RAW_QUERY_MAX_RANGE_DAYS', 'AW_RAW_QUERY_MAX_PAGE_SIZE', 'AW_RAW_LOW_DISK_WARN_BYTES', 'AW_RAW_LOW_DISK_BLOCK_BYTES', 'AW_RAW_INTEGRITY_VERIFY_ON_STARTUP', 'AW_RAW_PROJECTOR_BATCH_SIZE', 'AW_COLLECTION_WINDOW', 'AW_COLLECTION_AFK', 'AW_COLLECTION_CONTENT', 'AW_CONTENT_POLL_MS')) {
+        $info.Environment.Remove($legacy) | Out-Null
+    }
+    foreach ($setting in @('EVENTS_COLLECTION_WINDOW', 'EVENTS_COLLECTION_AFK', 'EVENTS_COLLECTION_TITLE_ENABLED',
             'FILE_WATCH_ENABLED', 'WIKI_ENABLED', 'EMBEDDING_ENABLED', 'WEBSEARCH_ENABLED')) {
         $info.Environment[$setting] = 'false'
     }
-    $info.Environment['AW_MODE'] = 'embedded'
-    $info.Environment['AW_DATA_DIR'] = Join-Path $Portable 'data/aw-data'
-    $info.Environment['AW_RAW_DIR'] = Join-Path $Portable 'data/aw-data/raw'
+    $info.Environment['EVENTS_MODE'] = 'embedded'
+    $info.Environment['EVENTS_DATA_DIR'] = Join-Path $Portable 'data/aw-data'
+    $info.Environment['EVENTS_RAW_DIR'] = Join-Path $Portable 'data/aw-data/raw'
     $info.Environment['MEMORY_DIR'] = Join-Path $Portable 'data/memory'
     $info.Environment['OPENAI_API_KEY'] = ''
     $process = [Diagnostics.Process]::Start($info)

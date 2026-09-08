@@ -61,7 +61,7 @@ Assert-NotContains $i18nJs 'memory\.(managerTitle|searchPlaceholder|status\.|ena
 
 # The action bar is rendered before the raw editor, and connection results name the service.
 $configText = Get-Content -LiteralPath $configJs -Raw
-$actionBarCall = $configText.IndexOf('+ renderConfigActionBar();')
+$actionBarCall = $configText.IndexOf('+ renderConfigActionBar()')
 $rawEditorMarkup = $configText.IndexOf('<textarea id="config-raw-editor"')
 if ($actionBarCall -lt 0 -or $rawEditorMarkup -lt 0 -or $actionBarCall -gt $rawEditorMarkup) {
     throw "Config action bar must render above the raw editor ($configJs)"

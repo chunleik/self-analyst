@@ -32,6 +32,89 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DesktopConfigControllerTest {
 
     @Test
+    void renamedAndRemovedConfigurationEntrypointsAreConsistent(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+        Map<String, Object> payload = ctrl.configPayload();
+        assertTrue(payload.containsKey("events"));
+        assertFalse(payload.containsKey("aw"));
+        Map<?, ?> collection = (Map<?, ?>) payload.get("collection");
+        assertFalse(collection.containsKey("content"));
+        Map<?, ?> title = (Map<?, ?>) collection.get("title");
+        assertTrue(title.containsKey("enabled"));
+        assertTrue(title.containsKey("pollMs"));
+
+        var saved = ctrl.applyStructuredSave(Map.of("collection",
+                Map.of("title", Map.of("enabled", false, "pollMs", 800))));
+        assertEquals("false", store.loadUser().getProperty("events.collection.title.enabled"));
+        assertEquals("800", store.loadUser().getProperty("events.collection.title.pollMs"));
+        assertTrue(saved.restartRequired().contains("events.collection.title.pollMs"));
+        String before = store.readRaw();
+        for (Map<String, Object> legacy : List.<Map<String, Object>>of(
+                Map.of("aw", Map.of("mode", "embedded")),
+                Map.of("aw", Map.of("dataDir", "must-not-leak")),
+                Map.of("collection", Map.of("content", false)),
+                Map.of("collection", Map.of("content", Map.of("pollMs", 900))),
+                Map.of("events", Map.of("raw", Map.of("enabled", false))))) {
+            var error = assertThrows(TomlValidationException.class, () -> ctrl.applyStructuredSave(legacy));
+            assertFalse(error.getMessage().contains("must-not-leak"));
+            assertEquals(before, store.readRaw());
+        }
+        var invalid = assertThrows(TomlValidationException.class,
+                () -> ctrl.applyRawSave("aw.mode='must-not-leak'\nevents.mode='embedded'\n"));
+        assertTrue(invalid.getMessage().contains("events.mode"));
+        assertFalse(invalid.getMessage().contains("must-not-leak"));
+        assertEquals(before, store.readRaw());
+        var comment = ctrl.applyRawSave("# aw.mode is now events.mode\n[events.collection.title]\nenabled=false\n");
+        assertTrue(comment.unknownKeys().isEmpty());
+    }
+
+    @Test
+    void removedConfigurationReturns400BeforeConnectionOrWrite(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("[llm]\nmodel='unchanged'\n");
+        var ctrl = controller(dir, store);
+        java.util.concurrent.atomic.AtomicInteger remoteCalls = new java.util.concurrent.atomic.AtomicInteger();
+        var remote = io.javalin.Javalin.create().get("/models", ctx -> {
+            remoteCalls.incrementAndGet();
+            ctx.json(Map.of("data", List.of()));
+        }).post("/embeddings", ctx -> {
+            remoteCalls.incrementAndGet();
+            ctx.json(Map.of("data", List.of()));
+        }).start("127.0.0.1", 0);
+        var api = io.javalin.Javalin.create()
+                .put("/config", ctrl::putConfig).put("/raw", ctrl::putRawConfig)
+                .post("/llm", ctrl::testLlm).post("/embedding", ctrl::testEmbedding)
+                .start("127.0.0.1", 0);
+        try {
+            var client = java.net.http.HttpClient.newHttpClient();
+            String text = "aw.mode='removed-secret-value'\n[llm]\napi-key='fake'\nbase-url='http://127.0.0.1:"
+                    + remote.port() + "'\n[embedding]\napi-key='fake'\nbase-url='http://127.0.0.1:" + remote.port() + "'\n";
+            String before = store.readRaw();
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            for (String route : List.of("config", "raw", "llm", "embedding")) {
+                Object body = route.equals("config") ? Map.of("aw", Map.of("mode", "removed-secret-value"))
+                        : Map.of("text", text);
+                var request = java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create("http://127.0.0.1:" + api.port() + "/" + route))
+                        .header("Content-Type", "application/json")
+                        .method(route.equals("config") || route.equals("raw") ? "PUT" : "POST",
+                                java.net.http.HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
+                        .build();
+                var response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                assertEquals(400, response.statusCode(), route + ": " + response.body());
+                assertTrue(response.body().contains("events.mode"), response.body());
+                assertFalse(response.body().contains("removed-secret-value"));
+                assertEquals(before, store.readRaw());
+            }
+            assertEquals(0, remoteCalls.get());
+        } finally {
+            api.stop();
+            remote.stop();
+        }
+    }
+
+    @Test
     void connectionTestsUseNewlySavedParameters(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         DesktopConfigController controller = controller(dir, store);
@@ -186,7 +269,7 @@ class DesktopConfigControllerTest {
         assertEquals("false", defaults.get("websearch.enabled"));
         assertFalse(defaults.keySet().stream().anyMatch(DeprecatedKeys::contains));
         assertTrue(defaults.containsKey("memory.dir"));
-        assertTrue(defaults.containsKey("aw.base-url"));
+        assertTrue(defaults.containsKey("events.base-url"));
         assertTrue(defaults.containsKey("wiki.prompt.maxContentChars"));
         assertTrue(defaults.containsKey("file.watch.paths"));
         assertEquals("0", defaults.get("file.watch.maxFileSizeKb"));
@@ -255,7 +338,7 @@ class DesktopConfigControllerTest {
 
         String text = ""
                 + "memory.dir = 'D:\\data\\memory'\n"
-                + "[aw]\n"
+                + "[events]\n"
                 + "base-url = \"http://localhost:5700/api/0\"\n"
                 + "timeout = 15000\n"
                 + "[wiki]\n"
@@ -290,14 +373,14 @@ class DesktopConfigControllerTest {
 
     @Test
     void knownKeyTypeViolationRejectedWithoutWriting(@TempDir Path dir) throws Exception {
-        // SPEC-TOML-TST-005: aw.port = "abc" is not an integer → 400, no write.
+        // SPEC-TOML-TST-005: events.port = "abc" is not an integer → 400, no write.
         UserConfigStore store = new UserConfigStore(dir);
         store.saveRaw("[llm]\nmodel = \"keep\"\n");
         var ctrl = controller(dir, store);
 
         TomlValidationException ex = assertThrows(TomlValidationException.class,
-                () -> ctrl.applyRawSave("[aw]\nport = \"abc\"\n"));
-        assertTrue(ex.getMessage().contains("aw.port"), ex.getMessage());
+                () -> ctrl.applyRawSave("[events]\nport = \"abc\"\n"));
+        assertTrue(ex.getMessage().contains("events.port"), ex.getMessage());
 
         assertEquals("[llm]\nmodel = \"keep\"\n", store.readRaw()); // untouched
     }
@@ -321,17 +404,17 @@ class DesktopConfigControllerTest {
     void invalidRawSettingsAreRejectedWithoutReplacingDiskFile(@TempDir Path dir)
             throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
-        String original = "[aw.raw.integrity]\nverifyOnStartup = \"latest\"\n";
+        String original = "[events.raw.integrity]\nstartupScope = \"latest\"\n";
         store.saveRaw(original);
         var ctrl = controller(dir, store);
 
         List<String> invalidTexts = List.of(
-                "[aw.raw.query]\nmaxRangeDays = 0\n",
-                "[aw.raw.query]\nmaxPageSize = 10001\n",
-                "[aw.raw.lowDisk]\nwarnBytes = 1024\nblockBytes = 1024\n",
-                "[aw.raw.projector]\nbatchSize = -1\n",
-                "[aw.raw.integrity]\nverifyOnStartup = \"none\"\n",
-                "[aw.raw]\nenabled = false\n");
+                "[events.raw.query]\nmaxRangeDays = 0\n",
+                "[events.raw.query]\nmaxPageSize = 10001\n",
+                "[events.raw.lowDisk]\nwarnBytes = 1024\nblockBytes = 1024\n",
+                "[events.raw.projector]\nbatchSize = -1\n",
+                "[events.raw.integrity]\nstartupScope = \"none\"\n",
+                "[events.raw]\nenabled = false\n");
 
         for (String invalidText : invalidTexts) {
             assertThrows(TomlValidationException.class,
@@ -344,10 +427,10 @@ class DesktopConfigControllerTest {
     void rawDirectoryCannotChangeAfterCatalogContainsPartition(@TempDir Path dir)
             throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
-        String original = "[aw.raw]\ndir = '" + dir.resolve("events/raw") + "'\n";
+        String original = "[events.raw]\ndir = '" + dir.resolve("events/raw") + "'\n";
         store.saveRaw(original);
         Config config = Config.testDefaults(dir);
-        try (RawPartitionCatalog catalog = new RawPartitionCatalog(config.awRawDir())) {
+        try (RawPartitionCatalog catalog = new RawPartitionCatalog(config.eventsRawDir())) {
             catalog.insert(new RawPartitionMetadata(
                     "2026-09", "2026/raw-events-2026-09.db",
                     Instant.parse("2026-09-01T00:00:00Z"), null,
@@ -357,11 +440,11 @@ class DesktopConfigControllerTest {
 
         TomlValidationException error = assertThrows(TomlValidationException.class,
                 () -> new DesktopConfigController(config, store).applyRawSave(
-                        "[aw.raw]\ndir = '" + dir.resolve("new-raw") + "'\n"));
+                        "[events.raw]\ndir = '" + dir.resolve("new-raw") + "'\n"));
 
-        assertTrue(error.getMessage().contains("aw.raw.dir"), error.getMessage());
+        assertTrue(error.getMessage().contains("events.raw.dir"), error.getMessage());
         assertEquals(original, store.readRaw());
-        try (RawPartitionCatalog catalog = new RawPartitionCatalog(config.awRawDir())) {
+        try (RawPartitionCatalog catalog = new RawPartitionCatalog(config.eventsRawDir())) {
             assertEquals(1, catalog.partitionCount());
         }
     }
@@ -370,10 +453,10 @@ class DesktopConfigControllerTest {
     void rawDirectoryCanChangeBeforeAnyPartitionExists(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         Config config = Config.testDefaults(dir);
-        try (RawPartitionCatalog ignored = new RawPartitionCatalog(config.awRawDir())) {
+        try (RawPartitionCatalog ignored = new RawPartitionCatalog(config.eventsRawDir())) {
             // catalog exists, but the first raw event has not created a partition yet
         }
-        String replacement = "[aw.raw]\ndir = '" + dir.resolve("new-raw") + "'\n";
+        String replacement = "[events.raw]\ndir = '" + dir.resolve("new-raw") + "'\n";
 
         new DesktopConfigController(config, store).applyRawSave(replacement);
 
@@ -451,11 +534,11 @@ class DesktopConfigControllerTest {
         // SPEC-TOML-TST-015 spirit: a saved raw TOML re-parses consistently.
         UserConfigStore store = new UserConfigStore(dir);
         var ctrl = controller(dir, store);
-        ctrl.applyRawSave("[aw]\nport = 5601\ncollection.window = false\n");
+        ctrl.applyRawSave("[events]\nport = 5601\ncollection.window = false\n");
 
         Properties back = store.loadUser();
-        assertEquals("5601", back.getProperty("aw.port"));
-        assertEquals("false", back.getProperty("aw.collection.window"));
+        assertEquals("5601", back.getProperty("events.port"));
+        assertEquals("false", back.getProperty("events.collection.window"));
     }
 
     @Test

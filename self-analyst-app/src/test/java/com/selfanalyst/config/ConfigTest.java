@@ -20,6 +20,62 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConfigTest {
 
     @Test
+    void explicitTomlWinsAndDeletionRestoresEnvironment(@TempDir Path dir) throws Exception {
+        var environment = java.util.Map.of(
+                "OPENAI_API_KEY", "env-key", "LLM_MODEL", "env-model",
+                "LLM_BASE_URL", "https://env.invalid/v1", "LLM_TEMPERATURE", "0.9",
+                "EMBEDDING_API_KEY", "env-embedding", "APP_LANGUAGE", "en",
+                "FILE_WATCH_EXTENSIONS", "md");
+        Path file = dir.resolve("config.toml");
+        Files.writeString(file, """
+                [llm]
+                api-key = "toml-key"
+                model = "toml-model"
+                base-url = "https://toml.invalid/v1"
+                temperature = 0.3
+                [embedding]
+                api-key = "toml-embedding"
+                [app]
+                language = "zh"
+                [file.watch]
+                extensions = []
+                """);
+        Config configured = Config.load(dir, environment);
+        assertEquals("toml-key", configured.llmApiKey());
+        assertEquals("toml-model", configured.llmModel());
+        assertEquals("https://toml.invalid/v1", configured.llmBaseUrl());
+        assertEquals(0.3, configured.llmTemperature());
+        assertEquals("toml-embedding", configured.embeddingApiKey());
+        assertEquals("zh", configured.appLanguage());
+        assertEquals("", configured.fileWatchExtensions());
+
+        Files.writeString(file, "");
+        Config fallback = Config.load(dir, environment);
+        assertEquals("env-key", fallback.llmApiKey());
+        assertEquals("env-model", fallback.llmModel());
+        assertEquals("https://env.invalid/v1", fallback.llmBaseUrl());
+        assertEquals(0.9, fallback.llmTemperature());
+        assertEquals("env-embedding", fallback.embeddingApiKey());
+        assertEquals("en", fallback.appLanguage());
+        assertEquals("md", fallback.fileWatchExtensions());
+        assertEquals("gpt-4o", Config.load(dir, java.util.Map.of()).llmModel());
+    }
+
+    @Test
+    void embeddingFallbackUsesEffectiveLlmKey(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), "[llm]\napi-key = 'toml-key'\n");
+        Config config = Config.load(dir, java.util.Map.of("OPENAI_API_KEY", "env-key"));
+        assertEquals("toml-key", config.embeddingApiKey());
+    }
+
+    @Test
+    void explicitBlankKeyDoesNotUseEnvironment(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("config.toml"), "[llm]\napi-key = ''\n");
+        Config config = Config.load(dir, java.util.Map.of("OPENAI_API_KEY", "env-key"));
+        assertEquals("", config.llmApiKey());
+    }
+
+    @Test
     void classpathDefaultsKeepNetworkFeaturesOptIn() throws Exception {
         Properties props = new Properties();
         try (var in = Config.class.getClassLoader().getResourceAsStream("application.properties")) {

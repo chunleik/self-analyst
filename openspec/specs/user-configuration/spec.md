@@ -131,13 +131,23 @@ config.properties、memoryDir/config.toml 或用户主目录旧 properties 路�
 - **THEN** 本次启动后续存储使用该目录，而 config.toml 自身路径保持不变
 
 ### Requirement: SPEC-TOML-LOAD-002 加载优先级
-配置 SHALL 按支持入口的环境变量或 JVM property、用户 TOML、classpath defaults、硬编码默认值顺序
-解析。Config 与 UserConfigStore 对同一 TOML SHALL 产生一致拍平结果。aw.port MUST 只由用户 TOML 或
+配置 SHALL 按用户 TOML 显式值、支持入口的环境变量、classpath defaults、硬编码默认值顺序
+解析。未配置或删除用户覆盖后 SHALL 恢复环境变量兜底；显式空值 MUST NOT 被环境变量覆盖，
+其合法性与默认值处理 SHALL 保持各键的既有规则。memory.dir 的显式 JVM property SHALL 继续优先于 TOML。
+Config 与 UserConfigStore 对同一 TOML SHALL 产生一致拍平结果。aw.port MUST 只由用户 TOML 或
 默认值决定，不接受环境变量覆盖。
 
-#### Scenario: 环境变量覆盖模型
+#### Scenario: 用户配置覆盖环境变量
 - **WHEN** 同一支持键同时存在环境变量和 TOML 值
-- **THEN** 环境变量生效
+- **THEN** 用户 TOML 值生效
+
+#### Scenario: 删除覆盖恢复环境变量
+- **WHEN** 用户删除一个支持环境变量的 TOML 配置项
+- **THEN** 后续加载使用非空环境变量；环境变量未设置时使用内置默认值
+
+#### Scenario: 连接测试与配置加载一致
+- **WHEN** 连接测试未显式提供模型连接参数
+- **THEN** LLM 与 Embedding 测试使用当前已保存配置按同一优先级解析的参数；未配置独立 Embedding 密钥时沿用有效 LLM 密钥
 
 #### Scenario: aw.port 环境变量
 - **WHEN** 环境变量尝试设置 aw.port 而 TOML 另有值

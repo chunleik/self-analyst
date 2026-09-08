@@ -133,8 +133,9 @@ pwsh -File scripts/check-native-tray-menu.ps1 -Case enabled
 
 ## 配置
 
-首次启动会在数据目录创建 `config.toml`。桌面“配置”页可编辑当前受支持字段；环境变量仍可覆盖
-对应配置。完整键表以 [用户配置规格](openspec/specs/user-configuration/spec.md) 和 `SupportedKeys` 为准。
+首次启动会在数据目录创建 `config.toml`。桌面“配置”页可编辑当前受支持字段；显式保存的 TOML 配置优先于
+环境变量，未配置的键才使用环境变量兜底，最后使用内置默认值。删除配置项可恢复兜底。
+memory.dir 的显式 JVM 参数仍具有最高优先级；aw.port 不接受环境变量覆盖。完整键表以 [用户配置规格](openspec/specs/user-configuration/spec.md) 和 `SupportedKeys` 为准。
 
 | 配置键 | 环境变量 | 默认值 |
 |--------|----------|--------|

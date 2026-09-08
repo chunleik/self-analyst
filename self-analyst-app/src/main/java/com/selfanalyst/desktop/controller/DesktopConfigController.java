@@ -408,17 +408,17 @@ public class DesktopConfigController {
 
     private Path proposedRawDirectory(Properties newUserProperties) {
         String envRawDir = System.getenv("AW_RAW_DIR");
-        if (envRawDir != null && !envRawDir.isBlank()) return Path.of(envRawDir);
         String configuredRawDir = newUserProperties.getProperty("aw.raw.dir");
         if (configuredRawDir != null && !configuredRawDir.isBlank()) {
             return Path.of(configuredRawDir.replace(
                     "${user.home}", System.getProperty("user.home")));
         }
+        if (!newUserProperties.containsKey("aw.raw.dir")
+                && envRawDir != null && !envRawDir.isBlank()) return Path.of(envRawDir);
         String envAwDataDir = System.getenv("AW_DATA_DIR");
-        String awDataDir = envAwDataDir != null && !envAwDataDir.isBlank()
-                ? envAwDataDir
-                : newUserProperties.getProperty("aw.data-dir",
-                        SupportedKeys.defaults().get("aw.data-dir"));
+        String awDataDir = newUserProperties.getProperty("aw.data-dir",
+                envAwDataDir != null && !envAwDataDir.isBlank()
+                        ? envAwDataDir : SupportedKeys.defaults().get("aw.data-dir"));
         return Path.of(awDataDir.replace(
                 "${user.home}", System.getProperty("user.home"))).resolve("raw");
     }
@@ -503,6 +503,7 @@ public class DesktopConfigController {
                 body = Map.of();
             }
 
+            Config effective = Config.load(userStore.filePath().getParent());
             String userProvidedKey = stringOr(body.get("apiKey"), null);
             // If frontend sends a masked key (user didn't type a new one), use stored key
             if (userProvidedKey == null || userProvidedKey.contains("****")) {
@@ -512,17 +513,10 @@ public class DesktopConfigController {
             if (userProvidedKey != null) {
                 apiKey = userProvidedKey;
             } else {
-                // Try env var first, then user config file, then config record
-                apiKey = System.getenv().getOrDefault("OPENAI_API_KEY", null);
-                if (apiKey == null || apiKey.isBlank()) {
-                    apiKey = userStore.load().getProperty("llm.api-key");
-                }
-                if (apiKey == null || apiKey.isBlank()) {
-                    apiKey = config.llmApiKey();
-                }
+                apiKey = effective.llmApiKey();
             }
-            String baseUrl = stringOr(body.get("baseUrl"), config.llmBaseUrl());
-            String model = stringOr(body.get("model"), config.llmModel());
+            String baseUrl = stringOr(body.get("baseUrl"), effective.llmBaseUrl());
+            String model = stringOr(body.get("model"), effective.llmModel());
 
             if (apiKey == null || apiKey.isBlank() || apiKey.contains("CHANGE_ME")) {
                 ctx.json(Map.of("ok", false, "error", "API Key 未配置"));
@@ -566,6 +560,7 @@ public class DesktopConfigController {
                 body = Map.of();
             }
 
+            Config effective = Config.load(userStore.filePath().getParent());
             String userProvidedKey = stringOr(body.get("embeddingApiKey"), null);
             if (userProvidedKey == null || userProvidedKey.contains("****")) {
                 userProvidedKey = null;
@@ -574,23 +569,14 @@ public class DesktopConfigController {
             if (userProvidedKey != null) {
                 apiKey = userProvidedKey;
             } else {
-                apiKey = System.getenv().getOrDefault("EMBEDDING_API_KEY", null);
-                if (apiKey == null || apiKey.isBlank()) {
-                    apiKey = System.getenv().getOrDefault("OPENAI_API_KEY", null);
-                }
-                if (apiKey == null || apiKey.isBlank()) {
-                    apiKey = userStore.load().getProperty("embedding.api-key");
-                }
-                if (apiKey == null || apiKey.isBlank()) {
-                    apiKey = config.llmApiKey();
-                }
+                apiKey = effective.embeddingApiKey();
             }
             String baseUrl = stringOr(body.get("embeddingBaseUrl"),
-                    config.embeddingBaseUrl());
-            String model = stringOr(body.get("embeddingModel"), config.embeddingModel());
+                    effective.embeddingBaseUrl());
+            String model = stringOr(body.get("embeddingModel"), effective.embeddingModel());
             boolean sendEncodingFormat = body.containsKey("embeddingSendEncodingFormat")
                     ? Boolean.parseBoolean(stringOr(body.get("embeddingSendEncodingFormat"), "true"))
-                    : true;
+                    : effective.embeddingSendEncodingFormat();
 
             if (apiKey == null || apiKey.isBlank() || apiKey.contains("CHANGE_ME")) {
                 ctx.json(Map.of("ok", false, "error", "API Key 未配置"));

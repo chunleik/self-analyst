@@ -31,6 +31,59 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DesktopConfigControllerTest {
 
+    @Test
+    void connectionTestsUseNewlySavedParameters(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        DesktopConfigController controller = controller(dir, store);
+        var authorization = new java.util.concurrent.atomic.AtomicReference<String>();
+        var embeddingBody = new java.util.concurrent.atomic.AtomicReference<String>();
+        var app = io.javalin.Javalin.create();
+        app.post("/test-llm", controller::testLlm);
+        app.post("/test-embedding", controller::testEmbedding);
+        app.get("/v1/models", ctx -> {
+            authorization.set(ctx.header("Authorization"));
+            ctx.result("{}");
+        });
+        app.post("/v1/embeddings", ctx -> {
+            authorization.set(ctx.header("Authorization"));
+            embeddingBody.set(ctx.body());
+            ctx.result("{}");
+        });
+        app.start("127.0.0.1", 0);
+        try (var client = java.net.http.HttpClient.newHttpClient()) {
+            String base = "http://127.0.0.1:" + app.port();
+            store.saveRaw("""
+                    [llm]
+                    api-key = "saved-llm-key"
+                    base-url = "%s/v1"
+                    model = "saved-chat"
+                    [embedding]
+                    api-key = "saved-embedding-key"
+                    base-url = "%s/v1"
+                    model = "saved-embedding"
+                    send-encoding-format = false
+                    """.formatted(base, base));
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            for (String kind : List.of("llm", "embedding")) {
+                var request = java.net.http.HttpRequest.newBuilder(
+                                java.net.URI.create(base + "/test-" + kind))
+                        .timeout(java.time.Duration.ofSeconds(15))
+                        .header("Content-Type", "application/json")
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofString("{}"))
+                        .build();
+                var response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, response.statusCode());
+                assertTrue(mapper.readTree(response.body()).path("ok").asBoolean(), response.body());
+                assertEquals("Bearer saved-" + kind + "-key", authorization.get());
+            }
+            var payload = mapper.readTree(embeddingBody.get());
+            assertEquals("saved-embedding", payload.path("model").asText());
+            assertFalse(payload.has("encoding_format"));
+        } finally {
+            app.stop();
+        }
+    }
+
     private DesktopConfigController controller(Path dir, UserConfigStore store) {
         return new DesktopConfigController(Config.testDefaults(dir), store);
     }

@@ -154,7 +154,11 @@ class DesktopServerIntegrationTest {
                         "message", "Hello?",
                         "context", Map.of("type", "manual"))),
                 new TypeReference<>() {});
-        assertTrue(String.valueOf(response.get("message")).contains("未配置"));
+        Map<String, Object> status = get("/desktop/status", new TypeReference<>() {});
+        String expected = "zh".equals(status.get("language"))
+                ? "LLM 未配置，请在配置页面设置 API Key"
+                : "LLM is not configured. Set the API key in Settings.";
+        assertEquals(expected, response.get("message"));
     }
 
     private <T> T get(String path, TypeReference<T> type) throws Exception {

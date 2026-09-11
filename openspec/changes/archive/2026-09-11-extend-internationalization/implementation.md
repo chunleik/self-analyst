@@ -56,6 +56,8 @@
 
 ## 首次提交前审查
 
+首次 Windows CI 在英文系统下发现 DesktopServerIntegrationTest 固定断言“未配置”。以 `-DargLine="-Duser.language=en -Duser.country=US"` 在本地复现后，测试改为按状态接口的有效语言验证完整提示；英文与中文 JVM 环境下各 6 项集成测试均通过。该修正不改变产品响应行为，远端结果由 PR 最新提交的检查记录提供。
+
 对 app 被标量占用、app.language 已为表或嵌套表的合法 TOML 草稿，语言选择器不再插入冲突字段；新增回归断言确认保留原草稿并拒绝该无损编辑操作。
 
 修复配置保存失败后语言选择框未恢复可用的问题，并在 config-runtime.test.mjs 补充回归断言，103 项 Node 测试通过。按 CI 要求执行 Rust 格式化及 Clippy（警告作为错误），均通过。分支已快进同步最新 main，未覆盖工作区实现。

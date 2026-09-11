@@ -35,6 +35,8 @@
 
 ## 7. 首次提交前审查修正
 
+- [x] 7.4 修正 `DesktopServerIntegrationTest` 对缺少 LLM 配置提示的固定中文断言，分别用英文与中文 JVM 环境验证；远端必需检查结果以 PR 最新提交为准。
+
 - [x] 7.3 在 `THIRD-PARTY-NOTICES.md` 补充 serde_json 用于桌面语言资源的说明，保持既有许可证记录。
 
 - [x] 7.2 对 TOML 中已被标量或子表占用的 app.language 路径禁用无损编辑，补充 `i18n.test.mjs` 冲突回归测试。

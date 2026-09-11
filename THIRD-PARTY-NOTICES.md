@@ -40,7 +40,7 @@ Rust crate 依赖声明在 `self-analyst-desktop/src-tauri/Cargo.toml`，锁定�
 | 组件 | 用途 | 许可证 |
 |------|------|--------|
 | [uiautomation](https://github.com/leexgone/uiautomation-rs) | `self-analyst-axsidecar` 的 Windows UIAutomation 客户端 | Apache-2.0 |
-| [serde](https://serde.rs) / `serde_json` | sidecar JSONL 协议 | MIT / Apache-2.0 |
+| [serde](https://serde.rs) / `serde_json` | sidecar JSONL 协议；桌面语言注册表与消息资源解析 | MIT / Apache-2.0 |
 
 ## 桌面前端
 

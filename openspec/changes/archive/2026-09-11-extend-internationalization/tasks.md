@@ -35,6 +35,8 @@
 
 ## 7. 首次提交前审查修正
 
+- [x] 7.3 在 `THIRD-PARTY-NOTICES.md` 补充 serde_json 用于桌面语言资源的说明，保持既有许可证记录。
+
 - [x] 7.2 对 TOML 中已被标量或子表占用的 app.language 路径禁用无损编辑，补充 `i18n.test.mjs` 冲突回归测试。
 
 - [x] 7.1 修复 `config.js` 保存失败后语言选择框未恢复的问题，补充 `config-runtime.test.mjs` 回归测试并运行 Node 测试；将双语验收截图纳入 PR 可访问的文档目录。

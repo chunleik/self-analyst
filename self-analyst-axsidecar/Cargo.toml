@@ -1,6 +1,6 @@
 [package]
 name = "self-analyst-axsidecar"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "OS-neutral accessibility-tree sidecar for SelfAnalyst (SPEC-AXS-*)"
 

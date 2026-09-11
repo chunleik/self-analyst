@@ -41,6 +41,7 @@ pub fn install_panic_hook() {
         } else {
             write("panic without source location");
         }
+        crate::report_startup_failure();
         original(info);
     }));
 }

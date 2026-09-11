@@ -27,7 +27,7 @@ assert.match(chat, /memory-panel-disable/, "chat.js should let users disable act
 const config = read("../../main/resources/desktop-ui/config.js");
 assert.doesNotMatch(config, /renderMemoryManager|memory-manager-/, "config modal must not contain memory management");
 
-const i18n = read("../../main/resources/desktop-ui/i18n.js");
+const i18n = read("../../main/resources/desktop-ui/locales/zh.json") + read("../../main/resources/desktop-ui/locales/en.json");
 [
   "memory.chatTitle",
   "memory.loadFailed",

@@ -101,13 +101,13 @@ public class DesktopAgentController {
             SummaryPromptService.SummaryTextClient summaryClient =
                     llmAvailable ? task::complete : null;
             com.selfanalyst.i18n.Lang lang = config != null
-                    ? config.effectiveLanguage() : com.selfanalyst.i18n.Lang.ZH;
+                    ? config.effectiveLanguage() : com.selfanalyst.i18n.Lang.chinese();
             int llmCap = config != null ? config.desktopSummaryMaxTimelineLlm() : 0;
             ctx.json(summaryAssembler.assemble(new DesktopSummaryAssembler.Request(
                     llmAvailable, llmCap, lang, summaryClient)));
             }
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to generate summary: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.summary.generate", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -145,7 +145,7 @@ public class DesktopAgentController {
 
             if (agent == null) {
                 ctx.json(Map.of(
-                        "message", "LLM 未配置，无法进行对话。请在配置页面设置 API Key。",
+                        "message", com.selfanalyst.i18n.Messages.text(config.effectiveLanguage(), "error.llmNotConfigured"),
                         "suggestedTasks", List.of()
                 ));
                 return;
@@ -185,8 +185,7 @@ public class DesktopAgentController {
             }
             if (!validateSessionRouting(ctx, request)) return;
             if (agent == null) {
-                ctx.status(503).json(Map.of(
-                        "error", "LLM 未配置，无法进行对话。请在配置页面设置 API Key。"));
+                ctx.status(503).json(DesktopErrors.payload(ctx, "error.llmNotConfigured", Map.of()));
                 return;
             }
 
@@ -232,8 +231,9 @@ public class DesktopAgentController {
             ChatError error = describeChatError(e);
             if (output != null && ctx.res().isCommitted()) {
                 try {
-                    writeSseEvent(output, "error", Map.of(
-                            "status", error.status(), "error", error.message()));
+                    var payload = chatErrorPayload(ctx, error);
+                    payload.put("status", error.status());
+                    writeSseEvent(output, "error", payload);
                 } catch (IOException disconnected) {
                     log.debug("Chat stream client disconnected while reporting an error");
                 }
@@ -248,15 +248,15 @@ public class DesktopAgentController {
         try {
             String sessionId = ctx.pathParam("id");
             if (!ChatSessionStore.isGeneratedSessionId(sessionId)) {
-                ctx.status(400).json(Map.of("error", "Invalid chat session id"));
+                ctx.status(400).json(DesktopErrors.payload(ctx, "error.chat.sessionId", Map.of()));
                 return;
             }
             if (chatSessionStore == null || chatSessionStore.getSession(sessionId) == null) {
-                ctx.status(404).json(Map.of("error", "Chat session not found"));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.chat.notFound", Map.of()));
                 return;
             }
             if (agent == null) {
-                ctx.status(503).json(Map.of("error", "LLM is not configured"));
+                ctx.status(503).json(DesktopErrors.payload(ctx, "error.llmNotConfigured", Map.of()));
                 return;
             }
             @SuppressWarnings("unchecked")
@@ -265,7 +265,7 @@ public class DesktopAgentController {
             Object rawMessageId = body == null ? null : body.get("userMessageId");
             if (!(rawMessageId instanceof String userMessageId)
                     || !ChatSessionStore.isGeneratedMessageId(userMessageId)) {
-                ctx.status(400).json(Map.of("error", "Invalid user message id"));
+                ctx.status(400).json(DesktopErrors.payload(ctx, "error.chat.userMessageId", Map.of()));
                 return;
             }
             boolean requested = agent.cancelChat(sessionId, userMessageId);
@@ -309,15 +309,15 @@ public class DesktopAgentController {
     private boolean validateSessionRouting(Context ctx, ChatRequest request) {
         if (request.sessionId().isEmpty()) return true;
         if (!ChatSessionStore.isGeneratedSessionId(request.sessionId())) {
-            ctx.status(400).json(Map.of("error", "Invalid chat session id"));
+            ctx.status(400).json(DesktopErrors.payload(ctx, "error.chat.sessionId", Map.of()));
             return false;
         }
         if (chatSessionStore == null || chatSessionStore.getSession(request.sessionId()) == null) {
-            ctx.status(404).json(Map.of("error", "Chat session not found"));
+            ctx.status(404).json(DesktopErrors.payload(ctx, "error.chat.notFound", Map.of()));
             return false;
         }
         if (!ChatSessionStore.isGeneratedMessageId(request.userMessageId())) {
-            ctx.status(400).json(Map.of("error", "Invalid user message id"));
+            ctx.status(400).json(DesktopErrors.payload(ctx, "error.chat.userMessageId", Map.of()));
             return false;
         }
         // Validate once before committing response headers. The same check is repeated under the
@@ -340,7 +340,7 @@ public class DesktopAgentController {
     }
 
     private static void writeChatErrorResponse(Context ctx, ChatError error) {
-        ctx.status(error.status()).json(Map.of("error", error.message()));
+        ctx.status(error.status()).json(chatErrorPayload(ctx, error));
     }
 
     static ChatError describeChatError(Exception e) {
@@ -356,25 +356,25 @@ public class DesktopAgentController {
             return new ChatError(400, "Invalid chat JSON: " + e.getMessage());
         }
         if (hasCause(e, SelfAnalystAgent.ChatSessionUnavailableException.class)) {
-            return new ChatError(404, "Chat session not found");
+            return new ChatError(404, "Chat session not found", "error.chat.sessionMissing");
         }
         if (hasCause(e, InvalidChatTurnException.class)) {
-            return new ChatError(400, "User message does not belong to session");
+            return new ChatError(400, "User message does not belong to session", "error.chat.wrongTurn");
         }
         if (hasCause(e, SelfAnalystAgent.StaleChatTurnException.class)) {
-            return new ChatError(409, "Only the latest incomplete user turn can be resumed");
+            return new ChatError(409, "Only the latest incomplete user turn can be resumed", "error.chat.staleTurn");
         }
         if (hasCause(e, SelfAnalystAgent.ChatCancelledException.class)) {
-            return new ChatError(409, "Chat request was cancelled");
+            return new ChatError(409, "Chat request was cancelled", "error.chat.cancelled");
         }
         if (hasCause(e, SelfAnalystAgent.EmptyAgentResponseException.class)) {
-            return new ChatError(502, "模型未返回文本，请重试");
+            return new ChatError(502, "模型未返回文本，请重试", "error.chat.emptyResponse");
         }
         if (hasAgentStillRunning(e)) {
-            return new ChatError(409, "上一条消息仍在处理中，请稍后再试...");
+            return new ChatError(409, "上一条消息仍在处理中，请稍后再试...", "error.chat.stillRunning");
         }
         if (hasCause(e, com.selfanalyst.wiki.usage.LlmUnavailableException.class)) {
-            return new ChatError(503, "LLM 未配置，请在配置页面设置 API Key");
+            return new ChatError(503, "LLM 未配置，请在配置页面设置 API Key", "error.chat.unavailable");
         }
         if (e instanceof IllegalArgumentException) {
             return new ChatError(400,
@@ -388,7 +388,15 @@ public class DesktopAgentController {
     private record ChatRequest(
             String message, Object context, String sessionId, String userMessageId) {}
 
-    record ChatError(int status, String message) {}
+    record ChatError(int status, String message, String code) {
+        ChatError(int status, String message) { this(status, message, "error.generic"); }
+    }
+
+    private static Map<String, Object> chatErrorPayload(Context ctx, ChatError error) {
+        var payload = DesktopErrors.payload(ctx, error.code(),
+                "error.generic".equals(error.code()) ? Map.of("detail", error.message()) : Map.of());
+        return payload;
+    }
 
     private static String requireAgentResponse(String response) {
         if (response == null || response.isBlank()) {

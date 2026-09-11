@@ -228,6 +228,7 @@ class DesktopChatSessionLifecycleControllerTest {
                     Context.class.getClassLoader(),
                     new Class<?>[]{Context.class},
                     (proxy, method, args) -> switch (method.getName()) {
+                        case "attribute" -> com.selfanalyst.i18n.Lang.chinese();
                         case "body" -> this.body;
                         case "pathParam" -> this.pathId;
                         case "status" -> {

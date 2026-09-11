@@ -81,6 +81,7 @@ function createVisibilitySandbox(overview, status) {
   };
   vm.createContext(sandbox);
   vm.runInContext(read("i18n.js"), sandbox);
+  sandbox.MESSAGES = Object.fromEntries(["zh", "en"].map(lang => [lang, JSON.parse(fs.readFileSync(new URL("../../main/resources/desktop-ui/locales/" + lang + ".json", import.meta.url), "utf8"))]));
   vm.runInContext(read("files.js"), sandbox);
   const originalOpen = sandbox.openFileSettingsModal;
   sandbox.openFileSettingsModal = function () {
@@ -124,6 +125,7 @@ function createSandbox(overview, getFiles) {
   };
   vm.createContext(sandbox);
   vm.runInContext(read("i18n.js"), sandbox);
+  sandbox.MESSAGES = Object.fromEntries(["zh", "en"].map(lang => [lang, JSON.parse(fs.readFileSync(new URL("../../main/resources/desktop-ui/locales/" + lang + ".json", import.meta.url), "utf8"))]));
   vm.runInContext(read("files.js"), sandbox);
   return { sandbox, elements };
 }

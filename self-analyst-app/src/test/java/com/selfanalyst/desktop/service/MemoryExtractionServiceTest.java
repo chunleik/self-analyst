@@ -22,7 +22,7 @@ class MemoryExtractionServiceTest {
     @Test
     void smartPolicyAutoActivatesExplicitLowRiskPreference() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
         ChatSessionStore.Session session = session("smart");
 
         svc.extractAfterAssistantSent(session, user("我以后都希望你用中文回答。"), assistant("好的。"),
@@ -40,7 +40,7 @@ class MemoryExtractionServiceTest {
     @Test
     void smartPolicyRoutesSensitiveInferenceToPending() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("smart"), user("最近晚上刷视频比较多。"), assistant("可以调整。"),
                 (prompt, timeout) -> """
@@ -55,7 +55,7 @@ class MemoryExtractionServiceTest {
     @Test
     void confirmAllPolicyKeepsAutoCandidatePending() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("confirm_all"), user("我偏好简洁回答。"), assistant("收到。"),
                 (prompt, timeout) -> """
@@ -69,7 +69,7 @@ class MemoryExtractionServiceTest {
     @Test
     void lowConfidenceAutoCandidateIsPending() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("smart"), user("我也许更喜欢早上开会。"), assistant("可以试试。"),
                 (prompt, timeout) -> """
@@ -83,7 +83,7 @@ class MemoryExtractionServiceTest {
     @Test
     void offPolicyDoesNotCallClientAndInvalidJsonDoesNotWriteMemories() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
         AtomicBoolean called = new AtomicBoolean(false);
 
         svc.extractAfterAssistantSent(session("off"), user("记住我喜欢中文。"), assistant("好。"),
@@ -101,7 +101,7 @@ class MemoryExtractionServiceTest {
     @Test
     void credentialLikeCandidateIsNotStored() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("smart"), user("我的 api key 是 sk-test-secret123"), assistant("我不会保存。"),
                 (prompt, timeout) -> """
@@ -114,7 +114,7 @@ class MemoryExtractionServiceTest {
     @Test
     void invalidCandidateDoesNotDropLaterValidCandidate() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("smart"), user("我偏好中文回答。"), assistant("收到。"),
                 (prompt, timeout) -> """
@@ -132,7 +132,7 @@ class MemoryExtractionServiceTest {
     @Test
     void credentialLikeChatTextDoesNotReachExtractionClient() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
         AtomicBoolean called = new AtomicBoolean(false);
 
         svc.extractAfterAssistantSent(session("smart"),
@@ -151,7 +151,7 @@ class MemoryExtractionServiceTest {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         memory.createExtracted("preference", "用户偏好中文交流。", "existing", 9,
                 false, "auto", "active", "session-1", List.of("user-1", "assistant-1"));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
         AtomicBoolean called = new AtomicBoolean(false);
 
         svc.extractAfterAssistantSent(session("smart"), user("我偏好中文。"), assistant("好的。"),
@@ -170,7 +170,7 @@ class MemoryExtractionServiceTest {
     void fencedJsonResponseIsParsedAndPromptIsBounded() throws Exception {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         memory.createManual("note", "m".repeat(5000), "existing memory", null, "ui_manual", "active");
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.EN);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.english());
         String longMessage = "x".repeat(5000);
 
         svc.extractAfterAssistantSent(session("smart"), user(longMessage), assistant(longMessage),
@@ -197,7 +197,7 @@ class MemoryExtractionServiceTest {
                 9, "active", false, "auto", "legacy", "session-1", List.of(),
                 java.time.Instant.parse("2026-07-04T00:00:00Z"),
                 java.time.Instant.parse("2026-07-04T00:00:00Z")));
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("smart"), user("我偏好简洁回答。"), assistant("收到。"),
                 (prompt, timeout) -> {
@@ -218,7 +218,7 @@ class MemoryExtractionServiceTest {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         GrowthProfile.MemoryItem item = memory.createManual(
                 "preference", "用户偏好中文交流。", "manual", "session-1", "chat_manual", "active");
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
         AtomicBoolean called = new AtomicBoolean(false);
 
         svc.extractAfterAssistantSent(session("off"), user("忘记 用户偏好中文交流。"), assistant("已处理。"),
@@ -240,7 +240,7 @@ class MemoryExtractionServiceTest {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         GrowthProfile.MemoryItem item = memory.createManual(
                 "note", "喝水", "manual", "session-1", "chat_manual", "active");
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("smart"), user("别忘记提醒我喝水。"), assistant("好的。"),
                 (prompt, timeout) -> "[]");
@@ -257,7 +257,7 @@ class MemoryExtractionServiceTest {
         LongTermMemoryService memory = new LongTermMemoryService(MemoryStore.load(tempDir));
         GrowthProfile.MemoryItem item = memory.createManual(
                 "preference", "用户偏好中文交流。", "manual", "session-1", "chat_manual", "active");
-        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.ZH);
+        MemoryExtractionService svc = new MemoryExtractionService(memory, Lang.chinese());
 
         svc.extractAfterAssistantSent(session("smart"), user("请忘记这条中文偏好。"), assistant("已处理。"),
                 (prompt, timeout) -> """

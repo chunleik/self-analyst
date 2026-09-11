@@ -72,13 +72,13 @@ public class DesktopFileController {
         Object enabledValue = body.get("enabled");
         Object pathsValue = body.get("paths");
         if (!(enabledValue instanceof Boolean enabled) || !(pathsValue instanceof List<?> rawPaths)) {
-            ctx.status(400).json(Map.of("error", "enabled 必须是布尔值，paths 必须是目录数组"));
+            ctx.status(400).json(DesktopErrors.payload(ctx, "error.file.settingsType", Map.of()));
             return;
         }
         List<String> paths = new ArrayList<>();
         for (Object rawPath : rawPaths) {
             if (!(rawPath instanceof String path)) {
-                ctx.status(400).json(Map.of("error", "paths 中的每一项都必须是目录字符串"));
+                ctx.status(400).json(DesktopErrors.payload(ctx, "error.file.pathType", Map.of()));
                 return;
             }
             paths.add(path);
@@ -86,9 +86,9 @@ public class DesktopFileController {
         try {
             ctx.json(updateSettings(enabled, paths));
         } catch (IllegalArgumentException invalidSettings) {
-            ctx.status(400).json(Map.of("error", invalidSettings.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, invalidSettings));
         } catch (IllegalStateException unavailable) {
-            ctx.status(503).json(Map.of("error", unavailable.getMessage()));
+            ctx.status(503).json(DesktopErrors.payload(ctx, "error.file.unavailable", Map.of()));
         }
     }
 
@@ -204,30 +204,30 @@ public class DesktopFileController {
 
     private static List<Path> normalizeWatchRoots(List<String> requestedPaths) {
         if (requestedPaths == null) {
-            throw new IllegalArgumentException("paths 必须是目录数组");
+            throw new DesktopErrors.UserMessageException("error.file.pathsArray", Map.of());
         }
         if (requestedPaths.size() > 100) {
-            throw new IllegalArgumentException("监控目录不能超过 100 个");
+            throw new DesktopErrors.UserMessageException("error.file.tooManyPaths", Map.of());
         }
         LinkedHashSet<Path> roots = new LinkedHashSet<>();
         for (String requestedPath : requestedPaths) {
             String value = requestedPath == null ? "" : requestedPath.strip();
             if (value.isEmpty()) continue;
             if (value.contains(",")) {
-                throw new IllegalArgumentException("监控目录路径不能包含英文逗号：" + value);
+                throw new DesktopErrors.UserMessageException("error.file.pathComma", Map.of("path", value));
             }
             final Path path;
             try {
                 Path candidate = Path.of(value);
                 if (!candidate.isAbsolute()) {
-                    throw new IllegalArgumentException("监控目录必须使用绝对路径：" + value);
+                    throw new DesktopErrors.UserMessageException("error.file.pathAbsolute", Map.of("path", value));
                 }
                 path = candidate.toAbsolutePath().normalize();
             } catch (InvalidPathException invalidPath) {
-                throw new IllegalArgumentException("无效的监控目录：" + value);
+                throw new DesktopErrors.UserMessageException("error.file.pathInvalid", Map.of("path", value));
             }
             if (!Files.isDirectory(path)) {
-                throw new IllegalArgumentException("监控目录不存在或不是目录：" + value);
+                throw new DesktopErrors.UserMessageException("error.file.pathMissing", Map.of("path", value));
             }
             roots.add(path);
         }

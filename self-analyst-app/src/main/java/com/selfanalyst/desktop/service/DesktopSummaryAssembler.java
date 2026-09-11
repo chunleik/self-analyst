@@ -50,11 +50,11 @@ public class DesktopSummaryAssembler {
 
     public Map<String, Object> assemble(Request request) {
         Instant now = clock.instant();
-        Lang lang = request.lang() != null ? request.lang() : Lang.ZH;
+        Lang lang = request.lang() != null ? request.lang() : Lang.chinese();
         Optional<SummarySnapshot> snapshot = snapshots != null ? snapshots.load() : Optional.empty();
 
         SummaryService.LocalFacts currentFacts = facts.currentStatus(now);
-        SummaryWindowClassifier.Slot todaySlot = windows.slots(now).stream()
+        SummaryWindowClassifier.Slot todaySlot = windows.slots(now, lang).stream()
                 .filter(slot -> "today".equals(slot.key()))
                 .findFirst()
                 .orElseThrow();
@@ -71,11 +71,11 @@ public class DesktopSummaryAssembler {
         boolean canLlm = request.llmAvailable() && request.client() != null && llmCap > 0;
 
         Map<String, Object> currentMap = openWindowMap(
-                "current", "现在", currentFacts, snapshot.map(SummarySnapshot::current).orElse(null),
+                "current", com.selfanalyst.i18n.Messages.text(lang, "period.now"), currentFacts, snapshot.map(SummarySnapshot::current).orElse(null),
                 refreshOpen, canLlm, request.client(), lang, llmUsed, llmCap);
 
         List<Map<String, Object>> timelineList = new ArrayList<>();
-        for (SummaryWindowClassifier.Slot slot : windows.slots(now)) {
+        for (SummaryWindowClassifier.Slot slot : windows.slots(now, lang)) {
             if ("current".equals(slot.key())) {
                 Map<String, Object> currentEntry = new LinkedHashMap<>(currentMap);
                 currentEntry.put("key", "current");
@@ -87,7 +87,7 @@ public class DesktopSummaryAssembler {
                         slot.key(), slot.label(), todayFacts, prior,
                         refreshOpen, canLlm, request.client(), lang, llmUsed, llmCap));
             } else {
-                timelineList.add(timeline.assembleClosed(slot));
+                timelineList.add(timeline.assembleClosed(slot, lang));
             }
         }
 
@@ -163,7 +163,7 @@ public class DesktopSummaryAssembler {
                             : raw;
             return adviceMap(finalAdvice);
         } catch (Exception e) {
-            return failedAdvice();
+            return failedAdvice(lang);
         }
     }
 
@@ -188,18 +188,18 @@ public class DesktopSummaryAssembler {
         return adviceMap;
     }
 
-    private static Map<String, Object> failedAdvice() {
+    private static Map<String, Object> failedAdvice(Lang lang) {
         Map<String, Object> adviceMap = new LinkedHashMap<>();
         adviceMap.put("type", "empty");
-        adviceMap.put("scopeLabel", "数据不足");
+        adviceMap.put("scopeLabel", com.selfanalyst.i18n.Messages.text(lang, "advice.dataInsufficient"));
         adviceMap.put("generatedAt", Instant.now().toString());
-        adviceMap.put("title", "暂时无法生成行为建议");
+        adviceMap.put("title", com.selfanalyst.i18n.Messages.text(lang, "advice.failed"));
         adviceMap.put("body", "");
         adviceMap.put("evidenceTags", List.of());
         adviceMap.put("confidence", "low");
-        adviceMap.put("emptyReason", "生成失败");
+        adviceMap.put("emptyReason", com.selfanalyst.i18n.Messages.text(lang, "advice.failedReason"));
         adviceMap.put("basis", Map.of(
-                "observationRange", "—", "trend", "—", "adviceKind", "—", "dataCompleteness", "低"));
+                "observationRange", "—", "trend", "—", "adviceKind", "—", "dataCompleteness", com.selfanalyst.i18n.Messages.text(lang, "advice.low")));
         return adviceMap;
     }
 

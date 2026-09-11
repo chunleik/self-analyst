@@ -15,15 +15,11 @@ public final class LangResolver {
      * <ul>
      *   <li>{@code app.language} 为 {@code "zh"}/{@code "en"} → 直接返回；</li>
      *   <li>{@code "auto"} 或 null/空/未知 → 看 {@code systemLocale} 的语言代码：
-     *       以 {@code "zh"} 开头则 {@link Lang#ZH}，否则 {@link Lang#EN}。</li>
+     *       以 {@code "zh"} 开头则 {@link Lang#chinese()}，否则 {@link Lang#english()}。</li>
      * </ul>
      */
     public static Lang resolve(String appLanguage, Locale systemLocale) {
-        Lang explicit = Lang.fromCode(appLanguage);
-        if (explicit != null) return explicit;
-        Locale locale = systemLocale != null ? systemLocale : Locale.getDefault();
-        String lang = locale.getLanguage();
-        return (lang != null && lang.toLowerCase().startsWith("zh")) ? Lang.ZH : Lang.EN;
+        return LanguageRegistry.bundled().resolve(appLanguage, systemLocale);
     }
 
     /** 便捷重载：用 {@link Locale#getDefault()} 作为系统 Locale。 */

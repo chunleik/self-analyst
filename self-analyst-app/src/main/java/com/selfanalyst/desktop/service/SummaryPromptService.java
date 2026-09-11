@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.service;
 
 import com.selfanalyst.i18n.Lang;
+import com.selfanalyst.i18n.Messages;
 
 import java.time.Duration;
 import java.util.*;
@@ -27,7 +28,7 @@ public class SummaryPromptService {
      * @return enriched summary
      */
     public EnhancedSummary enhance(SummaryService.LocalFacts facts, SummaryTextClient client) {
-        return enhance(facts, client, Lang.ZH);
+        return enhance(facts, client, Lang.chinese());
     }
 
     /** Language-aware overload (SPEC-I18N-PROMPT-001): prompt + fallback follow {@code lang}. */
@@ -69,7 +70,7 @@ public class SummaryPromptService {
     public BehaviorAdviceService.BehaviorAdvice enhanceAdvice(
             BehaviorAdviceService.BehaviorAdvice advice,
             SummaryTextClient client) {
-        return enhanceAdvice(advice, client, Lang.ZH);
+        return enhanceAdvice(advice, client, Lang.chinese());
     }
 
     /** Language-aware overload (SPEC-I18N-PROMPT-001): advice prompt follows {@code lang}. */
@@ -100,7 +101,7 @@ public class SummaryPromptService {
 
     /** Localized "no insight" fallback text; the controller uses this to detect LLM failure. */
     public static String noInsightText(Lang lang) {
-        return lang == Lang.EN ? NO_INSIGHT_EN : NO_INSIGHT_ZH;
+        return Messages.text(lang, "summary.noInsight");
     }
 
     private static EnhancedSummary fromLocalOnly(SummaryService.LocalFacts facts, Lang lang) {
@@ -119,55 +120,8 @@ public class SummaryPromptService {
     }
 
     static String buildPrompt(SummaryService.LocalFacts facts, Lang lang) {
-        String topApps = facts.topApps() != null ? String.join(", ", facts.topApps()) : null;
-        if (lang == Lang.EN) {
-            return """
-                    You are SelfAnalyst. Based on the following activity data, generate a short summary (1-2 sentences).
-                    Output JSON only, nothing else:
-                    {
-                      "headline": "summarize the current activity in one English sentence",
-                      "insight": "one-sentence insight or pattern finding",
-                      "suggestion": "a specific actionable suggestion (optional, null if none)",
-                      "confidence": "high or medium or low"
-                    }
-
-                    Activity data:
-                    - Top apps: %s
-                    - Active time: %s
-                    - Idle time: %s
-                    - Window switches: %d
-                    - User goal: %s
-                    """.formatted(
-                    topApps != null ? topApps : "none",
-                    facts.activeTime(),
-                    facts.afkTime(),
-                    facts.switchCount(),
-                    facts.goalContext() != null ? facts.goalContext() : "none"
-            );
-        }
-        return """
-                你是 SelfAnalyst，请基于以下活动数据生成一条简短摘要（1-2 句）。
-                输出格式为 JSON，不要输出其他内容：
-                {
-                  "headline": "用中文概括当前活动，1 句话",
-                  "insight": "一句话洞见或模式发现",
-                  "suggestion": "具体可执行的建议（可选，无建议则为 null）",
-                  "confidence": "high 或 medium 或 low"
-                }
-
-                活动数据：
-                - 主要应用: %s
-                - 活跃时间: %s
-                - 非活跃时间: %s
-                - 窗口切换: %d 次
-                - 用户目标: %s
-                """.formatted(
-                topApps != null ? topApps : "无",
-                facts.activeTime(),
-                facts.afkTime(),
-                facts.switchCount(),
-                facts.goalContext() != null ? facts.goalContext() : "无"
-        );
+        String topApps = facts.topApps() != null ? String.join(", ", facts.topApps()) : Messages.text(lang, "common.none");
+        return Messages.text(lang, "summary.prompt").formatted(topApps, facts.activeTime(), facts.afkTime(), facts.switchCount(), facts.goalContext() != null ? facts.goalContext() : Messages.text(lang, "common.none"));
     }
 
     private static EnhancedSummary parseEnhanced(SummaryService.LocalFacts facts, String response, Lang lang) {
@@ -202,52 +156,7 @@ public class SummaryPromptService {
     }
 
     static String buildAdvicePrompt(BehaviorAdviceService.BehaviorAdvice advice, Lang lang) {
-        if (lang == Lang.EN) {
-            return """
-                    You are SelfAnalyst. Based on the following behavior analysis, refine the advice wording to be more natural and empathetic.
-                    Output JSON only, nothing else:
-                    {
-                      "title": "refined main conclusion (one sentence, no more than 80 characters)",
-                      "body": "refined explanation (no more than 240 characters)",
-                      "confidence": "high or medium or low"
-                    }
-
-                    Current advice:
-                    - Type: %s
-                    - Main conclusion: %s
-                    - Explanation: %s
-                    - Evidence: %s
-                    - Trend: %s
-                    """.formatted(
-                    advice.type(),
-                    advice.title(),
-                    advice.body(),
-                    advice.evidenceTags() != null ? String.join(", ", advice.evidenceTags()) : "none",
-                    advice.basis() != null ? advice.basis().trend() : "unknown"
-            );
-        }
-        return """
-                你是 SelfAnalyst，请基于以下行为分析结果优化建议措辞，使其更自然、共情。
-                输出格式为 JSON，不要输出其他内容：
-                {
-                  "title": "优化后的主结论（1句话，不超过80字）",
-                  "body": "优化后的解释正文（不超过240字）",
-                  "confidence": "high 或 medium 或 low"
-                }
-
-                当前建议：
-                - 类型: %s
-                - 主结论: %s
-                - 解释: %s
-                - 证据: %s
-                - 趋势: %s
-                """.formatted(
-                advice.type(),
-                advice.title(),
-                advice.body(),
-                advice.evidenceTags() != null ? String.join(", ", advice.evidenceTags()) : "无",
-                advice.basis() != null ? advice.basis().trend() : "未知"
-        );
+        return Messages.text(lang, "advice.prompt").formatted(advice.type(), advice.title(), advice.body(), advice.evidenceTags() != null ? String.join(", ", advice.evidenceTags()) : Messages.text(lang, "common.none"), advice.basis() != null ? advice.basis().trend() : Messages.text(lang, "common.unknown"));
     }
 
     private static BehaviorAdviceService.BehaviorAdvice parseAdviceResponse(

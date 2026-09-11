@@ -1,33 +1,28 @@
 package com.selfanalyst.i18n;
 
-/**
- * 有效语言（effective language）：SelfAnalyst 仅支持中文与英文两种（SPEC-I18N-DEC-002）。
- * 后端提示词与前端文案均按此枚举选用对应语言变体。
- */
-public enum Lang {
-    ZH("zh"),
-    EN("en");
+import java.util.Locale;
+import java.util.Objects;
 
-    private final String code;
+/** 语言元数据；正式语言由共享清单注册，业务代码不依赖语言枚举。 */
+public record Lang(String code, String displayName, String dateLocale, String resource) {
+    public static Lang chinese() { return LanguageRegistry.bundled().find("zh"); }
+    public static Lang english() { return LanguageRegistry.bundled().find("en"); }
 
-    Lang(String code) {
-        this.code = code;
+    public Lang {
+        Objects.requireNonNull(code);
+        Objects.requireNonNull(displayName);
+        Objects.requireNonNull(dateLocale);
+        Objects.requireNonNull(resource);
+        if (!code.matches("[a-z]{2,8}(?:-[a-z0-9]{2,8})*")
+                || !resource.matches("[a-z]{2,8}(?:-[a-z0-9]{2,8})*")) {
+            throw new IllegalArgumentException("Invalid language resource identifier: " + code);
+        }
+        if (Locale.forLanguageTag(dateLocale).getLanguage().isEmpty()) {
+            throw new IllegalArgumentException("Invalid date locale: " + dateLocale);
+        }
     }
 
-    /** 语言代码（{@code "zh"} / {@code "en"}）。 */
-    public String code() {
-        return code;
-    }
+    public Locale locale() { return Locale.forLanguageTag(dateLocale); }
 
-    /**
-     * 由语言代码解析枚举：去空白、小写后匹配 {@code "zh"}/{@code "en"}；
-     * 未知（含 {@code "auto"}、null、空）返回 {@code null}（交由 {@link LangResolver} 兜底）。
-     */
-    public static Lang fromCode(String code) {
-        if (code == null) return null;
-        String c = code.trim().toLowerCase();
-        if (c.equals("zh")) return ZH;
-        if (c.equals("en")) return EN;
-        return null;
-    }
+    public static Lang fromCode(String code) { return LanguageRegistry.bundled().find(code); }
 }

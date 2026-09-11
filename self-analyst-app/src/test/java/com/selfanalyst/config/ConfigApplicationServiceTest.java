@@ -12,6 +12,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ConfigApplicationServiceTest {
 
+    @Test void languageSaveAndModelReloadKeepStartupLanguage() throws Exception {
+        var store = new UserConfigStore(dir.resolve("language"));
+        store.saveRaw("[app]\nlanguage='zh'\n");
+        Config startup = ConfigResolver.resolve(store.loadUser(), Map.of()).config();
+        var service = new ConfigApplicationService(store, startup, Map.of());
+        try (var runtime = attach(service, new AtomicInteger())) {
+            var result = service.update(Map.of("app.language", "en", "llm.model", "new-model"));
+            assertTrue(result.restartRequired().contains("app.language"));
+            assertEquals("zh", startup.effectiveLanguage().code());
+            assertEquals("en", service.saved().config().effectiveLanguage().code());
+            assertEquals("new-model", runtime.settings().model());
+            assertTrue(service.update(Map.of("llm.temperature", "0.4")).restartRequired().contains("app.language"));
+        }
+    }
+
     @Test void parentDirectoryChangeCannotRedirectExistingRawPartitions() throws Exception {
         var store = new UserConfigStore(dir.resolve("config"));
         Path events = dir.resolve("events");

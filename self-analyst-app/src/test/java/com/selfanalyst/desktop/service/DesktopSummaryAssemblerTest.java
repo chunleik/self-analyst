@@ -168,7 +168,7 @@ class DesktopSummaryAssemblerTest {
                 facts, new BehaviorAdviceService(), new SummaryPromptService(),
                 new SummarySnapshotStore(tempDir), wikiStore, clock);
         return assembler.assemble(new DesktopSummaryAssembler.Request(
-                llmAvailable, cap, Lang.ZH, client));
+                llmAvailable, cap, Lang.chinese(), client));
     }
 
     @SuppressWarnings("unchecked")

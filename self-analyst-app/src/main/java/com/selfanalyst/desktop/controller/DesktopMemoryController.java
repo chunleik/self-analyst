@@ -1,5 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
+import java.util.Objects;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.selfanalyst.memory.LongTermMemoryService;
@@ -35,9 +37,9 @@ public class DesktopMemoryController {
                     text(body, "type"), text(body, "content"), text(body, "evidence"),
                     text(body, "sourceSessionId"), "ui_manual", textOr(body, "status", "active")));
         } catch (IllegalArgumentException e) {
-            ctx.status(400).json(Map.of("error", e.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, e));
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to create memory: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.memory.create", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -50,14 +52,14 @@ public class DesktopMemoryController {
                     text(body, "status"),
                     body.hasNonNull("sensitive") ? body.get("sensitive").asBoolean() : null);
             if (updated == null) {
-                ctx.status(404).json(Map.of("error", "Memory not found: " + ctx.pathParam("id")));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.memory.notFound", Map.of("id", ctx.pathParam("id"))));
                 return;
             }
             ctx.json(updated);
         } catch (IllegalArgumentException e) {
-            ctx.status(400).json(Map.of("error", e.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, e));
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to update memory: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.memory.update", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -65,12 +67,12 @@ public class DesktopMemoryController {
         try {
             String id = ctx.pathParam("id");
             if (!memoryService.delete(id)) {
-                ctx.status(404).json(Map.of("error", "Memory not found: " + id));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.memory.notFound", Map.of("id", id)));
                 return;
             }
             ctx.json(Map.of("deleted", true, "id", id));
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to delete memory: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.memory.delete", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -81,9 +83,9 @@ public class DesktopMemoryController {
                     text(body, "type"), text(body, "content"), text(body, "evidence"),
                     ctx.pathParam("id"), "chat_manual", textOr(body, "status", "active")));
         } catch (IllegalArgumentException e) {
-            ctx.status(400).json(Map.of("error", e.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, e));
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to create session memory: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.session.memory.create", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 

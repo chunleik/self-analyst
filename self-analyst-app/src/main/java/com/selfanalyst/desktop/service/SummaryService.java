@@ -25,12 +25,17 @@ public class SummaryService implements SummaryFactSource {
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_INSTANT;
     private static final ZoneId ZONE = ZoneId.systemDefault();
 
+    private final com.selfanalyst.i18n.Lang lang;
+    private String message(String key) { return com.selfanalyst.i18n.Messages.text(lang, key); }
+    private String duration(double seconds) { return formatDuration(seconds, lang); }
     private final EventStore eventStore;
     private final MemoryStore memoryStore;
     private final String windowBucket;
     private final String afkBucket;
 
-    public SummaryService(EventStore eventStore, MemoryStore memoryStore) {
+    public SummaryService(EventStore eventStore, MemoryStore memoryStore) { this(eventStore, memoryStore, com.selfanalyst.i18n.Lang.chinese()); }
+    public SummaryService(EventStore eventStore, MemoryStore memoryStore, com.selfanalyst.i18n.Lang lang) {
+        this.lang = lang;
         this.eventStore = eventStore;
         this.memoryStore = memoryStore;
         String host = getHostname();
@@ -55,7 +60,7 @@ public class SummaryService implements SummaryFactSource {
 
     public LocalFacts getCurrentStatus(Instant now) {
         Instant twoHoursAgo = now.minus(Duration.ofHours(2));
-        return computeFacts(twoHoursAgo, now, "现在");
+        return computeFacts(twoHoursAgo, now, message("period.now"));
     }
 
     @Override
@@ -78,49 +83,49 @@ public class SummaryService implements SummaryFactSource {
 
         // 当前: last ~2 hours
         Instant twoHoursAgo = now.minus(Duration.ofHours(2));
-        entries.add(new TimelineEntry("current", "当前",
-                computeFacts(twoHoursAgo, now, "当前")));
+        entries.add(new TimelineEntry("current", message("period.current"),
+                computeFacts(twoHoursAgo, now, message("period.current"))));
 
         // Today 00:00 → now
         Instant todayStart = today.atStartOfDay(ZONE).toInstant();
-        entries.add(new TimelineEntry("today", "今天",
-                computeFacts(todayStart, now, "今天")));
+        entries.add(new TimelineEntry("today", message("period.today"),
+                computeFacts(todayStart, now, message("period.today"))));
 
         // 上午: if current time >= 12:00, show 00:00 → 12:00
         if (localNow.getHour() >= 12) {
             Instant morningEnd = today.atTime(12, 0).atZone(ZONE).toInstant();
-            entries.add(new TimelineEntry("morning", "上午",
-                    computeFacts(todayStart, morningEnd, "上午")));
+            entries.add(new TimelineEntry("morning", message("period.morning"),
+                    computeFacts(todayStart, morningEnd, message("period.morning"))));
         }
 
         // Yesterday 00:00 → 23:59:59
         LocalDate yesterday = today.minusDays(1);
         Instant yDayStart = yesterday.atStartOfDay(ZONE).toInstant();
         Instant yDayEnd = yesterday.plusDays(1).atStartOfDay(ZONE).minusNanos(1).toInstant();
-        entries.add(new TimelineEntry("yesterday", "昨天",
-                computeFacts(yDayStart, yDayEnd, "昨天")));
+        entries.add(new TimelineEntry("yesterday", message("period.yesterday"),
+                computeFacts(yDayStart, yDayEnd, message("period.yesterday"))));
 
         // Day before yesterday
         LocalDate dayBefore = today.minusDays(2);
         Instant dbStart = dayBefore.atStartOfDay(ZONE).toInstant();
         Instant dbEnd = dayBefore.plusDays(1).atStartOfDay(ZONE).minusNanos(1).toInstant();
-        entries.add(new TimelineEntry("dayBefore", "前天",
-                computeFacts(dbStart, dbEnd, "前天")));
+        entries.add(new TimelineEntry("dayBefore", message("period.dayBefore"),
+                computeFacts(dbStart, dbEnd, message("period.dayBefore"))));
 
         // This week (Monday → now)
         LocalDate thisMonday = today.with(DayOfWeek.MONDAY);
-        entries.add(new TimelineEntry("thisWeek", "本周",
-                computeFacts(thisMonday.atStartOfDay(ZONE).toInstant(), now, "本周")));
+        entries.add(new TimelineEntry("thisWeek", message("period.thisWeek"),
+                computeFacts(thisMonday.atStartOfDay(ZONE).toInstant(), now, message("period.thisWeek"))));
 
         // 最近两周: rolling 14-day window ending now
         Instant twoWeeksAgo = now.minus(14, java.time.temporal.ChronoUnit.DAYS);
-        entries.add(new TimelineEntry("lastTwoWeeks", "最近两周",
-                computeFacts(twoWeeksAgo, now, "最近两周")));
+        entries.add(new TimelineEntry("lastTwoWeeks", message("period.lastTwoWeeks"),
+                computeFacts(twoWeeksAgo, now, message("period.lastTwoWeeks"))));
 
         // This month (1st → now)
         LocalDate firstOfMonth = today.withDayOfMonth(1);
-        entries.add(new TimelineEntry("thisMonth", "本月",
-                computeFacts(firstOfMonth.atStartOfDay(ZONE).toInstant(), now, "本月")));
+        entries.add(new TimelineEntry("thisMonth", message("period.thisMonth"),
+                computeFacts(firstOfMonth.atStartOfDay(ZONE).toInstant(), now, message("period.thisMonth"))));
 
         return entries;
     }
@@ -213,7 +218,7 @@ public class SummaryService implements SummaryFactSource {
         List<String> topEntApps = entAppDurations.entrySet().stream()
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                 .limit(5)
-                .map(e -> e.getKey() + " " + formatDuration(e.getValue()))
+                .map(e -> e.getKey() + " " + duration(e.getValue()))
                 .toList();
 
         return new BehaviorData(
@@ -269,13 +274,13 @@ public class SummaryService implements SummaryFactSource {
         List<String> topApps = appDurations.entrySet().stream()
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                 .limit(5)
-                .map(e -> e.getKey() + " " + formatDuration(e.getValue()))
+                .map(e -> e.getKey() + " " + duration(e.getValue()))
                 .toList();
 
         // Headline: show top app + its most-used window title
         String headline;
         if (topApps.isEmpty()) {
-            headline = label + "暂无活动数据";
+            headline = message("local.empty").formatted(label);
         } else {
             Map.Entry<String, Double> topAppEntry = appDurations.entrySet().stream()
                     .max(Map.Entry.comparingByValue())
@@ -287,13 +292,13 @@ public class SummaryService implements SummaryFactSource {
                     .map(e -> abbreviate(e.getKey(), 40))
                     .orElse("");
             String titleSuffix = topTitle.isEmpty() ? "" : " (" + topTitle + ")";
-            headline = "主要在" + topAppName + titleSuffix + ", " + formatDuration(topAppEntry.getValue());
+            headline = message("local.headline").formatted(topAppName, titleSuffix, duration(topAppEntry.getValue()));
         }
 
         // Evidence lines
         List<String> evidence = new ArrayList<>();
         if (!topApps.isEmpty()) {
-            evidence.add("主要应用: " + String.join(", ", topApps));
+            evidence.add(message("local.apps").formatted(String.join(", ", topApps)));
         }
         // Top 3 window titles for the leading app
         String leadingApp = appDurations.entrySet().stream()
@@ -305,14 +310,14 @@ public class SummaryService implements SummaryFactSource {
                     .entrySet().stream()
                     .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
                     .limit(3)
-                    .map(e -> abbreviate(e.getKey(), 50) + " " + formatDuration(e.getValue()))
+                    .map(e -> abbreviate(e.getKey(), 50) + " " + duration(e.getValue()))
                     .toList();
             if (!topTitles.isEmpty()) {
-                evidence.add("主要窗口: " + String.join("; ", topTitles));
+                evidence.add(message("local.windows").formatted(String.join("; ", topTitles)));
             }
         }
-        evidence.add("活跃时间: " + formatDuration(effectiveActive) + "，非活跃: " + formatDuration(afkTime));
-        evidence.add("窗口切换次数: " + windowEvents.size());
+        evidence.add(message("local.activity").formatted(duration(effectiveActive), duration(afkTime)));
+        evidence.add(message("local.switches").formatted(windowEvents.size()));
 
         // Build goal context if memory is available
         String goalContext = "";
@@ -321,14 +326,12 @@ public class SummaryService implements SummaryFactSource {
             List<GrowthProfile.Goal> activeGoals = profile.getGoals().stream()
                     .filter(GrowthProfile.Goal::active).toList();
             if (!activeGoals.isEmpty()) {
-                goalContext = "活跃目标 " + activeGoals.size() + " 个: " +
-                        activeGoals.stream().map(GrowthProfile.Goal::description)
-                                .collect(Collectors.joining(", "));
+                goalContext = message("local.goals").formatted(activeGoals.size(), activeGoals.stream().map(GrowthProfile.Goal::description).collect(Collectors.joining(", ")));
             }
         }
 
         return new LocalFacts(headline, evidence, topApps,
-                formatDuration(effectiveActive), formatDuration(afkTime),
+                duration(effectiveActive), duration(afkTime),
                 windowEvents.size(), goalContext);
     }
 
@@ -372,13 +375,13 @@ public class SummaryService implements SummaryFactSource {
         return false;
     }
 
-    static String formatDuration(double seconds) {
-        if (seconds < 60) return (int) seconds + "秒";
-        long mins = (long) (seconds / 60);
-        if (mins < 60) return mins + "分钟";
-        long hours = mins / 60;
-        long remMins = mins % 60;
-        return remMins > 0 ? hours + "小时" + remMins + "分钟" : hours + "小时";
+    static String formatDuration(double seconds) { return formatDuration(seconds, com.selfanalyst.i18n.Lang.chinese()); }
+    static String formatDuration(double seconds, com.selfanalyst.i18n.Lang lang) {
+        long minutes = (long) (seconds / 60);
+        if (seconds < 60) return com.selfanalyst.i18n.Messages.text(lang, "duration.seconds").formatted((int) seconds);
+        if (minutes < 60) return com.selfanalyst.i18n.Messages.text(lang, "duration.minutes").formatted(minutes);
+        return minutes % 60 == 0 ? com.selfanalyst.i18n.Messages.text(lang, "duration.hours").formatted(minutes / 60)
+                : com.selfanalyst.i18n.Messages.text(lang, "duration.hoursMinutes").formatted(minutes / 60, minutes % 60);
     }
 
     private static String getHostname() {

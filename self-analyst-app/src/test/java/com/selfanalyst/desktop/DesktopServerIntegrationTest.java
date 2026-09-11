@@ -28,6 +28,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DesktopServerIntegrationTest {
 
+    @Test
+    void servesOnlyProductionLanguageCatalogs() throws Exception {
+        for (String code : List.of("zh", "en")) {
+            var response = http.send(HttpRequest.newBuilder(URI.create(baseUrl + "/desktop-ui/locales/" + code + ".json")).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+            assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("application/json"));
+            assertTrue(MAPPER.readTree(response.body()).has("tab.chat"));
+        }
+        assertEquals(404, http.send(HttpRequest.newBuilder(URI.create(baseUrl + "/desktop-ui/locales/fr.json")).GET().build(), HttpResponse.BodyHandlers.discarding()).statusCode());
+    }
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @TempDir
@@ -143,7 +154,11 @@ class DesktopServerIntegrationTest {
                         "message", "Hello?",
                         "context", Map.of("type", "manual"))),
                 new TypeReference<>() {});
-        assertTrue(String.valueOf(response.get("message")).contains("未配置"));
+        Map<String, Object> status = get("/desktop/status", new TypeReference<>() {});
+        String expected = "zh".equals(status.get("language"))
+                ? "LLM 未配置，请在配置页面设置 API Key"
+                : "LLM is not configured. Set the API key in Settings.";
+        assertEquals(expected, response.get("message"));
     }
 
     private <T> T get(String path, TypeReference<T> type) throws Exception {

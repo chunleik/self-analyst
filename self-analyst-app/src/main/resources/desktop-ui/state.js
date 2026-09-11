@@ -5,7 +5,8 @@
 
 var state = {
   tab: "agent",
-  lang: "zh",  // effective language; overwritten from /desktop/status in init() (SPEC-I18N-UI-004)
+  lang: "en",
+  dateLocale: "en-US",  // effective language; overwritten from /desktop/status in init() (SPEC-I18N-UI-004)
   status: null,
   filesOverview: null,
   filesLoading: false,

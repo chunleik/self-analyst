@@ -20,6 +20,14 @@ Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2
 OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
 [archive/removed-features/removed-ocr-audio.md](archive/removed-features/removed-ocr-audio.md)。
 
+## 国际化资源与语言生效
+
+`self-analyst-app/src/main/resources/i18n/languages.json` 注册正式语言及日期 Locale。后端启动时解析有效语言并固定在 Config 中，经桌面状态通道返回语言元数据；普通模型配置热更新不应用待重启语言。原生壳嵌入同一注册表和原生消息资源，使用本次受管端口及 token 读取后端语言后建立正常桌面入口。
+
+页面消息位于 `desktop-ui/locales/<语言>.json`，后端固定消息位于 `i18n/messages/<语言>.json`，原生消息位于 `i18n/native/<语言>.json`；Agent Markdown 提示词继续位于 `prompts/agent/`。查找依次使用当前语言、英文、key，参数只替换一次。桌面错误可携带 `errorCode` 和 `errorParams`，保留既有错误字段及 HTTP 状态；未知错误保留可公开诊断信息，由本地化通用文案包裹。
+
+扩展语言时增加注册项及上述各域资源，提供对应 Markdown 提示词，并运行 Java、Node 和 Rust 测试。各语言的目录 key、参数集合和提示词占位符需通过完整性校验；测试用第三语言仅放在测试资源中，不加入正式清单。无需修改业务渲染点或引入前端打包器。日期 Locale 仅影响展示，不改变时区、存储时间戳或聚合时间窗。
+
 ## 2. 模块边界
 
 | 模块 | 边界 |

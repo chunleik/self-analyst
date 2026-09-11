@@ -64,6 +64,10 @@ final class PromptResources {
 
     private static String read(String name) {
         String path = ROOT + name;
+        if (PromptResources.class.getResource(path) == null) {
+            String fallback = name.replaceFirst("\\.[a-z]+(?:-[a-z0-9]+)*\\.md$", ".en.md");
+            if (!fallback.equals(name)) return read(fallback);
+        }
         try (InputStream input = PromptResources.class.getResourceAsStream(path)) {
             if (input == null) {
                 throw new IllegalStateException("Prompt resource not found: " + path);

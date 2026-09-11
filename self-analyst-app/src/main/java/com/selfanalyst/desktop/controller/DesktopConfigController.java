@@ -116,13 +116,13 @@ public class DesktopConfigController {
             StructuredSaveResult result = applyStructuredSave(body);
             ctx.json(result.result().payload());
         } catch (TomlValidationException invalid) {
-            ctx.status(400).json(Map.of("error", invalid.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, invalid));
         } catch (Throwable t) {
             log.error("配置保存失败 ({})", t.getClass().getSimpleName());
             try {
                 String msg = "配置保存或应用失败";
                 if (msg == null) msg = t.getClass().getName();
-                ctx.status(500).result("{\"error\":\"Save config failed: " + escapeJson(msg) + "\"}").contentType("application/json");
+                ctx.status(500).json(DesktopErrors.payload(ctx, "error.configSave", Map.of()));
             } catch (Throwable suppressed) {
                 log.error("Error handler also failed", suppressed);
                 try {
@@ -431,8 +431,7 @@ public class DesktopConfigController {
         } catch (Throwable t) {
             log.error("Failed to read raw config", t);
             String msg = "配置读写失败";
-            ctx.status(500).result("{\"error\":\"Read raw config failed: " + escapeJson(msg) + "\"}")
-                    .contentType("application/json");
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.configRead", Map.of()));
         }
     }
 
@@ -447,8 +446,7 @@ public class DesktopConfigController {
             Object raw = body.get("text");
             text = raw != null ? raw.toString() : "";
         } catch (Exception e) {
-            ctx.status(400).result("{\"error\":\"请求体无效: " + escapeJson(e.getMessage()) + "\"}")
-                    .contentType("application/json");
+            ctx.status(400).json(DesktopErrors.failure(ctx, e));
             return;
         }
         try {
@@ -458,14 +456,12 @@ public class DesktopConfigController {
             // TOML syntax/structure/type failure → 400 with line/col + violating keys,
             // nothing written to disk. SPEC-TOML-API-001b/c, SPEC-TOML-GOAL-005.
             String msg = "配置文本无效: " + String.join("; ", e.messages());
-            ctx.status(400).result("{\"error\":\"" + escapeJson(msg) + "\"}")
-                    .contentType("application/json");
+            ctx.status(400).json(DesktopErrors.failure(ctx, e));
         } catch (Throwable t) {
             // IO/other failures → 500 (disk write happens only after validation passes).
             log.error("配置保存失败 ({})", t.getClass().getSimpleName());
             String msg = "配置读写失败";
-            ctx.status(500).result("{\"error\":\"Save raw config failed: " + escapeJson(msg) + "\"}")
-                    .contentType("application/json");
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.configSave", Map.of()));
         }
     }
 
@@ -516,7 +512,7 @@ public class DesktopConfigController {
             String model = stringOr(body.get("model"), effective.llmModel());
 
             if (apiKey == null || apiKey.isBlank() || apiKey.contains("CHANGE_ME")) {
-                ctx.json(Map.of("ok", false, "error", "API Key 未配置"));
+                ctx.json(connectionError(ctx, "error.llmNotConfigured", Map.of()));
                 return;
             }
 
@@ -536,14 +532,12 @@ public class DesktopConfigController {
             if (resp.statusCode() == 200) {
                 ctx.json(Map.of("ok", true, "model", model));
             } else {
-                ctx.json(Map.of("ok", false,
-                        "error", "HTTP " + resp.statusCode()));
+                ctx.json(connectionError(ctx, "error.http", Map.of("status", resp.statusCode())));
             }
         } catch (TomlValidationException invalid) {
-            ctx.status(400).json(Map.of("error", invalid.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, invalid));
         } catch (Throwable e) {
-            ctx.status(200).json(Map.of("ok", false, "error",
-                    "连接测试失败 (" + e.getClass().getSimpleName() + ")"));
+            ctx.status(200).json(connectionError(ctx, "error.generic", Map.of("detail", e.getClass().getSimpleName())));
         }
     }
 
@@ -578,7 +572,7 @@ public class DesktopConfigController {
                     : effective.embeddingSendEncodingFormat();
 
             if (apiKey == null || apiKey.isBlank() || apiKey.contains("CHANGE_ME")) {
-                ctx.json(Map.of("ok", false, "error", "API Key 未配置"));
+                ctx.json(connectionError(ctx, "error.llmNotConfigured", Map.of()));
                 return;
             }
 
@@ -608,15 +602,19 @@ public class DesktopConfigController {
             if (resp.statusCode() == 200) {
                 ctx.json(Map.of("ok", true, "model", model));
             } else {
-                ctx.json(Map.of("ok", false,
-                        "error", "HTTP " + resp.statusCode()));
+                ctx.json(connectionError(ctx, "error.http", Map.of("status", resp.statusCode())));
             }
         } catch (TomlValidationException invalid) {
-            ctx.status(400).json(Map.of("error", invalid.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, invalid));
         } catch (Throwable e) {
-            ctx.status(200).json(Map.of("ok", false, "error",
-                    "连接测试失败 (" + e.getClass().getSimpleName() + ")"));
+            ctx.status(200).json(connectionError(ctx, "error.generic", Map.of("detail", e.getClass().getSimpleName())));
         }
+    }
+
+    private Map<String, Object> connectionError(Context ctx, String code, Map<String, ?> params) {
+        var payload = DesktopErrors.payload(ctx, code, params);
+        payload.put("ok", false);
+        return payload;
     }
 
     private Config testConfiguration(Map<String, Object> body) {

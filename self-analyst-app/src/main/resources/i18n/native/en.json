@@ -1,0 +1,15 @@
+{
+  "show": "Show window",
+  "web": "Web desktop",
+  "about": "About",
+  "quit": "Quit",
+  "autostart": "Start at login",
+  "autostartOther": "Start at login (replaces another location)",
+  "autostartUnavailable": "Start at login (status unavailable)",
+  "autostartFailed": "Startup setting failed",
+  "autostartFailedBody": "Unable to confirm the startup setting: {error}",
+  "aboutTitle": "About SelfAnalyst",
+  "aboutBody": "SelfAnalyst v{version}\nDesktop: Tauri\nBackend: {url}",
+  "startupFailed": "Unable to open SelfAnalyst",
+  "startupFailedBody": "The application could not start. See the local startup and backend logs for details."
+}

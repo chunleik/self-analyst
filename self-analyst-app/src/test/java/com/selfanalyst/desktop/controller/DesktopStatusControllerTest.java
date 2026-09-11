@@ -14,6 +14,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DesktopStatusControllerTest {
 
     @Test
+    void languageRemainsFixedAfterSystemLocaleChanges(@TempDir Path dir) {
+        java.util.Locale original = java.util.Locale.getDefault();
+        try {
+            java.util.Locale.setDefault(java.util.Locale.CHINA);
+            Config config = Config.testDefaults(dir);
+            java.util.Locale.setDefault(java.util.Locale.US);
+            try (var controller = new DesktopStatusController(config, null, null)) {
+                assertEquals("zh", controller.statusPayload().get("language"));
+                assertEquals("zh-CN", controller.statusPayload().get("dateLocale"));
+                assertEquals(2, ((java.util.List<?>) controller.statusPayload().get("languages")).size());
+            }
+        } finally {
+            java.util.Locale.setDefault(original);
+        }
+    }
+
+    @Test
     void llmStatusUsesConfiguredBaseUrlDirectly(@TempDir Path dir) {
         Config config = Config.testDefaults(dir);
         DesktopStatusController controller = new DesktopStatusController(

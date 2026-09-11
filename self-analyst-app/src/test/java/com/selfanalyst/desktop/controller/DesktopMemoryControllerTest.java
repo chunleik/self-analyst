@@ -57,7 +57,7 @@ class DesktopMemoryControllerTest {
         ChatSessionStore store = new ChatSessionStore(tempDir);
         ChatSessionStore.Session session = store.create(req("memory"));
         DesktopChatSessionController controller = new DesktopChatSessionController(
-                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), null);
+                store, new ChatSummaryService(Lang.chinese()), null, Config.testDefaults(tempDir), null);
 
         FakeContext ctx = FakeContext.withBody("{\"memoryPolicy\":\"confirm_all\"}");
         ctx.pathParams.put("id", session.id);
@@ -73,7 +73,7 @@ class DesktopMemoryControllerTest {
     void chatControllerCreateSessionMapsInvalidMemoryPolicyTo400() {
         ChatSessionStore store = new ChatSessionStore(tempDir);
         DesktopChatSessionController controller = new DesktopChatSessionController(
-                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), null);
+                store, new ChatSummaryService(Lang.chinese()), null, Config.testDefaults(tempDir), null);
         FakeContext ctx = FakeContext.withBody("{\"title\":\"bad\",\"memoryPolicy\":\"always\"}");
 
         controller.createSession(ctx.ctx());
@@ -88,7 +88,7 @@ class DesktopMemoryControllerTest {
         store.create(req("two"));
         store.create(req("three"));
         DesktopChatSessionController controller = new DesktopChatSessionController(
-                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), null);
+                store, new ChatSummaryService(Lang.chinese()), null, Config.testDefaults(tempDir), null);
         FakeContext legacy = FakeContext.empty();
         controller.listSessions(legacy.ctx());
         assertEquals(200, legacy.status);
@@ -125,7 +125,7 @@ class DesktopMemoryControllerTest {
     void chatControllerRejectsOversizedMalformedAndEmptyMessageBodies() throws Exception {
         ChatSessionStore store = new ChatSessionStore(tempDir);
         DesktopChatSessionController controller = new DesktopChatSessionController(
-                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), null);
+                store, new ChatSummaryService(Lang.chinese()), null, Config.testDefaults(tempDir), null);
 
         FakeContext oversized = FakeContext.withBody(
                 "x".repeat(DesktopChatJson.MAX_BODY_BYTES + 1));
@@ -195,7 +195,7 @@ class DesktopMemoryControllerTest {
         String assistantId = loaded.messages.get(1).id;
         CapturingExtractionService extraction = new CapturingExtractionService(tempDir.resolve("extraction-memory"));
         DesktopChatSessionController controller = new DesktopChatSessionController(
-                store, new ChatSummaryService(Lang.ZH), null, Config.testDefaults(tempDir), extraction);
+                store, new ChatSummaryService(Lang.chinese()), null, Config.testDefaults(tempDir), extraction);
 
         FakeContext ctx = FakeContext.withBody("{\"content\":\"好的。\",\"status\":\"sent\"}");
         ctx.pathParams.put("id", session.id);
@@ -254,7 +254,7 @@ class DesktopMemoryControllerTest {
         ChatSessionStore.Message assistant;
 
         CapturingExtractionService(Path memoryDir) throws Exception {
-            super(new LongTermMemoryService(MemoryStore.load(memoryDir)), Lang.ZH);
+            super(new LongTermMemoryService(MemoryStore.load(memoryDir)), Lang.chinese());
         }
 
         @Override
@@ -307,6 +307,7 @@ class DesktopMemoryControllerTest {
                     Context.class.getClassLoader(),
                     new Class<?>[]{Context.class},
                     (proxy, method, args) -> switch (method.getName()) {
+                        case "attribute" -> com.selfanalyst.i18n.Lang.english();
                         case "body" -> {
                             if (bodyFailure != null) throw bodyFailure;
                             yield body;

@@ -54,6 +54,10 @@ public class SummaryWindowClassifier {
         return slots(clock.instant());
     }
 
+    public List<Slot> slots(Instant now, com.selfanalyst.i18n.Lang lang) {
+        return slots(now).stream().map(slot -> new Slot(slot.key(), com.selfanalyst.i18n.Messages.text(lang, "period." + slot.key()), slot.start(), slot.end(), slot.open(), slot.span(), slot.wikiLevel())).toList();
+    }
+
     public List<Slot> slots(Instant now) {
         ZoneId zone = zone();
         ZonedDateTime localNow = now.atZone(zone);

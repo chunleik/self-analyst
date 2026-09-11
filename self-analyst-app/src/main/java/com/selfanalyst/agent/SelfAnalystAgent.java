@@ -559,12 +559,7 @@ public class SelfAnalystAgent implements AutoCloseable {
     }
 
     private String budgetBlockedMessage() {
-        return lang == Lang.EN
-                ? "The daily token budget has been reached; the conversation is paused to control cost. "
-                  + "You can adjust llm.budget.dailyTokens / llm.budget.mode in the configuration, "
-                  + "or wait for the automatic daily reset."
-                : "已达到今日 token 使用上限，已暂停对话以控制成本。"
-                  + "可在配置中调整 llm.budget.dailyTokens / llm.budget.mode，或等待次日自动重置。";
+        return com.selfanalyst.i18n.Messages.text(lang, "budget.blocked");
     }
 
     private void seedSessionHistoryIfAbsent(String sessionId, List<Msg> existingHistory) {

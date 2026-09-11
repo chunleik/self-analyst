@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.i18n.Lang;
+import com.selfanalyst.i18n.Messages;
 import com.selfanalyst.memory.GrowthProfile;
 import com.selfanalyst.memory.LongTermMemoryService;
 
@@ -51,22 +52,7 @@ public class MemoryExtractionService {
 
     private String buildPrompt(ChatSessionStore.Session session, ChatSessionStore.Message user,
                                ChatSessionStore.Message assistant) {
-        String language = lang == Lang.EN ? "English" : "中文";
-        return """
-                你是 SelfAnalyst 的长期记忆提炼器。请只输出 JSON 数组。
-                只提炼未来多次对话有用的长期信息。不要保存密码、token、API key、验证码或大段原文。
-                自动保存仅限用户明确陈述的低风险偏好、目标、长期项目事实。
-                行为模式、敏感内容、推断、低置信度内容必须 approvalPolicy=confirm。
-                输出语言: %s
-                当前会话ID: %s
-                会话标题: %s
-                记忆策略: %s
-                相关消息ID: user=%s, assistant=%s
-                现有 active/pending 记忆摘要: %s
-                用户消息: %s
-                助手回复: %s
-                字段: action(add|disable), id(仅 disable 时填现有记忆 id), type, content, evidence, confidence(1-10), sensitive, approvalPolicy(auto|confirm)
-                """.formatted(language, safe(session.id), safe(session.title), safe(session.memoryPolicy),
+        return Messages.text(lang, "memory.prompt").formatted(safe(session.id), safe(session.title), safe(session.memoryPolicy),
                 safe(user != null ? user.id : null), safe(assistant != null ? assistant.id : null),
                 safe(memorySnapshot()), safe(user != null ? user.content : null),
                 safe(assistant != null ? assistant.content : null));
@@ -81,7 +67,7 @@ public class MemoryExtractionService {
                 .map(MemoryExtractionService::formatMemory)
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("");
-        return snapshot.isBlank() ? "无" : safe(snapshot, MAX_MEMORY_SNAPSHOT);
+        return snapshot.isBlank() ? Messages.text(lang, "common.none") : safe(snapshot, MAX_MEMORY_SNAPSHOT);
     }
 
     private List<Candidate> parseCandidates(String raw) throws Exception {

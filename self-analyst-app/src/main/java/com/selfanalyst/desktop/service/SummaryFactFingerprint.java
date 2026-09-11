@@ -73,6 +73,22 @@ public final class SummaryFactFingerprint {
             return 0;
         }
         String text = formatted.trim().toLowerCase(Locale.ROOT);
+        for (var language : com.selfanalyst.i18n.LanguageRegistry.bundled().supported()) {
+            for (String unit : List.of("hoursMinutes", "hours", "minutes", "seconds")) {
+                String template = com.selfanalyst.i18n.Messages.text(language, "duration." + unit).toLowerCase(Locale.ROOT);
+                String regex = java.util.Arrays.stream(template.split("%d", -1))
+                        .map(Pattern::quote).collect(java.util.stream.Collectors.joining("(\\d+)"));
+                Matcher match = Pattern.compile(regex).matcher(text);
+                if (!match.matches() || match.groupCount() == 0) continue;
+                int value = Integer.parseInt(match.group(1));
+                return switch (unit) {
+                    case "hoursMinutes" -> value * 60 + Integer.parseInt(match.group(2));
+                    case "hours" -> value * 60;
+                    case "minutes" -> value;
+                    default -> 0;
+                };
+            }
+        }
         Matcher hours = HOURS_MINUTES.matcher(text);
         if (hours.find()) {
             int hour = Integer.parseInt(hours.group(1));

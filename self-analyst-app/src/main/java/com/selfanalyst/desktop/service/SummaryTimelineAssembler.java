@@ -19,15 +19,24 @@ import java.util.Map;
  */
 public class SummaryTimelineAssembler {
 
+    private final com.selfanalyst.i18n.Lang lang;
     private final WikiStore wikiStore;
     private final SummaryFactSource facts;
     private final SummaryPromptService prompts;
 
     public SummaryTimelineAssembler(WikiStore wikiStore, SummaryFactSource facts, SummaryPromptService prompts) {
+        this(wikiStore, facts, prompts, com.selfanalyst.i18n.Lang.chinese());
+    }
+
+    private SummaryTimelineAssembler(WikiStore wikiStore, SummaryFactSource facts, SummaryPromptService prompts, com.selfanalyst.i18n.Lang lang) {
+        this.lang = lang;
         this.wikiStore = wikiStore;
         this.facts = facts;
         this.prompts = prompts;
     }
+
+    public Map<String, Object> assembleClosed(SummaryWindowClassifier.Slot slot, com.selfanalyst.i18n.Lang lang) { return new SummaryTimelineAssembler(wikiStore, facts, prompts, lang).assembleClosed(slot); }
+    private String duration(double seconds) { return SummaryService.formatDuration(seconds, lang); }
 
     public Map<String, Object> assembleClosed(SummaryWindowClassifier.Slot slot) {
         if (slot.span()) {
@@ -80,7 +89,7 @@ public class SummaryTimelineAssembler {
             insight = insight.substring(0, 399) + "…";
         }
         Map<String, Object> map = base(slot);
-        map.put("headline", slot.label() + "（部分）");
+        map.put("headline", com.selfanalyst.i18n.Messages.text(lang, "local.partial").formatted(slot.label()));
         map.put("insight", insight);
         map.put("confidence", "medium");
         map.put("source", "wiki-partial");
@@ -108,12 +117,12 @@ public class SummaryTimelineAssembler {
         map.put("source", source);
         map.put("incomplete", incomplete);
         if (entry.metrics() != null) {
-            map.put("activeTime", SummaryService.formatDuration(entry.metrics().activeSeconds()));
-            map.put("afkTime", SummaryService.formatDuration(entry.metrics().afkSeconds()));
+            map.put("activeTime", duration(entry.metrics().activeSeconds()));
+            map.put("afkTime", duration(entry.metrics().afkSeconds()));
             map.put("switchCount", entry.metrics().switchCount());
             if (entry.metrics().topApps() != null) {
                 map.put("topApps", entry.metrics().topApps().stream()
-                        .map(app -> app.app() + " " + SummaryService.formatDuration(app.seconds()))
+                        .map(app -> app.app() + " " + duration(app.seconds()))
                         .toList());
             }
         }

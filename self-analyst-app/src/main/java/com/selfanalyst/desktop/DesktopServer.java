@@ -52,6 +52,7 @@ public class DesktopServer {
     private final Javalin app;
     private final DesktopAgentController agentCtrl;
     private final DesktopConfigController configCtrl;
+    private final com.selfanalyst.i18n.Lang language;
     private final DesktopTaskController taskCtrl;
     private final DesktopStatusController statusCtrl;
     private final DesktopFileController fileCtrl;
@@ -159,8 +160,8 @@ public class DesktopServer {
             throw recoveryFailure;
         }
         this.chatSessionStore = chatSessionStore;
-        SummaryService summaryService = new SummaryService(eventStore, memoryStore);
-        BehaviorAdviceService adviceService = new BehaviorAdviceService();
+        SummaryService summaryService = new SummaryService(eventStore, memoryStore, config.effectiveLanguage());
+        BehaviorAdviceService adviceService = new BehaviorAdviceService(config.effectiveLanguage());
         LongTermMemoryService longTermMemoryService = memoryStore != null
                 ? new LongTermMemoryService(memoryStore)
                 : null;
@@ -171,6 +172,7 @@ public class DesktopServer {
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
                 config, chatSessionStore, new SummarySnapshotStore(memoryDir), wikiStore);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
+        this.language = config.effectiveLanguage();
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.fileCtrl = new DesktopFileController(
                 fileWatchStore, userConfigStore,
@@ -195,6 +197,17 @@ public class DesktopServer {
      * Call this <b>before</b> {@code EventServer.start()}.
      */
     public void start() {
+        app.get("/desktop-ui/locales/{file}", ctx -> {
+            String file = ctx.pathParam("file");
+            boolean supported = com.selfanalyst.i18n.LanguageRegistry.bundled().supported().stream()
+                    .anyMatch(lang -> file.equals(lang.resource() + ".json"));
+            if (!supported) { ctx.status(404); return; }
+            try (var input = getClass().getResourceAsStream("/desktop-ui/locales/" + file)) {
+                if (input == null) { ctx.status(404); return; }
+                ctx.contentType("application/json").header("Cache-Control", "no-store")
+                        .result(input.readAllBytes());
+            }
+        });
         // ── Desktop frontend static files (from classpath) ───
         app.get("/desktop-ui/{f}", ctx -> {
             String file = ctx.pathParam("f");
@@ -223,6 +236,7 @@ public class DesktopServer {
 
         // ── Config tab ───────────────────────────────────────
         app.get("/desktop/config", configCtrl::getConfig);
+        app.before("/desktop/*", ctx -> ctx.attribute("selfanalyst.language", language));
         app.get("/desktop/config/effective", configCtrl::getEffectiveConfig);
         app.put("/desktop/config", configCtrl::putConfig);
         app.get("/desktop/config/raw", configCtrl::getRawConfig);

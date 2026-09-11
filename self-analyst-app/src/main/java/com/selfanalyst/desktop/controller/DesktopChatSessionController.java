@@ -1,5 +1,7 @@
 package com.selfanalyst.desktop.controller;
 
+import java.util.Objects;
+
 import com.selfanalyst.agent.SelfAnalystAgent;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.desktop.service.ChatSummaryService;
@@ -111,10 +113,9 @@ public class DesktopChatSessionController {
             int limit = limitValue == null ? 50 : Integer.parseInt(limitValue);
             ctx.json(store.listIndexPage(limit, cursor, query));
         } catch (IllegalArgumentException e) {
-            ctx.status(400).json(Map.of("error",
-                    e.getMessage() == null ? "Invalid chat index query" : e.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, e));
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to list sessions: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.sessions.list", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -125,12 +126,12 @@ public class DesktopChatSessionController {
             if (!requireGeneratedSessionId(ctx, id)) return;
             ChatSessionStore.Session s = store.getSession(id);
             if (s == null) {
-                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
                 return;
             }
             ctx.json(s);
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to get session: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.session.get", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -162,7 +163,7 @@ public class DesktopChatSessionController {
             ctx.status(201).json(created);
         } catch (Exception e) {
             if (writeClientError(ctx, e)) return;
-            ctx.status(500).json(Map.of("error", "Failed to create session: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.session.create", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -180,13 +181,13 @@ public class DesktopChatSessionController {
                     ? MAPPER.convertValue(body.get("contextSnapshot"), Object.class) : null;
             ChatSessionStore.Session updated = store.updateMeta(id, title, contextLabel, contextSnapshot);
             if (updated == null) {
-                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
                 return;
             }
             ctx.json(updated);
         } catch (Exception e) {
             if (writeClientError(ctx, e)) return;
-            ctx.status(500).json(Map.of("error", "Failed to update session: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.session.update", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -198,7 +199,7 @@ public class DesktopChatSessionController {
             boolean exists = store.getSession(id) != null;
             boolean pendingDeletion = store.pendingDeletionIds().contains(id);
             if (!exists && !pendingDeletion) {
-                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
                 return;
             }
             ChatSessionStore.DeleteResult result;
@@ -206,14 +207,13 @@ public class DesktopChatSessionController {
                 result = deletionCoordinator.delete(id);
             } catch (IllegalStateException busy) {
                 if (DesktopAgentController.hasAgentStillRunning(busy)) {
-                    ctx.status(409).json(Map.of(
-                            "error", "Session is currently processing a chat request"));
+                    ctx.status(409).json(DesktopErrors.payload(ctx, "error.chat.busy", Map.of()));
                     return;
                 }
                 throw busy;
             }
             if (result == null) {
-                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
                 return;
             }
             cancelSummary(id);
@@ -223,7 +223,7 @@ public class DesktopChatSessionController {
             resp.put("activeSessionId", result.activeSessionId()); // may be null
             ctx.json(resp);
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to delete session: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.session.delete", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -236,14 +236,14 @@ public class DesktopChatSessionController {
                     DesktopChatJson.readBoundedBody(ctx));
             List<ChatSessionStore.Message> appended = store.appendMessages(id, incoming);
             if (appended == null) {
-                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
                 return;
             }
             scheduleSummary(id);
             ctx.status(201).json(appended);
         } catch (Exception e) {
             if (writeClientError(ctx, e)) return;
-            ctx.status(500).json(Map.of("error", "Failed to append messages: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.messages.append", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -254,7 +254,7 @@ public class DesktopChatSessionController {
             if (!requireGeneratedSessionId(ctx, id)) return;
             String msgId = ctx.pathParam("msgId");
             if (!ChatSessionStore.isGeneratedMessageId(msgId)) {
-                ctx.status(400).json(Map.of("error", "Invalid chat message id"));
+                ctx.status(400).json(DesktopErrors.payload(ctx, "error.chat.messageId", Map.of()));
                 return;
             }
             JsonNode body = requireObject(MAPPER.readTree(DesktopChatJson.readBoundedBody(ctx)));
@@ -277,7 +277,7 @@ public class DesktopChatSessionController {
             ChatSessionStore.Message updated =
                     store.updateMessage(id, msgId, content, status, error, suggestedTasks);
             if (updated == null) {
-                ctx.status(404).json(Map.of("error", "Session or message not found"));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.chat.messageNotFound", Map.of()));
                 return;
             }
             scheduleSummary(id);
@@ -288,7 +288,7 @@ public class DesktopChatSessionController {
             ctx.json(updated);
         } catch (Exception e) {
             if (writeClientError(ctx, e)) return;
-            ctx.status(500).json(Map.of("error", "Failed to update message: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.message.update", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -302,13 +302,13 @@ public class DesktopChatSessionController {
             String policy = textOrNull(body, "memoryPolicy");
             ChatSessionStore.Session updated = store.updateMemoryPolicy(id, policy);
             if (updated == null) {
-                ctx.status(404).json(Map.of("error", "Session not found: " + id));
+                ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
                 return;
             }
             ctx.json(updated);
         } catch (Exception e) {
             if (writeClientError(ctx, e)) return;
-            ctx.status(500).json(Map.of("error", "Failed to set memory policy: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.memory.policy.set", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -320,7 +320,7 @@ public class DesktopChatSessionController {
             String activeId = textOrNull(body, "activeSessionId");
             if (activeId != null && !requireGeneratedSessionId(ctx, activeId)) return;
             if (activeId != null && store.getSession(activeId) == null) {
-                ctx.status(400).json(Map.of("error", "Unknown session: " + activeId));
+                ctx.status(400).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", activeId)));
                 return;
             }
             String persisted = store.setActiveSession(activeId);
@@ -329,7 +329,7 @@ public class DesktopChatSessionController {
             ctx.json(resp);
         } catch (Exception e) {
             if (writeClientError(ctx, e)) return;
-            ctx.status(500).json(Map.of("error", "Failed to set active session: " + e.getMessage()));
+            ctx.status(500).json(DesktopErrors.payload(ctx, "error.active.session.set", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
     }
 
@@ -484,17 +484,15 @@ public class DesktopChatSessionController {
 
     private static boolean writeClientError(Context ctx, Exception error) {
         if (error instanceof DesktopChatJson.PayloadTooLargeException) {
-            ctx.status(413).json(Map.of("error", error.getMessage()));
+            ctx.status(413).json(DesktopErrors.failure(ctx, error));
             return true;
         }
         if (error instanceof HttpResponseException response) {
-            ctx.status(response.getStatus()).json(Map.of(
-                    "error", response.getMessage() == null ? "Invalid request" : response.getMessage()));
+            ctx.status(response.getStatus()).json(DesktopErrors.failure(ctx, response));
             return true;
         }
         if (error instanceof JsonProcessingException || error instanceof IllegalArgumentException) {
-            ctx.status(400).json(Map.of(
-                    "error", error.getMessage() == null ? "Invalid chat request" : error.getMessage()));
+            ctx.status(400).json(DesktopErrors.failure(ctx, error));
             return true;
         }
         return false;
@@ -502,7 +500,7 @@ public class DesktopChatSessionController {
 
     private static boolean requireGeneratedSessionId(Context ctx, String id) {
         if (ChatSessionStore.isGeneratedSessionId(id)) return true;
-        ctx.status(400).json(Map.of("error", "Invalid chat session id"));
+        ctx.status(400).json(DesktopErrors.payload(ctx, "error.chat.sessionId", Map.of()));
         return false;
     }
 }

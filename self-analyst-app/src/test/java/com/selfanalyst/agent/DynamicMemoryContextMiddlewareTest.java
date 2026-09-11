@@ -13,7 +13,7 @@ class DynamicMemoryContextMiddlewareTest {
     void enrichesEachNewSystemPromptWithFreshMemory() {
         AtomicReference<String> memory = new AtomicReference<>("用户偏好中文交流。");
         DynamicMemoryContextMiddleware middleware =
-                new DynamicMemoryContextMiddleware(Lang.ZH, memory::get);
+                new DynamicMemoryContextMiddleware(Lang.chinese(), memory::get);
 
         String first = middleware.enrich("base prompt");
         assertTrue(first.startsWith("base prompt"));

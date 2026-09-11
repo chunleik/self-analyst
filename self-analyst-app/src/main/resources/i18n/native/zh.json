@@ -1,0 +1,15 @@
+{
+  "show": "显示窗口",
+  "web": "Web版桌面",
+  "about": "关于",
+  "quit": "退出",
+  "autostart": "开机自启动",
+  "autostartOther": "开机自启动（开启将替换其他路径）",
+  "autostartUnavailable": "开机自启动（状态不可用）",
+  "autostartFailed": "开机自启动设置失败",
+  "autostartFailedBody": "无法确认设置已生效：{error}",
+  "aboutTitle": "关于 SelfAnalyst",
+  "aboutBody": "SelfAnalyst v{version}\n桌面端: Tauri\n后端服务: {url}",
+  "startupFailed": "无法打开 SelfAnalyst",
+  "startupFailedBody": "应用无法启动，请查看本地启动日志和后端日志了解详情。"
+}

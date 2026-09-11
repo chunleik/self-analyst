@@ -28,6 +28,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DesktopServerIntegrationTest {
 
+    @Test
+    void servesOnlyProductionLanguageCatalogs() throws Exception {
+        for (String code : List.of("zh", "en")) {
+            var response = http.send(HttpRequest.newBuilder(URI.create(baseUrl + "/desktop-ui/locales/" + code + ".json")).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode());
+            assertTrue(response.headers().firstValue("Content-Type").orElse("").contains("application/json"));
+            assertTrue(MAPPER.readTree(response.body()).has("tab.chat"));
+        }
+        assertEquals(404, http.send(HttpRequest.newBuilder(URI.create(baseUrl + "/desktop-ui/locales/fr.json")).GET().build(), HttpResponse.BodyHandlers.discarding()).statusCode());
+    }
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @TempDir

@@ -14,7 +14,7 @@ function escHtml(str) {
 }
 
 function uiLocale() {
-  return (typeof state !== "undefined" && state && state.lang === "en") ? "en-US" : "zh-CN";
+  return (typeof state !== "undefined" && state && state.dateLocale) ? state.dateLocale : "en-US";
 }
 
 function formatDate(d) {

@@ -112,6 +112,8 @@ public class DesktopStatusController implements AutoCloseable {
         status.put("backend", "running");
         // Effective language for the desktop UI to pick its message column (SPEC-I18N-RES-003)
         status.put("language", config.effectiveLanguage().code());
+        status.put("dateLocale", config.effectiveLanguage().dateLocale());
+        status.put("languages", com.selfanalyst.i18n.LanguageRegistry.bundled().supported());
 
         // AW section
         Map<String, Object> aw = new LinkedHashMap<>();

@@ -72,6 +72,7 @@ const sandbox = {
 
 vm.createContext(sandbox);
 vm.runInContext(i18nJs, sandbox);
+  sandbox.MESSAGES = Object.fromEntries(["zh", "en"].map(lang => [lang, JSON.parse(fs.readFileSync(new URL("../../main/resources/desktop-ui/locales/" + lang + ".json", import.meta.url), "utf8"))]));
 vm.runInContext(chatJs, sandbox);
 
 assert.doesNotThrow(() => sandbox.renderChatTab());

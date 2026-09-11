@@ -2,6 +2,7 @@ package com.selfanalyst.desktop.service;
 
 import com.selfanalyst.desktop.store.ChatSessionStore;
 import com.selfanalyst.i18n.Lang;
+import com.selfanalyst.i18n.Messages;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -32,13 +33,13 @@ public class ChatSummaryService {
     /** Effective language for the summary prompt (SPEC-I18N-PROMPT-003b). */
     private final Lang lang;
 
-    /** Defaults to {@link Lang#ZH} for backward compatibility with existing tests. */
+    /** Defaults to {@link Lang#chinese()} for backward compatibility with existing tests. */
     public ChatSummaryService() {
-        this(Lang.ZH);
+        this(Lang.chinese());
     }
 
     public ChatSummaryService(Lang lang) {
-        this.lang = lang != null ? lang : Lang.ZH;
+        this.lang = lang != null ? lang : Lang.chinese();
     }
 
     /**
@@ -71,43 +72,18 @@ public class ChatSummaryService {
      * (SPEC-CSP-API-011d / DEC-007 / DEC-010).
      */
     static String buildPrompt(ChatSessionStore.Session session, Lang lang) {
-        boolean isEn = lang == Lang.EN;
         StringBuilder body = new StringBuilder();
         if (session.title != null && !session.title.isBlank()) {
-            body.append(isEn ? "Session title: " : "会话标题：")
-                    .append(trim(session.title, TITLE_TRIM)).append('\n');
+            body.append(Messages.text(lang, "chat.title")).append(trim(session.title, TITLE_TRIM)).append('\n');
         }
-        List<ChatSessionStore.Message> messages =
-                session.messages != null ? session.messages : List.of();
-        int from = Math.max(0, messages.size() - MAX_PROMPT_MESSAGES);
-        for (int i = from; i < messages.size(); i++) {
-            ChatSessionStore.Message m = messages.get(i);
-            if (m.content == null || m.content.isBlank()) continue;
-            String role;
-            if (isEn) {
-                role = "assistant".equals(m.role) ? "Assistant" : "system".equals(m.role) ? "System" : "User";
-                body.append(role).append(": ").append(trim(m.content, MSG_TRIM)).append('\n');
-            } else {
-                role = "assistant".equals(m.role) ? "助手" : "system".equals(m.role) ? "系统" : "用户";
-                body.append(role).append("：").append(trim(m.content, MSG_TRIM)).append('\n');
-            }
+        List<ChatSessionStore.Message> messages = session.messages != null ? session.messages : List.of();
+        for (int i = Math.max(0, messages.size() - MAX_PROMPT_MESSAGES); i < messages.size(); i++) {
+            var message = messages.get(i);
+            if (message.content == null || message.content.isBlank()) continue;
+            String role = "assistant".equals(message.role) ? "assistant" : "system".equals(message.role) ? "system" : "user";
+            body.append(Messages.text(lang, "chat.role." + role)).append(trim(message.content, MSG_TRIM)).append('\n');
         }
-        if (isEn) {
-            return """
-                    You are SelfAnalyst. Summarize in one English sentence what the following conversation is about, so it can later be searched by content.
-                    Output only the summary itself — no prefix, quotes, code block, or extra explanation; no more than 40 words.
-
-                    Conversation:
-                    %s
-                    """.formatted(body.toString().strip());
-        }
-        return """
-                你是 SelfAnalyst，请用一句中文概括下面这段对话聊了什么，便于以后按内容检索会话。
-                只输出概括本身，不要前缀、引号、代码块或多余说明，不超过 40 字。
-
-                对话内容：
-                %s
-                """.formatted(body.toString().strip());
+        return Messages.text(lang, "chat.prompt").formatted(body.toString().strip());
     }
 
     // ── Fallback ─────────────────────────────────────────────────
@@ -133,7 +109,7 @@ public class ChatSummaryService {
         if (s != null && s.title != null && !s.title.isBlank()) {
             return trim(s.title.strip(), SUMMARY_LEN);
         }
-        return lang == Lang.EN ? "New chat" : "新会话";
+        return Messages.text(lang, "chat.new");
     }
 
     // ── Helpers ──────────────────────────────────────────────────

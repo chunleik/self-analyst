@@ -1,0 +1,4 @@
+[
+  { "code": "zh", "displayName": "中文", "dateLocale": "zh-CN", "resource": "zh" },
+  { "code": "en", "displayName": "English", "dateLocale": "en-US", "resource": "en" }
+]

@@ -1,4 +1,5 @@
 mod autostart;
+mod i18n;
 mod instance;
 mod startup_log;
 
@@ -88,12 +89,34 @@ impl Drop for JavaBackend {
 }
 
 fn show_about_message(port: u16) {
-    let message = format!(
-        "SelfAnalyst v{}\n桌面端: Tauri\n后端服务: {}",
-        env!("CARGO_PKG_VERSION"),
-        backend_url(port, "")
+    let message = i18n::render(
+        "aboutBody",
+        &[
+            ("version", env!("CARGO_PKG_VERSION")),
+            ("url", &backend_url(port, "")),
+        ],
     );
-    show_message("关于 SelfAnalyst", &message);
+    show_message(&i18n::text("aboutTitle"), &message);
+}
+
+fn startup_failure(handle: &AppHandle) {
+    report_startup_failure();
+    handle.exit(1);
+}
+
+fn report_startup_failure() {
+    static SHOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !SHOWN.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        show_message(
+            &i18n::text("startupFailed"),
+            &i18n::text("startupFailedBody"),
+        );
+    }
+}
+
+fn early_startup_failure() -> ! {
+    report_startup_failure();
+    std::process::exit(1);
 }
 
 fn show_message(title: &str, message: &str) {
@@ -273,16 +296,16 @@ fn start_java(app: AppHandle, automatic: bool) {
     let (distribution_root, installed) =
         select_distribution_root(&exe_dir, resource_dir.as_deref()).unwrap_or_else(|| {
             eprintln!("JAR not found in executable or resource directory");
-            std::process::exit(1);
+            early_startup_failure();
         });
     let working_dir = if installed {
         let directory = app.path().app_local_data_dir().unwrap_or_else(|error| {
             eprintln!("Failed to resolve application data directory: {error}");
-            std::process::exit(1);
+            early_startup_failure();
         });
         std::fs::create_dir_all(&directory).unwrap_or_else(|error| {
             eprintln!("Failed to create application data directory: {error}");
-            std::process::exit(1);
+            early_startup_failure();
         });
         directory
     } else {
@@ -346,7 +369,7 @@ fn start_java(app: AppHandle, automatic: bool) {
         let port = loop {
             if Instant::now() >= port_deadline {
                 eprintln!("Java backend did not publish its configured port");
-                handle.exit(1);
+                startup_failure(&handle);
                 return;
             }
             thread::sleep(Duration::from_millis(100));
@@ -356,19 +379,19 @@ fn start_java(app: AppHandle, automatic: bool) {
                     Err(error) => {
                         eprintln!("Java backend published an invalid port: {error}");
                         let _ = std::fs::remove_file(&port_file);
-                        handle.exit(1);
+                        startup_failure(&handle);
                         return;
                     }
                 },
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     if backend_exited(&handle) {
-                        handle.exit(1);
+                        startup_failure(&handle);
                         return;
                     }
                 }
                 Err(error) => {
                     eprintln!("Failed to read Java backend port: {error}");
-                    handle.exit(1);
+                    startup_failure(&handle);
                     return;
                 }
             }
@@ -395,6 +418,13 @@ fn start_java(app: AppHandle, automatic: bool) {
                 .call()
                 .is_ok()
             {
+                let language_result =
+                    i18n::initialize_backend(port, &health_token, Duration::from_secs(5));
+                if language_result.is_err() {
+                    startup_log::write("backend language handshake failed");
+                    startup_failure(&handle);
+                    return;
+                }
                 println!("Java backend ready");
                 startup_log::write("backend healthy");
                 let window_handle = handle.clone();
@@ -402,23 +432,23 @@ fn start_java(app: AppHandle, automatic: bool) {
                 if let Err(error) = handle.run_on_main_thread(move || {
                     if let Err(error) = create_tray(&window_handle, &window_token, port) {
                         eprintln!("Failed to create tray icon: {error}");
-                        window_handle.exit(1);
+                        startup_failure(&window_handle);
                         return;
                     }
                     if let Err(error) =
                         create_main_window(&window_handle, port, &window_token, automatic)
                     {
                         eprintln!("Failed to create desktop window: {error}");
-                        window_handle.exit(1);
+                        startup_failure(&window_handle);
                     }
                 }) {
                     eprintln!("Failed to schedule desktop window creation: {error}");
-                    handle.exit(1);
+                    startup_failure(&handle);
                 }
                 return;
             }
             if backend_exited(&handle) {
-                handle.exit(1);
+                startup_failure(&handle);
                 return;
             }
             let remaining = health_deadline.saturating_duration_since(Instant::now());
@@ -427,7 +457,7 @@ fn start_java(app: AppHandle, automatic: bool) {
             }
         }
         eprintln!("Java backend failed to start");
-        handle.exit(1);
+        startup_failure(&handle);
     });
 }
 
@@ -510,12 +540,10 @@ fn apply_autostart_status(
     status: io::Result<autostart::Status>,
 ) -> tauri::Result<()> {
     let (label, enabled, checked) = match status {
-        Ok(autostart::Status::Enabled) => ("开机自启动", true, true),
-        Ok(autostart::Status::Disabled) => ("开机自启动", true, false),
-        Ok(autostart::Status::OtherDistribution) => {
-            ("开机自启动（开启将替换其他路径）", true, false)
-        }
-        Err(_) => ("开机自启动（状态不可用）", false, false),
+        Ok(autostart::Status::Enabled) => (i18n::text("autostart"), true, true),
+        Ok(autostart::Status::Disabled) => (i18n::text("autostart"), true, false),
+        Ok(autostart::Status::OtherDistribution) => (i18n::text("autostartOther"), true, false),
+        Err(_) => (i18n::text("autostartUnavailable"), false, false),
     };
     item.set_text(label)?;
     item.set_enabled(enabled)?;
@@ -532,8 +560,8 @@ fn toggle_autostart(item: &CheckMenuItem<tauri::Wry>) {
     refresh_autostart(item);
     if let Err(error) = result {
         show_message(
-            "开机自启动设置失败",
-            &format!("无法确认设置已生效：{error}"),
+            &i18n::text("autostartFailed"),
+            &i18n::render("autostartFailedBody", &[("error", &error.to_string())]),
         );
     }
 }
@@ -563,12 +591,19 @@ fn desktop_auth_script(token: &str) -> String {
 fn create_tray_menu(
     app: &AppHandle,
 ) -> tauri::Result<(Menu<tauri::Wry>, CheckMenuItem<tauri::Wry>)> {
-    let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
-    let web_desktop_item = MenuItem::with_id(app, "web_desktop", "Web版桌面", true, None::<&str>)?;
-    let about_item = MenuItem::with_id(app, "about", "关于", true, None::<&str>)?;
-    let autostart_item =
-        CheckMenuItem::with_id(app, "autostart", "开机自启动", true, false, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, "show", i18n::text("show"), true, None::<&str>)?;
+    let web_desktop_item =
+        MenuItem::with_id(app, "web_desktop", i18n::text("web"), true, None::<&str>)?;
+    let about_item = MenuItem::with_id(app, "about", i18n::text("about"), true, None::<&str>)?;
+    let autostart_item = CheckMenuItem::with_id(
+        app,
+        "autostart",
+        i18n::text("autostart"),
+        true,
+        false,
+        None::<&str>,
+    )?;
+    let quit_item = MenuItem::with_id(app, "quit", i18n::text("quit"), true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -653,7 +688,10 @@ pub fn run() {
             eprintln!("Single-instance startup failed: {error}");
             startup_log::write(&format!("single-instance setup failed: {error}"));
             if !automatic {
-                show_message("无法打开 SelfAnalyst", &error.to_string());
+                show_message(
+                    &i18n::text("startupFailed"),
+                    &i18n::text("startupFailedBody"),
+                );
             }
             return;
         }
@@ -708,12 +746,17 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "native-menu-review")]
+    use super::i18n;
     // 手动调用的原生菜单验收：复用正式菜单，不启动后端、不访问注册表。
     // SELF_ANALYST_MENU_REVIEW_CASE 可选 enabled / unavailable / other。
     #[test]
     #[cfg(feature = "native-menu-review")]
     #[ignore = "需要交互式 Windows 桌面进行原生菜单截图验收"]
     fn native_tray_menu_review() {
+        let language =
+            std::env::var("SELF_ANALYST_MENU_REVIEW_LANGUAGE").unwrap_or_else(|_| "zh".into());
+        i18n::review_language(&language);
         let case =
             std::env::var("SELF_ANALYST_MENU_REVIEW_CASE").unwrap_or_else(|_| "enabled".into());
         let (status, expected_text, expected_enabled, expected_checked) = match case.as_str() {
@@ -722,19 +765,19 @@ mod tests {
                     std::io::ErrorKind::PermissionDenied,
                     "test",
                 )),
-                "开机自启动（状态不可用）",
+                i18n::text("autostartUnavailable"),
                 false,
                 false,
             ),
             "other" => (
                 Ok(super::autostart::Status::OtherDistribution),
-                "开机自启动（开启将替换其他路径）",
+                i18n::text("autostartOther"),
                 true,
                 false,
             ),
             "enabled" => (
                 Ok(super::autostart::Status::Enabled),
-                "开机自启动",
+                i18n::text("autostart"),
                 true,
                 true,
             ),
@@ -748,7 +791,7 @@ mod tests {
                     "menu-review",
                     tauri::WebviewUrl::External("about:blank".parse().unwrap()),
                 )
-                .title(format!("SelfAnalyst 托盘菜单验收 - {case}"))
+                .title(format!("SelfAnalyst 托盘菜单验收 - {language} - {case}"))
                 .inner_size(900.0, 600.0)
                 .center()
                 .build()?;
@@ -757,16 +800,45 @@ mod tests {
                 assert_eq!(item.text()?, expected_text);
                 assert_eq!(item.is_enabled()?, expected_enabled);
                 assert_eq!(item.is_checked()?, expected_checked);
+                if std::env::var("SELF_ANALYST_MENU_REVIEW_ABOUT").is_err() {
+                    let focused_window = window.clone();
+                    let focused_menu = menu.clone();
+                    let focused_handle = app.handle().clone();
+                    window.on_window_event(move |event| {
+                        if matches!(event, tauri::WindowEvent::Focused(true)) {
+                            let window = focused_window.clone();
+                            let menu = focused_menu.clone();
+                            let handle = focused_handle.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(150));
+                                let _ = handle.run_on_main_thread(move || {
+                                    let _ = window
+                                        .popup_menu_at(&menu, tauri::PhysicalPosition::new(60, 80));
+                                });
+                            });
+                        }
+                    });
+                }
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                     let exit_handle = handle.clone();
                     handle
                         .run_on_main_thread(move || {
+                            window.show().unwrap();
+                            window.set_focus().unwrap();
+                            if std::env::var("SELF_ANALYST_MENU_REVIEW_ABOUT").is_ok() {
+                                super::show_about_message(13405);
+                                exit_handle.exit(0);
+                                return;
+                            }
                             window
                                 .popup_menu_at(&menu, tauri::PhysicalPosition::new(60, 80))
                                 .unwrap();
-                            exit_handle.exit(0);
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_secs(120));
+                                exit_handle.exit(0);
+                            });
                         })
                         .unwrap();
                 });

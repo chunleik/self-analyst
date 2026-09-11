@@ -10,12 +10,22 @@ function chatJsonResponse(response, fallbackMessage) {
   return response.text().then(function (text) {
     var body = null;
     try { body = text ? JSON.parse(text) : null; } catch (ignored) {}
-    var error = new Error((body && (body.error || body.title)) ||
-      fallbackMessage + ": " + response.status);
+    var error = new Error(apiErrorMessage(body, fallbackMessage + ": " + response.status));
     error.status = response.status;
     error.body = body || text;
     throw error;
   });
+}
+
+function apiErrorMessage(body, fallback) {
+  var detail = body && (body.error || body.title) || fallback;
+  if (typeof t !== "function") return detail;
+  if (body && typeof body.errorCode === "string") {
+    var translated = t(body.errorCode, body.errorParams || {});
+    if (translated !== body.errorCode) return translated;
+  }
+  var generic = t("error.generic", { detail: detail });
+  return generic === "error.generic" ? detail : generic;
 }
 
 function parseChatSseFrame(frame) {
@@ -44,8 +54,7 @@ function consumeChatSseResponse(response, onEvent) {
     if (!parsed) return;
     if (onEvent) onEvent(parsed.event, parsed.payload);
     if (parsed.event === "error") {
-      var error = new Error(parsed.payload && parsed.payload.error
-        ? parsed.payload.error : "Chat stream failed");
+      var error = new Error(apiErrorMessage(parsed.payload, "Chat stream failed"));
       error.status = parsed.payload && parsed.payload.status;
       error.body = parsed.payload;
       throw error;
@@ -97,14 +106,14 @@ function consumeChatSseResponse(response, onEvent) {
 var api = {
   getStatus: function () {
     return fetch(API_BASE + "/desktop/status").then(function (r) {
-      if (!r.ok) throw new Error("Status fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Status fetch failed: ");
       return r.json();
     });
   },
   getFiles: function (limit) {
     var value = limit || 20;
     return fetch(API_BASE + "/desktop/files?limit=" + encodeURIComponent(value)).then(function (r) {
-      if (!r.ok) throw new Error("File overview fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "File overview fetch failed: ");
       return r.json();
     });
   },
@@ -117,19 +126,19 @@ var api = {
   },
   getSummary: function () {
     return fetch(API_BASE + "/desktop/summary").then(function (r) {
-      if (!r.ok) throw new Error("Summary fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Summary fetch failed: ");
       return r.json();
     });
   },
   getUsage: function () {
     return fetch(API_BASE + "/desktop/usage").then(function (r) {
-      if (!r.ok) throw new Error("Usage fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Usage fetch failed: ");
       return r.json();
     });
   },
   getTasks: function () {
     return fetch(API_BASE + "/desktop/tasks").then(function (r) {
-      if (!r.ok) throw new Error("Tasks fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Tasks fetch failed: ");
       return r.json();
     });
   },
@@ -139,7 +148,7 @@ var api = {
       body: JSON.stringify(t),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("Create task failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Create task failed: ");
       return r.json();
     });
   },
@@ -149,7 +158,7 @@ var api = {
       body: JSON.stringify(t),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("Update task failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Update task failed: ");
       return r.json();
     });
   },
@@ -157,21 +166,21 @@ var api = {
     return fetch(API_BASE + "/desktop/tasks/" + id + "/complete", {
       method: "POST",
     }).then(function (r) {
-      if (!r.ok) throw new Error("Complete task failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Complete task failed: ");
     });
   },
   archiveTask: function (id) {
     return fetch(API_BASE + "/desktop/tasks/" + id + "/archive", {
       method: "POST",
     }).then(function (r) {
-      if (!r.ok) throw new Error("Archive task failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Archive task failed: ");
     });
   },
   deleteTask: function (id) {
     return fetch(API_BASE + "/desktop/tasks/" + id, {
       method: "DELETE",
     }).then(function (r) {
-      if (!r.ok) throw new Error("Delete task failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Delete task failed: ");
     });
   },
   postChat: function (msg, ctx, sessionId, userMessageId) {
@@ -270,7 +279,7 @@ var api = {
     var query = params ? new URLSearchParams(params).toString() : "";
     var qs = query ? "?" + query : "";
     return fetch(API_BASE + "/desktop/memory" + qs).then(function (r) {
-      if (!r.ok) throw new Error("List memory failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "List memory failed: ");
       return r.json();
     });
   },
@@ -280,7 +289,7 @@ var api = {
       body: JSON.stringify(payload || {}),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("Create memory failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Create memory failed: ");
       return r.json();
     });
   },
@@ -290,7 +299,7 @@ var api = {
       body: JSON.stringify(patch || {}),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("Update memory failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Update memory failed: ");
       return r.json();
     });
   },
@@ -298,7 +307,7 @@ var api = {
     return fetch(API_BASE + "/desktop/memory/" + encodeURIComponent(id), {
       method: "DELETE",
     }).then(function (r) {
-      if (!r.ok) throw new Error("Delete memory failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Delete memory failed: ");
       return r.json();
     });
   },
@@ -308,7 +317,7 @@ var api = {
       body: JSON.stringify({ memoryPolicy: policy }),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("Set memory policy failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Set memory policy failed: ");
       return r.json();
     });
   },
@@ -318,13 +327,13 @@ var api = {
       body: JSON.stringify(payload || {}),
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
-      if (!r.ok) throw new Error("Create session memory failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Create session memory failed: ");
       return r.json();
     });
   },
   getConfig: function () {
     return fetch(API_BASE + "/desktop/config").then(function (r) {
-      if (!r.ok) throw new Error("Config fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Config fetch failed: ");
       return r.json();
     });
   },
@@ -344,7 +353,7 @@ var api = {
           }
         }
         if (!r.ok) {
-          throw new Error(payload.error || text || "Save config failed: " + r.status);
+          throw new Error(apiErrorMessage(payload, text || "Save config failed: " + r.status));
         }
         return payload;
       });
@@ -352,14 +361,14 @@ var api = {
   },
   getEffectiveConfig: function () {
     return fetch(API_BASE + "/desktop/config/effective").then(function (r) {
-      if (!r.ok) throw new Error("Effective config fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Effective config fetch failed: ");
       return r.json();
     });
   },
 
   getRawConfig: function () {
     return fetch(API_BASE + "/desktop/config/raw").then(function (r) {
-      if (!r.ok) throw new Error("Raw config fetch failed: " + r.status);
+      if (!r.ok) return chatJsonResponse(r, "Raw config fetch failed: ");
       return r.json();
     });
   },
@@ -379,7 +388,7 @@ var api = {
           }
         }
         if (!r.ok) {
-          throw new Error(payload.error || body || "Save raw config failed: " + r.status);
+          throw new Error(apiErrorMessage(payload, body || "Save raw config failed: " + r.status));
         }
         return payload;
       });
@@ -392,7 +401,7 @@ var api = {
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
       return r.json().then(function (payload) {
-        if (!r.ok) throw new Error(payload.error || "LLM test failed: " + r.status);
+        if (!r.ok) throw new Error(apiErrorMessage(payload, "LLM test failed: " + r.status));
         return payload;
       });
     });
@@ -404,7 +413,7 @@ var api = {
       headers: { "Content-Type": "application/json" },
     }).then(function (r) {
       return r.json().then(function (payload) {
-        if (!r.ok) throw new Error(payload.error || "Embedding test failed: " + r.status);
+        if (!r.ok) throw new Error(apiErrorMessage(payload, "Embedding test failed: " + r.status));
         return payload;
       });
     });

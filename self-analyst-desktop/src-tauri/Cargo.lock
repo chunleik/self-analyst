@@ -2662,6 +2662,7 @@ name = "self-analyst-desktop"
 version = "0.2.0"
 dependencies = [
  "open",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-shell",

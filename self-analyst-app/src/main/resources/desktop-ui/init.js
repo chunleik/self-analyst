@@ -72,26 +72,55 @@ function cacheDom() {
   };
 }
 
-function init() {
-  cacheDom();
-  // Drop the legacy localStorage sessions key; the backend is now the source
-  // of truth and this key is never read again (SPEC-CSP-FE-006 / DEC-004).
-  try { localStorage.removeItem(CHAT_STORAGE_KEY); } catch (e) { /* unavailable */ }
+var initializationPending = null;
+var initialized = false;
+var bootstrapBound = false;
 
-  // Resolve the effective language before the first render so static + dynamic
-  // text comes up localized (SPEC-I18N-RES-003 / UI-004). A status failure keeps
-  // the default state.lang ("zh") rather than blocking startup.
-  api.getStatus().then(function (st) {
-    if (st && st.language) { state.lang = st.language; state.status = st; }
-  }).catch(function () { /* keep default lang */ }).then(function () {
-    applyI18n(document);
-    setupEvents();
-    switchTab("agent");
-    // Render the chat list only after the backend index resolves (SPEC-CSP-FE-002).
-    loadChatSessions().then(function () { renderChatTab(); });
-    loadAll();
-    startAutoRefresh();
+function initializeLanguage() {
+  if (initialized) return Promise.resolve();
+  if (initializationPending) return initializationPending;
+  var timeout;
+  var statusRequest = Promise.race([
+    api.getStatus(),
+    new Promise(function (_, reject) { timeout = setTimeout(function () { reject(new Error("Status timeout")); }, 5000); })
+  ]);
+  initializationPending = statusRequest.then(function (st) {
+    if (!st || !st.language || !st.dateLocale) throw new Error("Missing language metadata");
+    var selected = (st.languages || []).find(function (language) { return language.code === st.language; });
+    return loadI18n(st.language, selected && selected.resource).then(function () {
+      state.lang = st.language;
+      state.dateLocale = st.dateLocale;
+      state.status = st;
+      document.documentElement.lang = st.language;
+      applyI18n(document);
+      hideError();
+      initialized = true;
+      state.dom.errorRetryBtn.removeEventListener("click", initializeLanguage);
+      setupEvents();
+      switchTab("agent");
+      loadChatSessions().then(function () { renderChatTab(); });
+      loadAll();
+      startAutoRefresh();
+    });
+  }).catch(function () {
+    showError(t("error.notReady"));
+  }).finally(function () {
+    clearTimeout(timeout);
+    initializationPending = null;
   });
+  return initializationPending;
+}
+
+function init() {
+  if (!bootstrapBound) {
+    cacheDom();
+    try { localStorage.removeItem(CHAT_STORAGE_KEY); } catch (ignored) {}
+    state.dom.errorRetryBtn.addEventListener("click", initializeLanguage);
+    bootstrapBound = true;
+    state.dom.errorRetryBtn.textContent = t("error.retry");
+    showError(t("common.loading"));
+  }
+  return initializeLanguage();
 }
 
 // Start when DOM is ready

@@ -15,20 +15,15 @@ import java.util.Map;
  */
 final class AgentPrompts {
 
-    private static final DateTimeFormatter DATE_TIME_FMT_ZH =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss EEEE (z, OOOO)", Locale.CHINA);
-    private static final DateTimeFormatter DATE_TIME_FMT_EN =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss EEEE (z, OOOO)", Locale.ENGLISH);
-
     private AgentPrompts() {}
 
     /** 装配主 Agent 的基础系统提示；能力片段由 Agent 初始化时的可用组件决定。 */
     static String systemPrompt(Lang lang, String memorySummary, boolean wikiEnabled,
                                boolean semanticEnabled, boolean hasFileTools,
                                boolean hasConfigTools, ZonedDateTime now) {
-        boolean isEn = en(lang);
-        String code = isEn ? "en" : "zh";
-        DateTimeFormatter formatter = isEn ? DATE_TIME_FMT_EN : DATE_TIME_FMT_ZH;
+        String code = languageCode(lang);
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(
+                "yyyy-MM-dd HH:mm:ss EEEE (z, OOOO)", (lang != null ? lang : Lang.english()).locale());
 
         return PromptResources.render("system." + code + ".md", Map.of(
                 "current_time", now.format(formatter),
@@ -76,10 +71,6 @@ final class AgentPrompts {
     }
 
     private static String languageCode(Lang lang) {
-        return en(lang) ? "en" : "zh";
-    }
-
-    private static boolean en(Lang lang) {
-        return lang == Lang.EN;
+        return lang != null ? lang.resource() : "en";
     }
 }

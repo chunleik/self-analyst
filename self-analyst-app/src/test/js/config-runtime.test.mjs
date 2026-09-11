@@ -79,9 +79,13 @@ test("runtime lookup errors preserve edits and explain that status is unavailabl
 
 test("saving failure preserves dirty text and the last successful baseline", async () => {
   const h = harness();
+  const languageSelect = { disabled: false };
+  h.elements.set("config-language", languageSelect);
   h.context.api.saveRawConfig = () => Promise.reject(new Error("write failed"));
   h.context.saveAllConfig();
+  assert.equal(languageSelect.disabled, true);
   await new Promise(setImmediate);
+  assert.equal(languageSelect.disabled, false);
   assert.equal(h.state.configDirty, true);
   assert.equal(h.state.configRawBaseline, "old");
   assert.equal(h.state.configSaving, false);

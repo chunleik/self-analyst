@@ -79,7 +79,8 @@ public record Config(
         String budgetMode,
         long budgetDailyTokens,
         double budgetWarnRatio,
-        String appLanguage) {
+        String appLanguage,
+        Lang effectiveLanguage) {
 
     private static final Logger log = LoggerFactory.getLogger(Config.class);
 
@@ -334,16 +335,7 @@ public record Config(
                 agentCompactionTriggerTokens, agentCompactionKeepMessages,
                 agentCompactionKeepTokens, desktopSummaryMaxTimelineLlm,
                 budgetMode, budgetDailyTokens, budgetWarnRatio,
-                appLanguage);
-    }
-
-    /**
-     * 有效语言（派生，不入构造）：由启动期 {@code app.language} 与系统 Locale
-     * 唯一解析（SPEC-I18N-RES-002）。变更 {@code app.language} 需重启后端才生效
-     * （SPEC-I18N-DEC-007）。
-     */
-    public Lang effectiveLanguage() {
-        return LangResolver.resolve(appLanguage, Locale.getDefault());
+                appLanguage, LangResolver.resolve(appLanguage, Locale.getDefault()));
     }
 
     /**
@@ -373,7 +365,7 @@ public record Config(
                 baseDir.resolve("file-semantic-index"),
                 2048, 8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,
-                "auto");
+                "auto", LangResolver.resolve("auto", Locale.getDefault()));
     }
 
     /** Load the classpath {@code application.properties} defaults (empty if absent). */

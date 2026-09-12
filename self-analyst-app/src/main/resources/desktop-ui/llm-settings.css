@@ -1,0 +1,22 @@
+.config-view-tabs { display: flex; gap: 8px; padding: 14px 18px 0; }
+.config-view-tabs .is-active { background: var(--accent, #2563eb); color: white; }
+.llm-settings { max-width: 820px; margin: 0 auto; color: var(--text-primary, #202b3c); }
+.llm-settings header { margin-bottom: 24px; }
+.llm-settings header h3 { font-size: 22px; margin: 0 0 8px; }
+.llm-settings p { line-height: 1.6; overflow-wrap: anywhere; }
+.llm-settings header p, .llm-hint, .llm-field-meta, #llm-key-state { color: var(--text-secondary, #68758a); font-size: 13px; }
+.llm-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; }
+.llm-wide { grid-column: 1 / -1; }
+.llm-settings label { display: block; font-size: 14px; font-weight: 600; }
+.llm-settings input, .llm-settings select { width: 100%; min-width: 0; box-sizing: border-box; margin-top: 7px; padding: 11px 12px; border: 1px solid var(--border-color, #d5dce6); border-radius: 8px; font: inherit; background: var(--bg-card, white); color: inherit; }
+.llm-settings :focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 2px; }
+.llm-field-meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding-top: 6px; }
+.llm-probes { background: var(--bg-secondary, #f3f6fa); border: 1px solid var(--border-color, #d5dce6); padding: 16px; border-radius: 10px; margin: 20px 0; }
+.llm-probes p { margin: 0 0 10px; }
+.llm-probes [role=status]:empty { display: none; }
+.llm-probes [role=status] { margin: 10px 0 0; }
+.llm-settings footer { display: flex; justify-content: flex-end; gap: 10px; position: sticky; bottom: -1px; background: var(--bg-card, white); border-top: 1px solid var(--border-color, #d5dce6); padding: 16px 0; margin-top: 20px; }
+#llm-error { color: var(--danger, #ba3030); white-space: pre-wrap; margin-bottom: 12px; }
+#llm-notice { color: var(--success, #197b44); margin-bottom: 12px; }
+#llm-runtime { padding-left: 20px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .llm-field-grid { grid-template-columns: 1fr; } .llm-field-meta { flex-wrap: wrap; } }

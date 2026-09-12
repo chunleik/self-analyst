@@ -337,6 +337,18 @@ var api = {
       return r.json();
     });
   },
+  llmSettings: function (path, method, body, signal) {
+    return fetch(API_BASE + "/desktop/llm-settings" + (path || ""), {
+      method: method || "GET", signal: signal,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(function (response) {
+      return response.json().then(function (payload) {
+        if (!response.ok) throw new Error(apiErrorMessage(payload, t("llm.error")));
+        return payload;
+      });
+    });
+  },
   saveConfig: function (c) {
     return fetch(API_BASE + "/desktop/config", {
       method: "PUT",

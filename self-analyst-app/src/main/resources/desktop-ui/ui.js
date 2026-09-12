@@ -127,24 +127,49 @@ function switchTab(tab) {
 
 function openConfigModal(focusKey) {
   if (typeof focusKey !== "string") focusKey = null;
+  if (state.configOpen) return switchConfigView(focusKey ? "raw" : "llm", focusKey);
+  state.configReturnFocus = document.activeElement;
   state.configOpen = true;
   state.dom.configModal.classList.remove("hidden");
-  // Always reload so the editor reflects the on-disk file, which may have been
-  // changed by the Agent or externally. SPEC-CFGUI-UI-002a.
-  return loadConfig().then(function () {
-    if (focusKey) focusConfigEditorKey(focusKey);
+  if (state.dom.configCloseBtn && state.dom.configCloseBtn.focus) state.dom.configCloseBtn.focus();
+  return switchConfigView(focusKey ? "raw" : "llm", focusKey);
+}
+
+function switchConfigView(view, focusKey) {
+  if (state.configSaving) return Promise.resolve();
+  if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()))
+      && !window.confirm(t("config.confirmDiscardClose"))) return Promise.resolve();
+  if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
+  if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
+  state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
+  state.configDirty = false; state.configRawText = ""; state.configRawBaseline = "";
+  state.configView = view;
+  var tabs = document.getElementById("config-view-tabs");
+  if (tabs) tabs.querySelectorAll("button").forEach(function (button) {
+    button.classList.toggle("is-active", button.dataset.configView === view);
+    button.setAttribute("aria-pressed", String(button.dataset.configView === view));
   });
+  if (view === "llm" && typeof mountLlmSettings === "function") {
+    state.llmSettingsView = mountLlmSettings(state.dom.configGrid);
+    return Promise.resolve();
+  }
+  return loadConfig().then(function () { if (focusKey) focusConfigEditorKey(focusKey); });
 }
 
 function closeConfigModal() {
+  if (state.configSaving) return;
   // Guard against losing unsaved edits. SPEC-CFGUI-UI-004a.
-  if (state.configDirty && !window.confirm(t("config.confirmDiscardClose"))) {
+  if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty())) && !window.confirm(t("config.confirmDiscardClose"))) {
     return;
   }
   state.configOpen = false;
+  state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
+  if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   state.configDirty = false;
   state.dom.configModal.classList.add("hidden");
+  if (state.configReturnFocus && state.configReturnFocus.focus) state.configReturnFocus.focus();
+  state.configReturnFocus = null;
 }
 
 // ---- Data Loading ----
@@ -200,8 +225,10 @@ function loadAll() {
 }
 
 function loadConfig() {
+  var generation = state.configLoadGeneration;
   return api.getRawConfig()
     .then(function (resp) {
+      if (generation !== state.configLoadGeneration) return;
       state.configRawText = resp.text || "";
       state.configRawBaseline = resp.text || "";
       state.configPath = (resp && resp.path) || "config.toml";
@@ -213,6 +240,7 @@ function loadConfig() {
       if (typeof refreshConfigRuntime === "function") return refreshConfigRuntime();
     })
     .catch(function (err) {
+      if (generation !== state.configLoadGeneration) return;
       // Load failed → read-only error state, no saving on unknown content.
       // SPEC-CFGUI-UI-002c.
       state.configRawText = "";

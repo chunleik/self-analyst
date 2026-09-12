@@ -100,8 +100,10 @@ class LlmHotReloadIntegrationTest {
             try {
                 var reply = f.agent.chat(SESSION, "000000000001", "first").toFuture();
                 assertTrue(entered.await(5, TimeUnit.SECONDS));
-                var update = f.config().update(Map.of("llm.model", "new", "llm.api-key", "new-key", "llm.max-tokens", "32"));
-                assertEquals("draining", ((Map<?, ?>) update.application().get("llm")).get("status"));
+                var settings = new com.selfanalyst.llm.settings.LlmSettingsService(new com.selfanalyst.llm.settings.TomlLlmSettingsRepository(f.config()));
+                var update = settings.save(Map.of("updates", Map.of("model", "new", "maxTokens", 32),
+                        "credential", Map.of("action", "replace", "value", "new-key")));
+                assertEquals("draining", ((Map<?, ?>) ((Map<?, ?>) update.get("application")).get("llm")).get("status"));
                 assertEquals("new", f.agent.completePlain("summary", Duration.ofSeconds(5)));
                 release.countDown();
                 assertEquals("old", reply.get(10, TimeUnit.SECONDS));
@@ -120,11 +122,12 @@ class LlmHotReloadIntegrationTest {
             var memory = f.agent.memory();
             assertFalse(f.agent.isLlmAvailable());
             assertThrows(IllegalStateException.class, () -> f.agent.completePlain("missing", Duration.ofSeconds(2)));
-            f.config().update(Map.of("llm.api-key", "new-key"));
+            var settings = new com.selfanalyst.llm.settings.LlmSettingsService(new com.selfanalyst.llm.settings.TomlLlmSettingsRepository(f.config()));
+            settings.save(Map.of("credential", Map.of("action", "replace", "value", "new-key")));
             assertTrue(f.agent.isLlmAvailable());
             assertEquals("old", f.agent.completePlain("first", Duration.ofSeconds(5)));
             long usage = f.meter.totalTokens();
-            f.config().saveRaw(f.store.readRaw().replace("new-key", ""));
+            settings.save(Map.of("credential", Map.of("action", "clear")));
             assertFalse(f.agent.isLlmAvailable());
             f.config().update(Map.of("llm.api-key", "restored-key", "llm.model", "restored"));
             assertSame(memory, f.agent.memory());

@@ -159,6 +159,19 @@ function setupEvents() {
   // Config modal open/close
   state.dom.configOpenBtn.addEventListener("click", function () { openConfigModal(); });
   state.dom.configCloseBtn.addEventListener("click", closeConfigModal);
+  var configTabs = document.getElementById("config-view-tabs");
+  if (configTabs) configTabs.addEventListener("click", function (e) {
+    var button = e.target.closest("[data-config-view]");
+    if (button) switchConfigView(button.dataset.configView);
+  });
+  state.dom.configModal.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { e.preventDefault(); closeConfigModal(); }
+    if (e.key !== "Tab") return;
+    var focusable = Array.from(state.dom.configModal.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)"));
+    var first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
   state.dom.configModal
     .querySelector(".config-modal-overlay")
     .addEventListener("click", closeConfigModal);

@@ -132,6 +132,54 @@ fn render_template(template: &str, parameters: &[(&str, &str)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{self, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
+
+    fn accept_until(listener: &TcpListener, timeout: Duration) -> io::Result<TcpStream> {
+        listener.set_nonblocking(true)?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false)?;
+                    stream.set_write_timeout(Some(Duration::from_secs(3)))?;
+                    return Ok(stream);
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, "等待测试连接超时"));
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn read_request(stream: &mut TcpStream) -> io::Result<String> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "读取测试请求超时"));
+            }
+            stream.set_read_timeout(Some(remaining))?;
+            let mut byte = [0];
+            stream.read_exact(&mut byte)?;
+            request.push(byte[0]);
+            if request.len() > 4096 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "测试请求头过大"));
+            }
+        }
+        Ok(String::from_utf8_lossy(&request).to_lowercase())
+    }
+
+    fn assert_authenticated_request(request: &str) {
+        assert!(request.starts_with("get /desktop/status http/1.1\r\n"));
+        assert!(request.contains("\r\nx-selfanalyst-token: test-token\r\n"));
+    }
     #[test]
     fn languages_and_extension() {
         assert_eq!(lookup("en", "show", CATALOGS), "Show window");
@@ -158,19 +206,12 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_handshake_and_timeout() {
-        use std::io::{Read, Write};
-        use std::net::TcpListener;
-        use std::time::{Duration, Instant};
+    fn authenticated_handshake() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0; 4096];
-            let size = stream.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..size]).to_lowercase();
-            assert!(request.contains("/desktop/status"));
-            assert!(request.contains("x-selfanalyst-token: test-token"));
+            let mut stream = accept_until(&listener, Duration::from_secs(3)).unwrap();
+            assert_authenticated_request(&read_request(&mut stream).unwrap());
             let body = r#"{"language":"en"}"#;
             write!(
                 stream,
@@ -180,20 +221,50 @@ mod tests {
             )
             .unwrap();
         });
-        assert_eq!(
-            request_backend_language(port, "test-token", Duration::from_secs(2)).unwrap(),
-            "en"
-        );
+        let result = request_backend_language(port, "test-token", Duration::from_secs(3));
         server.join().unwrap();
+        assert_eq!(result.unwrap(), "en");
+    }
+
+    #[test]
+    fn authenticated_response_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        let (release, finished) = std::sync::mpsc::channel();
         let server = std::thread::spawn(move || {
-            let (_stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_millis(300));
+            let mut stream = accept_until(&listener, Duration::from_secs(3)).unwrap();
+            assert_authenticated_request(&read_request(&mut stream).unwrap());
+            // 保持连接，直到客户端返回；提前关闭连接不能冒充响应超时。
+            let released = finished.recv_timeout(Duration::from_secs(10));
+            drop(stream);
+            released.unwrap();
         });
         let start = Instant::now();
-        assert!(request_backend_language(port, "test-token", Duration::from_millis(50)).is_err());
-        assert!(start.elapsed() < Duration::from_secs(2));
+        let result = request_backend_language(port, "test-token", Duration::from_secs(3));
+        let elapsed = start.elapsed();
+        let _ = release.send(());
         server.join().unwrap();
+        assert!(result.is_err());
+        assert!(
+            elapsed >= Duration::from_secs(2),
+            "请求提前失败: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(6),
+            "请求未及时超时: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn server_exits_without_a_client_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = std::thread::spawn(move || {
+            accept_until(&listener, Duration::from_millis(50))
+                .unwrap_err()
+                .kind()
+        });
+        let start = Instant::now();
+        assert_eq!(server.join().unwrap(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(2));
     }
 }

@@ -56,6 +56,36 @@ class ConfigApplicationServiceTest {
         assertEquals(raw, fixed.saved().config().eventsRawDir());
     }
     @TempDir Path dir;
+    @Test void llmPatchPreservesLatestTextAndExplicitEmptyCredential() throws Exception {
+        var store = new UserConfigStore(dir);
+        store.saveRaw("# keep\n[llm]\napi-key='old'\nmodel='old'\n[embedding]\nenabled=true\n");
+        var service = service(store);
+        try (var runtime = attach(service, new AtomicInteger())) {
+            service.saveRaw(store.readRaw() + "# other writer\n");
+            var result = service.updateLlm(Map.of("llm.api-key", "", "llm.model", "new"));
+            assertTrue(store.readRaw().startsWith("# keep"));
+            assertTrue(store.readRaw().endsWith("# other writer\n"));
+            assertEquals("", store.loadUser().getProperty("llm.api-key"));
+            assertFalse(runtime.available());
+            assertTrue(result.restartRequired().contains("embedding.api-key"));
+            String before = store.readRaw();
+            assertThrows(IllegalStateException.class, () -> service.updateLlm(Map.of("llm.model", "reject")));
+            assertEquals(before, store.readRaw()); assertEquals("new", runtime.settings().model());
+        }
+    }
+    @Test void llmPatchReadAndWriteFailureCannotReplaceFile() throws Exception {
+        AtomicBoolean failRead = new AtomicBoolean(), failWrite = new AtomicBoolean();
+        var store = new UserConfigStore(dir) {
+            @Override public String readRaw() throws IOException { if (failRead.get()) throw new IOException("test"); return super.readRaw(); }
+            @Override public void saveRaw(String text) throws IOException { if (failWrite.get()) throw new IOException("test"); super.saveRaw(text); }
+        };
+        store.saveRaw("[llm]\nmodel='old'\n"); var service = service(store);
+        try (var runtime = attach(service, new AtomicInteger())) {
+            failRead.set(true); assertThrows(IOException.class, () -> service.updateLlm(Map.of("llm.model", "new")));
+            failRead.set(false); failWrite.set(true); assertThrows(IOException.class, () -> service.updateLlm(Map.of("llm.model", "new")));
+            assertEquals("[llm]\nmodel='old'\n", store.readRaw()); assertEquals("old", runtime.settings().model());
+        }
+    }
     private ConfigApplicationService service(UserConfigStore store) {
         Config initial = ConfigResolver.resolve(store.loadUser(), Map.of()).config();
         return new ConfigApplicationService(store, initial, Map.of());

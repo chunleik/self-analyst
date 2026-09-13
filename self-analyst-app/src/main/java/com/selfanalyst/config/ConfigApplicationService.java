@@ -66,6 +66,20 @@ public final class ConfigApplicationService implements AutoCloseable {
     public SaveResult saveRaw(String text) throws IOException {
         synchronized (lock) { return commit(text); }
     }
+    /** 专用模型设置读取必须严格解析，禁止容错读取覆盖损坏文件。 */
+    public Properties readUserStrict() throws IOException {
+        synchronized (lock) {
+            Properties user = new Properties();
+            TomlSupport.parseAndFlatten(store.readRaw()).forEach(user::setProperty);
+            return user;
+        }
+    }
+    public SaveResult updateLlm(Map<String, String> changes) throws IOException {
+        synchronized (lock) {
+            if (closed) throw new IllegalStateException("应用正在关闭，无法保存配置");
+            return commit(LlmTomlEditor.edit(store.readRaw(), changes));
+        }
+    }
     public SaveResult update(Map<String, String> changes) throws IOException {
         synchronized (lock) {
             RemovedEventConfig.rejectKeys(changes.keySet());

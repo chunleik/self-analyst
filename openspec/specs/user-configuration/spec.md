@@ -9,16 +9,21 @@
 ### Requirement: SPEC-TOML-DEC-001..004、007 配置文件与两种写入语义
 用户覆盖文件 SHALL 固定为进程工作目录下 `./data/config/config.toml`，使用 TOML v1.0 和 UTF-8；
 classpath application.properties SHALL 继续提供打包默认值。内部消费方 SHALL 继续使用拍平点分键和
-字符串属性值。raw 写入 SHALL 逐字保存完整文本；结构化端点和 ConfigTools SHALL 重新生成整个 TOML，
-不承诺保留注释。写入 SHALL 使用同目录临时文件后 REPLACE_EXISTING；当前不承诺崩溃级 ATOMIC_MOVE。
+字符串属性值。raw 写入 SHALL 逐字保存完整文本；原有通用结构化端点和 ConfigTools SHALL 重新生成整个 TOML，
+不承诺保留注释。独立模型设置专用保存 SHALL 按 SPEC-LLMSET-004 定向修改目标键并保留未修改原文，不沿用整文件重生成语义。
+写入 SHALL 使用同目录临时文件后 REPLACE_EXISTING；当前不承诺崩溃级 ATOMIC_MOVE。
 
 #### Scenario: raw 逐字往返
 - **WHEN** 用户保存包含注释、空行、键顺序和中文路径的合法 TOML
 - **THEN** 再次 raw 读取与提交文本逐字符一致
 
 #### Scenario: 结构化单键写入
-- **WHEN** ConfigTools 或结构化端点修改一个点分键
+- **WHEN** ConfigTools 或原有通用结构化端点修改一个点分键
 - **THEN** 系统重新生成可解析 TOML，值生效但用户原注释不保证保留
+
+#### Scenario: 模型表单定向写入
+- **WHEN** 独立模型设置修改单个模型参数
+- **THEN** 原有非目标配置和注释保留，所有保存入口仍使用同一配置文件及运行提交协调
 
 ### Requirement: SPEC-TOML-GOAL-001..006 TOML 配置目标
 用户覆盖 SHALL 以 UTF-8 TOML 持久化；Windows 反斜杠路径 SHALL 可通过字面量字符串所见即所得。
@@ -41,16 +46,17 @@ classpath application.properties SHALL 继续提供打包默认值。内部消�
 - **THEN** 编辑器显示真实配置文本；未通过回环和桌面认证的请求不能读取该文本
 
 ### Requirement: SPEC-CFGUI-UI-001..005 配置编辑器交互
-配置入口 SHALL 打开单个等宽、多行、可滚动纯文本编辑器，不展示结构化字段表单。打开时 SHALL 读取
-raw API；文件缺失或为空时 SHALL 显示完整注释模板但不自动写盘。加载失败 SHALL 使编辑器只读。
-脏状态 SHALL 按当前文本与最近成功基准逐字符比较；放弃恢复基准，保存期间禁止重复提交。保存成功
+配置入口 SHALL 默认打开独立的“模型设置”结构化视图，并提供“高级配置”原文视图；打开时只加载所选视图所需数据，不自动读取 raw 密钥文本到模型表单。
+高级配置 SHALL 展示单个等宽、多行、可滚动纯文本编辑器，进入时 SHALL 读取 raw API；文件缺失或为空时 SHALL 显示完整注释模板但不自动写盘。加载失败 SHALL 使编辑器只读。
+原文脏状态 SHALL 按当前文本与最近成功基准逐字符比较；放弃恢复基准，保存期间禁止重复提交。保存成功
 SHALL 更新基准并显示 restartRequired/unknownKeys 及各组件的运行时应用结果；未保存成功时 SHALL
 保留脏态和文本。不可用状态或仍有旧版本任务时 MUST 给出准确说明，不将“已保存”解释为全部组件已切换。
-来源与运行状态 SHALL 作为只读辅助信息呈现，不替换原文编辑器。存在未保存修改时关闭
-SHALL 先确认。LLM/Embedding 连接测试 SHALL 使用编辑器当前 TOML，缺失密钥可按后端语义回退有效配置。
+来源与运行状态 SHALL 作为只读辅助信息呈现，不替换原文编辑器。任一视图存在未保存修改时关闭或切换
+SHALL 先确认；取消确认保留视图和草稿，确认放弃后进入目标视图并读取最新已保存配置，MUST NOT 静默互相覆盖。
+原文视图 LLM/Embedding 连接检查 SHALL 使用编辑器当前 TOML，缺失密钥可按后端语义回退有效配置；新模型设置的生成测试遵循 SPEC-LLMSET-006。
 
 #### Scenario: 打开空配置
-- **WHEN** config.toml 不存在或为空
+- **WHEN** config.toml 不存在或为空且用户进入高级配置
 - **THEN** 编辑器显示合法注释模板，exists/path 状态准确，磁盘仍不创建文件
 
 #### Scenario: 保存校验失败
@@ -68,6 +74,10 @@ SHALL 先确认。LLM/Embedding 连接测试 SHALL 使用编辑器当前 TOML，
 #### Scenario: 未配置有效密钥
 - **WHEN** 保存后有效 LLM 密钥为空或占位值
 - **THEN** 界面更新已保存基准并显示 LLM 不可用及配置指引，不显示连接成功
+
+#### Scenario: 从脏原文切换模型设置
+- **WHEN** 原文有未保存修改且用户确认放弃后切换模型设置
+- **THEN** 模型表单从已保存配置重新读取，不使用被放弃原文构建表单
 
 ### Requirement: SPEC-CFGUI-API-001..003 raw 与兼容 API
 `GET /desktop/config/raw` SHALL 返回 text、path、exists；文件缺失/空时 text 为模板。`PUT` SHALL 在写盘
@@ -226,13 +236,18 @@ LLM 与 Embedding 连接测试端点 SHALL 保持可用。结构化写入 MAY �
 - **THEN** 工具返回该名称已移除及应使用 `events.collection.title.enabled` 的错误，不写入配置、不报告成功
 
 ### Requirement: SPEC-TOML-UI-001..004 TOML 编辑器呈现
-桌面配置模态 SHALL 直接显示 config.toml 纯文本和实际路径，不显示“全部可配置项”逐项插入面板。
+桌面配置模态的“高级配置”视图 SHALL 直接显示 config.toml 纯文本和实际路径，不显示“全部可配置项”逐项插入面板。
 模板打开本身不写盘，只有取消注释或编辑进入脏态。400 错误的行列和违规键 SHALL 完整显示且不清脏态。
-连接测试 SHALL 从当前编辑文本解析 llm/embedding 配置，同时支持表内和顶层点分写法。
+原文连接检查 SHALL 从当前编辑文本解析 llm/embedding 配置，同时支持表内和顶层点分写法。
+来自其它功能的配置键定位入口 SHALL 直接打开高级配置并定位对应键，同时遵循未保存草稿确认规则。
 
 #### Scenario: 编辑器当前文本连接测试
-- **WHEN** 用户修改但尚未保存 llm 或 embedding 配置并点击测试
-- **THEN** 测试使用当前 TOML 文本解析值，而不是仅使用磁盘旧值
+- **WHEN** 用户修改但尚未保存 llm 或 embedding 配置并点击原文连接检查
+- **THEN** 检查使用当前 TOML 文本解析值，而不是仅使用磁盘旧值
+
+#### Scenario: 其它功能定位配置键
+- **WHEN** 用户从文件设置指引请求定位一个配置键
+- **THEN** 配置窗口进入高级配置并保留现有键定位能力，不停留在模型表单
 
 ### Requirement: SPEC-TOML-NON-001..005 配置功能边界
 classpath application.properties SHALL 继续作为打包默认值；事件配置 SHALL 按 SPEC-TOML-RENAME-001 一次性改名并移除列明的旧名称；其它既有点分配置键 MUST 保持不变，

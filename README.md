@@ -115,37 +115,29 @@ the system language.
 See [PRIVACY.md](PRIVACY.md) for privacy details and [docs/README.md](docs/README.md) for the current
 specification index. These documents are maintained in Simplified Chinese.
 
-## Configuration
+## 配置
 
-On first startup, the application creates `config.toml` in the data directory. Desktop Settings
-can edit currently supported fields. Explicitly saved TOML values take precedence over environment
-variables; unset keys fall back to environment variables and then built-in defaults. Removing a
-configuration entry restores fallback behavior.
+桌面设置默认显示独立的“模型设置”：支持一个 OpenAI-compatible 连接、连接预设、只写 API Key、
+模型发现与手工输入、温度、输出上限和最小生成测试。保存后新聊天与摘要工作采用新配置，
+进行中的回答继续使用旧版本；摘要和压缩保持低温策略，会话及用量不会重置。
+操作说明见[模型设置指南](docs/llm-settings.md)。
 
-An explicit JVM property for `memory.dir` retains the highest precedence. `events.port` cannot be
-overridden by an environment variable. The authoritative list of keys is defined by the
-[user configuration specification](openspec/specs/user-configuration/spec.md) and `SupportedKeys`.
+“高级配置”保留 `./data/config/config.toml` 原文编辑器。文件缺失时显示注释模板，打开本身不写盘。
+模型表单只更新指定键并保留其它原文和注释；无法安全修改的复杂目标写法需使用高级配置。
+旧通用结构化接口和 Agent 配置工具仍可能重新生成 TOML。两种视图切换时会确认未保存更改。
 
-After saving any of the following settings through desktop Settings or the Agent configuration
-tools, new chat turns and summary jobs use the new values immediately:
-`llm.api-key`, `llm.base-url`, `llm.model`, `llm.temperature`, and `llm.max-tokens`.
-An ongoing chat turn, including context compaction and tool calls, continues using its original
-configuration. Chat history and daily usage counters are not reset. Summaries and compaction
-continue to use a low-temperature policy.
+TOML 显式值优先于环境变量，删除覆盖恢复环境变量及默认值；显式空密钥阻止环境兜底。
+密码框留空表示保留当前密钥，“清空密钥”和“恢复密钥继承”是分别确认的操作。
+配置来源与运行状态在界面中显示。配置键以[用户配置规格](openspec/specs/user-configuration/spec.md)
+和 `SupportedKeys` 为准；`memory.dir` 的显式 JVM property 优先，`events.port` 不接受环境变量。
 
-The local service can start without an API key. Chat becomes available after a key is configured;
-clearing the effective key makes new LLM work report that the model is not configured.
+可热更新的键为 `llm.api-key`、`llm.base-url`、`llm.model`、`llm.temperature`、`llm.max-tokens`。
+端口、预算、`maxIters`、压缩阈值及 Embedding 客户端仍使用启动期配置；Embedding 继承密钥变化
+会单独提示需重启。未配置模型时本地服务仍可启动，补填后新工作无需重启即可恢复。
 
-Settings shows saved values, configuration sources, and application status. “Applied to new work;
-existing work uses its original configuration” does not require a restart. “Backend restart required”
-applies only to the listed components. Ports, storage directories, budget policies, `maxIters`,
-compaction thresholds, and Embedding clients still use startup-time configuration. If Embedding
-inherits the LLM API key, a key change produces a separate restart notice for Embedding.
-
-Editing TOML in an external editor does not trigger automatic hot reload; save it within the
-application or restart the backend to apply the changes. Connection tests use the current editor
-text. A successful connection test does not mean the running configuration has changed or guarantee
-that the selected model can complete a conversation.
+生成测试会发送一次固定最小请求，可能产生少量计费；它和模型发现均不保存配置。
+高级配置中的旧 LLM 检查只验证目录连接。保存成功不等于远端可调用，测试成功也不改变运行配置。
+外部编辑文件不会自动热更新；请通过应用保存或重启后端。相同字段的并发更新以后提交者为准。
 
 | Configuration key | Environment variable | Default |
 |-------------------|----------------------|---------|

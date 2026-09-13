@@ -52,6 +52,7 @@ public class DesktopServer {
     private final Javalin app;
     private final DesktopAgentController agentCtrl;
     private final DesktopConfigController configCtrl;
+    private final DesktopLlmSettingsController llmSettings;
     private final com.selfanalyst.i18n.Lang language;
     private final DesktopTaskController taskCtrl;
     private final DesktopStatusController statusCtrl;
@@ -172,6 +173,7 @@ public class DesktopServer {
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
                 config, chatSessionStore, new SummarySnapshotStore(memoryDir), wikiStore);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
+        this.llmSettings = new DesktopLlmSettingsController(userConfigStore.application(config));
         this.language = config.effectiveLanguage();
         this.taskCtrl = new DesktopTaskController(taskStore);
         this.fileCtrl = new DesktopFileController(
@@ -238,6 +240,11 @@ public class DesktopServer {
         app.get("/desktop/config", configCtrl::getConfig);
         app.before("/desktop/*", ctx -> ctx.attribute("selfanalyst.language", language));
         app.get("/desktop/config/effective", configCtrl::getEffectiveConfig);
+        app.get("/desktop/llm-settings", llmSettings::get);
+        app.put("/desktop/llm-settings", llmSettings::put);
+        app.get("/desktop/llm-settings/presets", llmSettings::presets);
+        app.post("/desktop/llm-settings/test", llmSettings::test);
+        app.post("/desktop/llm-settings/discover-models", llmSettings::discover);
         app.put("/desktop/config", configCtrl::putConfig);
         app.get("/desktop/config/raw", configCtrl::getRawConfig);
         app.put("/desktop/config/raw", configCtrl::putRawConfig);

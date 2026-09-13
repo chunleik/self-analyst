@@ -100,6 +100,18 @@ GET /desktop/config/effective 提供脱敏的已保存值、来源、实际运�
 继续用于受保护的原文编辑。LLM 可热更新的键、其它键的重启策略由 ConfigPolicy 统一声明。
 本期不监听外部配置文件修改，也不热更新 Embedding 客户端或迁移索引。
 
+### 独立模型设置
+
+`com.selfanalyst.llm.settings` 提供单连接设置服务、只写凭据操作、预设目录和有界 HTTP 探测；
+桌面控制器通过 `/desktop/llm-settings` 及其子路径提供专用 API。`LlmSettingsRepository` 的 TOML
+适配器进入 `ConfigApplicationService` 的同一提交锁，严格读取最新原文，由 `LlmTomlEditor` 定向
+编辑并重新解析比对，再复用已有候选资源准备及版本发布。不增加独立进程或 Maven 模块。
+
+`desktop-ui/llm-settings.js` 管理独立草稿和请求代次，前端不读取 raw 文本来构建模型表单。
+配置窗口默认显示模型设置；高级配置保留原文编辑与键定位。切换会确认脏态，运行状态刷新不替换草稿。
+密码只存在于暂时输入和后端内部连接对象，普通查询仅返回凭据状态与来源。测试与发现是显式诊断，
+不携带业务内容，不自动保存；超时、大小上限和禁止重定向限制远端响应。详见[模型设置指南](llm-settings.md)。
+
 ## 7. 发布结构
 
 ```text

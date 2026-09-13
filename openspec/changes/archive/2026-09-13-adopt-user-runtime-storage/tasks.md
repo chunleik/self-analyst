@@ -23,13 +23,13 @@
 
 - [x] 4.1 更新 `scripts/build-portable.ps1` 及相关 dist/installer/冒烟脚本，移除预置可变数据和空配置，标准包不带便携标记；检查构建产物清单，并在临时目录验证解压默认首次启动和加标记后的全新便携启动。
 - [x] 4.2 使用临时隔离用户目录完成安装版、免安装版和直接 JAR 冒烟，验证同格式重启复用、不迁移旧 portable 数据、安装版与显式便携版兼容无标记数据原地接纳、未知或不兼容数据拒绝且保留；回归安装、升级、卸载不删除用户数据。
-- [ ] 4.3 运行 `cargo test --manifest-path self-analyst-desktop/src-tauri/Cargo.toml` 和 `mvn test`；为纯 Java 守卫进程测试在 Windows、Linux、macOS CI 配置运行矩阵，仅运行不依赖 Windows UIA 的守卫测试并记录三平台结果，不扩展桌面分发支持范围。
+- [x] 4.3 运行 `cargo test --manifest-path self-analyst-desktop/src-tauri/Cargo.toml` 和 `mvn test`；为纯 Java 守卫进程测试在 Windows、Linux、macOS CI 配置运行矩阵，仅运行不依赖 Windows UIA 的守卫测试并记录三平台结果，不扩展桌面分发支持范围。
 
 ## 5. 文档和规格交付
 
 - [x] 5.1 使用简体中文更新 `README.md`、`docs/architecture.md` 及相关用户/测试指南，说明默认目录、标记用法、不迁移数据位置、无标记旧数据经只读兼容检查后原地补标记、无法确认兼容时拒绝、旧版本不受新锁约束、根外共享限制及手动保留数据的回退方式；核对路径示例和实际 UI，不改写历史发布记录。
 - [x] 5.2 实施验证通过后使用 openspec-sync-specs 同步 `runtime-storage`、`desktop-shell`、`user-configuration`；运行 `openspec validate adopt-user-runtime-storage --strict` 和受影响主规格严格校验，确认现行行为与增量一致。
-- [ ] 5.3 汇总测试及截图证据，核对任务全部完成后使用 openspec-archive-change 归档；提交或 PR 引用此 change 和验证结果，若进入合并阶段按仓库规则等待最新提交的必需检查含 `Windows 全量验证` 成功，不用本地结果代替。
+- [x] 5.3 汇总测试及截图证据，核对任务全部完成后使用 openspec-archive-change 归档；提交或 PR 引用此 change 和验证结果，若进入合并阶段按仓库规则等待最新提交的必需检查含 `Windows 全量验证` 成功，不用本地结果代替。
 
 ## 验证记录
 
@@ -40,4 +40,4 @@
 - 桌面冒烟通过中文空格便携路径、移动目录、静默启动、单实例唤起和后端故障提示；记录位于 `.tmp/autostart-7cb2c2fce79f437cb3e9bcf30940d0d4/result.txt`。
 - NSIS 安装、重装、资源、内置 JRE 后端冒烟和卸载通过，全部安装文件限定在工作区临时目录。
 - 浏览器界面实际复核通过，截图为 `docs/screenshots/runtime-storage.png`；原生打开命令的来源限制复用已有原生命令来源校验，JS 测试覆盖无路径参数和失败反馈。
-- 25 项主规格严格校验及本 change 严格校验通过；远端跨平台结果待 PR 检查。
+- 25 项主规格严格校验及本 change 严格校验通过；Windows、Linux、macOS 守卫检查均通过（CI run 34756159414，代码提交 0406569）；最终提交的必需检查以 PR #30 为准，未执行合并。

@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-[官网](https://chunleik.github.io/self-analyst/en/) · [官网预览与发布说明](docs/website.md)
+[Website](https://chunleik.github.io/self-analyst/en/) · [Website preview and deployment (Chinese)](docs/website.md)
 
 SelfAnalyst is a local-first tool for analyzing personal activity. A local event service stores
 window/AFK activity and in-app context titles for Wiki aggregation. Filesystem metadata from

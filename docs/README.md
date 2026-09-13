@@ -68,6 +68,12 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 `openspec/specs/<capability>/spec.md` 维护；一次性实施步骤不进入主规格，必要历史背景应写入
 `docs/archive/` 并明确标注取代关系。
 
+## 探索记录
+
+探索文档用于保存候选方案、调查依据和待验证问题，不属于现行行为契约，也不表示功能已实施。
+
+- [可选 LLM 隐私网关与多语言实体识别](explorations/2026-09-13-llm-privacy-gateway.md) — LiteLLM + Presidio、国际化实体目录、业务脱敏策略和本体适用性评估
+
 ## 归档
 
 - [archive/design-proposals/](archive/design-proposals/) — 已被正式规格取代、但仍保留背景价值的历史设计提案，包括[原始事件永久保留设计](archive/design-proposals/2026-08-30-raw-event-permanent-retention-design.md)

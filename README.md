@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+[官网源码](website/en/index.html) · [官网预览与发布说明](docs/website.md)
+
 SelfAnalyst is a local-first tool for analyzing personal activity. A local event service stores
 window/AFK activity and in-app context titles for Wiki aggregation. Filesystem metadata from
 folders explicitly configured by the user is stored locally, exposed through FileTools and the

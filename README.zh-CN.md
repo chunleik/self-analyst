@@ -1,5 +1,7 @@
 # SelfAnalyst
 
+[官网源码](website/zh-CN/index.html) · [官网预览与发布说明](docs/website.md)
+
 [English](README.md) | **简体中文**
 
 SelfAnalyst 是一个本地优先的个人活动分析工具。窗口/AFK 状态与应用内上下文标题由本地

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-language="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Recall your activity, understand your time, and find your next step. SelfAnalyst is a local-first personal activity analysis tool for Windows.">
+  <title>SelfAnalyst — Make sense of your day</title>
+  <link rel="alternate" hreflang="zh-CN" href="../zh-CN/">
+  <link rel="alternate" hreflang="en" href="./">
+  <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/language.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap nav">
+  <a class="brand" href="./" aria-label="SelfAnalyst home"><span class="mark" aria-hidden="true">↗</span>SelfAnalyst</a>
+  <nav aria-label="Main navigation"><a href="#features">Features</a><a href="#privacy">Privacy</a><a href="#start">Get started</a><a href="#download">Download</a><a class="language" href="../zh-CN/" lang="zh-CN" aria-label="Switch to Simplified Chinese">简体中文 ↗</a></nav>
+</div></header>
+<main id="main">
+  <div class="wrap hero">
+    <span class="badge"><span class="dot" aria-hidden="true"></span> Local-first · Built for Windows</span>
+    <h1>A little more context.<br><em>A clearer day.</em></h1>
+    <p class="intro">See where your time went. Pick up your train of thought.<br>Turn everyday activity into a conversation with your personal analysis assistant.</p>
+    <div class="actions"><a class="button primary" href="#download">Get SelfAnalyst for Windows <span aria-hidden="true">↓</span></a><a class="button" href="https://github.com/chunleik/self-analyst">View on GitHub <span aria-hidden="true">↗</span></a></div>
+    <p class="small">Runs on your computer · Available in English and Simplified Chinese</p>
+    <figure class="product"><img src="../assets/desktop-chat.png" width="2404" height="1660" alt="SelfAnalyst desktop chat with a session list on the left, conversation in the center, and activity context and long-term memory on the right"><figcaption>Actual desktop interface · Chinese UI example showing conversations, activity context, and long-term memory.</figcaption></figure>
+    <div class="principles"><span>Activity stored locally</span><span>Context for reflection</span><span>Your choice of model provider</span></div>
+  </div>
+  <section id="features" class="wrap">
+    <div class="section-top"><div class="eyebrow">From activity to understanding</div><h2>Connect the dots<br>in your everyday work.</h2><p>You don't have to reconstruct your day from memory. Start with your activity, conversations, and the context you've kept.</p></div>
+    <div class="grid">
+      <article class="card"><span class="number">01 / RECALL</span><h3>Recover your context</h3><p>Keep track of apps, window titles, and active time. Use activity summaries to understand what you've been doing and where your time went.</p></article>
+      <article class="card"><span class="number">02 / REFLECT</span><h3>Ask about your day</h3><p>Explore past activity in an Agent conversation. Bring context to your patterns and next steps. Configure a model provider in desktop settings to get started.</p></article>
+      <article class="card"><span class="number">03 / REMEMBER</span><h3>Keep useful threads</h3><p>Connect past context with Wiki aggregation and long-term memory. Optionally collect file metadata from folders you choose to follow file changes.</p></article>
+    </div>
+  </section>
+  <section id="privacy" class="privacy"><div class="wrap split">
+    <div><div class="eyebrow">Clear data boundaries</div><h2>Local first.<br>Know what's recorded.</h2><p>Activity and conversations are stored on your computer. Collection and optional online services have distinct settings and boundaries.</p><a href="https://github.com/chunleik/self-analyst/blob/main/PRIVACY.md">Full privacy details (Chinese) ↗</a></div>
+    <div><ul><li><strong>Titles, without persisted body text.</strong> Recognition may temporarily read accessibility information, but UIA body text and control trees are not saved.</li><li><strong>File metadata only.</strong> Collect names, paths, sizes, and timestamps within explicitly configured folders, without reading ordinary file contents.</li><li><strong>No screenshots, OCR, or audio collection.</strong> If recognition fails, collection falls back to system window titles.</li></ul><p class="note">Local-first does not mean fully offline. When enabled, LLM, embedding, and web search services receive relevant inputs. File metadata returned by tools may also enter conversations with your configured model.</p></div>
+  </div></section>
+  <section id="start" class="wrap">
+    <div class="section-top"><div class="eyebrow">Get started</div><h2>Start on your own computer.</h2></div>
+    <div class="steps">
+      <article class="step"><span>01</span><h3>Choose your package</h3><p>Get the Windows x64 installer from Releases, or extract and run the portable package. Both include a Java runtime. The desktop interface uses your system's WebView2 Runtime.</p></article>
+      <article class="step"><span>02</span><h3>Connect your model</h3><p>Open Settings → Model settings in the desktop app. Enter your endpoint, model, and API key, test the connection, and save. Enter keys only in the desktop app.</p><a href="https://github.com/chunleik/self-analyst/blob/main/docs/llm-settings.md">Model setup guide (Chinese) ↗</a></article>
+      <article class="step"><span>03</span><h3>Make time to reflect</h3><p>After some activity, ask “What have I been working on today?” File collection is off by default; enable it and choose folders if needed. Closing the window hides it to the tray. Use the tray menu to quit.</p></article>
+    </div>
+  </section>
+  <div id="download" class="wrap download">
+    <div class="eyebrow">Download SelfAnalyst</div><h2>Your next reflection<br>starts today.</h2><p>For Windows 10 / 11 x64. Choose your package on GitHub Releases.</p>
+    <div class="grid">
+      <article class="card"><h3>Windows installer</h3><p>For everyday use. Follow the setup wizard. Your data lives in the application data directory and is preserved across upgrades and uninstallation.</p><a class="button" href="https://github.com/chunleik/self-analyst/releases/latest">Choose installer on Releases ↗</a></article>
+      <article class="card"><h3>Portable package</h3><p>Extract and run. Your data lives in the data folder beside the app. Move or back up the entire folder to keep the app and your data together.</p><a class="button" href="https://github.com/chunleik/self-analyst/releases/latest">Choose portable on Releases ↗</a></article>
+    </div><p class="small">SHA-256 checksum files are included in Releases. <a href="https://github.com/chunleik/self-analyst/releases">All versions and release notes ↗</a></p>
+  </div>
+</main>
+<footer><div class="wrap footer-row"><a class="brand" href="./"><span class="mark" aria-hidden="true">↗</span>SelfAnalyst</a><div class="footer-links"><a href="https://github.com/chunleik/self-analyst">Source</a><a href="https://github.com/chunleik/self-analyst/blob/main/README.md">Documentation</a><a href="https://github.com/chunleik/self-analyst/issues">Report an issue</a><a href="../zh-CN/" lang="zh-CN">简体中文</a></div></div></footer>
+</body>
+</html>

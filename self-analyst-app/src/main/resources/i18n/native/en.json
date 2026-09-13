@@ -10,6 +10,11 @@
   "autostartFailedBody": "Unable to confirm the startup setting: {error}",
   "aboutTitle": "About SelfAnalyst",
   "aboutBody": "SelfAnalyst v{version}\nDesktop: Tauri\nBackend: {url}",
+  "dataInUse": "Another SelfAnalyst instance is using this data directory. Close that instance first.",
+  "dataLockUnavailable": "Cannot acquire the data directory lock. Check permissions and the filesystem.",
+  "dataFormatUnsupported": "This application does not support the data format. Use a compatible version.",
+  "dataFormatInvalid": "Cannot verify the data format. Close the older application normally and check the data and format marker. Existing data was not overwritten.",
+  "dataRootUnavailable": "The runtime directory or portable marker is unavailable. Check permissions and portable.marker.",
   "startupFailed": "Unable to open SelfAnalyst",
   "startupFailedBody": "The application could not start. See the local startup and backend logs for details."
 }

@@ -2,13 +2,14 @@
 
 param(
     [switch]$SkipBuild,
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [string]$DistributionPath = 'dist-portable'
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Root = [System.IO.Path]::GetFullPath($Root).TrimEnd('\')
-$Portable = Join-Path $Root "dist-portable"
+$Portable = if ([IO.Path]::IsPathRooted($DistributionPath)) { $DistributionPath } else { Join-Path $Root $DistributionPath }
 $BundleResources = Join-Path $Root "self-analyst-desktop/src-tauri/bundle-resources"
 $Desktop = Join-Path $Root "self-analyst-desktop"
 $Artifacts = Join-Path $Root "artifacts"
@@ -25,7 +26,7 @@ $BundleResources = Assert-WorkspaceChild $BundleResources "Tauri bundle resource
 $Artifacts = Assert-WorkspaceChild $Artifacts "构建产物目录"
 
 if (-not $SkipBuild) {
-    & (Join-Path $Root "scripts/build-portable.ps1") -NoZip
+    & (Join-Path $Root "scripts/build-portable.ps1") -NoZip -OutputDirectory $Portable
 }
 
 $JarSource = Join-Path $Portable "self-analyst-app.jar"

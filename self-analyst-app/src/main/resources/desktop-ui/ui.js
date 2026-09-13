@@ -131,6 +131,7 @@ function openConfigModal(focusKey) {
   state.configReturnFocus = document.activeElement;
   state.configOpen = true;
   state.dom.configModal.classList.remove("hidden");
+  if (typeof loadRuntimeStorage === "function") loadRuntimeStorage();
   if (state.dom.configCloseBtn && state.dom.configCloseBtn.focus) state.dom.configCloseBtn.focus();
   return switchConfigView(focusKey ? "raw" : "llm", focusKey);
 }

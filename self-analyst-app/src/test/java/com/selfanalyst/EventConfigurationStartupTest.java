@@ -21,8 +21,13 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class EventConfigurationStartupTest {
 
+    private static void initializeRuntime(Path directory) throws Exception {
+        try (var guard = RuntimeStorageGuard.acquire(directory.resolve("data"), root -> {})) { }
+    }
+
     @Test
     void allScopeFailureStopsApplicationBeforePublishingPort(@TempDir Path dir) throws Exception {
+        initializeRuntime(dir);
         Path rawDir = dir.resolve("raw");
         Path older;
         try (var raw = new RawEventStore(rawDir)) {
@@ -98,6 +103,7 @@ class EventConfigurationStartupTest {
     void removedInputsExitBeforeInitializingDataOrListening(@TempDir Path root) throws Exception {
         for (boolean useEnvironment : List.of(false, true)) {
             Path dir = Files.createDirectory(root.resolve(useEnvironment ? "environment" : "toml"));
+            initializeRuntime(dir);
             Path config = Files.createDirectories(dir.resolve("data/config")).resolve("config.toml");
             String original = useEnvironment ? "events.mode='embedded'\n" : "aw.mode='private-old-value'\n";
             Files.writeString(config, original);
@@ -122,6 +128,7 @@ class EventConfigurationStartupTest {
 
     @Test
     void renamedConfigurationReopensExistingRawAndProjection(@TempDir Path dir) throws Exception {
+        initializeRuntime(dir);
         Path eventsDir = dir.resolve("events");
         Path rawDir = dir.resolve("raw");
         Instant at = Instant.parse("2026-09-03T12:00:00Z");

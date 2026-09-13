@@ -10,13 +10,14 @@
 #     SelfAnalyst.exe            Tauri shell (launches the backend)
 #     self-analyst-app.jar       backend fat jar (embedded AW + agent + UI)
 #     runtime/                   jlink'd minimal JRE (java.exe under runtime/bin)
-#     data/                      created on first run (aw-data, memory, ...)
+#     portable.marker            用户可选添加，启用程序旁数据目录
 #
 # Prereqs: JDK 21 (jlink), Maven, and Rust/cargo.
 
 param(
     [switch]$SkipBuild,   # reuse existing jar/exe instead of rebuilding
-    [switch]$NoZip        # leave the folder, don't produce the .zip
+    [switch]$NoZip,       # leave the folder, don't produce the .zip
+    [string]$OutputDirectory = 'dist-portable'
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +25,7 @@ $Root = [System.IO.Path]::GetFullPath(
     (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))).TrimEnd('\')
 Set-Location $Root
 
-$Dist = Join-Path $Root "dist-portable"
+$Dist = if ([IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $Root $OutputDirectory }
 $Artifacts = Join-Path $Root "artifacts"
 
 function Assert-WorkspaceChild([string]$Path, [string]$Name) {
@@ -36,6 +37,9 @@ function Assert-WorkspaceChild([string]$Path, [string]$Name) {
 }
 
 $Dist = Assert-WorkspaceChild $Dist "便携分发目录"
+if (Test-Path -LiteralPath (Join-Path $Dist 'data')) {
+    throw '输出目录包含运行数据，请使用 -OutputDirectory 指定新的构建目录；不会删除既有数据。'
+}
 $Artifacts = Assert-WorkspaceChild $Artifacts "构建产物目录"
 
 # ── Resolve a JDK 21 with jlink ────────────────────────────────────────────────
@@ -82,11 +86,11 @@ if (-not (Test-Path -LiteralPath $JarSrc)) { throw "Missing jar: $JarSrc (run wi
 if (-not (Test-Path -LiteralPath $ExeSrc)) { throw "Missing exe: $ExeSrc (run without -SkipBuild)" }
 
 # ── 3. Fresh dist-portable skeleton ────────────────────────────────────────────
-Write-Host "=== 3/6 Preparing dist-portable/ ===" -ForegroundColor Cyan
+Write-Host "=== 3/6 准备分发目录 $Dist ===" -ForegroundColor Cyan
 Remove-Item -Recurse -Force -LiteralPath $Dist -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $Dist "data/memory") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $Dist "data/config") | Out-Null
+
+
 
 Copy-Item -LiteralPath $ExeSrc -Destination (Join-Path $Dist "SelfAnalyst.exe") -Force
 Copy-Item -LiteralPath $JarSrc -Destination (Join-Path $Dist "self-analyst-app.jar") -Force
@@ -105,25 +109,12 @@ $modules = "java.se,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.zipfs,
 if ($LASTEXITCODE -ne 0) { throw "jlink failed" }
 
 # ── 5. Prepare user config ─────────────────────────────────────────────────────
-Write-Host "=== 5/6 Preparing user config ===" -ForegroundColor Cyan
+Write-Host "=== 5/6 使用首次运行配置 ===" -ForegroundColor Cyan
 
 # WebView2 is intentionally not bundled — the app uses the system (Evergreen)
 # WebView2 runtime, preinstalled on Windows 10/11.
 
-# Seed an empty TOML config so first launch finds the file (LLM key set via UI).
-$seedCfg = Join-Path $Dist "data/config/config.toml"
-if (-not (Test-Path -LiteralPath $seedCfg)) {
-    $seedText = @(
-        "# SelfAnalyst 用户配置（覆盖内置 application.properties）。",
-        "# 可在此处或桌面端「配置」页面设置 LLM。",
-        "[llm]",
-        "# api-key = ''",
-        "# base-url = 'https://api.openai.com/v1'",
-        "# model = 'gpt-4o'"
-    ) -join [Environment]::NewLine
-    [IO.File]::WriteAllText($seedCfg, $seedText + [Environment]::NewLine,
-        [Text.UTF8Encoding]::new($false))
-}
+# 用户配置和数据由所选运行目录在首次启动时生成；标准包不预置 portable.marker。
 
 # ── 6. Package ─────────────────────────────────────────────────────────────────
 Write-Host "=== 6/6 Packaging ===" -ForegroundColor Cyan
@@ -159,4 +150,4 @@ function New-Zip([string]$name) {
 
 Show-Sizes
 New-Zip "SelfAnalyst-portable.zip"
-Write-Host "Run: .\dist-portable\SelfAnalyst.exe" -ForegroundColor Green
+Write-Host "运行：$(Join-Path $Dist 'SelfAnalyst.exe')" -ForegroundColor Green

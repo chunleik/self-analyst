@@ -266,6 +266,7 @@ public class DesktopServer {
         app.post("/desktop/llm-settings/discover-models", llmSettings::discover);
         app.put("/desktop/config", configCtrl::putConfig);
         app.get("/desktop/config/raw", configCtrl::getRawConfig);
+        app.get("/desktop/config/runtime-storage", configCtrl::getRuntimeStorage);
         app.put("/desktop/config/raw", configCtrl::putRawConfig);
         app.post("/desktop/config/test-llm", configCtrl::testLlm);
         app.post("/desktop/config/test-embedding", configCtrl::testEmbedding);

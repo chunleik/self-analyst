@@ -1,4 +1,17 @@
 {
+  "storage.dataRoot": "Data directory",
+  "storage.loadFailed": "Unable to load the data location.",
+  "storage.loading": "Loading data location…",
+  "storage.mode": "Mode",
+  "storage.mode.direct": "Direct launch",
+  "storage.mode.portable": "Explicit portable",
+  "storage.mode.user": "User directory",
+  "storage.nativeUnavailable": "Opening local directories is unavailable in the browser. Use the path above.",
+  "storage.open": "Open data directory",
+  "storage.openFailed": "Unable to open the data directory.",
+  "storage.runtimeRoot": "Runtime directory",
+  "storage.title": "Runtime data",
+
   "document.title": "Session documents",
   "document.empty": "Ask for a report, spreadsheet, or presentation in chat",
   "document.loadFailed": "Session documents are temporarily unavailable",

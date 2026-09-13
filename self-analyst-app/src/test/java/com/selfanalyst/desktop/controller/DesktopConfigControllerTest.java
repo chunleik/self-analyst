@@ -31,6 +31,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DesktopConfigControllerTest {
 
+    @Test void runtimeStorageReportsActualConfigurationRoot(@TempDir Path directory) {
+        Path data = directory.resolve("data").toAbsolutePath().normalize();
+        UserConfigStore store = new UserConfigStore(data.resolve("config"));
+        var payload = controller(data, store).runtimeStoragePayload();
+        assertEquals(data.toString(), payload.get("dataRoot"));
+        assertEquals(directory.toAbsolutePath().normalize().toString(), payload.get("runtimeRoot"));
+        assertTrue(List.of("direct", "user", "portable").contains(payload.get("mode")));
+    }
+
     @Test
     void renamedAndRemovedConfigurationEntrypointsAreConsistent(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);

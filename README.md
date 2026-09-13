@@ -68,9 +68,10 @@ Build an NSIS installer with the same backend and jlink JRE:
 ```
 
 Output is written to `artifacts/`, with `.sha256` files for the ZIP archive and installer.
-Installed distributions keep user data in Tauri's per-user application data directory, preserving
-it across application upgrades and uninstallation. Portable distributions keep `data/` next to
-the executable. Release packages do not include PaddleOCR, Tesseract, Whisper, or speech models.
+安装版与免安装 ZIP 默认将运行数据放在 `%LOCALAPPDATA%\com.selfanalyst.desktop`，升级或换解压位置继续使用同一目录。
+免安装包只有在 EXE 同级存在 `portable.marker` 普通文件时，才使用程序旁的 `data/`。
+无标记的已有兼容数据经只读检查后原地补标记，不自动搬运其他目录数据。详见[运行数据指南](docs/runtime-storage.md)。
+发布包不包含 PaddleOCR、Tesseract、Whisper 或语音模型。
 
 ## Interface language
 

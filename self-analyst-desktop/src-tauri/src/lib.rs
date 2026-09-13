@@ -2,6 +2,7 @@ mod autostart;
 mod documents;
 mod i18n;
 mod instance;
+mod runtime_storage;
 mod startup_log;
 
 use std::fs::OpenOptions;
@@ -299,19 +300,19 @@ fn start_java(app: AppHandle, automatic: bool) {
             eprintln!("JAR not found in executable or resource directory");
             early_startup_failure();
         });
-    let working_dir = if installed {
-        let directory = app.path().app_local_data_dir().unwrap_or_else(|error| {
-            eprintln!("Failed to resolve application data directory: {error}");
-            early_startup_failure();
-        });
-        std::fs::create_dir_all(&directory).unwrap_or_else(|error| {
-            eprintln!("Failed to create application data directory: {error}");
-            early_startup_failure();
-        });
-        directory
-    } else {
-        exe_dir
-    };
+    let storage = runtime_storage::select(&exe_dir, installed, || {
+        app.path().app_local_data_dir().map_err(io::Error::other)
+    })
+    .unwrap_or_else(|_| {
+        show_message(
+            &i18n::text("startupFailed"),
+            &i18n::text("dataRootUnavailable"),
+        );
+        std::process::exit(24);
+    });
+    let working_dir = storage.root.clone();
+    let storage_mode = storage.mode;
+    app.manage(storage);
     let jar = distribution_root.join(BACKEND_JAR);
     startup_log::write(&format!("distribution resolved installed={installed}"));
     println!("[SelfAnalyst] Jar path: {}", jar.display());
@@ -333,10 +334,9 @@ fn start_java(app: AppHandle, automatic: bool) {
         .expect("Failed to clone backend log handle");
     let mut child = Command::new(java)
         .creation_flags(0x08000000) // CREATE_NO_WINDOW
-        // Portable mode keeps data beside the executable. Installed mode uses
-        // the per-user application data directory so upgrades/uninstalls do not
-        // overwrite the user's databases and configuration.
+        // 默认数据根与分发位置分离；只有显式便携标记使用程序旁目录。
         .current_dir(&working_dir)
+        .env("SELF_ANALYST_STORAGE_MODE", storage_mode)
         .env("SELF_ANALYST_DESKTOP_TOKEN", &token)
         .env("SELF_ANALYST_DESKTOP_PORT_FILE", &port_file)
         .arg("-jar")
@@ -466,7 +466,12 @@ fn backend_exited(app: &AppHandle) -> bool {
     if let Some(state) = app.try_state::<JavaBackend>() {
         if let Ok(mut guard) = state.child.lock() {
             if let Some(child) = guard.as_mut() {
-                if matches!(child.try_wait(), Ok(Some(_))) {
+                if let Ok(Some(status)) = child.try_wait() {
+                    if let Some(key) = status.code().and_then(runtime_storage::failure_key) {
+                        show_message(&i18n::text("startupFailed"), &i18n::text(key));
+                        app.exit(status.code().unwrap_or(1));
+                        return false;
+                    }
                     eprintln!("Java backend exited during startup; see self-analyst-backend.log");
                     return true;
                 }
@@ -707,7 +712,10 @@ pub fn run() {
     let requested_exit = std::rc::Rc::new(std::cell::Cell::new(None));
     let exit_state = requested_exit.clone();
     let runtime_exit = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![documents::save_document])
+        .invoke_handler(tauri::generate_handler![
+            documents::save_document,
+            runtime_storage::open_data_directory
+        ])
         .manage(Mutex::new(instance::WindowIntent::default()))
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {

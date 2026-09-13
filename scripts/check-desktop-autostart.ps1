@@ -14,6 +14,7 @@ $Scratch = [IO.Path]::GetFullPath((Join-Path $Root ('.tmp\autostart-' + [guid]::
 if (-not $Scratch.StartsWith($Root + '\.tmp\autostart-', [StringComparison]::OrdinalIgnoreCase)) { throw '临时目录越界' }
 $Portable = Join-Path $Scratch '便携 路径'
 New-Item -ItemType Directory -Path $Portable -Force | Out-Null
+[IO.File]::WriteAllText((Join-Path $Portable 'portable.marker'), '')
 Copy-Item -LiteralPath $DesktopPath -Destination (Join-Path $Portable 'SelfAnalyst.exe')
 Copy-Item -LiteralPath (Join-Path $DistributionPath 'self-analyst-app.jar') -Destination $Portable
 Copy-Item -LiteralPath (Join-Path $DistributionPath 'runtime') -Destination $Portable -Recurse
@@ -152,12 +153,23 @@ try {
         $Primary = $null
         [IO.File]::WriteAllText((Join-Path $Portable 'self-analyst-app.jar'), 'invalid jar')
         $Primary = Start-TestDesktop @('--autostart')
-        if (-not $Primary.WaitForExit(65000)) { throw '后端故障后桌面壳未退出' }
-        if ($Primary.ExitCode -eq 0) { throw '后端故障退出码不应为零' }
+        # 原生错误对话框等待用户确认；自动测试验证提示后回收测试进程，不把等待确认误判为挂死。
+        $failureDeadline = [DateTime]::UtcNow.AddSeconds(30)
+        $failureDialog = $false
+        while (-not $Primary.HasExited -and [DateTime]::UtcNow -lt $failureDeadline) {
+            $Primary.Refresh()
+            if ($Primary.MainWindowTitle -in @('无法打开 SelfAnalyst', 'Unable to open SelfAnalyst')) {
+                $failureDialog = $true
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        if (-not $Primary.HasExited -and -not $failureDialog) { throw '后端故障后未退出或显示错误提示' }
+        if ($Primary.HasExited -and $Primary.ExitCode -eq 0) { throw '后端故障退出码不应为零' }
         if (-not (Select-String -LiteralPath (Join-Path $Portable 'self-analyst-backend.log') -Pattern 'Invalid or corrupt jarfile' -Quiet)) {
             throw '后端故障缺少诊断日志'
         }
-        $Report.Add('通过：后端故障退出并保留诊断日志。')
+        $Report.Add('通过：后端故障退出或显示待确认的原生错误提示，并保留诊断日志；提示由测试进程回收结束。')
     }
     $Report | Set-Content -LiteralPath (Join-Path $Scratch 'result.txt') -Encoding utf8
     $Report | Write-Host

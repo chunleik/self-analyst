@@ -1,6 +1,6 @@
 # SelfAnalyst
 
-[官网源码](website/zh-CN/index.html) · [官网预览与发布说明](docs/website.md)
+[官网](https://chunleik.github.io/self-analyst/zh-CN/) · [官网预览与发布说明](docs/website.md)
 
 [English](README.md) | **简体中文**
 

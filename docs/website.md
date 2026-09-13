@@ -48,4 +48,10 @@ Actions 配置依据：[GitHub Pages 自定义工作流](https://docs.github.com
 浏览器验证了根入口选择、显式语言地址、切换后偏好记忆、刷新、图片加载和键盘跳过导航入口。
 390px 窄屏下，两种语言文档宽度均为 375px（扣除滚动条），未出现横向溢出；桌面布局也已检查。
 双语截图保存在忽略的 `artifacts/website-qa/`，不包含在 Pages 产物内。
-当前记录只证明本地验证，远端 PR 必需检查、公开部署及部署后验证应在交付时另行记录。
+## 首次上线记录
+
+2026-09-13，[PR #25](https://github.com/chunleik/self-analyst/pull/25) 最新提交 `6456780` 的官网检查和 Windows 全量验证全部通过后合并，合并提交为 `d263f59914625590d0388203aff520f14b07d0c3`。
+[Pages 部署运行](https://github.com/chunleik/self-analyst/actions/runs/34735525732) 成功，仓库 Pages 来源已设置为 GitHub Actions，并启用 HTTPS。
+
+公开地址：<https://chunleik.github.io/self-analyst/>。浏览器实测根入口、简体中文与英文直接路径、语言切换、刷新及图片样式均正常；下载按钮成功跳转至正式 `v0.2.1` Release。
+双语桌面截图保留在 `docs/mockups/website/` 供 PR 审阅；本文件继续作为官网维护说明保留。

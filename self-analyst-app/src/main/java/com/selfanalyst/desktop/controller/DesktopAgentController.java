@@ -156,7 +156,7 @@ public class DesktopAgentController {
                     : agent.chat(sessionId,
                             userMessageId,
                             () -> persistedTurnFromSession(
-                                    chatSessionStore.getSession(sessionId), userMessageId)))
+                                    chatSessionStore.getSession(sessionId), userMessageId, Boolean.TRUE.equals(ctx.attribute("selfanalyst.managedDesktop")))))
                     .block(Duration.ofSeconds(180));
             if (response == null || response.isBlank()) {
                 throw new SelfAnalystAgent.EmptyAgentResponseException();
@@ -200,7 +200,7 @@ public class DesktopAgentController {
             agent.chatStream(request.sessionId(), request.userMessageId(),
                             () -> persistedTurnFromSession(
                                     chatSessionStore.getSession(request.sessionId()),
-                                    request.userMessageId()))
+                                    request.userMessageId(), Boolean.TRUE.equals(ctx.attribute("selfanalyst.managedDesktop"))))
                     .doOnNext(event -> {
                         try {
                             if (event.type() == SelfAnalystAgent.ChatStreamEventType.DELTA) {
@@ -487,6 +487,11 @@ public class DesktopAgentController {
 
     static SelfAnalystAgent.PersistedDesktopTurn persistedTurnFromSession(
             ChatSessionStore.Session session, String currentUserMessageId) {
+        return persistedTurnFromSession(session, currentUserMessageId, false);
+    }
+
+    private static SelfAnalystAgent.PersistedDesktopTurn persistedTurnFromSession(
+            ChatSessionStore.Session session, String currentUserMessageId, boolean managed) {
         if (session == null) return null;
         List<Msg> history = agentHistoryBeforeCurrentUser(session, currentUserMessageId);
         ChatSessionStore.Message current = session.messages.stream()
@@ -498,7 +503,7 @@ public class DesktopAgentController {
         return new SelfAnalystAgent.PersistedDesktopTurn(
                 current.content != null ? current.content : "",
                 current.contextSnapshot,
-                history);
+                history, managed);
     }
 
     private static final class InvalidChatTurnException extends IllegalArgumentException {

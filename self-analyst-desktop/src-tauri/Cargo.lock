@@ -2663,6 +2663,7 @@ version = "0.2.2"
 dependencies = [
  "open",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-shell",

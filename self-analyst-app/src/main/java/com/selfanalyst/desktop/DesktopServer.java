@@ -60,6 +60,7 @@ public class DesktopServer {
     private final DesktopChatSessionController chatSessionCtrl;
     private final DesktopMemoryController memoryCtrl;
     private final ChatSessionStore chatSessionStore;
+    private final DesktopDocumentController documentCtrl;
 
     /**
      * Create and register all desktop API routes.
@@ -152,6 +153,16 @@ public class DesktopServer {
         Path memoryDir = config.memoryDir();
         TaskStore taskStore = new TaskStore(memoryDir);
         ChatSessionStore chatSessionStore = ChatSessionStore.openExclusive(memoryDir);
+        DesktopDocumentController documentController = null;
+        try {
+            var documents = new com.selfanalyst.document.DocumentService(memoryDir, chatSessionStore);
+            documents.setDataSources(new com.selfanalyst.document.DocumentDataSources(config, eventStore, fileWatchStore, wikiStore));
+            documentController = new DesktopDocumentController(documents, config);
+            if (agent != null) agent.registerDocumentTools(documents);
+        } catch (Exception failure) {
+            log.warn("Document service unavailable: {}", failure.getClass().getSimpleName());
+        }
+        this.documentCtrl = documentController;
         ChatSessionDeletionCoordinator deletionCoordinator =
                 new ChatSessionDeletionCoordinator(chatSessionStore, agent, config);
         try {
@@ -235,6 +246,14 @@ public class DesktopServer {
         app.post("/desktop/chat", agentCtrl::chat);
         app.post("/desktop/chat/stream", agentCtrl::chatStream);
         app.get("/desktop/usage", agentCtrl::getUsage);
+        if (documentCtrl != null) {
+            app.get("/desktop/chat/sessions/{id}/documents", documentCtrl::list);
+            app.get("/desktop/chat/sessions/{id}/documents/{artifact}", documentCtrl::detail);
+            app.get("/desktop/chat/sessions/{id}/documents/{artifact}/content", documentCtrl::content);
+            app.post("/desktop/chat/sessions/{id}/documents/{artifact}/save-target", documentCtrl::validateSaveTarget);
+        } else {
+            app.get("/desktop/chat/sessions/{id}/documents", ctx -> ctx.status(503).json(java.util.Map.of("error", "文档服务不可用")));
+        }
 
         // ── Config tab ───────────────────────────────────────
         app.get("/desktop/config", configCtrl::getConfig);

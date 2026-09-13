@@ -30,5 +30,9 @@ fn main() {
         generated,
     )
     .expect("embed language resources");
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(&["save_document"])),
+    )
+    .expect("build desktop permissions")
 }

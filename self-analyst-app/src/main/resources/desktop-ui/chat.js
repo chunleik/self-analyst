@@ -811,6 +811,7 @@ function renderChatTab() {
   renderChatThread();
   renderChatContextPanel();
   updateChatInputState();
+  if (typeof refreshChatDocuments === "function") refreshChatDocuments();
 }
 
 function renderChatSessionList() {

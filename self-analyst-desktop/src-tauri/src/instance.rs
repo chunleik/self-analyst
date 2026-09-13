@@ -120,11 +120,11 @@ pub struct Instance {
 
 impl Instance {
     pub fn acquire(automatic: bool) -> io::Result<Option<Self>> {
-        Self::acquire_named(
-            "SelfAnalystDesktopSingleInstance",
-            automatic,
-            Duration::from_secs(5),
-        )
+        #[cfg(feature = "document-review")]
+        let prefix = "SelfAnalystDocumentReviewInstance";
+        #[cfg(not(feature = "document-review"))]
+        let prefix = "SelfAnalystDesktopSingleInstance";
+        Self::acquire_named(prefix, automatic, Duration::from_secs(5))
     }
 
     fn acquire_named(prefix: &str, automatic: bool, timeout: Duration) -> io::Result<Option<Self>> {

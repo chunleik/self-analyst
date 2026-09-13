@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capability","local":true,"windows":["main"],"permissions":["core:default","shell:allow-open"]}}
+{"default":{"identifier":"default","description":"Default capability","local":true,"windows":["main"],"permissions":["core:default","shell:allow-open"]},"document-save":{"identifier":"document-save","description":"允许受管桌面页面另存为已生成文档，命令内校验本次后端 origin","remote":{"urls":["http://localhost:*","http://127.0.0.1:*"]},"local":false,"windows":["main"],"permissions":["allow-save-document"]}}

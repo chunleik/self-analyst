@@ -140,7 +140,15 @@ NSIS 安装包把后端 JAR、jlink runtime 和安装布局标记作为 Tauri re
 accessibility sidecar 随内容模块资源打包并按平台释放。所有发布结构都没有 `tools/PaddleOCR-json`、
 `tools/whisper` 或声音模型。
 
-## 8. 验证
+## 8. 文档生成与另存为
+
+`self-analyst-app` 的 `com.selfanalyst.document` 提供有界结构化渲染、数据快照导出、文件发布和版本管理。DesktopServer 创建会话 writer 后注入文档服务及 Agent 工具；工具身份从本轮 RuntimeContext 注入，不接受模型指定的会话归属。现有 ReActAgent 持有工具集副本，因此当前实例与后续模型版本的工具模板均注册文档工具。
+
+文档元数据使用 chat.db 的附加表，正文和生成源独立保存于 `memoryDir/documents/`。完整文件通过格式检查后才发布 READY，发布失败、取消或重启恢复清理半成品；删除会话复用删除 intent，用户另存副本不参与清理。直接导出使用只读快照和磁盘行集，原始记录不进入模型结果；原始数据导出仅开放给受管桌面聊天，普通事件查询工具继续读取派生投影。
+
+桌面文件接口位于 `/desktop/chat/sessions/{id}/documents`，统一要求受管认证。Tauri 保存命令只接收会话和文件标识，使用系统对话框选目标，再校验来源、长度与摘要，最后替换目标文件。浏览器使用 cookie 认证下载。生成和保存的用户行为见[文档生成指南](document-generation.md)。
+
+## 9. 验证
 
 - Java：`mvn test`
 - Rust sidecar：`cargo test --manifest-path self-analyst-axsidecar/Cargo.toml`

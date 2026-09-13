@@ -1,6 +1,6 @@
 [package]
 name = "self-analyst-desktop"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
 
 [package.metadata]

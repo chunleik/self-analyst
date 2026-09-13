@@ -20,7 +20,8 @@ class RuntimeStorageCompatibilityTest {
     Path root;
 
     @org.junit.jupiter.api.BeforeEach void layout() throws Exception {
-        root = Files.createDirectory(temporary.resolve("data"));
+        // macOS 的系统临时目录可经 /var 链接进入；夹具使用真实路径，符合业务存储的无链接约束。
+        root = Files.createDirectory(temporary.resolve("data")).toRealPath();
     }
 
     private Map<String, byte[]> snapshot() throws Exception {

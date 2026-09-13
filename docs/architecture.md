@@ -118,13 +118,13 @@ GET /desktop/config/effective 提供脱敏的已保存值、来源、实际运�
 dist/
 ├── SelfAnalyst.exe
 ├── self-analyst-app.jar
-└── data/                       # 首次运行或既有数据
+└── portable.marker             # 用户可选创建，启用程序旁数据
 
 dist-portable/
 ├── SelfAnalyst.exe
 ├── self-analyst-app.jar
 ├── runtime/                    # jlink JRE
-└── data/
+└── portable.marker             # 标准 ZIP 不预置
 
 artifacts/
 ├── SelfAnalyst-portable.zip
@@ -135,7 +135,10 @@ artifacts/
 
 NSIS 安装包把后端 JAR、jlink runtime 和安装布局标记作为 Tauri resource 安装。桌面壳识别该标记后，
 从 resource 目录启动后端，但把工作目录切换到当前用户应用数据目录；因此应用升级或卸载不会把用户
-数据库与配置当作安装文件处理。便携包仍以可执行文件目录作为工作目录。
+数据库与配置当作安装文件处理。免安装包默认使用同一用户运行目录，只有 EXE 同级存在有效
+`portable.marker` 时才以程序目录为工作目录。Java 在业务初始化前持有 `data/app.lock` 并检查格式；
+没有标记的兼容旧数据经只读验证后原地登记，不搬运数据。生产锁保留至 JVM 终止，防止后台写入
+尚未结束时提前释放。详见[运行数据指南](runtime-storage.md)。
 
 accessibility sidecar 随内容模块资源打包并按平台释放。所有发布结构都没有 `tools/PaddleOCR-json`、
 `tools/whisper` 或声音模型。

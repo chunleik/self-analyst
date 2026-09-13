@@ -130,3 +130,11 @@ cargo test --manifest-path self-analyst-axsidecar/Cargo.toml
 - Windows release workflow SHALL 重建 portable ZIP 和 NSIS 安装包，校验内置 JAR/JRE、生成
   SHA-256，并完成隔离目录中的静默安装与卸载。由 `v*` 标签触发时 SHALL 在校验通过后创建或更新
   同名 GitHub Release，并附上上述分发文件；`workflow_dispatch` 只构建和上传 artifact，不发 Release。
+
+### 运行数据准入验证
+
+- `RuntimeStorageGuardTest` 和 `RuntimeStorageProcessTest` 覆盖独占锁、异常退出释放、正式入口拒绝及格式标记发布；跨进程测试必须启动真实 JVM。
+- `RuntimeStorageCompatibilityTest` 用临时生成的当前存储验证无标记旧数据接纳，比较检查前后业务文件的字节及清单，不使用用户数据。
+- CI 在 Windows、Linux、macOS 运行这些守卫测试；桌面壳仍按 Windows 验证。
+- 当前 portable 输出目录已有 `data/` 时构建脚本拒绝清理。可使用 `build-portable.ps1 -OutputDirectory .tmp/new-package`，再以 `build-installer.ps1 -SkipBuild -DistributionPath .tmp/new-package` 构建安装包。
+- 原生启动错误提示等待用户确认，自动冒烟验证提示和诊断日志后回收测试进程；不要将等待确认当作后台无响应。

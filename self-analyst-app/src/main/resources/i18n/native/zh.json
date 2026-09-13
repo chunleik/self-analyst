@@ -10,6 +10,11 @@
   "autostartFailedBody": "无法确认设置已生效：{error}",
   "aboutTitle": "关于 SelfAnalyst",
   "aboutBody": "SelfAnalyst v{version}\n桌面端: Tauri\n后端服务: {url}",
+  "dataInUse": "数据目录正在被另一个 SelfAnalyst 实例使用。请先退出该实例。",
+  "dataLockUnavailable": "无法取得数据目录独占锁，请检查目录权限和文件系统。",
+  "dataFormatUnsupported": "当前程序不支持此数据格式，请使用兼容版本。",
+  "dataFormatInvalid": "无法确认数据格式。请先正常关闭旧版应用，并检查数据及格式标记；原数据未被覆盖。",
+  "dataRootUnavailable": "运行数据目录或便携标记不可用，请检查目录权限和 portable.marker。",
   "startupFailed": "无法打开 SelfAnalyst",
   "startupFailedBody": "应用无法启动，请查看本地启动日志和后端日志了解详情。"
 }

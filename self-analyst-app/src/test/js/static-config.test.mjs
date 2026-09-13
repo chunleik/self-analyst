@@ -37,5 +37,5 @@ assert.match(appPom, /<executable>node<\/executable>/);
 assert.match(appPom, /<skip>\$\{skipTests\}<\/skip>/);
 
 assert.match(eventServer, /\.start\("127\.0\.0\.1", port\)/);
-assert.match(portableBuild, /data\/config\/config\.toml/);
-assert.match(portableBuild, /\[Text\.UTF8Encoding\]::new\(\$false\)/);
+assert.doesNotMatch(portableBuild, /\$seedCfg|\$seedText/);
+assert.doesNotMatch(portableBuild, /New-Item[^\n]+data\/(?:config|memory)/);

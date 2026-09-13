@@ -2291,3 +2291,6 @@ input:checked + .toggle-switch::after {
 #chat-document-list { max-height: 360px; overflow-y: auto; }
 .config-runtime-status table { width: 100%; margin-top: 8px; border-collapse: collapse; }
 .config-runtime-status th, .config-runtime-status td { padding: 6px 8px; text-align: left; word-break: break-word; }
+
+.runtime-storage { margin-top: 20px; padding: 16px; border-top: 1px solid var(--border-color, #ddd); font-size: 13px; line-height: 1.7; }
+.runtime-storage .btn { margin-top: 8px; }

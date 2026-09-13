@@ -28,8 +28,8 @@ public class AppSession implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AppSession.class);
     private final Config config;
-    private final UsageMeter usageMeter;
-    private final SelfAnalystAgent agent;
+    private UsageMeter usageMeter;
+    private SelfAnalystAgent agent;
     private EventServer eventServer;
     private final String desktopToken;
     private final Runnable desktopShutdownSignal;
@@ -54,6 +54,25 @@ public class AppSession implements AutoCloseable {
     private boolean contentPersistenceReady = true;
     private String contentMigrationError;
     private final AtomicBoolean closed = new AtomicBoolean();
+    // 当前部分工作线程的 shutdown 是有界等待，不能证明所有写入已经结束。
+    // 生产会话的锁因此保留至 JVM 退出，由 OS 释放，不在 close 中提前释放。
+    private RuntimeStorageGuard runtimeStorage;
+    private static final List<RuntimeStorageGuard> PROCESS_STORAGE_LEASES =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    private record Prepared(RuntimeStorageGuard guard, Config config, UserConfigStore store) {}
+
+    private static Prepared prepare() throws IOException {
+        RuntimeStorageGuard guard = RuntimeStorageGuard.acquire(Path.of("data"));
+        try {
+            Prepared prepared = new Prepared(guard, Config.load(), new UserConfigStore(Config.resolveConfigDir()));
+            PROCESS_STORAGE_LEASES.add(guard);
+            return prepared;
+        } catch (RuntimeException | Error failure) {
+            guard.close();
+            throw failure;
+        }
+    }
 
     public AppSession() throws IOException {
         this(null, () -> {});
@@ -64,8 +83,12 @@ public class AppSession implements AutoCloseable {
      * token and shutdown signal are supplied up front rather than registered later.
      */
     public AppSession(String desktopToken, Runnable desktopShutdownSignal) throws IOException {
-        this(desktopToken, desktopShutdownSignal, Config.load(),
-                new UserConfigStore(Config.resolveConfigDir()));
+        this(desktopToken, desktopShutdownSignal, prepare());
+    }
+
+    private AppSession(String desktopToken, Runnable desktopShutdownSignal, Prepared prepared) throws IOException {
+        this(desktopToken, desktopShutdownSignal, prepared.config(), prepared.store());
+        runtimeStorage = prepared.guard();
     }
 
     AppSession(String desktopToken, Runnable desktopShutdownSignal, Config initialConfig,
@@ -74,168 +97,173 @@ public class AppSession implements AutoCloseable {
         this.desktopShutdownSignal =
                 desktopShutdownSignal != null ? desktopShutdownSignal : () -> {};
         this.config = initialConfig;
-        this.usageMeter = new UsageMeter(config, config.memoryDir());
-        if (config.eventsEmbedded()) {
-            startEmbeddedAW();
-        }
-        if (config.llmApiKey() == null || config.llmApiKey().isBlank()
-                || config.llmApiKey().contains("CHANGE_ME")) {
-            log.warn("LLM API key 未配置，Agent 对话功能不可用。");
-        }
-
-        // Wiki store
-        if (config.wikiEnabled()) {
-            try {
-                wikiStore = new WikiStore(config.memoryDir().resolve("llm-wiki.db"));
-                log.info("WikiStore 已初始化");
-            } catch (Exception e) {
-                log.warn("WikiStore 初始化失败，Wiki 功能不可用: {}", e.getMessage());
-                wikiStore = null;
+        try {
+            this.usageMeter = new UsageMeter(config, config.memoryDir());
+            if (config.eventsEmbedded()) {
+                startEmbeddedAW();
             }
-        }
+            if (config.llmApiKey() == null || config.llmApiKey().isBlank()
+                    || config.llmApiKey().contains("CHANGE_ME")) {
+                log.warn("LLM API key 未配置，Agent 对话功能不可用。");
+            }
 
-        // Wiki semantic index + embedding
-        EmbeddingClient embeddingClient = null;
-        if (wikiStore != null && config.embeddingEnabled() && config.wikiSemanticEnabled()) {
-            try {
-                wikiSemanticIndex = new WikiSemanticIndex(config.wikiSemanticIndexDir(),
-                        config.embeddingDimensions());
-                if (config.embeddingApiKey() != null && !config.embeddingApiKey().isBlank()) {
-                    embeddingClient = new OpenAiCompatibleEmbeddingClient(
-                            config.embeddingBaseUrl(), config.embeddingApiKey(),
-                            config.embeddingModel(), config.embeddingDimensions(),
-                            Duration.ofSeconds(30), config.embeddingSendEncodingFormat(),
-                            usageMeter);
-                    log.info("Embedding client 已初始化 (model={})", config.embeddingModel());
+            // Wiki store
+            if (config.wikiEnabled()) {
+                try {
+                    wikiStore = new WikiStore(config.memoryDir().resolve("llm-wiki.db"));
+                    log.info("WikiStore 已初始化");
+                } catch (Exception e) {
+                    log.warn("WikiStore 初始化失败，Wiki 功能不可用: {}", e.getMessage());
+                    wikiStore = null;
                 }
-            } catch (Exception e) {
-                log.warn("语义索引初始化失败，语义检索不可用: {}", e.getMessage());
-                wikiSemanticIndex = null;
-                embeddingClient = null;
             }
-        }
 
-        // WikiTools with optional semantic support
-        WikiTools wikiTools = null;
-        if (wikiStore != null) {
-            wikiTools = new WikiTools(wikiStore, wikiSemanticIndex, embeddingClient,
-                    config.wikiSemanticTopK());
-        }
-
-
-
-        // Metadata-only file store + tools (SPEC-FILE-001/050/060).
-        fileTools = null;
-        fileWatchEnabled = config.fileWatchEnabled();
-        fileWatchRoots = List.copyOf(parseWatchRoots(config.fileWatchPaths()));
-        try {
-            if (config.fileWatchConfigurationError() != null) {
-                throw new IllegalArgumentException(config.fileWatchConfigurationError());
+            // Wiki semantic index + embedding
+            EmbeddingClient embeddingClient = null;
+            if (wikiStore != null && config.embeddingEnabled() && config.wikiSemanticEnabled()) {
+                try {
+                    wikiSemanticIndex = new WikiSemanticIndex(config.wikiSemanticIndexDir(),
+                            config.embeddingDimensions());
+                    if (config.embeddingApiKey() != null && !config.embeddingApiKey().isBlank()) {
+                        embeddingClient = new OpenAiCompatibleEmbeddingClient(
+                                config.embeddingBaseUrl(), config.embeddingApiKey(),
+                                config.embeddingModel(), config.embeddingDimensions(),
+                                Duration.ofSeconds(30), config.embeddingSendEncodingFormat(),
+                                usageMeter);
+                        log.info("Embedding client 已初始化 (model={})", config.embeddingModel());
+                    }
+                } catch (Exception e) {
+                    log.warn("语义索引初始化失败，语义检索不可用: {}", e.getMessage());
+                    wikiSemanticIndex = null;
+                    embeddingClient = null;
+                }
             }
-            int purgedLegacyIndexFiles = LegacyFileSemanticIndexPurger.purge(
-                    config.legacyFileSemanticIndexDir());
-            if (purgedLegacyIndexFiles > 0) {
-                log.info("已清理旧文件内容语义索引 ({} 个索引文件)", purgedLegacyIndexFiles);
+
+            // WikiTools with optional semantic support
+            WikiTools wikiTools = null;
+            if (wikiStore != null) {
+                wikiTools = new WikiTools(wikiStore, wikiSemanticIndex, embeddingClient,
+                        config.wikiSemanticTopK());
             }
-            // The store and FileTools stay available while collection is disabled so the
-            // dedicated settings page can enable the complete pipeline without a restart.
-            fileWatchStore = new FileWatchStore(config.memoryDir().resolve("file-watch.db"));
-            FileFilterConfig filterConfig = FileFilterConfig.parse(
-                    config.fileWatchMaxFileSizeKb(),
-                    FileFilterConfig.splitCsv(config.fileWatchExcludeDirs()),
-                    FileFilterConfig.splitCsv(config.fileWatchExcludeGlobs()),
-                    FileFilterConfig.splitCsv(config.fileWatchExtensions()),
-                    config.fileWatchRespectGitIgnore());
-            filePathFilter = new PathFilter(filterConfig);
-            fileTools = new FileTools(fileWatchStore);
-            fileTools.updateWatchRoots(List.of());
-            log.info("FileWatchStore 已初始化 ({} 个已配置目录)", fileWatchRoots.size());
-        } catch (Exception e) {
-            fileWatchInitializationError = e.getMessage();
-            fileWatchStartupReason = "initialization_failed";
-            fileWatchStartupError = fileWatchInitializationError;
-            log.warn("文件监控初始化失败，文件功能不可用: {}", e.getMessage());
-            if (fileWatchStore != null) {
-                fileWatchStore.close();
-            }
-            fileWatchStore = null;
-            filePathFilter = null;
+
+
+
+            // Metadata-only file store + tools (SPEC-FILE-001/050/060).
             fileTools = null;
-        }
-
-        SelfAnalystAgent a = null;
-        try {
-            a = new SelfAnalystAgent(config, wikiStore, wikiTools, userConfigStore, fileTools,
-                    usageMeter);
-        } catch (Exception e) {
-            log.warn("Agent 初始化失败 (API key 无效?): {}", e.getMessage());
-        }
-        this.agent = a;
-
-        // Wiki embedding worker
-        if (wikiStore != null && wikiSemanticIndex != null && embeddingClient != null) {
+            fileWatchEnabled = config.fileWatchEnabled();
+            fileWatchRoots = List.copyOf(parseWatchRoots(config.fileWatchPaths()));
             try {
-                wikiEmbeddingWorker = new WikiEmbeddingWorker(wikiStore, wikiSemanticIndex,
-                        embeddingClient, config.embeddingModel(), config.embeddingDimensions(),
-                        config.wikiWorkerIntervalSeconds());
-                wikiEmbeddingWorker.start();
-                log.info("WikiEmbeddingWorker 已启动");
+                if (config.fileWatchConfigurationError() != null) {
+                    throw new IllegalArgumentException(config.fileWatchConfigurationError());
+                }
+                int purgedLegacyIndexFiles = LegacyFileSemanticIndexPurger.purge(
+                        config.legacyFileSemanticIndexDir());
+                if (purgedLegacyIndexFiles > 0) {
+                    log.info("已清理旧文件内容语义索引 ({} 个索引文件)", purgedLegacyIndexFiles);
+                }
+                // The store and FileTools stay available while collection is disabled so the
+                // dedicated settings page can enable the complete pipeline without a restart.
+                fileWatchStore = new FileWatchStore(config.memoryDir().resolve("file-watch.db"));
+                FileFilterConfig filterConfig = FileFilterConfig.parse(
+                        config.fileWatchMaxFileSizeKb(),
+                        FileFilterConfig.splitCsv(config.fileWatchExcludeDirs()),
+                        FileFilterConfig.splitCsv(config.fileWatchExcludeGlobs()),
+                        FileFilterConfig.splitCsv(config.fileWatchExtensions()),
+                        config.fileWatchRespectGitIgnore());
+                filePathFilter = new PathFilter(filterConfig);
+                fileTools = new FileTools(fileWatchStore);
+                fileTools.updateWatchRoots(List.of());
+                log.info("FileWatchStore 已初始化 ({} 个已配置目录)", fileWatchRoots.size());
             } catch (Exception e) {
-                log.warn("WikiEmbeddingWorker 启动失败: {}", e.getMessage());
-                wikiEmbeddingWorker = null;
+                fileWatchInitializationError = e.getMessage();
+                fileWatchStartupReason = "initialization_failed";
+                fileWatchStartupError = fileWatchInitializationError;
+                log.warn("文件监控初始化失败，文件功能不可用: {}", e.getMessage());
+                if (fileWatchStore != null) {
+                    fileWatchStore.close();
+                }
+                fileWatchStore = null;
+                filePathFilter = null;
+                fileTools = null;
             }
-        }
 
-        // Wiki summarization worker
-        if (wikiStore != null && a != null && eventServer != null
-                && contentPersistenceReady && eventServer.projectionReady()) {
+            SelfAnalystAgent a = null;
             try {
-                WikiFactBuilder factBuilder = new WikiFactBuilder(
-                        eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> {
-                            Object lag = eventServer.rawStatus().get("projectionLagSeconds");
-                            return lag instanceof Number number ? number.longValue() : null;
-                        });
-                WikiSummarizer summarizer = new WikiSummarizer(a.wikiLLMClient());
-                wikiWorker = new WikiWorker(wikiStore, factBuilder, summarizer,
-                        ZoneId.systemDefault(),
-                        Duration.ofMinutes(3),
-                        config.wikiWorkerIntervalSeconds(),
-                        config.wikiBackfillEnabled(),
-                        wikiEmbeddingWorker);
-                wikiWorker.start();
-                log.info("WikiWorker 已启动");
+                a = new SelfAnalystAgent(config, wikiStore, wikiTools, userConfigStore, fileTools,
+                        usageMeter);
             } catch (Exception e) {
-                log.warn("WikiWorker 启动失败: {}", e.getMessage());
+                log.warn("Agent 初始化失败 (API key 无效?): {}", e.getMessage());
             }
-        }
+            this.agent = a;
 
-        // Wiki summary buckets (feeds hourly/halfday/daily axes in AW timeline)
-        if (wikiStore != null && eventServer != null && eventServer.projectionReady()) {
-            try {
-                wikiSummaryWatcher = new WikiSummaryWatcher(wikiStore,
-                        eventServer.bucketStore(), eventServer.eventStore());
-                wikiSummaryWatcher.start();
-                log.info("WikiSummaryWatcher 已启动");
-            } catch (Exception e) {
-                log.warn("WikiSummaryWatcher 启动失败: {}", e.getMessage());
+            // Wiki embedding worker
+            if (wikiStore != null && wikiSemanticIndex != null && embeddingClient != null) {
+                try {
+                    wikiEmbeddingWorker = new WikiEmbeddingWorker(wikiStore, wikiSemanticIndex,
+                            embeddingClient, config.embeddingModel(), config.embeddingDimensions(),
+                            config.wikiWorkerIntervalSeconds());
+                    wikiEmbeddingWorker.start();
+                    log.info("WikiEmbeddingWorker 已启动");
+                } catch (Exception e) {
+                    log.warn("WikiEmbeddingWorker 启动失败: {}", e.getMessage());
+                    wikiEmbeddingWorker = null;
+                }
             }
-        }
 
-        // Metadata-only workers do not depend on Agent or LLM availability.
-        applyFileWatchSettings(fileWatchEnabled, fileWatchRoots);
+            // Wiki summarization worker
+            if (wikiStore != null && a != null && eventServer != null
+                    && contentPersistenceReady && eventServer.projectionReady()) {
+                try {
+                    WikiFactBuilder factBuilder = new WikiFactBuilder(
+                            eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> {
+                                Object lag = eventServer.rawStatus().get("projectionLagSeconds");
+                                return lag instanceof Number number ? number.longValue() : null;
+                            });
+                    WikiSummarizer summarizer = new WikiSummarizer(a.wikiLLMClient());
+                    wikiWorker = new WikiWorker(wikiStore, factBuilder, summarizer,
+                            ZoneId.systemDefault(),
+                            Duration.ofMinutes(3),
+                            config.wikiWorkerIntervalSeconds(),
+                            config.wikiBackfillEnabled(),
+                            wikiEmbeddingWorker);
+                    wikiWorker.start();
+                    log.info("WikiWorker 已启动");
+                } catch (Exception e) {
+                    log.warn("WikiWorker 启动失败: {}", e.getMessage());
+                }
+            }
 
-        if (eventServer != null && eventServer.app() != null) {
-            var memoryStore = agent != null ? agent.memory() : null;
-            desktopServer = new DesktopServer(eventServer.app(), config, agent,
-                    eventServer.eventStore(), memoryStore,
-                    watcherManager, contentWatcher,
-                    contentPersistenceReady, contentMigrationError,
-                    fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings,
-                    userConfigStore, wikiStore);
-            desktopServer.statusController().setRawStatusSupplier(eventServer::rawStatus);
-            desktopServer.start();
-            eventServer.registerWebUi();
-            log.info(desktopUiStartupLogMessage(config.eventsPort()));
+            // Wiki summary buckets (feeds hourly/halfday/daily axes in AW timeline)
+            if (wikiStore != null && eventServer != null && eventServer.projectionReady()) {
+                try {
+                    wikiSummaryWatcher = new WikiSummaryWatcher(wikiStore,
+                            eventServer.bucketStore(), eventServer.eventStore());
+                    wikiSummaryWatcher.start();
+                    log.info("WikiSummaryWatcher 已启动");
+                } catch (Exception e) {
+                    log.warn("WikiSummaryWatcher 启动失败: {}", e.getMessage());
+                }
+            }
+
+            // Metadata-only workers do not depend on Agent or LLM availability.
+            applyFileWatchSettings(fileWatchEnabled, fileWatchRoots);
+
+            if (eventServer != null && eventServer.app() != null) {
+                var memoryStore = agent != null ? agent.memory() : null;
+                desktopServer = new DesktopServer(eventServer.app(), config, agent,
+                        eventServer.eventStore(), memoryStore,
+                        watcherManager, contentWatcher,
+                        contentPersistenceReady, contentMigrationError,
+                        fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings,
+                        userConfigStore, wikiStore);
+                desktopServer.statusController().setRawStatusSupplier(eventServer::rawStatus);
+                desktopServer.start();
+                eventServer.registerWebUi();
+                log.info(desktopUiStartupLogMessage(config.eventsPort()));
+            }
+        } catch (RuntimeException | Error failure) {
+            try { close(); } catch (RuntimeException | Error cleanup) { failure.addSuppressed(cleanup); }
+            throw failure;
         }
     }
 

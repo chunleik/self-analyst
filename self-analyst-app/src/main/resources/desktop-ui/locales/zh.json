@@ -1,4 +1,17 @@
 {
+  "storage.dataRoot": "数据目录",
+  "storage.loadFailed": "无法读取数据位置。",
+  "storage.loading": "正在读取数据位置…",
+  "storage.mode": "运行模式",
+  "storage.mode.direct": "直接运行",
+  "storage.mode.portable": "显式便携",
+  "storage.mode.user": "用户目录",
+  "storage.nativeUnavailable": "浏览器中无法打开本地目录，请使用上方路径。",
+  "storage.open": "打开数据目录",
+  "storage.openFailed": "无法打开数据目录。",
+  "storage.runtimeRoot": "运行目录",
+  "storage.title": "运行数据",
+
   "document.title": "会话文档",
   "document.empty": "可在聊天中要求生成报告、数据表或 PPT",
   "document.loadFailed": "暂时无法读取会话文档",

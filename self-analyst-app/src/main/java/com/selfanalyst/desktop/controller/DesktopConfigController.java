@@ -154,6 +154,17 @@ public class DesktopConfigController {
         return new StructuredSaveResult(configuration.update(changes));
     }
 
+    public void getRuntimeStorage(Context ctx) {
+        ctx.json(runtimeStoragePayload());
+    }
+
+    Map<String, String> runtimeStoragePayload() {
+        Path dataRoot = userStore.filePath().toAbsolutePath().normalize().getParent().getParent();
+        String mode = System.getenv("SELF_ANALYST_STORAGE_MODE");
+        return Map.of("mode", Set.of("user", "portable").contains(mode == null ? "" : mode) ? mode : "direct",
+                "runtimeRoot", dataRoot.getParent().toString(), "dataRoot", dataRoot.toString());
+    }
+
     private static void rejectRemovedStructuredKeys(Map<String, Object> body) {
         Map<String, Object> flat = new LinkedHashMap<>();
         flattenStructuredSection("", body, flat);

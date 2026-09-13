@@ -22,7 +22,7 @@ fn wide(path: &Path) -> Vec<u16> {
     path.as_os_str().encode_wide().chain(Some(0)).collect()
 }
 
-fn trusted(url: &tauri::Url, port: u16) -> bool {
+pub(super) fn trusted(url: &tauri::Url, port: u16) -> bool {
     url.scheme() == "http"
         && matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
         && url.port_or_known_default() == Some(port)

@@ -39,10 +39,16 @@ public class App {
             log.info("正在关闭...");
             session.close();
             log.info("已关闭");
+            // 终止所有残余后台线程后，操作系统释放生产数据根锁。
+            System.exit(0);
         } catch (Exception e) {
             log.error("启动失败: {}", e.getMessage(), e);
-            if (session != null) session.close();
-            System.exit(1);
+            try {
+                if (session != null) session.close();
+            } finally {
+                System.exit(e instanceof RuntimeStorageGuard.StorageException storage
+                        ? storage.failure().exitCode() : 1);
+            }
         }
     }
 

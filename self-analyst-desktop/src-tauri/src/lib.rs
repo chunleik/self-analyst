@@ -2,6 +2,7 @@ mod autostart;
 mod documents;
 mod i18n;
 mod instance;
+mod java_path;
 mod runtime_storage;
 mod startup_log;
 
@@ -340,7 +341,7 @@ fn start_java(app: AppHandle, automatic: bool) {
         .env("SELF_ANALYST_DESKTOP_TOKEN", &token)
         .env("SELF_ANALYST_DESKTOP_PORT_FILE", &port_file)
         .arg("-jar")
-        .arg(jar.to_string_lossy().to_string())
+        .arg(java_path::for_java(&jar))
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(error_log))

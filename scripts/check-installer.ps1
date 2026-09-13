@@ -118,6 +118,7 @@ try {
     }
 
     & (Join-Path $Root "scripts/check-packaged-jar.ps1") -JarPath $Jar -JavaPath $Java
+    & (Join-Path $Root "scripts/check-installed-startup.ps1") -DistributionPath $InstallRoot
 
     $Uninstaller = Get-ChildItem -LiteralPath $InstallRoot -Filter "uninstall*.exe" -File |
         Select-Object -First 1

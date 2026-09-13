@@ -115,29 +115,43 @@ the system language.
 See [PRIVACY.md](PRIVACY.md) for privacy details and [docs/README.md](docs/README.md) for the current
 specification index. These documents are maintained in Simplified Chinese.
 
-## 配置
+## Configuration
 
-桌面设置默认显示独立的“模型设置”：支持一个 OpenAI-compatible 连接、连接预设、只写 API Key、
-模型发现与手工输入、温度、输出上限和最小生成测试。保存后新聊天与摘要工作采用新配置，
-进行中的回答继续使用旧版本；摘要和压缩保持低温策略，会话及用量不会重置。
-操作说明见[模型设置指南](docs/llm-settings.md)。
+Desktop Settings opens a dedicated “Model settings” view by default. It supports one
+OpenAI-compatible connection, connection presets, a write-only API key field, model discovery
+and manual entry, temperature, output limits, and a minimal generation test. After saving,
+new chats and summary jobs use the new configuration, while responses already in progress
+continue using the previous version. Summaries and compaction retain their low-temperature
+policy; sessions and usage counters are not reset. See the [model settings guide](docs/llm-settings.md)
+for instructions.
 
-“高级配置”保留 `./data/config/config.toml` 原文编辑器。文件缺失时显示注释模板，打开本身不写盘。
-模型表单只更新指定键并保留其它原文和注释；无法安全修改的复杂目标写法需使用高级配置。
-旧通用结构化接口和 Agent 配置工具仍可能重新生成 TOML。两种视图切换时会确认未保存更改。
+“Advanced configuration” retains the raw text editor for `./data/config/config.toml`. If the
+file is missing, it displays a commented template; opening the editor does not write to disk.
+The model form updates only the specified keys, preserving other text and comments. Complex
+target syntax that cannot be safely updated requires advanced configuration. The legacy generic
+structured API and Agent configuration tools may still regenerate the TOML file. Switching
+between the two views prompts for confirmation if there are unsaved changes.
 
-TOML 显式值优先于环境变量，删除覆盖恢复环境变量及默认值；显式空密钥阻止环境兜底。
-密码框留空表示保留当前密钥，“清空密钥”和“恢复密钥继承”是分别确认的操作。
-配置来源与运行状态在界面中显示。配置键以[用户配置规格](openspec/specs/user-configuration/spec.md)
-和 `SupportedKeys` 为准；`memory.dir` 的显式 JVM property 优先，`events.port` 不接受环境变量。
+Explicit TOML values take precedence over environment variables. Removing an override restores
+fallback to environment variables and defaults; an explicitly empty key prevents environment
+fallback. Leaving the password field blank keeps the current key. “Clear key” and “Restore key
+inheritance” are separate actions, each requiring confirmation. Configuration sources and runtime
+status are shown in the interface. Refer to the [user configuration specification](openspec/specs/user-configuration/spec.md)
+and `SupportedKeys` for supported keys. An explicit JVM property takes precedence for `memory.dir`;
+`events.port` does not accept an environment variable.
 
-可热更新的键为 `llm.api-key`、`llm.base-url`、`llm.model`、`llm.temperature`、`llm.max-tokens`。
-端口、预算、`maxIters`、压缩阈值及 Embedding 客户端仍使用启动期配置；Embedding 继承密钥变化
-会单独提示需重启。未配置模型时本地服务仍可启动，补填后新工作无需重启即可恢复。
+The keys that can be updated without restarting are `llm.api-key`, `llm.base-url`, `llm.model`,
+`llm.temperature`, and `llm.max-tokens`. Ports, budgets, `maxIters`, compaction thresholds, and the
+Embedding client continue using their startup configuration. Changes to a key inherited by the
+Embedding client trigger a separate restart notice. Local services can still start without a
+configured model; after completing the model settings, new work can resume without restarting.
 
-生成测试会发送一次固定最小请求，可能产生少量计费；它和模型发现均不保存配置。
-高级配置中的旧 LLM 检查只验证目录连接。保存成功不等于远端可调用，测试成功也不改变运行配置。
-外部编辑文件不会自动热更新；请通过应用保存或重启后端。相同字段的并发更新以后提交者为准。
+The generation test sends one fixed, minimal request and may incur a small charge. Neither this
+test nor model discovery saves the configuration. The legacy LLM check in advanced configuration
+only verifies connectivity to the model catalog. A successful save does not guarantee that the
+remote model can be called, and a successful test does not change the runtime configuration.
+External file edits are not automatically applied at runtime; save through the application or
+restart the backend. For concurrent updates to the same field, the last committed update wins.
 
 | Configuration key | Environment variable | Default |
 |-------------------|----------------------|---------|

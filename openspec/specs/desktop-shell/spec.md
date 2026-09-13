@@ -85,7 +85,7 @@
 
 ### Requirement: SPEC-DSK-BACKEND-001、001a、001b、001c、001d、001e Java 后端管理
 桌面壳 SHALL 优先使用已解析分发根目录中的 Java runtime 执行 `self-analyst-app.jar`，仅在分发未携带
-runtime 时回退到系统 Java，并注入 desktop token 和唯一端口文件。带安装布局标记但缺少后端 JAR 的
+runtime 时回退到系统 Java，并注入 desktop token 和唯一端口文件。桌面壳 SHALL 将 Windows 扩展长度资源路径转换为 Java 可加载的等价路径，保留中文、空格和 UNC 共享语义。带安装布局标记但缺少后端 JAR 的
 分发 MUST fail closed，不得回退到可执行文件目录中的其他 JAR。壳 SHALL 最多等待 30 秒取得
 `1..65535` 的十进制端口，再最多等待 30 秒以 token 调用
 `/desktop/lifecycle/health`。端口文件读取后 SHALL 清理。后端提前退出、端口非法、端口等待超时或
@@ -111,6 +111,10 @@ runtime 时回退到系统 Java，并注入 desktop token 和唯一端口文件�
 #### Scenario: 安装资源不完整
 - **WHEN** 安装布局标记存在但安装 resource 目录缺少后端 JAR
 - **THEN** 壳在启动任何后端前失败，不使用相邻目录中的未知 JAR
+
+#### Scenario: Windows 安装资源路径兼容
+- **WHEN** 安装资源路径带有 Windows 扩展长度前缀，或路径包含中文和空格
+- **THEN** 后端从同一资源位置成功加载主类并完成端口与健康握手，不因路径表示形式报主类缺失
 
 ### Requirement: SPEC-DSK-WEB-001 WebView 与浏览器认证
 WebView SHALL 从实际后端端口加载桌面 UI。初始化脚本 SHALL 只为同源且路径以 `/desktop/` 开头的 fetch 注入 `X-SelfAnalyst-Token`，MUST NOT 向外部 origin 发送 token。系统浏览器入口 SHALL 通过 `/desktop/session?token=...` 交换设置为 `HttpOnly; SameSite=Strict; Path=/desktop` 的会话 cookie，并重定向到桌面 UI；无效 token SHALL 返回 403。服务 SHALL 校验 Host 和 Origin 的回环边界，业务接口 MUST NOT 接受 query 参数 token。

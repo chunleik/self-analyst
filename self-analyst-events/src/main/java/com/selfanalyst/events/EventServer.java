@@ -158,6 +158,10 @@ public class EventServer {
                 ctx.status(204).result("");
                 ctx.skipRemainingHandlers();
             }
+            if (LocalRequestGuard.isProtectedDesktopPath(ctx.path())
+                    && LocalRequestGuard.hasConfiguredDesktopToken(desktopToken)) {
+                ctx.attribute("selfanalyst.managedDesktop", true);
+            }
         });
 
         // aw-client (JS lib) sends requests to /0/... without the /api prefix.

@@ -18,6 +18,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RawEventQueryServiceTest {
 
     @Test
+    void exportSnapshotExcludesConcurrentWritesAndRejectsOverflow(@TempDir Path dir) throws Exception {
+        var ids = new RawEventIdGenerator();
+        try (var store = new RawEventStore(dir); var queries = new RawEventQueryService(dir, 31, 1)) {
+            store.append(event(ids, "bucket", "2026-08-31T23:59:59Z", "one"));
+            store.append(event(ids, "bucket", "2026-09-01T00:00:00Z", "two"));
+            var actual = new ArrayList<RawEvent>();
+            var coverage = queries.exportSnapshot("bucket", Instant.parse("2026-08-31T00:00:00Z"),
+                    Instant.parse("2026-09-02T00:00:00Z"), 10, value -> {
+                        actual.add(value);
+                        if (actual.size() == 1) store.append(event(ids, "bucket", "2026-09-01T00:00:01Z", "late"));
+                    }, () -> {});
+            assertEquals(List.of("one", "two"), actual.stream().map(RawEvent::sourceEventId).toList());
+            assertEquals(2, coverage.size());
+            assertThrows(IllegalArgumentException.class, () -> queries.exportSnapshot("bucket", Instant.parse("2026-08-31T00:00:00Z"),
+                    Instant.parse("2026-09-02T00:00:00Z"), 1, value -> {}, () -> {}));
+            assertThrows(IllegalArgumentException.class, () -> queries.exportSnapshot("bucket", Instant.parse("2026-01-01T00:00:00Z"),
+                    Instant.parse("2026-09-02T00:00:00Z"), 10, value -> {}, () -> {}));
+        }
+    }
+
+    @Test
     void pagesAcrossMonthsWithoutOmissionOrDuplication(@TempDir Path dir) throws Exception {
         RawEventIdGenerator ids = new RawEventIdGenerator();
         List<RawEvent> inserted = new ArrayList<>();

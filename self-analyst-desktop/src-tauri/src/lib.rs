@@ -1,4 +1,5 @@
 mod autostart;
+mod documents;
 mod i18n;
 mod instance;
 mod startup_log;
@@ -706,6 +707,7 @@ pub fn run() {
     let requested_exit = std::rc::Rc::new(std::cell::Cell::new(None));
     let exit_state = requested_exit.clone();
     let runtime_exit = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![documents::save_document])
         .manage(Mutex::new(instance::WindowIntent::default()))
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {

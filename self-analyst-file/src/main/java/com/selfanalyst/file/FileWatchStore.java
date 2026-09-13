@@ -357,6 +357,31 @@ public class FileWatchStore implements AutoCloseable {
         return queryMetadataInternal(null, start, end, watchRoot, null, extension, limit);
     }
 
+    public void exportSnapshot(Instant start, Instant end, int maxRows,
+                               java.util.function.Consumer<FileRecord> consume, Runnable checkpoint) {
+        if (start == null || end == null || !start.isBefore(end) || maxRows < 1 || maxRows > 100_000)
+            throw new IllegalArgumentException("导出条件无效");
+        try {
+            String url;
+            synchronized (this) { url = conn.getMetaData().getURL(); }
+            var properties = new java.util.Properties(); properties.setProperty("open_mode", "1");
+            try (var snapshot = DriverManager.getConnection(url, properties);
+                 var query = snapshot.prepareStatement("SELECT * FROM file_metadata WHERE status='COLLECTED' AND last_modified>=? AND last_modified<?"
+                         + " ORDER BY substr(last_modified,1,19),substr(replace(substr(last_modified,21),'Z','')||'000000000',1,9),id")) {
+                query.setQueryTimeout(120);
+                query.setString(1, start.toString().substring(0, 19)); query.setString(2, end.plusSeconds(1).toString().substring(0, 19));
+                try (var rows = query.executeQuery()) {
+                    int count = 0;
+                    while (rows.next()) {
+                        checkpoint.run(); var record = map(rows);
+                        if (record.lastModified() == null || record.lastModified().isBefore(start) || !record.lastModified().isBefore(end)) continue;
+                        if (++count > maxRows) throw new IllegalArgumentException("文件记录超过导出上限"); consume.accept(record);
+                    }
+                }
+            }
+        } catch (SQLException failure) { throw new IllegalStateException("文件元数据导出失败", failure); }
+    }
+
     /** Local path/title search. It never reads a file or calls an embedding service. */
     public synchronized List<FileRecord> queryMetadata(String query, Instant start, Instant end,
                                                        String watchRoot, String extension, int limit) {

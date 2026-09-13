@@ -112,6 +112,33 @@ public class ChatSessionStore implements AutoCloseable {
     private boolean pendingTranscriptsRecovered;
     private boolean recoveringDeletions;
     private boolean closed;
+    private java.util.function.Consumer<String> documentDeletion = ignored -> {};
+
+    @FunctionalInterface
+    public interface DocumentOperation<T> { T run(Connection connection) throws Exception; }
+
+    /** 文档元数据复用会话 writer 和数据库事务，不向 Agent 暴露数据库连接。 */
+    public synchronized <T> T documentTransaction(DocumentOperation<T> operation) {
+        ensureOpen();
+        try (Connection connection = connect()) {
+            connection.setAutoCommit(false);
+            try {
+                T result = operation.run(connection);
+                connection.commit();
+                return result;
+            } catch (Exception failure) {
+                rollbackQuietly(connection, failure);
+                if (failure instanceof RuntimeException runtime) throw runtime;
+                throw new IllegalStateException("文档元数据操作失败", failure);
+            }
+        } catch (SQLException failure) {
+            throw new IllegalStateException("文档存储不可用", failure);
+        }
+    }
+
+    public synchronized void setDocumentDeletion(java.util.function.Consumer<String> deletion) {
+        this.documentDeletion = java.util.Objects.requireNonNull(deletion);
+    }
 
     public ChatSessionStore(Path memoryDir) {
         this(memoryDir, null, null);
@@ -962,6 +989,7 @@ public class ChatSessionStore implements AutoCloseable {
         ensureOpen();
         requireValidSessionId(id);
         try {
+            documentDeletion.accept(id);
             transaction("clear chat deletion intent", conn -> {
                 try (PreparedStatement statement = conn.prepareStatement(
                         "DELETE FROM pending_deletions WHERE session_id = ?")) {

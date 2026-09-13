@@ -1,0 +1,8 @@
+{
+  "identifier": "document-save",
+  "description": "允许受管桌面页面另存为已生成文档，命令内校验本次后端 origin",
+  "windows": ["main"],
+  "local": false,
+  "remote": { "urls": ["http://localhost:*", "http://127.0.0.1:*"] },
+  "permissions": ["allow-save-document"]
+}

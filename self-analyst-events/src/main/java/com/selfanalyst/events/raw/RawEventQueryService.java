@@ -69,6 +69,55 @@ public final class RawEventQueryService implements AutoCloseable {
         }
     }
 
+    /** 内部文件导出：先固定全部分区的只读快照，再分页消费，不向模型返回记录。 */
+    public List<String> exportSnapshot(String bucketId, Instant start, Instant end, int maxRows,
+                                      java.util.function.Consumer<RawEvent> consume, Runnable checkpoint) {
+        validateRequest(bucketId, start, end, Math.min(maxPageSize, 1000));
+        if (maxRows < 1 || maxRows > 100_000) throw new IllegalArgumentException("导出数量上限无效");
+        var partitions = catalog.listReadable(start, end);
+        var connections = new ArrayList<Connection>();
+        try {
+            // 第一次 SELECT 固定 SQLite WAL 快照，后续分页不看见新到达事件。
+            for (var partition : partitions) {
+                checkpoint.run();
+                var connection = DriverManager.getConnection("jdbc:sqlite:"
+                        + catalog.resolvePartitionPath(partition.relativePath()).toUri() + "?mode=ro");
+                connections.add(connection); connection.setAutoCommit(false);
+                try (var statement = connection.createStatement(); var rows = statement.executeQuery("SELECT MAX(rowid) FROM raw_events")) { rows.next(); }
+            }
+            int count = 0;
+            for (var connection : connections) {
+                CursorAnchor anchor = null;
+                while (true) {
+                    checkpoint.run();
+                    String sql = "SELECT * FROM raw_events WHERE bucket_id=? AND received_at>=? AND received_at<?"
+                            + (anchor == null ? "" : " AND (received_at>? OR (received_at=? AND event_id>?))")
+                            + " ORDER BY received_at,event_id LIMIT ?";
+                    int pageCount = 0;
+                    try (var statement = connection.prepareStatement(sql)) {
+                        int p = 1; statement.setString(p++, bucketId); statement.setString(p++, RawTimestamp.format(start)); statement.setString(p++, RawTimestamp.format(end));
+                        if (anchor != null) { statement.setString(p++, RawTimestamp.format(anchor.receivedAt)); statement.setString(p++, RawTimestamp.format(anchor.receivedAt)); statement.setString(p++, anchor.eventId); }
+                        statement.setInt(p, Math.min(maxPageSize, 1000));
+                        try (var rows = statement.executeQuery()) {
+                            while (rows.next()) {
+                                checkpoint.run();
+                                if (++count > maxRows) throw new IllegalArgumentException("记录超过导出上限，请缩小范围");
+                                var event = RawEventStore.mapEvent(rows); consume.accept(event); pageCount++;
+                                anchor = new CursorAnchor(event.receivedAt(), event.eventId());
+                            }
+                        }
+                    }
+                    if (pageCount < Math.min(maxPageSize, 1000)) break;
+                }
+            }
+            return partitions.stream().map(RawPartitionMetadata::partitionMonth).toList();
+        } catch (java.sql.SQLException failure) {
+            throw new IllegalStateException("原始记录快照导出失败", failure);
+        } finally {
+            for (var connection : connections) try { connection.close(); } catch (java.sql.SQLException ignored) { }
+        }
+    }
+
     private void queryPartition(RawPartitionMetadata partition, String bucketId,
                                 Instant start, Instant end, CursorAnchor anchor,
                                 int limit, List<RawEvent> output) {

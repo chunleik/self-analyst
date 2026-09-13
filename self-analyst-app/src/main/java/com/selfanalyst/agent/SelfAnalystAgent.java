@@ -329,11 +329,21 @@ public class SelfAnalystAgent implements AutoCloseable {
 
     /** Session-owned turn loaded under the application gate. */
     public record PersistedDesktopTurn(
-            String userInput, Object contextSnapshot, List<Msg> existingHistory) {
+            String userInput, Object contextSnapshot, List<Msg> existingHistory, boolean managedDesktop) {
+        public PersistedDesktopTurn(String userInput, Object contextSnapshot, List<Msg> existingHistory) {
+            this(userInput, contextSnapshot, existingHistory, false);
+        }
         public PersistedDesktopTurn {
             userInput = userInput != null ? userInput : "";
             existingHistory = existingHistory != null ? List.copyOf(existingHistory) : null;
         }
+    }
+
+    public void registerDocumentTools(com.selfanalyst.document.DocumentService service) {
+        var documents = new com.selfanalyst.document.DocumentTools(service);
+        toolkit.registerTool(documents);
+        // ReActAgent 在构建时复制 toolkit；当前版本和后续新版本均需包含文档工具。
+        if (agent != null && agent.getToolkit() != toolkit) agent.getToolkit().registerTool(documents);
     }
 
     public Mono<String> chat(
@@ -394,9 +404,13 @@ public class SelfAnalystAgent implements AutoCloseable {
             String userMessageId,
             Supplier<PersistedDesktopTurn> persistedTurnSupplier) {
         ActiveDesktopChat activeChat = new ActiveDesktopChat(sessionId, userMessageId);
+        java.util.concurrent.atomic.AtomicReference<com.selfanalyst.document.DocumentExecution> documents = new java.util.concurrent.atomic.AtomicReference<>();
         return runExclusiveStream(activeChat, () -> Flux.defer(() -> {
             PersistedDesktopTurn turn = persistedTurnSupplier.get();
             if (turn == null) throw new ChatSessionUnavailableException(sessionId);
+            var documentExecution = new com.selfanalyst.document.DocumentExecution(
+                    sessionId, userMessageId, turn.managedDesktop(), activeChat::cancelled);
+            documents.set(documentExecution);
             if (usageMeter != null && usageMeter.isBlocked()) {
                 return Flux.just(ChatStreamEvent.result(budgetBlockedMessage()));
             }
@@ -426,7 +440,8 @@ public class SelfAnalystAgent implements AutoCloseable {
                 }
                 RuntimeContext.Builder contextBuilder = RuntimeContext.builder()
                         .userId(DESKTOP_USER_ID)
-                        .sessionId(sessionId);
+                        .sessionId(sessionId)
+                        .put(com.selfanalyst.document.DocumentExecution.class, documentExecution);
                 if (turn.contextSnapshot() != null) {
                     contextBuilder.put(ConversationContextMiddleware.DesktopTurnContext.class,
                             new ConversationContextMiddleware.DesktopTurnContext(
@@ -460,6 +475,12 @@ public class SelfAnalystAgent implements AutoCloseable {
                                 true);
                 });
             }));
+        }).doOnTerminate(() -> {
+            var execution = documents.get();
+            if (execution != null) execution.closeAndAwait();
+        }).doOnCancel(() -> {
+            var execution = documents.get();
+            if (execution != null) execution.closeAndAwait();
         })).transform(SelfAnalystAgent::requireTerminalChatResult);
     }
 

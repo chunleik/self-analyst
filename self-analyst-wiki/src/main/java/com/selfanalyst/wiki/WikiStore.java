@@ -462,6 +462,30 @@ public class WikiStore implements AutoCloseable {
         return results;
     }
 
+    public void exportSnapshot(Instant start, Instant end, WikiLevel level, int maxRows,
+                               java.util.function.Consumer<WikiEntry> consume, Runnable checkpoint) {
+        if (start == null || end == null || !start.isBefore(end) || maxRows < 1 || maxRows > 100_000)
+            throw new IllegalArgumentException("导出条件无效");
+        try {
+            var properties = new java.util.Properties(); properties.setProperty("open_mode", "1");
+            try (var snapshot = DriverManager.getConnection(conn.getMetaData().getURL(), properties);
+                 var query = snapshot.prepareStatement("SELECT * FROM wiki_entries WHERE period_end>=? AND period_start<?"
+                         + (level == null ? "" : " AND level=?") + " ORDER BY substr(period_start,1,19),substr(replace(substr(period_start,21),'Z','')||'000000000',1,9),id")) {
+                query.setQueryTimeout(120);
+                query.setString(1, start.toString().substring(0, 19)); query.setString(2, end.plusSeconds(1).toString().substring(0, 19));
+                if (level != null) query.setString(3, level.name());
+                try (var rows = query.executeQuery()) {
+                    int count = 0;
+                    while (rows.next()) {
+                        checkpoint.run(); var entry = mapEntry(rows);
+                        if (!entry.periodEnd().isAfter(start) || !entry.periodStart().isBefore(end)) continue;
+                        if (++count > maxRows) throw new IllegalArgumentException("Wiki 记录超过导出上限"); consume.accept(entry);
+                    }
+                }
+            }
+        } catch (SQLException failure) { throw new IllegalStateException("Wiki 快照导出失败", failure); }
+    }
+
     public List<WikiEntry> findPending(WikiLevel level, int limit) {
         return findByStatusAndLevel(WikiStatus.PENDING, level, limit);
     }

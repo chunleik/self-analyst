@@ -87,6 +87,31 @@ public class EventStore {
         return queryEvents(bucketId, limit, null, null);
     }
 
+    /** 内部导出入口：独立只读连接的一次结果集形成快照，逐条消费避免整批加载。 */
+    public void exportSnapshot(String bucketId, Instant start, Instant end, int maxRows,
+                               java.util.function.Consumer<Event> consume, Runnable checkpoint) {
+        if (bucketId == null || start == null || end == null || !start.isBefore(end)
+                || maxRows < 1 || maxRows > 100_000) throw new IllegalArgumentException("导出条件无效");
+        if (!bucketExists(bucketId)) throw new IllegalArgumentException("事件桶不存在");
+        String sql = "SELECT * FROM events WHERE bucket_id=? AND timestamp>=? AND timestamp<?"
+                + " ORDER BY substr(timestamp,1,19),substr(replace(substr(timestamp,21),'Z','')||'000000000',1,9),id";
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:"
+                + db.dataDir().resolve(Database.PROJECTION_FILENAME).toAbsolutePath().toUri() + "?mode=ro");
+             var statement = connection.prepareStatement(sql)) {
+            statement.setQueryTimeout(120);
+            statement.setString(1, bucketId); statement.setString(2, start.toString().substring(0, 19)); statement.setString(3, end.plusSeconds(1).toString().substring(0, 19));
+            try (var rows = statement.executeQuery()) {
+                int count = 0;
+                while (rows.next()) {
+                    checkpoint.run();
+                    var event = mapEvent(rows);
+                    if (event.timestamp().isBefore(start) || !event.timestamp().isBefore(end)) continue;
+                    if (++count > maxRows) throw new IllegalArgumentException("记录超过导出上限"); consume.accept(event);
+                }
+            }
+        } catch (SQLException failure) { throw new IllegalStateException("事件快照导出失败", failure); }
+    }
+
     public List<Event> queryEvents(String bucketId, int limit, String startTime, String endTime) {
         List<Event> result = new ArrayList<>();
         StringBuilder sql = new StringBuilder("SELECT * FROM events WHERE bucket_id = ?");

@@ -139,6 +139,10 @@
 
       <!-- RIGHT: context panel -->
       <aside class="chat-context-panel">
+        <div class="chat-context-section">
+          <h4 data-i18n="document.title">会话文档</h4>
+          <div id="chat-document-list" aria-live="polite"></div>
+        </div>
         <div id="chat-context-summary" class="chat-context-section">
           <h4 data-i18n="chat.ctxCurrentStatus">当前状态</h4>
           <div class="chat-context-content" data-i18n="common.noData">暂无数据</div>
@@ -259,6 +263,7 @@
 <script src="agent.js"></script>
 <script src="deep-chat-adapter.js"></script>
 <script src="chat.js"></script>
+<script src="documents.js"></script>
 <script src="chat-drawer.js"></script>
 <script src="config.js"></script>
 <script src="llm-settings.js"></script>

@@ -29,7 +29,7 @@ node scripts/preview-website.mjs
 
 2026-09-13 核实正式版本 `v0.2.1` 存在 Windows x64 安装包、便携 ZIP 及 SHA-256 文件。
 官网统一链接 `https://github.com/chunleik/self-analyst/releases/latest`，不写死版本和资产名称。
-现有 `docs/mockups/desktop-chat-screenshot.png` 已视觉核对：展示公开产品界面和通用技术文档活动，未见密钥、身份或私人聊天信息；复制到官网目录并标注中文界面示例。
+中文版使用 `website/assets/desktop-chat.png`，源自 `docs/mockups/desktop-chat-screenshot.png`，标注中文界面示例。英文版使用 `website/assets/desktop-chat-en.png`，原样复用用户提供并用于英文 README 的 `docs/mockups/desktop-chat-screenshot-en.png`，标注英文界面示例。更新截图时同步维护对应语言页面的资源引用与说明文字。
 
 ## 发布与回滚
 

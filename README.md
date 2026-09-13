@@ -9,7 +9,7 @@ window/AFK activity and in-app context titles for Wiki aggregation. Filesystem m
 folders explicitly configured by the user is stored locally, exposed through FileTools and the
 desktop API, and retained in local event history through metadata-only heartbeats.
 
-![SelfAnalyst desktop chat interface](docs/mockups/desktop-chat-screenshot.png)
+![SelfAnalyst desktop chat interface](docs/mockups/desktop-chat-screenshot-en.png)
 
 > This screenshot shows the desktop chat interface: the session list, conversation area, and a
 > side panel with current status, recent activity, suggested to-dos, long-term memory, and context options.

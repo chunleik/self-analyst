@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN" data-language="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="用 SelfAnalyst 回顾活动、理解时间、整理下一步。本地优先的个人活动分析工具，支持 Windows 安装包与便携包。">
+  <title>SelfAnalyst — 让每一天，都有迹可循</title>
+  <link rel="alternate" hreflang="en" href="../en/">
+  <link rel="alternate" hreflang="zh-CN" href="./">
+  <link rel="stylesheet" href="../assets/site.css">
+  <script src="../assets/language.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+<header><div class="wrap nav">
+  <a class="brand" href="./" aria-label="SelfAnalyst 首页"><span class="mark" aria-hidden="true">↗</span>SelfAnalyst</a>
+  <nav aria-label="主导航"><a href="#features">功能</a><a href="#privacy">隐私</a><a href="#start">快速开始</a><a href="#download">下载</a><a class="language" href="../en/" lang="en" aria-label="切换为英文">English ↗</a></nav>
+</div></header>
+<main id="main">
+  <div class="wrap hero">
+    <span class="badge"><span class="dot" aria-hidden="true"></span> 本地优先 · Windows 桌面应用</span>
+    <h1>让每一天，<br><em>都有迹可循。</em></h1>
+    <p class="intro">时间花在哪里，思路走到哪里。<br>从日常活动中找回上下文，和你的个人分析助手一起，理清下一步。</p>
+    <div class="actions"><a class="button primary" href="#download">获取 Windows 版 <span aria-hidden="true">↓</span></a><a class="button" href="https://github.com/chunleik/self-analyst">查看 GitHub <span aria-hidden="true">↗</span></a></div>
+    <p class="small">安装到自己的电脑 · 支持简体中文与英文</p>
+    <figure class="product"><img src="../assets/desktop-chat.png" width="2404" height="1660" alt="SelfAnalyst 桌面会话界面：左侧会话列表、中间对话、右侧活动状态和长期记忆面板"><figcaption>产品实机界面 · 中文界面示例，展示会话、活动上下文与长期记忆。</figcaption></figure>
+    <div class="principles"><span>活动数据本地保存</span><span>按上下文回顾与对话</span><span>自行选择模型服务</span></div>
+  </div>
+  <section id="features" class="wrap">
+    <div class="section-top"><div class="eyebrow">从记录，到理解</div><h2>把零散的活动，<br>连成自己的思路。</h2><p>不必凭记忆重建一天。让活动事实、会话和记忆成为回顾的起点。</p></div>
+    <div class="grid">
+      <article class="card"><span class="number">01 / 回顾</span><h3>找回活动上下文</h3><p>记录应用、窗口标题和活跃状态，结合活动摘要，了解最近在做什么、时间花在哪里。</p></article>
+      <article class="card"><span class="number">02 / 对话</span><h3>向自己的历史提问</h3><p>通过 Agent 会话回顾活动，结合上下文梳理行为与待办。使用前在桌面设置中配置模型服务。</p></article>
+      <article class="card"><span class="number">03 / 积累</span><h3>保留值得记住的线索</h3><p>通过 Wiki 聚合与长期记忆连接历史线索；按需启用指定目录的文件元数据采集，了解文件变化。</p></article>
+    </div>
+  </section>
+  <section id="privacy" class="privacy"><div class="wrap split">
+    <div><div class="eyebrow">清晰的数据边界</div><h2>本地优先。<br>知道记录了什么。</h2><p>活动与会话数据保存在本机。采集范围和可选联网能力，分别说明、分别配置。</p><a href="https://github.com/chunleik/self-analyst/blob/main/PRIVACY.md">阅读完整隐私说明 ↗</a></div>
+    <div><ul><li><strong>保留标题，不持久化正文。</strong>标题识别可能临时读取无障碍信息，但不保存 UIA 正文或控件树。</li><li><strong>文件采集仅限元数据。</strong>只在显式配置的目录内采集文件名、路径、大小和时间，不读取普通文件正文。</li><li><strong>不采集截图、OCR 或音频。</strong>识别失败时回退到系统窗口标题。</li></ul><p class="note">本地优先不代表全部离线。启用 LLM、Embedding 或联网搜索时，相关输入会发送到你配置的服务；文件元数据作为工具结果时也可能进入模型会话。</p></div>
+  </div></section>
+  <section id="start" class="wrap">
+    <div class="section-top"><div class="eyebrow">快速开始</div><h2>从自己的电脑开始。</h2></div>
+    <div class="steps">
+      <article class="step"><span>01</span><h3>选择并运行分发包</h3><p>在 Releases 中选择 Windows x64 安装包，或解压便携包后运行程序。分发包已包含 Java runtime；桌面界面使用系统 WebView2 Runtime。</p></article>
+      <article class="step"><span>02</span><h3>连接你的模型</h3><p>在桌面「设置 → 模型设置」填写服务地址、模型与 API 密钥，测试连接后保存。密钥只在桌面应用中填写。</p><a href="https://github.com/chunleik/self-analyst/blob/main/docs/llm-settings.md">模型设置指南 ↗</a></article>
+      <article class="step"><span>03</span><h3>开始第一次回顾</h3><p>积累活动后，试着问「我今天主要在做什么？」。文件采集默认关闭，需要时启用并添加监控目录。关闭窗口会隐藏到托盘；退出请使用托盘菜单。</p></article>
+    </div>
+  </section>
+  <div id="download" class="wrap download">
+    <div class="eyebrow">下载 SelfAnalyst</div><h2>下一次回顾，<br>从今天开始。</h2><p>适用于 Windows 10 / 11 x64。前往 GitHub Releases 选择分发包。</p>
+    <div class="grid">
+      <article class="card"><h3>Windows 安装包</h3><p>适合日常使用。按安装向导完成安装，用户数据保存在应用数据目录，升级与卸载时保留。</p><a class="button" href="https://github.com/chunleik/self-analyst/releases/latest">前往 Releases 选择安装包 ↗</a></article>
+      <article class="card"><h3>便携包</h3><p>解压即可运行。用户数据保存在程序旁的 data 目录，移动或备份时请连同整个文件夹一起处理。</p><a class="button" href="https://github.com/chunleik/self-analyst/releases/latest">前往 Releases 选择便携包 ↗</a></article>
+    </div><p class="small">Releases 同时提供 SHA-256 校验文件。 <a href="https://github.com/chunleik/self-analyst/releases">查看全部版本与更新说明 ↗</a></p>
+  </div>
+</main>
+<footer><div class="wrap footer-row"><a class="brand" href="./"><span class="mark" aria-hidden="true">↗</span>SelfAnalyst</a><div class="footer-links"><a href="https://github.com/chunleik/self-analyst">源码</a><a href="https://github.com/chunleik/self-analyst/blob/main/README.zh-CN.md">使用文档</a><a href="https://github.com/chunleik/self-analyst/issues">问题反馈</a><a href="../en/" lang="en">English</a></div></div></footer>
+</body>
+</html>

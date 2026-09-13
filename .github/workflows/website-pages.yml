@@ -1,0 +1,56 @@
+name: 官网验证与发布
+
+on:
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'scripts/website.test.mjs'
+      - '.github/workflows/website-pages.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'scripts/website.test.mjs'
+      - '.github/workflows/website-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 官网检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: 验证双语与静态资源
+        run: node --test scripts/website.test.mjs
+
+  deploy:
+    name: 发布 GitHub Pages
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: website-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: website
+      - name: 部署官网
+        id: deployment
+        uses: actions/deploy-pages@v4

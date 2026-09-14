@@ -14,8 +14,6 @@ const agentSource = fs.readFileSync(
 
 function createSandbox(summary) {
   const timeline = { innerHTML: summary ? "cached-timeline" : '<div class="loading-placeholder">加载中...</div>' };
-  const advice = { innerHTML: summary ? "cached-advice" : '<div class="loading-placeholder">分析行为数据中...</div>' };
-  const tasks = { innerHTML: "" };
   let summaryCalls = 0;
   const sandbox = {
     state: {
@@ -30,7 +28,6 @@ function createSandbox(summary) {
         tabChat: { classList: { toggle() {} } },
         tabFiles: { classList: { toggle() {} } },
         timelineBody: timeline,
-        tasksBody: tasks,
         errorOverlay: { classList: { add() {}, remove() {} } },
         errorMessage: { textContent: "" },
         backendDot: { className: "", title: "" },
@@ -47,8 +44,6 @@ function createSandbox(summary) {
       },
     },
     document: { getElementById(id) {
-      if (id === "behavior-advice-card") return { classList: { remove() {}, add() {} } };
-      if (id === "behavior-advice-body") return advice;
       return null;
     } },
     api: {
@@ -65,6 +60,8 @@ function createSandbox(summary) {
     formatRelativeTime() { return ""; },
     formatDate() { return ""; },
     priorityBadge() { return ""; },
+    setInterval(callback) { sandbox.refresh = callback; return 1; },
+    clearInterval() {},
     setTimeout,
     clearTimeout,
     hideError() {},
@@ -77,7 +74,6 @@ function createSandbox(summary) {
     focusChatComposer() {},
     summaryCalls() { return summaryCalls; },
     timeline,
-    advice,
   };
   vm.createContext(sandbox);
   vm.runInContext(uiSource + "\n" + agentSource, sandbox);
@@ -92,7 +88,6 @@ test("loadAll keeps an existing snapshot instead of the loading placeholder", ()
   sandbox.loadAll();
   assert.match(sandbox.timeline.innerHTML, /昨天在开会/);
   assert.doesNotMatch(sandbox.timeline.innerHTML, /加载中/);
-  assert.doesNotMatch(sandbox.advice.innerHTML, /分析行为数据中/);
 });
 
 test("loadAll without a snapshot leaves the loading placeholder", () => {
@@ -122,4 +117,67 @@ test("switching back to the agent tab does not fetch summary", () => {
   sandbox.switchTab("chat");
   sandbox.switchTab("agent");
   assert.equal(sandbox.summaryCalls(), 0);
+});
+
+test("dashboard refresh and task loading work without removed panel nodes", async () => {
+  const sandbox = createSandbox({ timeline: [{ label: "今天", headline: "旧摘要" }] });
+  sandbox.api.getTasks = async () => [{ id: "task-1", status: "open", title: "待办" }];
+  sandbox.api.getSummary = async () => ({
+    behaviorAdvice: { type: "suggestion", title: "不应展示的顶部建议" },
+    timeline: [{ label: "今天", headline: "新摘要", suggestion: "保留条目建议" }],
+  });
+  sandbox.startAutoRefresh();
+  sandbox.refresh();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.match(sandbox.timeline.innerHTML, /新摘要/);
+  assert.match(sandbox.timeline.innerHTML, /保留条目建议/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /不应展示的顶部建议/);
+  await sandbox.loadTasks();
+  assert.equal(sandbox.state.tasks[0].title, "待办");
+  sandbox.api.getTasks = async () => { throw new Error("offline"); };
+  await sandbox.loadTasks();
+  assert.equal(sandbox.state.tasks[0].id, "task-1");
+});
+
+test("empty summary renders only the timeline empty state", () => {
+  const sandbox = createSandbox({ behaviorAdvice: null, timeline: [] });
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /timeline.insufficient/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /behavior-advice|tasks-empty/);
+});
+
+test("event setup without task nodes preserves timeline expand and discuss", () => {
+  const sandbox = createSandbox({ timeline: [{ key: "today", label: "今天", headline: "活动摘要" }] });
+  const listeners = {};
+  const element = () => ({
+    addEventListener() {}, querySelector() { return element(); }, querySelectorAll() { return []; },
+  });
+  for (const node of Object.values(sandbox.state.dom)) {
+    if (node && !Array.isArray(node)) Object.assign(node, element());
+  }
+  sandbox.state.dom = new Proxy(sandbox.state.dom, {
+    get(target, key) {
+      if (key === "tasksBody") throw new Error("Removed task panel must not be accessed");
+      return target[key] ?? element();
+    },
+  });
+  sandbox.timeline.addEventListener = (event, handler) => { listeners[event] = handler; };
+  sandbox.document.addEventListener = () => {};
+  for (const name of ["handleConfigFieldChange", "openFileStatusEntry", "openFileSettingsModal",
+    "closeFileSettingsModal", "saveFileSettings", "closeChat", "sendChatMessage", "sendChatTabMessage"]) {
+    sandbox[name] = () => {};
+  }
+  sandbox.openChatTabWithContext = context => { sandbox.discussContext = context; };
+  vm.runInContext(fs.readFileSync(new URL("../../main/resources/desktop-ui/events.js", import.meta.url), "utf8"), sandbox);
+  sandbox.setupEvents();
+  let expanded = false;
+  const entry = { classList: { toggle(name) { assert.equal(name, "expanded"); expanded = !expanded; } } };
+  listeners.click({ target: { closest(selector) { return selector === ".timeline-entry" ? entry : null; } } });
+  assert.equal(expanded, true);
+  const button = { dataset: { entryIdx: "0" }, classList: { contains: name => name === "timeline-entry-discuss-btn" } };
+  button.closest = selector => selector === "button" ? button : entry;
+  listeners.click({ target: button });
+  assert.equal(sandbox.discussContext.type, "timeline_entry");
+  assert.equal(sandbox.discussContext.id, "today");
+  assert.equal(sandbox.discussContext.headline, "活动摘要");
 });

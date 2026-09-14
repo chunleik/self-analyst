@@ -15,7 +15,7 @@
   <div class="nav-left">
     <span class="brand">SelfAnalyst</span>
     <nav class="tabs">
-      <button class="tab active" data-tab="agent" data-i18n="tab.agent">Agent</button>
+      <button class="tab active" data-tab="agent" data-i18n="tab.agent">看板</button>
       <button class="tab" data-tab="chat" data-i18n="tab.chat">会话</button>
       <button class="tab hidden" data-tab="files" data-i18n="tab.files">文件</button>
     </nav>
@@ -42,45 +42,19 @@
 <!-- ======== MAIN CONTENT ======== -->
 <main id="main-content">
 
-  <!-- ===== AGENT TAB ===== -->
+  <!-- ===== 看板 ===== -->
   <section id="tab-agent" class="tab-content active">
-    <div class="agent-grid">
-
-      <!-- Left Column: Behavior Advice + Timeline -->
-      <div class="agent-left">
-        <!-- Behavior Advice Card (SPEC-ADV-IA-001, SPEC-ADV-IA-002) -->
-        <div id="behavior-advice-card" class="card behavior-advice-card">
-          <div class="card-body" id="behavior-advice-body">
-            <div class="loading-placeholder" data-i18n="advice.analyzing">分析行为数据中...</div>
-          </div>
+    <div class="dashboard-layout">
+      <div id="timeline" class="card timeline-card">
+        <div class="card-header">
+          <h2 class="card-title" data-i18n="timeline.title">时间轴</h2>
         </div>
-
-        <!-- Timeline -->
-        <div id="timeline" class="card timeline-card">
-          <div class="card-header">
-            <h2 class="card-title" data-i18n="timeline.title">时间轴</h2>
-          </div>
-          <div class="card-body" id="timeline-body">
-            <div class="loading-placeholder" data-i18n="common.loading">加载中...</div>
-          </div>
+        <div class="card-body" id="timeline-body">
+          <div class="loading-placeholder" data-i18n="common.loading">加载中...</div>
         </div>
       </div>
-
-      <!-- Right Column: Future Tasks -->
-      <div class="agent-right">
-        <div id="future-tasks-panel" class="card fixed-card">
-          <div class="card-header">
-            <h2 class="card-title" data-i18n="tasks.title">未来任务</h2>
-          </div>
-          <div class="card-body" id="tasks-body">
-            <div class="loading-placeholder" data-i18n="common.loading">加载中...</div>
-          </div>
-        </div>
-      </div>
-
     </div>
   </section>
-
   <!-- ===== FILES TAB ===== -->
   <section id="tab-files" class="tab-content">
     <div class="file-page">

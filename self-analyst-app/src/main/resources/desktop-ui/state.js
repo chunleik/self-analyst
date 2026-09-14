@@ -29,7 +29,6 @@ var state = {
   chatMessages: [],
   loading: true,
   error: null,
-  editingTaskId: null,
   configDirty: false,
   configChangedSections: 0,
   configRawText: "",

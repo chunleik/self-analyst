@@ -19,9 +19,8 @@ function cacheDom() {
     fileText: $("#file-text"),
     llmDot: $("#llm-dot"),
     llmText: $("#llm-text"),
-    // Agent tab
+    // 看板
     timelineBody: $("#timeline-body"),
-    tasksBody: $("#tasks-body"),
     // Config modal
     configGrid: $("#config-grid"),
     configModal: $("#config-modal"),

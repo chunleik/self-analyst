@@ -80,7 +80,7 @@
   "error.llmSettings.unsupported_toml_edit": "This TOML cannot be safely edited in place. Use Advanced configuration. The file was not changed.",
   "error.llmSettings.credential_required": "The address changed. Enter the target service key before testing.",
   "error.llmSettings.save": "Could not read, save, or apply settings. Check file permissions and runtime status.",
-  "tab.agent": "Agent",
+  "tab.agent": "Dashboard",
   "tab.chat": "Chat",
   "tab.files": "Files",
   "status.service": "Service",

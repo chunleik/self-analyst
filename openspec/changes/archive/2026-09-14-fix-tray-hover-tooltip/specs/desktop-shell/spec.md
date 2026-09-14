@@ -22,4 +22,3 @@ Windows 系统托盘图标的悬停提示 SHALL 显示非空产品名称 `SelfAn
 #### Scenario: 悬停识别应用
 - **WHEN** 用户将鼠标悬停在 Windows 系统托盘中的应用图标上，主窗口可见或已隐藏
 - **THEN** 系统提示显示产品名称 SelfAnalyst，不显示空白提示
-

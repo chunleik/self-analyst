@@ -968,9 +968,11 @@ function renderLegacyChatThread() {
       }
       html += '</div>';
     }
+    if (typeof documentSlotHtml === "function") html += documentSlotHtml(session, i);
     html += '</div>';
   }
   thread.innerHTML = html;
+  if (typeof mountChatDocuments === "function") mountChatDocuments();
   thread.scrollTop = thread.scrollHeight;
 
   // Bind retry buttons

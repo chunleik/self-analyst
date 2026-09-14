@@ -11,6 +11,23 @@ const ui = path.resolve(here, "../../main/resources/desktop-ui");
 const adapterSource = fs.readFileSync(path.join(ui, "deep-chat-adapter.js"), "utf8");
 const html = fs.readFileSync(path.join(ui, "index.html"), "utf8");
 
+test("document slots follow their canonical assistant turn without changing text", () => {
+  const { box, session } = sandbox();
+  vm.runInContext(fs.readFileSync(path.join(ui, "documents.js"), "utf8"), box);
+  session.messages = [
+    { id: 'u1', role: 'user', content: 'export' },
+    { id: 'a1', role: 'assistant', content: 'ready', status: 'error' },
+    { id: 'u2', role: 'user', content: 'again' },
+    { id: 'a2', role: 'assistant', content: 'working', status: 'pending' }
+  ];
+  const messages = box.deepChatDisplayMessages(session);
+  assert.equal(messages.length, 4);
+  assert.equal(messages[0].html, undefined);
+  assert.match(messages[1].html, /data-document-turn="u1"/);
+  assert.match(messages[3].html, /data-document-turn="u2"/);
+  assert.equal(messages[3].text, 'working');
+});
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")

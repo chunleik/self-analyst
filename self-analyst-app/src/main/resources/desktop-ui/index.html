@@ -120,6 +120,10 @@
         <div class="chat-workspace-header">
           <span id="chat-session-title" class="chat-session-title" data-i18n="chat.selectOrCreate">选择或创建会话</span>
         </div>
+        <details id="chat-document-history" class="chat-document-history">
+          <summary data-i18n="document.title">会话文档</summary>
+          <div id="chat-document-list" aria-live="polite"></div>
+        </details>
         <div id="chat-thread" class="chat-thread deep-chat-host">
           <deep-chat id="deep-chat" aria-label="SelfAnalyst chat"></deep-chat>
         </div>
@@ -139,10 +143,6 @@
 
       <!-- RIGHT: context panel -->
       <aside class="chat-context-panel">
-        <div class="chat-context-section">
-          <h4 data-i18n="document.title">会话文档</h4>
-          <div id="chat-document-list" aria-live="polite"></div>
-        </div>
         <div id="chat-context-summary" class="chat-context-section">
           <h4 data-i18n="chat.ctxCurrentStatus">当前状态</h4>
           <div class="chat-context-content" data-i18n="common.noData">暂无数据</div>

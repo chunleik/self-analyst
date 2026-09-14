@@ -68,9 +68,12 @@ Build an NSIS installer with the same backend and jlink JRE:
 ```
 
 Output is written to `artifacts/`, with `.sha256` files for the ZIP archive and installer.
-Both the installer and the standalone ZIP use `%LOCALAPPDATA%\com.selfanalyst.desktop` for runtime data by default, keeping the same directory across upgrades and changes to the extraction location.
-The standalone package uses `data/` beside the executable only when a regular `portable.marker` file exists in the same directory as the EXE.
-Existing compatible data without a format marker receives one in place after a read-only check; data from other directories is not moved automatically. See the [runtime data guide](docs/runtime-storage.md).
+Both the installer and portable ZIP store runtime data in `%LOCALAPPDATA%\com.selfanalyst.desktop`
+by default and continue using the same directory after upgrades or extraction to a different location.
+The portable package uses `data/` next to the executable only when a regular file named
+`portable.marker` exists in the same directory as the EXE.
+Existing compatible data without a marker is checked without modification before a marker is added
+in place; data from other directories is not moved automatically. See the [runtime data guide](docs/runtime-storage.md).
 Release packages do not include PaddleOCR, Tesseract, Whisper, or speech models.
 
 ## Interface language

@@ -79,12 +79,47 @@ class LlmHotReloadIntegrationTest {
             agent = new SelfAnalystAgent(config, null, null, store, null, meter);
         }
         ConfigApplicationService config() { return agent.configuration(); }
-        public void close() {
-            agent.close();
-            server.stop(0);
-            requests.shutdownNow();
+        public void close() throws Exception {
+            // 逆序清理：先收敛 Agent，再排空用量写入，最后停止 HTTP 服务并等待请求退出。
+            try (requests;
+                 AutoCloseable stopServer = () -> {
+                     try { server.stop(0); }
+                     finally { requests.shutdownNow(); }
+                 };
+                 AutoCloseable flushUsage = meter::flush) {
+                agent.close();
+            }
         }
     }
+    @Test void fixtureCloseFlushesUsageAndStopsBackgroundWork(@TempDir Path dir) throws Exception {
+        Fixture f = new Fixture(dir, "key");
+        try {
+            String day;
+            try (f) {
+                f.meter.record(UsageMeter.Category.AGENT, 5, 2);
+                f.meter.record(UsageMeter.Category.AGENT, 3, 1);
+                day = f.meter.snapshot().get("date").toString();
+            }
+            assertTrue(persistExecutor(f.meter).isTerminated(),
+                    "夹具关闭后用量后台写线程必须终止，避免与临时目录清理竞争");
+            assertTrue(f.requests.isTerminated(), "夹具关闭后 HTTP 请求执行器必须终止");
+            JsonNode usage = JSON.readTree(dir.resolve("usage/usage-" + day + ".json").toFile())
+                    .path("categories").path("agent");
+            assertEquals(8, usage.path("inputTokens").asLong());
+            assertEquals(3, usage.path("outputTokens").asLong());
+            assertEquals(2, usage.path("calls").asLong());
+        } finally {
+            // 回归断言失败时也排空写入，防止测试自身污染 @TempDir 清理。
+            f.meter.flush();
+        }
+    }
+
+    private static ExecutorService persistExecutor(UsageMeter meter) throws ReflectiveOperationException {
+        var field = UsageMeter.class.getDeclaredField("persistExecutor");
+        field.setAccessible(true);
+        return (ExecutorService) field.get(meter);
+    }
+
     @Test void oldAnswerAndNewSummaryUseTheirOwnVersions(@TempDir Path dir) throws Exception {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);

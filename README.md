@@ -68,10 +68,10 @@ Build an NSIS installer with the same backend and jlink JRE:
 ```
 
 Output is written to `artifacts/`, with `.sha256` files for the ZIP archive and installer.
-安装版与免安装 ZIP 默认将运行数据放在 `%LOCALAPPDATA%\com.selfanalyst.desktop`，升级或换解压位置继续使用同一目录。
-免安装包只有在 EXE 同级存在 `portable.marker` 普通文件时，才使用程序旁的 `data/`。
-无标记的已有兼容数据经只读检查后原地补标记，不自动搬运其他目录数据。详见[运行数据指南](docs/runtime-storage.md)。
-发布包不包含 PaddleOCR、Tesseract、Whisper 或语音模型。
+Both the installer and the standalone ZIP use `%LOCALAPPDATA%\com.selfanalyst.desktop` for runtime data by default, keeping the same directory across upgrades and changes to the extraction location.
+The standalone package uses `data/` beside the executable only when a regular `portable.marker` file exists in the same directory as the EXE.
+Existing compatible data without a format marker receives one in place after a read-only check; data from other directories is not moved automatically. See the [runtime data guide](docs/runtime-storage.md).
+Release packages do not include PaddleOCR, Tesseract, Whisper, or speech models.
 
 ## Interface language
 
@@ -209,8 +209,18 @@ This project is licensed under the [Apache License 2.0](LICENSE). See also [NOTI
 Third-party components used by the project or included in release distributions, along with their
 licenses, are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-### 长期记忆与会话澄清
+### Long-term memory and clarification in chat
 
-长期记忆默认在后台自动总结和筛选，会话页不再展示审批面板。具有长期价值且证据充分的内容自动保存；凭据、敏感推断、低可信内容和一次性操作流水被过滤。旧的待确认记忆会在启动后后台重新评估：合格项生效，其余删除，模型或保存失败时保留原记录并稍后重试。显式关闭自动总结的会话保持关闭，旧的全部确认策略兼容为自动筛选。
+Long-term memory is summarized and filtered automatically in the background by default, and the chat
+page no longer shows an approval panel. Information with lasting value and sufficient evidence is
+saved automatically; credentials, sensitive inferences, low-confidence content, and one-off activity
+logs are filtered out. Previously pending memories are reassessed in the background after startup:
+qualifying entries become active, while the rest are deleted. If the model or a save operation fails,
+the original records are retained for a later retry. Sessions with automatic summarization explicitly
+disabled remain disabled, and the legacy confirm-all policy is treated as automatic filtering.
 
-如果发现记忆不准确，可以直接说“你记错了，我目前维护的是另一个项目”，或“忘记关于这个项目的记忆”。目标不明确时助手会先追问；目标明确后更正或停用对应记忆，只有保存成功才确认完成。显式纠错也适用于关闭自动总结的会话。
+If a memory is inaccurate, you can say, "You remembered that incorrectly; I am now maintaining a
+different project," or "Forget the memory about this project." The assistant asks a follow-up question
+when the target is unclear. Once the target is clear, it corrects or disables the relevant memory and
+confirms completion only after saving successfully. Explicit corrections also work in sessions with
+automatic summarization disabled.

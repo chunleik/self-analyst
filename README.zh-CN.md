@@ -66,8 +66,10 @@ pnpm tauri dev
 .\scripts\build-installer.ps1
 ```
 
-输出位于 `artifacts/`，并为 ZIP 和安装包生成 `.sha256` 文件。安装模式把用户数据保存在 Tauri
-当前用户应用数据目录，不随应用文件升级或卸载；便携模式继续把 `data/` 放在可执行文件旁边。
+输出位于 `artifacts/`，并为 ZIP 和安装包生成 `.sha256` 文件。
+安装版与免安装 ZIP 默认将运行数据放在 `%LOCALAPPDATA%\com.selfanalyst.desktop`，升级或换解压位置继续使用同一目录。
+免安装包只有在 EXE 同级存在 `portable.marker` 普通文件时，才使用程序旁的 `data/`。
+无格式标记的已有兼容数据经只读检查后原地补标记，不自动搬运其他目录数据。详见[运行数据指南](docs/runtime-storage.md)。
 发布包不包含 PaddleOCR、Tesseract、Whisper 或语音模型。
 
 ## 界面语言
@@ -170,3 +172,9 @@ llm.api-key、llm.base-url、llm.model、llm.temperature、llm.max-tokens。正�
 
 本项目采用 [Apache License 2.0](LICENSE)，另见 [NOTICE](NOTICE)。依赖与随发布产物分发的
 第三方组件及其各自许可证见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+### 长期记忆与会话澄清
+
+长期记忆默认在后台自动总结和筛选，会话页不再展示审批面板。具有长期价值且证据充分的内容自动保存；凭据、敏感推断、低可信内容和一次性操作流水被过滤。旧的待确认记忆会在启动后后台重新评估：合格项生效，其余删除，模型或保存失败时保留原记录并稍后重试。显式关闭自动总结的会话保持关闭，旧的全部确认策略兼容为自动筛选。
+
+如果发现记忆不准确，可以直接说“你记错了，我目前维护的是另一个项目”，或“忘记关于这个项目的记忆”。目标不明确时助手会先追问；目标明确后更正或停用对应记忆，只有保存成功才确认完成。显式纠错也适用于关闭自动总结的会话。

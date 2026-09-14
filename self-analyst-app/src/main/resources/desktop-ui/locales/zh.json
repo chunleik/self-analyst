@@ -80,7 +80,7 @@
   "error.llmSettings.unsupported_toml_edit": "此 TOML 写法无法安全定向编辑，请使用高级配置。原文件未修改。",
   "error.llmSettings.credential_required": "地址已改变，请重新输入目标服务密钥后再测试。",
   "error.llmSettings.save": "配置读取、保存或应用失败，请检查文件权限和运行状态。",
-  "tab.agent": "Agent",
+  "tab.agent": "看板",
   "tab.chat": "会话",
   "tab.files": "文件",
   "status.service": "服务",

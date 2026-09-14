@@ -178,7 +178,6 @@ function closeConfigModal() {
 function loadAll() {
   hideError();
   if (state.summary && state.tab === "agent") {
-    renderBehaviorAdvice();
     renderTimeline();
   }
   state.loading = !state.summary;
@@ -207,7 +206,6 @@ function loadAll() {
       hideError();
     }
     updateStatusBar();
-    renderTasks();
   });
 
   // Phase 2: summary may refresh the open window; keep any existing snapshot on screen.
@@ -216,7 +214,6 @@ function loadAll() {
       if (summary) state.summary = summary;
       state.loading = false;
       if (state.tab === "agent" && state.summary) {
-        renderBehaviorAdvice();
         renderTimeline();
       }
     })
@@ -255,14 +252,11 @@ function loadConfig() {
 }
 
 function loadTasks() {
-  api.getTasks()
+  return api.getTasks()
     .then(function (tasks) {
       state.tasks = tasks || [];
-      renderTasks();
     })
-    .catch(function () {
-      renderTasks();
-    });
+    .catch(function () {});
 }
 
 // ---- Auto-refresh ----
@@ -291,13 +285,11 @@ function startAutoRefresh() {
       state.tasks = results[1] || state.tasks;
       state.usage = results[2] || state.usage;
       updateStatusBar();
-      renderTasks();
     });
     // Summary refresh separately; keep the last rendered snapshot if the request fails.
     api.getSummary().then(function (summary) {
       if (!summary) return;
       state.summary = summary;
-      renderBehaviorAdvice();
       renderTimeline();
     }).catch(function () {});
   }, 30000);

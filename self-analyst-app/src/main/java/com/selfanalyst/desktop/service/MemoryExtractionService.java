@@ -95,18 +95,20 @@ public class MemoryExtractionService {
         }
         if (!action.isEmpty() && !"add".equals(action)) return;
         if (candidate.content() == null || candidate.content().isBlank()) return;
-        String status = shouldAutoActivate(session, candidate) ? "active" : "pending";
+        if (!shouldAutoActivate(session, candidate)) return;
+        String status = "active";
         memoryService.createExtracted(
                 candidate.type(), candidate.content(), candidate.evidence(), clamp(candidate.confidence()),
-                candidate.sensitive(), candidate.approvalPolicy(), status, session.id,
+                candidate.sensitive(), "auto", status, session.id,
                 messageIds(user, assistant));
     }
 
     private static boolean shouldAutoActivate(ChatSessionStore.Session session, Candidate candidate) {
-        if ("confirm_all".equals(session.memoryPolicy)) return false;
         if (candidate.sensitive()) return false;
         if (candidate.confidence() < 8) return false;
-        return "auto".equals(candidate.approvalPolicy());
+        return Boolean.TRUE.equals(candidate.durable())
+                && Boolean.TRUE.equals(candidate.supported())
+                && candidate.evidence() != null && !candidate.evidence().isBlank();
     }
 
     private static List<String> messageIds(ChatSessionStore.Message user, ChatSessionStore.Message assistant) {
@@ -162,6 +164,6 @@ public class MemoryExtractionService {
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Candidate(String action, String id, String targetId,
                      String type, String content, String evidence, int confidence,
-                     boolean sensitive, String approvalPolicy) {
+                     boolean sensitive, String approvalPolicy, Boolean durable, Boolean supported) {
     }
 }

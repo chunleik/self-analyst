@@ -14,15 +14,9 @@ const api = read("../../main/resources/desktop-ui/api.js");
 ].forEach((name) => assert.match(api, new RegExp(name + "\\s*:"), `api.js missing ${name}`));
 
 const chat = read("../../main/resources/desktop-ui/chat.js");
-assert.match(chat, /renderChatMemoryPanel/, "chat.js should render memory panel");
-assert.match(chat, /memoryLoadError/, "chat.js should track memory load failure");
-assert.match(chat, /memory\.loadFailed/, "chat.js should render memory load failure copy");
-assert.match(chat, /session-memory-policy/, "chat.js should bind session memory policy");
-assert.match(chat, /memory-pending-count/, "chat.js should show pending memory count");
-assert.match(chat, /memory-approve/, "chat.js should expose pending approval");
-assert.match(chat, /memory-edit-approve/, "chat.js should expose edit-before-approval");
-assert.match(chat, /memory-reject/, "chat.js should expose pending rejection");
-assert.match(chat, /memory-panel-disable/, "chat.js should let users disable active memories");
+assert.doesNotMatch(chat, /renderChatMemoryPanel|loadMemoryForChat|refreshMemoryPanelSoon|api\.listMemory/, "chat must not load or render the removed panel");
+const html = read("../../main/resources/desktop-ui/index.html");
+assert.doesNotMatch(html, /chat-memory-section|chat-memory-content/, "removed panel must not leave a layout placeholder");
 
 const config = read("../../main/resources/desktop-ui/config.js");
 assert.doesNotMatch(config, /renderMemoryManager|memory-manager-/, "config modal must not contain memory management");

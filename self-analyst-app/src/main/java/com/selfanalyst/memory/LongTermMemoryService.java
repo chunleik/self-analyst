@@ -142,6 +142,39 @@ public class LongTermMemoryService {
         return removed;
     }
 
+    public synchronized boolean resolvePending(GrowthProfile.MemoryItem expected, boolean keep,
+                                               int confidence) throws IOException {
+        List<GrowthProfile.MemoryItem> items = store.profile().getMemories();
+        int index = items.indexOf(expected);
+        if (index < 0 || !"pending".equals(expected.status())) return false;
+        List<GrowthProfile.MemoryItem> snapshot = new ArrayList<>(items);
+        if (keep) {
+            rejectForbidden(expected.content());
+            rejectForbidden(expected.evidence());
+            items.set(index, new GrowthProfile.MemoryItem(expected.id(), expected.type(), expected.content(),
+                    expected.evidence(), clampConfidence(confidence), "active", false, "auto", expected.source(),
+                    expected.sourceSessionId(), expected.sourceMessageIds(), expected.createdAt(), Instant.now()));
+        } else {
+            items.remove(index);
+        }
+        saveOrRestore(items, snapshot);
+        return true;
+    }
+
+    public synchronized GrowthProfile.MemoryItem correct(String id, String expectedContent,
+                                                         String replacement, boolean forget) throws IOException {
+        GrowthProfile.MemoryItem item = store.profile().getMemories().stream()
+                .filter(m -> Objects.equals(id, m.id())).findFirst().orElse(null);
+        if (item == null || !Objects.equals(item.content(), expectedContent)) {
+            throw new IllegalArgumentException("Memory changed or not found; read it again before correcting");
+        }
+        if (!"active".equals(item.status()) && !"pending".equals(item.status())) {
+            throw new IllegalArgumentException("Memory is already disabled or rejected");
+        }
+        return update(id, null, forget ? null : normalizeContent(replacement),
+                forget ? null : "用户在会话中明确更正", 10, forget ? "disabled" : "active", false);
+    }
+
     public synchronized int disableMatching(String query) throws IOException {
         String target = fingerprint(query);
         if (target.isEmpty()) {

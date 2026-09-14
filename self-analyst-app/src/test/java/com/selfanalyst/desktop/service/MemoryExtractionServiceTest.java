@@ -27,7 +27,7 @@ class MemoryExtractionServiceTest {
 
         svc.extractAfterAssistantSent(session, user("我以后都希望你用中文回答。"), assistant("好的。"),
                 (prompt, timeout) -> """
-                        [{"type":"preference","content":"用户偏好使用中文交流。","evidence":"用户明确要求后续用中文。","confidence":9,"sensitive":false,"approvalPolicy":"auto"}]
+                        [{"type":"preference","content":"用户偏好使用中文交流。","evidence":"用户明确要求后续用中文。","confidence":9,"sensitive":false,"durable":true,"supported":true,"approvalPolicy":"auto"}]
                         """);
 
         List<GrowthProfile.MemoryItem> active = memory.list("active", null, null, null);
@@ -48,8 +48,7 @@ class MemoryExtractionServiceTest {
                         """);
 
         List<GrowthProfile.MemoryItem> pending = memory.list("pending", null, null, null);
-        assertEquals(1, pending.size());
-        assertTrue(pending.getFirst().sensitive());
+        assertEquals(0, pending.size());
     }
 
     @Test
@@ -59,11 +58,11 @@ class MemoryExtractionServiceTest {
 
         svc.extractAfterAssistantSent(session("confirm_all"), user("我偏好简洁回答。"), assistant("收到。"),
                 (prompt, timeout) -> """
-                        [{"type":"preference","content":"用户偏好简洁回答。","evidence":"用户明确说明。","confidence":9,"sensitive":false,"approvalPolicy":"auto"}]
+                        [{"type":"preference","content":"用户偏好简洁回答。","evidence":"用户明确说明。","confidence":9,"sensitive":false,"durable":true,"supported":true,"approvalPolicy":"auto"}]
                         """);
 
-        assertEquals(0, memory.list("active", null, null, null).size());
-        assertEquals(1, memory.list("pending", null, null, null).size());
+        assertEquals(1, memory.list("active", null, null, null).size());
+        assertEquals(0, memory.list("pending", null, null, null).size());
     }
 
     @Test
@@ -73,11 +72,11 @@ class MemoryExtractionServiceTest {
 
         svc.extractAfterAssistantSent(session("smart"), user("我也许更喜欢早上开会。"), assistant("可以试试。"),
                 (prompt, timeout) -> """
-                        [{"type":"preference","content":"用户可能偏好早上开会。","evidence":"低置信度推断。","confidence":7,"sensitive":false,"approvalPolicy":"auto"}]
+                        [{"type":"preference","content":"用户可能偏好早上开会。","evidence":"低置信度推断。","confidence":7,"sensitive":false,"durable":true,"supported":true,"approvalPolicy":"auto"}]
                         """);
 
         assertEquals(0, memory.list("active", null, null, null).size());
-        assertEquals(1, memory.list("pending", null, null, null).size());
+        assertEquals(0, memory.list("pending", null, null, null).size());
     }
 
     @Test
@@ -120,7 +119,7 @@ class MemoryExtractionServiceTest {
                 (prompt, timeout) -> """
                         [
                           {"type":"fact","content":"api-key=sk-test-secret123","evidence":"bad","confidence":10,"sensitive":true,"approvalPolicy":"confirm"},
-                          {"type":"preference","content":"用户偏好中文回答。","evidence":"用户明确说明。","confidence":9,"sensitive":false,"approvalPolicy":"auto"}
+                          {"type":"preference","content":"用户偏好中文回答。","evidence":"用户明确说明。","confidence":9,"sensitive":false,"durable":true,"supported":true,"approvalPolicy":"auto"}
                         ]
                         """);
 
@@ -158,7 +157,7 @@ class MemoryExtractionServiceTest {
                 (prompt, timeout) -> {
                     called.set(true);
                     return """
-                            [{"type":"preference","content":"用户倾向中文回答。","evidence":"same source","confidence":9,"sensitive":false,"approvalPolicy":"auto"}]
+                            [{"type":"preference","content":"用户倾向中文回答。","evidence":"same source","confidence":9,"sensitive":false,"durable":true,"supported":true,"approvalPolicy":"auto"}]
                             """;
                 });
 
@@ -179,7 +178,7 @@ class MemoryExtractionServiceTest {
                     assertTrue(prompt.length() < 11000, "prompt should bound copied chat text and memory snapshot");
                     return """
                             ```json
-                            [{"type":"goal","content":"User wants concise answers.","evidence":"User said so.","confidence":10,"sensitive":false,"approvalPolicy":"auto"}]
+                            [{"type":"goal","content":"User wants concise answers.","evidence":"User said so.","confidence":10,"sensitive":false,"durable":true,"supported":true,"approvalPolicy":"auto"}]
                             ```
                             """;
                 });
@@ -269,6 +268,22 @@ class MemoryExtractionServiceTest {
                 .findFirst()
                 .orElseThrow()
                 .status());
+    }
+
+    @Test
+    void rejectsOneOffAndUnsupportedButAcceptsSupportedPatterns() throws Exception {
+        var memory = new LongTermMemoryService(MemoryStore.load(tempDir));
+        var service = new MemoryExtractionService(memory, Lang.chinese());
+        service.extractAfterAssistantSent(session("smart"), user("持续学习知识图谱"), assistant("收到"),
+                (p,t) -> """
+                [
+                  {"type":"fact","content":"今天导出表格","evidence":"一次导出","confidence":9,"sensitive":false,"durable":false,"supported":true},
+                  {"type":"pattern","content":"猜测的习惯","evidence":"猜测","confidence":9,"sensitive":false,"durable":true,"supported":false},
+                  {"type":"pattern","content":"持续学习知识图谱","evidence":"多次明确说明","confidence":9,"sensitive":false,"durable":true,"supported":true}
+                ]
+                """);
+        assertEquals(1, memory.list("active", null, null, null).size());
+        assertTrue(memory.list("pending", null, null, null).isEmpty());
     }
 
     private static ChatSessionStore.Session session(String policy) {

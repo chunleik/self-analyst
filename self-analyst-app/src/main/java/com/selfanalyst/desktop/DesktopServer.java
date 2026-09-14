@@ -181,6 +181,17 @@ public class DesktopServer {
                 ? new MemoryExtractionService(longTermMemoryService, config.effectiveLanguage())
                 : null;
 
+        if (longTermMemoryService != null && agent != null) {
+            agent.registerMemoryTools(longTermMemoryService);
+            pendingMemoryReview = new com.selfanalyst.desktop.service.PendingMemoryReview(longTermMemoryService, config.effectiveLanguage());
+            pendingMemoryReview.start((prompt, timeout) -> {
+                try (var task = agent.plainTask()) {
+                    if (!task.available() || agent.isBudgetBlocked()) throw new IllegalStateException("LLM unavailable");
+                    return task.complete(prompt, timeout);
+                }
+            });
+        }
+
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
                 config, chatSessionStore, new SummarySnapshotStore(memoryDir), wikiStore);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
@@ -323,12 +334,15 @@ public class DesktopServer {
     }
 
     public void shutdown() {
+        if (pendingMemoryReview != null) pendingMemoryReview.close();
         try {
             if (statusCtrl != null) statusCtrl.close();
         } finally {
             chatSessionStore.close();
         }
     }
+
+    private com.selfanalyst.desktop.service.PendingMemoryReview pendingMemoryReview;
 
     private static String escapeJson(String s) {
         if (s == null) return "null";

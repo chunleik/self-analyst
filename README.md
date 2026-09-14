@@ -208,3 +208,9 @@ making changes, especially its sections on data boundaries and the specification
 This project is licensed under the [Apache License 2.0](LICENSE). See also [NOTICE](NOTICE).
 Third-party components used by the project or included in release distributions, along with their
 licenses, are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+### 长期记忆与会话澄清
+
+长期记忆默认在后台自动总结和筛选，会话页不再展示审批面板。具有长期价值且证据充分的内容自动保存；凭据、敏感推断、低可信内容和一次性操作流水被过滤。旧的待确认记忆会在启动后后台重新评估：合格项生效，其余删除，模型或保存失败时保留原记录并稍后重试。显式关闭自动总结的会话保持关闭，旧的全部确认策略兼容为自动筛选。
+
+如果发现记忆不准确，可以直接说“你记错了，我目前维护的是另一个项目”，或“忘记关于这个项目的记忆”。目标不明确时助手会先追问；目标明确后更正或停用对应记忆，只有保存成功才确认完成。显式纠错也适用于关闭自动总结的会话。

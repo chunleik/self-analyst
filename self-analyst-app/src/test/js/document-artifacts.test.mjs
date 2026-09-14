@@ -50,3 +50,95 @@ test('native cancel and failure retain the file and restore save button', async 
   button.onclick(); await new Promise(resolve => setImmediate(resolve));
   assert.equal(status.textContent, 'document.saveFailed'); assert.equal(context.documentView.documents.length, 1);
 });
+
+test('pagination retains older files after refresh and retry restores the list', async () => {
+  const { context, requests, panel } = environment();
+  const sid = context.state.activeChatSessionId;
+  async function page(more, documents, nextOffset, hasMore) {
+    const pending = context.refreshChatDocuments(true, more);
+    requests.at(-1).resolve({ json: async () => ({ documents, nextOffset, hasMore }) });
+    await pending;
+  }
+  await page(false, [artifact(sid)], 1, true);
+  await page(true, [artifact(sid, '2'.repeat(32))], 2, false);
+  await page(false, [artifact(sid)], 1, true);
+  assert.equal(context.documentView.documents.length, 2);
+  assert.equal(context.documentView.offset, 2);
+  assert.equal(context.documentView.hasMore, false);
+  const failed = context.refreshChatDocuments(true);
+  requests.at(-1).resolve({ json: async () => { throw new Error('offline'); } }); await failed;
+  assert.equal(panel.children[0].textContent, 'document.loadFailed');
+  await page(false, [artifact(sid)], 1, true);
+  assert.equal(panel.children.length, 2);
+});
+
+test('inline cards keep turn ownership and do not reset during unchanged polling', () => {
+  const { context } = environment();
+  const sid = context.state.activeChatSessionId;
+  const session = { id: sid, messages: [
+    { id: 'u1', role: 'user' }, { id: 'a1', role: 'assistant', status: 'error' },
+    { id: 'u2', role: 'user' }, { id: 'a2', role: 'assistant', status: 'pending' }
+  ] };
+  context.getActiveChatSession = () => session;
+  const slots = ['u1', 'u2'].map(turn => ({
+    children: [], getAttribute: () => turn,
+    replaceChildren() { this.children = []; }, appendChild(child) { this.children.push(child); }
+  }));
+  context.state.dom = { chatThread: { querySelectorAll: () => slots } };
+  context.documentView.sessionId = sid;
+  context.documentView.documents = [
+    { ...artifact(sid), userMessageId: 'u1' },
+    { ...artifact(sid, '2'.repeat(32)), userMessageId: 'u2', status: 'RUNNING' },
+    { ...artifact(sid, '3'.repeat(32)), userMessageId: 'u2' },
+    { ...artifact(sid, '4'.repeat(32)), userMessageId: 'trimmed' }
+  ];
+  assert.equal(context.documentTurnId(session, 0), null);
+  assert.equal(context.documentTurnId(session, 3), 'u2');
+  context.mountChatDocuments();
+  assert.equal(slots[0].children.length, 1);
+  assert.equal(slots[1].children.length, 2);
+  const card = slots[0].children[0];
+  context.mountChatDocuments();
+  assert.equal(slots[0].children[0], card);
+  assert.equal(slots[1].children[0].children[1].textContent, 'document.status.RUNNING');
+});
+
+test('saving feedback survives remount and browser download uses the protected route', async () => {
+  const { context, panel } = environment();
+  context.documentView.documents = [artifact(context.state.activeChatSessionId)];
+  context.renderDocumentCards(panel);
+  panel.children[0].children[2].onclick();
+  await new Promise(resolve => setImmediate(resolve));
+  panel.documentSignature = null; context.renderDocumentCards(panel);
+  assert.equal(panel.children[0].children[3].textContent, 'document.downloadStarted');
+  assert.match(context.document.body.children[0].href, /^\/desktop\/chat\/sessions\/[a-f0-9]+\/documents\/[a-f0-9]+\/content$/);
+});
+
+test('live attachments follow the streaming bubble without replacing message text', () => {
+  const { context } = environment();
+  const sid = context.state.activeChatSessionId;
+  const session = { id: sid, messages: [{ id: 'u1', role: 'user' }, { id: 'a1', role: 'assistant' }] };
+  let slot, placedAfter;
+  const user = { after(node) { slot = node; placedAfter = this; this.nextElementSibling = node; } };
+  const assistant = { textContent: 'streamed text', after: user.after };
+  let bubbles = [user];
+  context.document.createElement = () => ({ children: [], attrs: {},
+    setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; },
+    replaceChildren() { this.children = []; }, appendChild(n) { this.children.push(n); }
+  });
+  context.deepChatElement = () => ({ shadowRoot: { querySelectorAll(selector) {
+    return selector === '[data-document-turn]' ? (slot ? [slot] : []) : bubbles;
+  } } });
+  context.deepChatAdapterState = { requestSessionId: sid };
+  context.getActiveChatSession = () => session;
+  context.documentView.sessionId = sid;
+  context.documentView.documents = [{ ...artifact(sid), userMessageId: 'u1' }];
+  context.mountChatDocuments();
+  assert.equal(placedAfter, user);
+  const original = slot;
+  bubbles = [user, assistant]; context.mountChatDocuments();
+  assert.equal(slot, original);
+  assert.equal(placedAfter, assistant);
+  assert.equal(assistant.textContent, 'streamed text');
+  assert.equal(slot.children.length, 1);
+});

@@ -169,6 +169,7 @@ function configureDeepChat(element) {
     },
   };
   element.auxiliaryStyle = [
+    typeof documentCardStyles === "string" ? documentCardStyles : "",
     ".sa-chat-actions{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 2px}",
     ".sa-chat-action{border:1px solid var(--border-color);border-radius:6px;padding:5px 9px;background:var(--bg-card);color:var(--accent);font:inherit;font-size:11px;cursor:pointer}",
     ".sa-chat-action:hover{border-color:var(--accent);background:var(--accent-dim)}",
@@ -426,6 +427,10 @@ function deepChatDisplayMessages(session) {
       i === retryableAssistantIdx &&
         (session.messages[i].status === "error" || session.messages[i].status === "pending")
     ));
+    if (typeof documentSlotHtml === "function") {
+      var slot = documentSlotHtml(session, i);
+      if (slot) result[result.length - 1].html = (result[result.length - 1].html || "") + slot;
+    }
   }
   var transientError = deepChatTransientError(session.id);
   if (transientError) {
@@ -469,6 +474,7 @@ function renderDeepChatThread() {
   for (var i = 0; i < messages.length; i++) {
     element.addMessage(messages[i], true);
   }
+  if (typeof mountChatDocuments === "function") mountChatDocuments();
   var transientError = session ? deepChatTransientError(session.id) : null;
   if (transientError && transientError.draft) {
     element.defaultInput = { text: transientError.draft };

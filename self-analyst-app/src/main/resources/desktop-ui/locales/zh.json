@@ -12,7 +12,7 @@
   "storage.runtimeRoot": "运行目录",
   "storage.title": "运行数据",
 
-  "document.title": "会话文档",
+  "document.title": "全部会话文档",
   "document.empty": "可在聊天中要求生成报告、数据表或 PPT",
   "document.loadFailed": "暂时无法读取会话文档",
   "document.saveAs": "另存为",

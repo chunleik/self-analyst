@@ -12,7 +12,7 @@
   "storage.runtimeRoot": "Runtime directory",
   "storage.title": "Runtime data",
 
-  "document.title": "Session documents",
+  "document.title": "All session documents",
   "document.empty": "Ask for a report, spreadsheet, or presentation in chat",
   "document.loadFailed": "Session documents are temporarily unavailable",
   "document.saveAs": "Save as",

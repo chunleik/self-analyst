@@ -2285,10 +2285,16 @@ input:checked + .toggle-switch::after {
 .config-runtime-status:empty { display: none; }
 .config-runtime-status ul { margin: 6px 0; padding-left: 20px; }
 .config-runtime-status summary { cursor: pointer; }
-.document-card { display: flex; flex-direction: column; gap: 7px; padding: 12px 0; border-bottom: 1px solid var(--border-color, #ddd); overflow-wrap: anywhere; }
+.document-card { display: flex; flex-direction: column; gap: 7px; padding: 12px; border: 1px solid var(--border-color, #ddd); border-radius: 8px; overflow-wrap: anywhere; min-width: 0; background: var(--bg-card); }
 .document-card small { opacity: .75; }
+.document-card { color: var(--text-primary); }
 .document-card button { align-self: flex-start; }
 #chat-document-list { max-height: 360px; overflow-y: auto; }
+.chat-document-history { flex: 0 0 auto; min-width: 0; padding: 8px 16px; border-bottom: 1px solid var(--border-color); }
+.chat-document-history summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+.chat-document-history #chat-document-list { display: flex; flex-direction: column; gap: 8px; max-height: 25vh; }
+.chat-document-slot { display: flex; flex-direction: column; gap: 8px; min-width: 0; max-width: 100%; margin-top: 8px; }
+.chat-document-slot:empty { display: none; }
 .config-runtime-status table { width: 100%; margin-top: 8px; border-collapse: collapse; }
 .config-runtime-status th, .config-runtime-status td { padding: 6px 8px; text-align: left; word-break: break-word; }
 

@@ -287,7 +287,7 @@ public class SelfAnalystAgent implements AutoCloseable {
     private String buildSystemPrompt() {
         return AgentPrompts.systemPrompt(lang, "",
                 wikiStore != null, semanticEnabled, hasFileTools, hasConfigTools,
-                ZonedDateTime.now());
+                ZonedDateTime.now()) + "\n" + com.selfanalyst.i18n.Messages.text(lang, "memory.clarification");
     }
 
     public Mono<String> chat(String userInput) {
@@ -337,6 +337,12 @@ public class SelfAnalystAgent implements AutoCloseable {
             userInput = userInput != null ? userInput : "";
             existingHistory = existingHistory != null ? List.copyOf(existingHistory) : null;
         }
+    }
+
+    public void registerMemoryTools(com.selfanalyst.memory.LongTermMemoryService service) {
+        var tools = new com.selfanalyst.memory.MemoryTools(service);
+        toolkit.registerTool(tools);
+        if (agent != null && agent.getToolkit() != toolkit) agent.getToolkit().registerTool(tools);
     }
 
     public void registerDocumentTools(com.selfanalyst.document.DocumentService service) {

@@ -79,35 +79,4 @@ assert.equal(
   "发送失败: timeout",
 );
 
-const root = { innerHTML: "", textContent: "" };
-const draft = { value: "", oninput: null };
-const elements = {
-  "chat-memory-content": root,
-  "session-memory-policy": {},
-  "memory-draft-input": draft,
-  "memory-add-btn": {},
-};
-sandbox.document = {
-  getElementById(id) {
-    return elements[id] || null;
-  },
-  querySelectorAll() {
-    return [];
-  },
-};
-sandbox.state = {
-  activeChatSessionId: "session-1",
-  chatSessions: [{ id: "session-1", memoryPolicy: "smart" }],
-  memoryLoading: false,
-  memoryLoadError: null,
-  memoryItems: [],
-  pendingMemoryCount: 0,
-  memoryDraft: "未提交草稿",
-};
-
-sandbox.renderChatMemoryPanel();
-assert.equal(draft.value, "未提交草稿");
-assert.equal(typeof draft.oninput, "function");
-draft.value = "新的草稿";
-draft.oninput();
-assert.equal(sandbox.state.memoryDraft, "新的草稿");
+assert.equal(sandbox.renderChatMemoryPanel, undefined, "removed memory panel must not expose controls");

@@ -8,7 +8,7 @@
 
 - [x] 2.1 使用 JDK 21 执行 `mvn -pl self-analyst-app -am '-Dtest=LlmHotReloadIntegrationTest,UsageMeterTest,SelfAnalystAgentOpenAiCompatibilityTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`，确认全部通过并记录结果。
 - [x] 2.2 执行 `mvn test` 与 `openspec validate fix-llm-hot-reload-test-cleanup --strict`，记录结果；复核不涉及业务契约变更，确认无需同步主规格或修改用户文档。
-- [ ] 2.3 将测试修复及 OpenSpec 产物提交并推送到 PR #38 功能分支，更新 PR 标题和说明以覆盖最终变更、change 名称及验证结果；检查 PR 最新 head 的必需检查全部成功，包含 Windows 全量验证。
+- [x] 2.3 将测试修复及 OpenSpec 产物提交并推送到 PR #38 功能分支，更新 PR 标题和说明以覆盖最终变更、change 名称及验证结果；检查 PR 最新 head 的必需检查全部成功，包含 Windows 全量验证。
 - [ ] 2.4 完成验证后按归档技能归档 change，并提交推送归档产物；再次确认最终 head 检查成功，汇报 PR 状态，未获用户合并授权时不合并。
 
 ## 验证记录
@@ -19,3 +19,4 @@
 - JDK 21 下完整 mvn -B test 通过，全部 Maven 模块成功；Windows 本机用时约 66 秒。
 - openspec validate fix-llm-hot-reload-test-cleanup --strict 及 openspec validate --all --strict 通过（26 项）。
 - 本次只修改测试夹具和回归测试，主规格及 docs/ 用户文档无需变更，现有文档保留。
+- 修复提交 63c58d012cd9fa7c63610d434167f70cc7c32bfd 的 GitHub Actions 34817548205 全部通过，Windows 全量验证用时 11 分 55 秒；PR 状态为 CLEAN。

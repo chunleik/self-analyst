@@ -631,6 +631,7 @@ fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::
 
     let desktop_session_url = format!("{}?token={}", backend_url(port, "/desktop/session"), token);
     TrayIconBuilder::new()
+        .tooltip("SelfAnalyst")
         .icon(
             app.default_window_icon()
                 .cloned()
@@ -879,6 +880,19 @@ mod tests {
         ));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn tray_builder_sets_product_tooltip() {
+        let source = include_str!("lib.rs");
+        let tray_builder = source
+            .split("fn create_tray(app:")
+            .nth(1)
+            .expect("tray initialization exists")
+            .split(".build(app)")
+            .next()
+            .unwrap();
+        assert!(tray_builder.contains(".tooltip(\"SelfAnalyst\")"));
     }
 
     #[test]

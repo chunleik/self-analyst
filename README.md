@@ -222,6 +222,22 @@ The following documents are maintained in Simplified Chinese:
 - [Temporary removal of OCR and audio modules](docs/archive/removed-features/removed-ocr-audio.md)
 - [Privacy](PRIVACY.md)
 
+## Activity statistics
+
+Dashboard and Wiki days run from **04:00 to 04:00 the next day in the local time zone**.
+Activity before 04:00 belongs to the previous statistical day; weeks start Monday at 04:00
+and months start on their first day at 04:00. Morning covers 04:00–12:00. The current
+window remains approximately two hours, and the dashboard's last two weeks remain a rolling 14 days.
+
+Application durations are clipped to the requested interval and exclude overlapping AFK (idle)
+time. Unidentified application activity is shown separately and does not determine the leading
+application. Missing AFK coverage is explicitly shown as an estimate. Old summary caches are
+refreshed; outdated Wiki summaries are retained for traceability and excluded from current results.
+Historical regeneration runs in the background when Wiki backfill is enabled and follows the
+existing model budget and retry settings. Original events remain unchanged.
+
+See the [activity statistics guide](docs/activity-statistics.md) for migration and recovery details.
+
 ## Contributing
 
 Bug reports, feature suggestions, and pull requests are welcome. The project follows specification-driven

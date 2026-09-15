@@ -11,5 +11,19 @@ public record SummarySnapshot(
         String currentWindowFingerprint,
         Map<String, Object> current,
         List<Map<String, Object>> timeline,
-        Map<String, Object> behaviorAdvice) {
+        Map<String, Object> behaviorAdvice,
+        String statisticsVersion, String calendarVersion, String timezone) {
+    public SummarySnapshot(String assembledAt, String currentWindowFingerprint,
+                           Map<String, Object> current, List<Map<String, Object>> timeline,
+                           Map<String, Object> behaviorAdvice) {
+        this(assembledAt, currentWindowFingerprint, current, timeline, behaviorAdvice,
+                com.selfanalyst.events.statistics.ActivityStatistics.VERSION,
+                com.selfanalyst.events.statistics.ActivityCalendar.VERSION, java.time.ZoneId.systemDefault().getId());
+    }
+
+    public boolean compatible(java.time.ZoneId zone) {
+        return com.selfanalyst.events.statistics.ActivityStatistics.VERSION.equals(statisticsVersion)
+                && com.selfanalyst.events.statistics.ActivityCalendar.VERSION.equals(calendarVersion)
+                && zone.getId().equals(timezone);
+    }
 }

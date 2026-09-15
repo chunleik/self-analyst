@@ -151,6 +151,7 @@ class WikiStoreTest {
 
     @Test
     void shouldCreateAndQuerySemanticDocs() {
+        store.upsert(createPendingEntry("entry-x", WikiLevel.HOUR, t1, t2));
         var doc = new WikiStore.SemanticDoc("sd-1", "entry-x", "ENTRY_SUMMARY",
                 "HOUR", t1.toString(), t2.toString(),
                 "abc123", "text-embedding-3-small", 1536,

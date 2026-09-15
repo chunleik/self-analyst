@@ -26,7 +26,8 @@ public final class SummaryFactFingerprint {
     }
 
     public static String of(SummaryService.LocalFacts current, SummaryService.LocalFacts today) {
-        return "current=" + factsKey(current) + "|today=" + factsKey(today);
+        return com.selfanalyst.events.statistics.ActivityStatistics.VERSION + "|"
+                + com.selfanalyst.events.statistics.ActivityCalendar.VERSION + "|current=" + factsKey(current) + "|today=" + factsKey(today);
     }
 
     public static boolean isFresh(String assembledAt, Instant now) {
@@ -61,7 +62,8 @@ public final class SummaryFactFingerprint {
         return String.join(",", apps)
                 + ";a" + bucketMinutes(facts.activeTime())
                 + ";k" + bucketMinutes(facts.afkTime())
-                + ";s" + (facts.switchCount() / SWITCH_BUCKET);
+                + ";s" + (facts.switchCount() / SWITCH_BUCKET)
+                + ";q" + facts.coverage() + ";u" + (long) facts.unknownActivitySeconds();
     }
 
     static int bucketMinutes(String formatted) {

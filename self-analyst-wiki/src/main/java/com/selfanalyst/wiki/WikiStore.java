@@ -22,15 +22,20 @@ public class WikiStore implements AutoCloseable {
             .registerModule(new JavaTimeModule());
 
     private final Connection conn;
+    private static final String CURRENT = "statistics_version='" + com.selfanalyst.events.statistics.ActivityStatistics.VERSION
+            + "' AND calendar_version='" + com.selfanalyst.events.statistics.ActivityCalendar.VERSION + "'";
 
     public WikiStore(Path dbPath) {
+        Connection opened = null;
         try {
             Files.createDirectories(dbPath.getParent());
             Class.forName("org.sqlite.JDBC");
-            conn = DriverManager.getConnection("jdbc:sqlite:" + dbPath.toAbsolutePath());
+            opened = DriverManager.getConnection("jdbc:sqlite:" + dbPath.toAbsolutePath());
+            conn = opened;
             try (Statement stmt = conn.createStatement()) {
                 stmt.execute("PRAGMA journal_mode=WAL");
                 int version = stmt.executeQuery("PRAGMA user_version").getInt(1);
+                if (version > 4) throw new SQLException("Unsupported Wiki schema version: " + version);
                 if (version < 1) {
                     createV1Schema(stmt);
                     stmt.execute("PRAGMA user_version=1");
@@ -43,8 +48,12 @@ public class WikiStore implements AutoCloseable {
                     createV3Schema(stmt);
                     stmt.execute("PRAGMA user_version=3");
                 }
+                if (version < 4) migrateStatistics(stmt, dbPath, version > 0);
             }
         } catch (Exception e) {
+            if (opened != null) {
+                try { opened.close(); } catch (SQLException closeError) { e.addSuppressed(closeError); }
+            }
             throw new RuntimeException("Failed to initialize WikiStore", e);
         }
     }
@@ -122,6 +131,66 @@ public class WikiStore implements AutoCloseable {
         stmt.execute("ALTER TABLE wiki_entries ADD COLUMN source_coverage_json TEXT");
     }
 
+    private void migrateStatistics(Statement stmt, Path dbPath, boolean backup) throws SQLException {
+        if (backup) {
+            Path backupPath = dbPath.resolveSibling(dbPath.getFileName() + ".before-statistics-v4.bak");
+            if (!Files.exists(backupPath)) stmt.execute("VACUUM INTO '"
+                    + backupPath.toAbsolutePath().toString().replace("'", "''") + "'");
+        }
+        String schema;
+        try (ResultSet rows = stmt.executeQuery("SELECT sql FROM sqlite_master WHERE name='wiki_entries'")) {
+            if (!rows.next()) throw new SQLException("Missing Wiki schema");
+            schema = rows.getString(1);
+        }
+        List<String> oldColumns = new ArrayList<>();
+        try (ResultSet columns = stmt.executeQuery("PRAGMA table_info(wiki_entries)")) {
+            while (columns.next()) oldColumns.add(columns.getString("name"));
+        }
+        stmt.execute("BEGIN IMMEDIATE");
+        try {
+            String replacement = schema.replaceFirst("wiki_entries", "wiki_entries_v4")
+                    .replace("UNIQUE(level, period_start, period_end, timezone)",
+                            "statistics_version TEXT NOT NULL DEFAULT 'legacy', calendar_version TEXT NOT NULL DEFAULT 'legacy', "
+                            + "UNIQUE(level, period_start, period_end, timezone, statistics_version, calendar_version)");
+            if (!replacement.contains("statistics_version")) throw new SQLException("Unrecognized Wiki uniqueness constraint");
+            stmt.execute(replacement);
+            stmt.execute("INSERT INTO wiki_entries_v4 (" + String.join(",", oldColumns)
+                    + ",statistics_version,calendar_version) SELECT " + String.join(",", oldColumns)
+                    + ", 'legacy', 'legacy' FROM wiki_entries");
+            stmt.execute("DROP TABLE wiki_entries");
+            stmt.execute("ALTER TABLE wiki_entries_v4 RENAME TO wiki_entries");
+            stmt.execute("CREATE INDEX idx_wiki_entries_period ON wiki_entries(level,period_start,period_end)");
+            stmt.execute("CREATE INDEX idx_wiki_entries_status_retry ON wiki_entries(statistics_version,calendar_version,status,next_retry_at)");
+            stmt.execute("UPDATE wiki_semantic_documents SET status='STALE'");
+            stmt.execute("CREATE TABLE IF NOT EXISTS wiki_statistics_progress (version TEXT PRIMARY KEY, history_before TEXT NOT NULL)");
+            stmt.execute("PRAGMA user_version=4");
+            stmt.execute("COMMIT");
+        } catch (SQLException error) {
+            stmt.execute("ROLLBACK");
+            throw error;
+        }
+    }
+
+    public Instant historyBefore() {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT history_before FROM wiki_statistics_progress WHERE version=?")) {
+            ps.setString(1, CURRENT);
+            try (ResultSet rows = ps.executeQuery()) { return rows.next() ? Instant.parse(rows.getString(1)) : null; }
+        } catch (SQLException error) { throw new IllegalStateException("Cannot read Wiki discovery progress", error); }
+    }
+
+    public void saveHistoryBefore(Instant cursor) {
+        try (PreparedStatement ps = conn.prepareStatement("INSERT OR REPLACE INTO wiki_statistics_progress VALUES (?,?)")) {
+            ps.setString(1, CURRENT); ps.setString(2, cursor.toString()); ps.executeUpdate();
+        } catch (SQLException error) { throw new IllegalStateException("Cannot save Wiki discovery progress", error); }
+    }
+
+    public boolean isCurrentEntry(String id) {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM wiki_entries WHERE id=? AND " + CURRENT)) {
+            ps.setString(1, id);
+            try (ResultSet rows = ps.executeQuery()) { return rows.next(); }
+        } catch (SQLException error) { return false; }
+    }
+
     // ── Semantic document CRUD ──
 
     public enum SemanticDocStatus { PENDING, INDEXED, FAILED, STALE }
@@ -178,9 +247,9 @@ public class WikiStore implements AutoCloseable {
     public List<SemanticDoc> findPendingSemanticDocs(int limit) {
         List<SemanticDoc> results = new ArrayList<>();
         String sql = """
-            SELECT * FROM wiki_semantic_documents WHERE status = ?
+            SELECT * FROM wiki_semantic_documents WHERE EXISTS (SELECT 1 FROM wiki_entries WHERE id=entry_id AND %s) AND status = ?
             ORDER BY created_at ASC LIMIT ?
-            """;
+            """.formatted(CURRENT);
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, SemanticDocStatus.PENDING.name());
             ps.setInt(2, limit);
@@ -195,10 +264,10 @@ public class WikiStore implements AutoCloseable {
     public List<SemanticDoc> findRetryableSemanticDocs(int limit) {
         List<SemanticDoc> results = new ArrayList<>();
         String sql = """
-            SELECT * FROM wiki_semantic_documents WHERE status = ?
+            SELECT * FROM wiki_semantic_documents WHERE EXISTS (SELECT 1 FROM wiki_entries WHERE id=entry_id AND %s) AND status = ?
             AND (next_retry_at IS NULL OR next_retry_at <= ?)
             ORDER BY retry_count ASC LIMIT ?
-            """;
+            """.formatted(CURRENT);
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, SemanticDocStatus.FAILED.name());
             ps.setString(2, Instant.now().toString());
@@ -267,13 +336,13 @@ public class WikiStore implements AutoCloseable {
     public List<WikiEntry> findSummarizedWithoutSemanticDocs(int limit) {
         List<WikiEntry> results = new ArrayList<>();
         String sql = """
-            SELECT * FROM wiki_entries w WHERE w.status = ?
+            SELECT * FROM wiki_entries w WHERE %s AND w.status = ?
             AND NOT EXISTS (
               SELECT 1 FROM wiki_semantic_documents s
               WHERE s.entry_id = w.id AND s.status IN (?, ?)
             )
             ORDER BY w.period_start ASC LIMIT ?
-            """;
+            """.formatted(CURRENT);
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, WikiStatus.SUMMARIZED.name());
             ps.setString(2, SemanticDocStatus.PENDING.name());
@@ -326,8 +395,8 @@ public class WikiStore implements AutoCloseable {
             (id, level, period_start, period_end, timezone, status, summary, primary_task,
              task_segments_json, metrics_json, source_entry_ids_json, model, prompt_version,
              retry_count, next_retry_at, last_error, created_at, updated_at, summarized_at,
-             fact_builder_version, projector_version, source_coverage_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             fact_builder_version, projector_version, source_coverage_json, statistics_version, calendar_version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, entry.id());
@@ -352,6 +421,8 @@ public class WikiStore implements AutoCloseable {
             ps.setString(20, entry.factBuilderVersion());
             ps.setString(21, entry.projectorVersion());
             ps.setString(22, toJson(entry.sourceCoverage()));
+            ps.setString(23, entry.statisticsVersion());
+            ps.setString(24, entry.calendarVersion());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to upsert wiki entry", e);
@@ -433,7 +504,7 @@ public class WikiStore implements AutoCloseable {
     public List<WikiEntry> query(Instant start, Instant end, WikiLevel level) {
         List<WikiEntry> results = new ArrayList<>();
         StringBuilder sql = new StringBuilder(
-                "SELECT * FROM wiki_entries WHERE 1=1");
+                "SELECT * FROM wiki_entries WHERE " + CURRENT);
         List<Object> params = new ArrayList<>();
         if (start != null) {
             sql.append(" AND period_end > ?");
@@ -493,10 +564,10 @@ public class WikiStore implements AutoCloseable {
     public List<WikiEntry> findRetryable(int limit) {
         List<WikiEntry> results = new ArrayList<>();
         String sql = """
-            SELECT * FROM wiki_entries WHERE status = ?
+            SELECT * FROM wiki_entries WHERE %s AND status = ?
             AND (next_retry_at IS NULL OR next_retry_at <= ?)
             ORDER BY retry_count ASC LIMIT ?
-            """;
+            """.formatted(CURRENT);
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, WikiStatus.FAILED.name());
             ps.setString(2, Instant.now().toString());
@@ -512,7 +583,7 @@ public class WikiStore implements AutoCloseable {
     }
 
     public long countByStatus(WikiLevel level, WikiStatus status) {
-        String sql = "SELECT COUNT(*) FROM wiki_entries WHERE level = ? AND status = ?";
+        String sql = "SELECT COUNT(*) FROM wiki_entries WHERE level = ? AND status = ? AND " + CURRENT;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, level.name());
             ps.setString(2, status.name());
@@ -525,7 +596,7 @@ public class WikiStore implements AutoCloseable {
 
     private List<WikiEntry> findByStatusAndLevel(WikiStatus status, WikiLevel level, int limit) {
         List<WikiEntry> results = new ArrayList<>();
-        String sql = "SELECT * FROM wiki_entries WHERE status = ? AND level = ? ORDER BY period_start ASC LIMIT ?";
+        String sql = "SELECT * FROM wiki_entries WHERE " + CURRENT + " AND status = ? AND level = ? ORDER BY period_start DESC LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, status.name());
             ps.setString(2, level.name());
@@ -563,7 +634,8 @@ public class WikiStore implements AutoCloseable {
                 parseInstantNullable(rs.getString("summarized_at")),
                 rs.getString("fact_builder_version"),
                 rs.getString("projector_version"),
-                parseCoverage(rs.getString("source_coverage_json")));
+                parseCoverage(rs.getString("source_coverage_json")),
+                rs.getString("statistics_version"), rs.getString("calendar_version"));
     }
 
     private static String toJson(Object obj) {

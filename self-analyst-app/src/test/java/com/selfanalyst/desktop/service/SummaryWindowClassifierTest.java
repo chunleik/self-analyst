@@ -39,7 +39,7 @@ class SummaryWindowClassifierTest {
     }
 
     @Test
-    void crossingMidnightMovesTodayToYesterday() {
+    void crossingFourMovesTodayToYesterday() {
         SummaryWindowClassifier before = classifier("2026-09-05T15:30:00Z"); // 23:30 Sep 5
         LocalDate sep5 = LocalDate.of(2026, 9, 5);
         assertEquals(sep5, before.slots().stream()
@@ -50,13 +50,24 @@ class SummaryWindowClassifierTest {
                 .atZone(ZONE)
                 .toLocalDate());
 
-        SummaryWindowClassifier after = classifier("2026-09-05T16:30:00Z"); // 00:30 Sep 6
+        SummaryWindowClassifier after = classifier("2026-09-05T20:00:00Z"); // 04:00 Sep 6
         SummaryWindowClassifier.Slot yesterday = after.slots().stream()
                 .filter(slot -> "yesterday".equals(slot.key()))
                 .findFirst()
                 .orElseThrow();
         assertEquals(sep5, yesterday.start().atZone(ZONE).toLocalDate());
         assertFalse(yesterday.open());
+    }
+
+    @Test
+    void midnightKeepsPreviousStatisticalDayAndMorning() {
+        var slots = index(classifier("2026-05-31T19:59:59Z"));
+        assertEquals(Instant.parse("2026-05-30T20:00:00Z"), slots.get("today").start());
+        assertEquals(Instant.parse("2026-05-24T20:00:00Z"), slots.get("thisWeek").start());
+        assertEquals(Instant.parse("2026-04-30T20:00:00Z"), slots.get("thisMonth").start());
+        assertEquals(Instant.parse("2026-05-31T04:00:00Z"), slots.get("morning").end());
+        assertEquals(java.time.Duration.ofDays(14), java.time.Duration.between(
+                slots.get("lastTwoWeeks").start(), slots.get("lastTwoWeeks").end()));
     }
 
     private static SummaryWindowClassifier classifier(String instant) {

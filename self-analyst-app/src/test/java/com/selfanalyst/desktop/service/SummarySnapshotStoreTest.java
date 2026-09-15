@@ -18,6 +18,19 @@ class SummarySnapshotStoreTest {
     Path tempDir;
 
     @Test
+    void oldVersionsAndWrongTimezonesAreNotAuthoritative() throws Exception {
+        SummarySnapshotStore store = new SummarySnapshotStore(tempDir);
+        Files.writeString(tempDir.resolve(SummarySnapshotStore.FILE_NAME),
+                "{\"assembledAt\":\"2026-09-15T00:00:00Z\",\"current\":{\"headline\":\"old\"},\"timeline\":[]}");
+        assertTrue(store.load().isEmpty());
+        store.save(new SummarySnapshot("2026-09-15T00:00:00Z", "same-fingerprint", Map.of(), List.of(), Map.of(),
+                com.selfanalyst.events.statistics.ActivityStatistics.VERSION,
+                com.selfanalyst.events.statistics.ActivityCalendar.VERSION, "UTC"));
+        assertTrue(store.load(java.time.ZoneId.of("Asia/Shanghai")).isEmpty());
+        assertTrue(store.load(java.time.ZoneId.of("UTC")).isPresent());
+    }
+
+    @Test
     void roundTripSurvivesNewStoreInstance() {
         SummarySnapshot snapshot = new SummarySnapshot(
                 Instant.parse("2026-09-06T04:00:00Z").toString(),

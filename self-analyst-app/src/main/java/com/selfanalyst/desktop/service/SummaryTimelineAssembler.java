@@ -20,22 +20,28 @@ import java.util.Map;
 public class SummaryTimelineAssembler {
 
     private final com.selfanalyst.i18n.Lang lang;
+    private final ZoneId zone;
     private final WikiStore wikiStore;
     private final SummaryFactSource facts;
     private final SummaryPromptService prompts;
 
     public SummaryTimelineAssembler(WikiStore wikiStore, SummaryFactSource facts, SummaryPromptService prompts) {
-        this(wikiStore, facts, prompts, com.selfanalyst.i18n.Lang.chinese());
+        this(wikiStore, facts, prompts, com.selfanalyst.i18n.Lang.chinese(), ZoneId.systemDefault());
     }
 
-    private SummaryTimelineAssembler(WikiStore wikiStore, SummaryFactSource facts, SummaryPromptService prompts, com.selfanalyst.i18n.Lang lang) {
+    public SummaryTimelineAssembler(WikiStore wikiStore, SummaryFactSource facts, SummaryPromptService prompts, ZoneId zone) {
+        this(wikiStore, facts, prompts, com.selfanalyst.i18n.Lang.chinese(), zone);
+    }
+
+    private SummaryTimelineAssembler(WikiStore wikiStore, SummaryFactSource facts, SummaryPromptService prompts, com.selfanalyst.i18n.Lang lang, ZoneId zone) {
+        this.zone = zone;
         this.lang = lang;
         this.wikiStore = wikiStore;
         this.facts = facts;
         this.prompts = prompts;
     }
 
-    public Map<String, Object> assembleClosed(SummaryWindowClassifier.Slot slot, com.selfanalyst.i18n.Lang lang) { return new SummaryTimelineAssembler(wikiStore, facts, prompts, lang).assembleClosed(slot); }
+    public Map<String, Object> assembleClosed(SummaryWindowClassifier.Slot slot, com.selfanalyst.i18n.Lang lang) { return new SummaryTimelineAssembler(wikiStore, facts, prompts, lang, zone).assembleClosed(slot); }
     private String duration(double seconds) { return SummaryService.formatDuration(seconds, lang); }
 
     public Map<String, Object> assembleClosed(SummaryWindowClassifier.Slot slot) {
@@ -58,7 +64,7 @@ public class SummaryTimelineAssembler {
         List<WikiEntry> children = childLevel == null
                 ? List.of()
                 : summarizedList(slot.start(), slot.end(), childLevel).stream()
-                .filter(entry -> entry.periodEnd() != null && entry.periodEnd().isBefore(slot.end()))
+                .filter(entry -> entry.periodEnd() != null && !entry.periodEnd().isAfter(slot.end()) && !entry.periodStart().isBefore(slot.start()))
                 .sorted(Comparator.comparing(WikiEntry::periodStart))
                 .toList();
         if (!children.isEmpty()) {
@@ -84,11 +90,15 @@ public class SummaryTimelineAssembler {
                 parts.add(labelFor(child) + task);
             }
         }
+        SummaryService.LocalFacts currentFacts = facts.factsFor(
+                com.selfanalyst.events.statistics.ActivityCalendar.start(slot.end().minusNanos(1), zone),
+                slot.end(), com.selfanalyst.i18n.Messages.text(lang, "period.today"));
+        parts.add(currentFacts.headline());
         String insight = String.join("；", parts);
         if (insight.length() > 400) {
             insight = insight.substring(0, 399) + "…";
         }
-        Map<String, Object> map = base(slot);
+        Map<String, Object> map = fromLocal(slot, "wiki-partial");
         map.put("headline", com.selfanalyst.i18n.Messages.text(lang, "local.partial").formatted(slot.label()));
         map.put("insight", insight);
         map.put("confidence", "medium");
@@ -101,7 +111,7 @@ public class SummaryTimelineAssembler {
         if (child.periodStart() == null) {
             return "";
         }
-        LocalDate day = child.periodStart().atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate day = child.periodStart().atZone(zone).toLocalDate();
         return day + "：";
     }
 
@@ -117,6 +127,10 @@ public class SummaryTimelineAssembler {
         map.put("source", source);
         map.put("incomplete", incomplete);
         if (entry.metrics() != null) {
+            map.put("unknownActivitySeconds", entry.metrics().extra() == null ? 0
+                    : entry.metrics().extra().getOrDefault("unknownActivitySeconds", 0));
+            map.put("coverage", entry.sourceCoverage().values().stream().allMatch(v -> "complete".equals(v.status()))
+                    ? "complete" : "estimated");
             map.put("activeTime", duration(entry.metrics().activeSeconds()));
             map.put("afkTime", duration(entry.metrics().afkSeconds()));
             map.put("switchCount", entry.metrics().switchCount());
@@ -132,7 +146,7 @@ public class SummaryTimelineAssembler {
     private Map<String, Object> fromLocal(SummaryWindowClassifier.Slot slot, String source) {
         SummaryService.LocalFacts local = facts.factsFor(slot.start(), slot.end(), slot.label());
         SummaryPromptService.EnhancedSummary enhanced = prompts.localOnly(local);
-        Map<String, Object> map = fromEnhanced(slot.key(), slot.label(), enhanced);
+        Map<String, Object> map = fromEnhanced(slot.key(), slot.label(), enhanced, local);
         map.put("source", source);
         map.put("incomplete", wikiStore == null);
         return map;
@@ -164,6 +178,8 @@ public class SummaryTimelineAssembler {
             map.put("afkTime", liveFacts.afkTime());
             map.put("switchCount", liveFacts.switchCount());
             map.put("evidence", liveFacts.evidence());
+            map.put("unknownActivitySeconds", liveFacts.unknownActivitySeconds());
+            map.put("coverage", liveFacts.coverage());
         }
         return map;
     }
@@ -181,7 +197,8 @@ public class SummaryTimelineAssembler {
     }
 
     private WikiEntry summarized(Instant start, Instant end, WikiLevel level) {
-        return summarizedList(start, end, level).stream().findFirst().orElse(null);
+        return summarizedList(start, end, level).stream()
+                .filter(e -> start.equals(e.periodStart()) && end.equals(e.periodEnd())).findFirst().orElse(null);
     }
 
     private List<WikiEntry> summarizedList(Instant start, Instant end, WikiLevel level) {
@@ -191,6 +208,7 @@ public class SummaryTimelineAssembler {
         try {
             return wikiStore.query(start, end, level).stream()
                     .filter(entry -> entry.status() == WikiStatus.SUMMARIZED)
+                    .filter(entry -> entry.timezone().equals(zone.getId()))
                     .filter(entry -> entry.summary() != null && !entry.summary().isBlank())
                     .toList();
         } catch (RuntimeException ignored) {

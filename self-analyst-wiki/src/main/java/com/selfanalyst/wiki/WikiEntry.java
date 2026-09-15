@@ -26,7 +26,27 @@ public record WikiEntry(
         Instant summarizedAt,
         String factBuilderVersion,
         String projectorVersion,
-        Map<String, SourceCoverage> sourceCoverage) {
+        Map<String, SourceCoverage> sourceCoverage,
+        String statisticsVersion, String calendarVersion) {
+
+    public WikiEntry(String id, WikiLevel level, Instant periodStart, Instant periodEnd,
+                     String timezone, WikiStatus status, String summary, String primaryTask,
+                     List<TaskSegment> taskSegments, WikiMetrics metrics,
+                     List<String> sourceEntryIds, String model, String promptVersion,
+                     int retryCount, Instant nextRetryAt, String lastError,
+                     Instant createdAt, Instant updatedAt, Instant summarizedAt,
+                     String factBuilderVersion, String projectorVersion, Map<String, SourceCoverage> sourceCoverage) {
+        this(id, level, periodStart, periodEnd, timezone, status, summary, primaryTask, taskSegments,
+                metrics, sourceEntryIds, model, promptVersion, retryCount, nextRetryAt, lastError,
+                createdAt, updatedAt, summarizedAt, factBuilderVersion, projectorVersion, sourceCoverage,
+                com.selfanalyst.events.statistics.ActivityStatistics.VERSION,
+                com.selfanalyst.events.statistics.ActivityCalendar.VERSION);
+    }
+
+    public boolean currentStatistics() {
+        return com.selfanalyst.events.statistics.ActivityStatistics.VERSION.equals(statisticsVersion)
+                && com.selfanalyst.events.statistics.ActivityCalendar.VERSION.equals(calendarVersion);
+    }
 
     public WikiEntry {
         taskSegments = taskSegments == null ? List.of() : List.copyOf(taskSegments);

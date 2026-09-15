@@ -121,7 +121,9 @@ public class SummaryPromptService {
 
     static String buildPrompt(SummaryService.LocalFacts facts, Lang lang) {
         String topApps = facts.topApps() != null ? String.join(", ", facts.topApps()) : Messages.text(lang, "common.none");
-        return Messages.text(lang, "summary.prompt").formatted(topApps, facts.activeTime(), facts.afkTime(), facts.switchCount(), facts.goalContext() != null ? facts.goalContext() : Messages.text(lang, "common.none"));
+        return Messages.text(lang, "summary.prompt").formatted(topApps, facts.activeTime(), facts.afkTime(), facts.switchCount(), facts.goalContext() != null ? facts.goalContext() : Messages.text(lang, "common.none"))
+                + Messages.text(lang, "summary.statisticsContext").formatted(
+                        facts.unknownActivitySeconds(), facts.coverage());
     }
 
     private static EnhancedSummary parseEnhanced(SummaryService.LocalFacts facts, String response, Lang lang) {

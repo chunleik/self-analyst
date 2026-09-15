@@ -163,6 +163,73 @@ public class EventStore {
         return result;
     }
 
+    public Optional<Instant> earliestEvent(List<String> buckets) {
+        Instant earliest = null;
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:"
+                + db.dataDir().resolve(Database.PROJECTION_FILENAME).toAbsolutePath().toUri() + "?mode=ro")) {
+            for (String bucket : buckets) {
+                try (PreparedStatement ps = connection.prepareStatement("SELECT timestamp FROM events WHERE bucket_id=? ORDER BY timestamp LIMIT 1")) {
+                    ps.setString(1, bucket);
+                    try (ResultSet rows = ps.executeQuery()) {
+                        if (rows.next()) {
+                            Instant at = Instant.parse(rows.getString(1));
+                            if (earliest == null || at.isBefore(earliest)) earliest = at;
+                        }
+                    }
+                }
+            }
+        } catch (SQLException error) { throw new IllegalStateException("Cannot discover event coverage", error); }
+        return Optional.ofNullable(earliest);
+    }
+
+    public record EventRange(List<Event> events, String status) {}
+
+    /** 各桶共享一个只读事务快照；相交语义仅供统计，不改变通用查询。 */
+    public Map<String, EventRange> queryIntersecting(List<String> bucketIds, Instant start, Instant end) {
+        if (start == null || end == null || start.isAfter(end)) {
+            throw new IllegalArgumentException("Invalid statistics range");
+        }
+        Map<String, EventRange> result = new LinkedHashMap<>();
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:"
+                + db.dataDir().resolve(Database.PROJECTION_FILENAME).toAbsolutePath().toUri() + "?mode=ro")) {
+            connection.setAutoCommit(false);
+            // A conservative upper bound preserves subsecond and legacy ISO precision.
+            // The bucket/timestamp index streams candidates; Java checks the exact intersection.
+            String sql = "SELECT * FROM events WHERE bucket_id=? AND timestamp<? AND duration>0"
+                    + " ORDER BY timestamp,id";
+            for (String bucketId : bucketIds) {
+                List<Event> events = new ArrayList<>();
+                try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                    ps.setString(1, bucketId);
+                    ps.setString(2, end.plusSeconds(1).toString().substring(0, 19));
+                    try (ResultSet rows = ps.executeQuery()) {
+                        while (rows.next()) {
+                            Event event = mapEvent(rows);
+                            if (Double.isFinite(event.duration()) && event.timestamp().isBefore(end)
+                                    && com.selfanalyst.events.statistics.ActivityStatistics.end(event).isAfter(start)) {
+                                events.add(event);
+                            }
+                        }
+                    }
+                    boolean exists = !events.isEmpty();
+                    if (!exists) {
+                        try (PreparedStatement bucket = connection.prepareStatement("SELECT 1 FROM buckets WHERE id=?")) {
+                            bucket.setString(1, bucketId);
+                            try (ResultSet rows = bucket.executeQuery()) { exists = rows.next(); }
+                        }
+                    }
+                    result.put(bucketId, new EventRange(List.copyOf(events), exists ? "complete" : "missing"));
+                } catch (Exception error) {
+                    result.put(bucketId, new EventRange(List.of(), "failed"));
+                }
+            }
+            connection.rollback();
+        } catch (SQLException error) {
+            bucketIds.forEach(id -> result.put(id, new EventRange(List.of(), "failed")));
+        }
+        return result;
+    }
+
     public int countByBucket(String bucketId) {
         String sql = "SELECT COUNT(*) FROM events WHERE bucket_id = ?";
         try (PreparedStatement ps = db.bucketConnection(bucketId).prepareStatement(sql)) {

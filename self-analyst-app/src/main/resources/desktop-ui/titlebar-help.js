@@ -18,6 +18,11 @@
     var drag = doc.getElementById("titlebar-drag");
     var maxState = false;
     var pending = false;
+    var updatePending = null;
+    var dialogGeneration = 0;
+    var linkAction = null;
+    var retry = doc.getElementById("help-update-retry");
+    var releasePage = "https://github.com/chunleik/self-analyst/releases/latest";
     var text = function (key) { return typeof t === "function" ? t(key) : key; };
     function invoke(command, args) { return Promise.resolve().then(function () { return host.__TAURI__.core.invoke(command, args); }); }
     if (native) doc.getElementById("titlebar-help-slot").appendChild(trigger);
@@ -39,6 +44,9 @@
       items[index || 0].focus();
     }
     function message(title, body, link) {
+      dialogGeneration++;
+      linkAction = null;
+      retry.hidden = true;
       close(false);
       doc.getElementById("help-dialog-title").textContent = title;
       doc.getElementById("help-dialog-body").textContent = body;
@@ -48,12 +56,50 @@
       if (link) target.href = link;
       else target.removeAttribute("href");
       if (!dialog.open) dialog.showModal();
+      return dialogGeneration;
     }
     function failed(link) { message(text("help.label"), text("help.failed"), link); }
+    function updateLink(label, action, tag) {
+      doc.getElementById("help-dialog-link").textContent = text(label);
+      linkAction = { action: action };
+      if (tag) linkAction.tag = tag;
+    }
+    doc.getElementById("help-dialog-link").addEventListener("click", function (event) {
+      if (!native || !linkAction) return;
+      event.preventDefault();
+      var url = doc.getElementById("help-dialog-link").href;
+      invoke("help_action", linkAction).catch(function () { failed(url); });
+    });
+    function checkUpdate() {
+      if (updatePending) return updatePending;
+      if (!native) {
+        message(text("update.check"), text("update.web"), releasePage);
+        updateLink("update.releases", "releases");
+        return Promise.resolve();
+      }
+      var generation = message(text("update.check"), text("update.checking"));
+      updatePending = invoke("help_action", { action: "check_update" }).then(function (result) {
+        if (!dialog.open || generation !== dialogGeneration) return;
+        var body = text(result.available ? "update.available" : "update.current") + "\n\n" +
+          text("update.installed") + ": " + result.currentVersion + "\n" + text("update.latest") + ": " + result.latestVersion;
+        var url = result.available ? "https://github.com/chunleik/self-analyst/releases/tag/" + encodeURIComponent(result.tag) : null;
+        message(text("update.check"), body, url);
+        if (result.available) updateLink("update.download", "download", result.tag);
+      }).catch(function (error) {
+        if (!dialog.open || generation !== dialogGeneration) return;
+        var codes = ["update.timeout", "update.rateLimited", "update.noRelease", "update.invalid", "update.busy"];
+        message(text("update.check"), text(codes.includes(error) ? error : "update.failed"), releasePage);
+        updateLink("update.releases", "releases");
+        retry.hidden = false;
+      }).finally(function () { updatePending = null; });
+      return updatePending;
+    }
+    retry.addEventListener("click", checkUpdate);
     function execute(action) {
       var language = typeof state !== "undefined" ? state.lang : doc.documentElement.lang;
       var url = guideUrl(action, language);
       close(true);
+      if (action === "check_update") return checkUpdate();
       if (!url && action !== "about") return Promise.resolve();
       if (native) {
         pending = true;
@@ -98,7 +144,7 @@
       if (!menu.hidden && !menu.contains(event.target) && event.target !== trigger) close(false);
     });
     host.addEventListener("blur", function () { close(false); });
-    dialog.addEventListener("close", function () { trigger.focus(); });
+    dialog.addEventListener("close", function () { dialogGeneration++; trigger.focus(); });
     dialog.addEventListener("click", function (event) { if (event.target === dialog) {
       var r = dialog.getBoundingClientRect();
       if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) dialog.close();

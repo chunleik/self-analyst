@@ -29,6 +29,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DesktopServerIntegrationTest {
 
     @Test
+    void staticAssetsPreserveBytesAndContentTypes() throws Exception {
+        for (var asset : Map.of("app-icon.png", "image/png", "index.html", "text/html",
+                "titlebar-help.css", "text/css", "titlebar-help.js", "application/javascript",
+                "favicon.svg", "image/svg+xml").entrySet()) {
+            String path = "/desktop-ui/" + asset.getKey();
+            var response = http.send(HttpRequest.newBuilder(URI.create(baseUrl + path)).GET().build(),
+                    HttpResponse.BodyHandlers.ofByteArray());
+            assertEquals(200, response.statusCode(), path);
+            try (var input = getClass().getResourceAsStream(path)) {
+                assertNotNull(input);
+                org.junit.jupiter.api.Assertions.assertArrayEquals(input.readAllBytes(), response.body(), path);
+            }
+            assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith(asset.getValue()), path);
+            if (asset.getKey().endsWith(".png")) {
+                var image = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(response.body()));
+                assertNotNull(image);
+                assertTrue(image.getWidth() > 0 && image.getHeight() > 0);
+            }
+        }
+    }
+
+    @Test
     void servesOnlyProductionLanguageCatalogs() throws Exception {
         for (String code : List.of("zh", "en")) {
             var response = http.send(HttpRequest.newBuilder(URI.create(baseUrl + "/desktop-ui/locales/" + code + ".json")).GET().build(), HttpResponse.BodyHandlers.ofString());

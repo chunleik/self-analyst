@@ -258,14 +258,35 @@ pub async fn help_action(
     app: tauri::AppHandle,
     window: WebviewWindow,
     action: String,
-) -> Result<(), String> {
+    tag: Option<String>,
+) -> Result<Option<super::updates::UpdateInfo>, String> {
     let port = managed_port(&app, &window)?;
+    if action == "check_update" {
+        let permit = super::updates::CheckPermit::acquire()?;
+        return tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            super::updates::check().map(Some)
+        })
+        .await
+        .map_err(|_| "update.failed".to_owned())?;
+    }
+    if action == "download" || action == "releases" {
+        let url = if action == "download" {
+            super::updates::release_url(tag.as_deref().ok_or("update.invalid")?)?
+        } else {
+            super::updates::RELEASES_URL.to_owned()
+        };
+        open::that(url).map_err(|_| "help.failed")?;
+        return Ok(None);
+    }
     if action == "about" {
         super::show_about_message(port);
-        return Ok(());
+        return Ok(None);
     }
     let url = help_url(&action, &super::i18n::effective_language()).ok_or("help.failed")?;
-    open::that(url).map_err(|_| "help.failed".into())
+    open::that(url)
+        .map(|_| None)
+        .map_err(|_| "help.failed".into())
 }
 
 #[cfg(test)]
@@ -397,8 +418,33 @@ pub fn run_titlebar_review() {
                 "Object.defineProperty(window, '__SELF_ANALYST_DESKTOP__', {value:true});",
             )
             .build()?;
+            // Review-only sizing/zoom allows repeatable small-window and scaled-layout QA.
+            if std::env::var("SELF_ANALYST_TITLEBAR_REVIEW_SMALL").is_ok() {
+                window.set_size(tauri::LogicalSize::new(800.0, 600.0))?;
+            }
+            if let Ok(zoom) = std::env::var("SELF_ANALYST_TITLEBAR_REVIEW_ZOOM") {
+                let zoom: f64 = zoom.parse().expect("review zoom");
+                assert!((0.5..=2.0).contains(&zoom));
+                window.set_zoom(zoom)?;
+            }
             install(&window)?;
             window.show()?;
+            if std::env::var("SELF_ANALYST_TITLEBAR_REVIEW_TRAY").is_ok() {
+                let (menu, _) = super::create_tray_menu(app.handle())?;
+                let ids: Vec<String> = menu
+                    .items()?
+                    .iter()
+                    .map(|item| item.id().as_ref().to_owned())
+                    .collect();
+                assert_eq!(ids, ["show", "web_desktop", "autostart", "quit"]);
+                let menu_window = window.clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Focused(true)) {
+                        let _ =
+                            menu_window.popup_menu_at(&menu, tauri::PhysicalPosition::new(60, 80));
+                    }
+                });
+            }
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(900));

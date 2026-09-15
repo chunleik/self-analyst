@@ -1,0 +1,8 @@
+{
+  "identifier": "runtime-storage",
+  "description": "允许受管主窗口打开当前实例数据目录，命令内校验本次后端 origin",
+  "windows": ["main"],
+  "local": false,
+  "remote": { "urls": ["http://localhost:*", "http://127.0.0.1:*"] },
+  "permissions": ["allow-open-data-directory"]
+}

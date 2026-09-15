@@ -67,6 +67,8 @@ public final class DocumentDataSources {
         node.set("fields", DocumentRequest.JSON.valueToTree(query.fields)); return node;
     }
     public Prepared prepare(Query query, DocumentFormat format, String title, Path directory, DocumentBudget budget) throws Exception {
+        if (format == DocumentFormat.SVG)
+            throw new IllegalArgumentException("SVG 不支持直接数据导出，请使用 generate_document 提供矢量源码");
         var spool = new DocumentRowSpool(directory.resolve("rows.part"));
         try {
             java.util.function.Consumer<ObjectNode> consume = row -> {

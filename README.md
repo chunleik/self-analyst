@@ -198,6 +198,18 @@ also removes its managed images. Abandoned uploads expire after 24 hours. Older 
 been compacted out of model context are not automatically sent again with subsequent questions.
 This feature does not enable background screenshots or change metadata-only file collection.
 
+## Files generated in chat
+
+Ask the assistant to generate CSV, JSON, Markdown, Excel, Word, PDF, PowerPoint, HTML, or SVG files.
+Save or download them from the file cards in the conversation. Files remain available after a restart;
+asking for changes creates a new version and keeps the original.
+
+HTML files can contain inline CSS, JavaScript, data, and SVG for offline charts, filtering, and
+calculations. Download the single `.html` file and open it in your browser. Standalone `.svg` files
+preserve vector shapes and text and support internal references, without scripts or external resources.
+Neither format has an in-app preview or opens automatically. HTML scripts run only when you open the
+downloaded file; pages must not depend on external resources or SelfAnalyst APIs.
+
 ## Documentation
 
 The following documents are maintained in Simplified Chinese:

@@ -159,6 +159,16 @@ llm.api-key、llm.base-url、llm.model、llm.temperature、llm.max-tokens。正�
 受管图片；未关联消息的上传在 24 小时后清理。已被模型上下文压缩移除的旧图片不会在后续追问中自动重发。
 此功能不启用后台截屏，也不改变文件采集仅保存元数据的边界。
 
+## 会话输出文件
+
+可以让助手生成 CSV、JSON、Markdown、Excel、Word、PDF、PowerPoint、HTML 或 SVG 文件，
+通过会话中的文件卡片另存为或下载。重启后仍可访问文件，要求修改时会生成新版本并保留原版本。
+
+HTML 可内嵌 CSS、JavaScript、数据和 SVG，实现离线图表、筛选和计算。下载单个 `.html` 文件后
+用浏览器打开即可。独立 `.svg` 文件保留矢量图形和文字，支持内部引用，不包含脚本或外部资源。
+两种格式均不提供应用内预览，也不会自动打开；HTML 脚本仅在打开下载文件后运行，页面不得依赖
+外部资源或 SelfAnalyst API。
+
 ## 文档
 
 - [架构](docs/architecture.md)

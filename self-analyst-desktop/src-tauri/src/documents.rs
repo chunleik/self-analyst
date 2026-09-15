@@ -94,7 +94,7 @@ fn save(port: u16, token: &str, session: &str, artifact: &str) -> Result<String,
         .extension()
         .and_then(|v| v.to_str())
         .ok_or("document.saveFailed")?;
-    if !["csv", "json", "md", "xlsx", "docx", "pdf", "pptx"].contains(&extension) {
+    if !supported_extension(extension) {
         return Err("document.saveFailed".into());
     }
     let size = metadata["size"]
@@ -187,6 +187,13 @@ fn save(port: u16, token: &str, session: &str, artifact: &str) -> Result<String,
     result
 }
 
+fn supported_extension(extension: &str) -> bool {
+    [
+        "csv", "json", "md", "xlsx", "docx", "pdf", "pptx", "html", "svg",
+    ]
+    .contains(&extension)
+}
+
 fn choose(name: &str, extension: &str) -> Result<Option<PathBuf>, String> {
     let mut buffer = vec![0u16; 32768];
     let initial: Vec<u16> = name.encode_utf16().collect();
@@ -261,6 +268,10 @@ mod tests {
     use super::*;
     #[test]
     fn identifiers_and_origin_are_restricted() {
+        assert!(supported_extension("html"));
+        assert!(supported_extension("svg"));
+        assert!(!supported_extension("exe"));
+        assert!(!supported_extension("html.exe"));
         assert!(valid_id(&"a".repeat(32)));
         assert!(!valid_id("../../private"));
         assert!(!valid_id(&"A".repeat(32)));

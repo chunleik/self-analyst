@@ -46,3 +46,22 @@ test('native open receives no path and reports failure', async () => {
   assert.equal(container.children.at(-1).textContent, 'storage.openFailed');
   assert.equal(button.disabled, false);
 });
+
+test('native open waits for completion then restores button without error', async () => {
+  let complete;
+  const calls = [];
+  const { context, container } = setup((...args) => {
+    calls.push(args);
+    return new Promise(resolve => { complete = resolve; });
+  });
+  await context.loadRuntimeStorage();
+  const button = container.children.find(child => child.type === 'button');
+  button.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(button.disabled, true);
+  assert.deepEqual(calls, [['open_data_directory']]);
+  complete();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(button.disabled, false);
+  assert.equal(container.children.at(-1).textContent, '');
+});

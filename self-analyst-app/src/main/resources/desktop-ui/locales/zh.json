@@ -1,4 +1,13 @@
 {
+  "chat.addImage": "添加图片",
+  "chat.imageLimits": "PNG/JPEG · 最多 4 张 · 每张 5 MiB · 2000 万像素",
+  "chat.imageInvalid": "图片无效或上传失败。",
+  "chat.imageUnavailable": "图片不可用",
+  "chat.imagePreview": "已选择的图片",
+  "chat.removeImage": "移除",
+  "chat.sendImages": "发送图文",
+  "error.chat.imageInvalid": "图片不可用或格式无效。请使用不超过 5 MiB、2000 万像素的 PNG/JPEG 图片。",
+  "error.chat.imageUnsupported": "当前模型不支持图片，请切换到视觉模型后重试。",
   "storage.dataRoot": "数据目录",
   "storage.loadFailed": "无法读取数据位置。",
   "storage.loading": "正在读取数据位置…",

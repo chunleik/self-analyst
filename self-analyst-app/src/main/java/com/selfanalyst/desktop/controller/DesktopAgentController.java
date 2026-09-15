@@ -344,6 +344,12 @@ public class DesktopAgentController {
     }
 
     static ChatError describeChatError(Exception e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if ("CHAT_IMAGE_UNSUPPORTED".equals(cause.getMessage()))
+                return new ChatError(400, "Model does not support images", "error.chat.imageUnsupported");
+            if ("Chat image is missing or invalid".equals(cause.getMessage()))
+                return new ChatError(400, "Image unavailable", "error.chat.imageInvalid");
+        }
         if (e instanceof DesktopChatJson.PayloadTooLargeException) {
             return new ChatError(413, e.getMessage());
         }
@@ -465,7 +471,8 @@ public class DesktopAgentController {
         List<Msg> history = new ArrayList<>();
         for (int i = 0; i < currentIndex; i++) {
             ChatSessionStore.Message visible = transcript.get(i);
-            if (visible == null || visible.content == null || visible.content.isBlank()) continue;
+            if (visible == null || ((visible.content == null || visible.content.isBlank())
+                    && (visible.images == null || visible.images.isEmpty()))) continue;
             MsgRole role;
             if ("user".equals(visible.role)) {
                 role = MsgRole.USER;
@@ -478,7 +485,7 @@ public class DesktopAgentController {
             Msg.Builder builder = Msg.builder()
                     .name(visible.role)
                     .role(role)
-                    .textContent(visible.content);
+                    .content(SelfAnalystAgent.imageContent(visible.content, session.id, visible.images));
             if (ChatSessionStore.isGeneratedMessageId(visible.id)) builder.id(visible.id);
             history.add(builder.build());
         }
@@ -503,7 +510,7 @@ public class DesktopAgentController {
         return new SelfAnalystAgent.PersistedDesktopTurn(
                 current.content != null ? current.content : "",
                 current.contextSnapshot,
-                history, managed);
+                history, managed, current.images);
     }
 
     private static final class InvalidChatTurnException extends IllegalArgumentException {

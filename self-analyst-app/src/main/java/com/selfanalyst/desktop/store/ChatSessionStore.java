@@ -112,6 +112,8 @@ public class ChatSessionStore implements AutoCloseable {
     private boolean pendingTranscriptsRecovered;
     private boolean recoveringDeletions;
     private boolean closed;
+    private final ChatImageStore images;
+    public ChatImageStore images() { return images; }
     private java.util.function.Consumer<String> documentDeletion = ignored -> {};
 
     @FunctionalInterface
@@ -156,6 +158,7 @@ public class ChatSessionStore implements AutoCloseable {
         }
         migrateLegacyIfNeeded();
         this.ftsEnabled = openWithCorruptionRecovery();
+        this.images = new ChatImageStore(this, memoryDir);
     }
 
     /** Open the production store with a process-wide exclusive writer lease. */
@@ -298,6 +301,7 @@ public class ChatSessionStore implements AutoCloseable {
      * whether the FTS5 trigram index is available (SPEC-CSS-DEC-005).
      */
     private static boolean initializeSchema(Connection conn) throws SQLException {
+        ChatImageStore.schema(conn);
         try (Statement statement = conn.createStatement()) {
             statement.execute("""
                     CREATE TABLE IF NOT EXISTS metadata(
@@ -857,6 +861,7 @@ public class ChatSessionStore implements AutoCloseable {
                         message.error = rows.getString("error");
                         message.contextSnapshot = parseJson(rows.getString("context_snapshot"));
                         message.suggestedTasks = parseJsonList(rows.getString("suggested_tasks"));
+                        message.images = ChatImageStore.list(conn, id, message.id);
                         session.messages.add(message);
                     }
                 }
@@ -870,6 +875,7 @@ public class ChatSessionStore implements AutoCloseable {
         normalizeSessionForWrite(session);
         transaction("write chat session " + session.id, conn -> {
             writeSessionRows(conn, session);
+            for (Message message : session.messages) ChatImageStore.bind(conn, session.id, message);
             incrementGeneration(conn);
             setMetadata(conn, "active_session_id",
                     makeActive ? session.id : metadata(conn, "active_session_id"));
@@ -877,6 +883,7 @@ public class ChatSessionStore implements AutoCloseable {
     }
 
     private void commitDeleteMutation(String id, String activeAfter) {
+        images.deleteSession(id);
         transaction("delete chat session " + id, conn -> {
             try (PreparedStatement statement = conn.prepareStatement(
                     "DELETE FROM sessions WHERE id = ?")) {
@@ -935,6 +942,7 @@ public class ChatSessionStore implements AutoCloseable {
         if (!pendingDeletionIds().contains(id)) {
             throw new IllegalStateException("No pending deletion intent for session " + id);
         }
+        images.deleteSession(id);
         boolean previousRecovery = recoveringDeletions;
         recoveringDeletions = true;
         try (Connection conn = connect()) {
@@ -1585,6 +1593,7 @@ public class ChatSessionStore implements AutoCloseable {
         Message copy = new Message();
         copy.role = incoming.role;
         copy.content = incoming.content;
+        copy.imageIds = incoming.imageIds == null ? null : new ArrayList<>(incoming.imageIds);
         copy.status = incoming.status;
         copy.error = incoming.error;
         copy.contextSnapshot = incoming.contextSnapshot;
@@ -1851,6 +1860,10 @@ public class ChatSessionStore implements AutoCloseable {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Message {
+        @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
+        public List<String> imageIds;
+        @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+        public List<ChatImageStore.Image> images = List.of();
         public String id;
         public String role;            // user | assistant | system
         public String content;
@@ -1918,6 +1931,7 @@ public class ChatSessionStore implements AutoCloseable {
     @Override
     public synchronized void close() {
         if (closed) return;
+        images.close();
         closed = true;
         IOException failure = null;
         if (writerLock != null) {

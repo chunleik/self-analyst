@@ -259,6 +259,7 @@ public class DesktopChatSessionController {
             }
             JsonNode body = requireObject(MAPPER.readTree(DesktopChatJson.readBoundedBody(ctx)));
             requireTextFields(body, "content", "status", "error");
+            if (body.has("imageIds") || body.has("images")) throw new IllegalArgumentException("Image associations are immutable");
             String content = textOrNull(body, "content");
             String status = textOrNull(body, "status");
             String error = textOrNull(body, "error");

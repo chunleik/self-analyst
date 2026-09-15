@@ -1959,3 +1959,10 @@ input:checked + .toggle-switch::after {
 
 .runtime-storage { margin-top: 20px; padding: 16px; border-top: 1px solid var(--border-color, #ddd); font-size: 13px; line-height: 1.7; }
 .runtime-storage .btn { margin-top: 8px; }
+.chat-image-composer { padding: 8px 12px; border-top: 1px solid var(--border-color); flex-shrink: 0; max-height: 220px; overflow: auto; }
+.chat-image-composer input[type=file] { display: block; max-width: 100%; font-size: 12px; }
+.chat-image-hint { display: block; font-size: 11px; color: var(--text-muted); margin: 4px 0; }
+.chat-image-previews { display: flex; gap: 8px; flex-wrap: wrap; }
+.chat-image-previews > div { display: flex; flex-direction: column; gap: 4px; }
+.chat-image-previews img { width: 80px; height: 64px; object-fit: contain; }
+.chat-message-image { display: inline-block; max-width: min(240px, 100%); max-height: 180px; object-fit: contain; margin: 4px; }

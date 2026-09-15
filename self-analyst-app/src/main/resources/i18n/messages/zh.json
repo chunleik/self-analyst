@@ -1,4 +1,6 @@
 {
+  "error.chat.imageInvalid": "图片不可用或格式无效。请使用不超过 5 MiB、2000 万像素的 PNG/JPEG 图片。",
+  "error.chat.imageUnsupported": "当前模型不支持图片，请切换到视觉模型后重试。",
   "error.llmSettings.baseUrl": "Base URL 必须是不含凭据、查询或片段的 HTTP(S) 地址。",
   "error.llmSettings.model": "模型 ID 不能为空。",
   "error.llmSettings.temperature": "温度必须是 0 到 2 之间的数字。",

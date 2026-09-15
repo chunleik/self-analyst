@@ -262,7 +262,7 @@ function deepChatRequestText(body) {
 
 function handleDeepChatRequest(body, signals) {
   var text = deepChatRequestText(body);
-  if (!text || state.chatSending) {
+  if ((!text && !(typeof chatHasImages === "function" && chatHasImages())) || state.chatSending) {
     signals.onResponse({ error: t("common.unknownError") });
     return;
   }
@@ -393,6 +393,7 @@ function deepChatMessage(message, retryable) {
   };
   var structured = parseStructuredChatContent(visibleContent);
   var actions = deepChatActionHtml(message, retryable);
+  if (typeof chatImageHtml === "function") actions = chatImageHtml(message) + actions;
   if (structured) {
     result.html = renderStructuredChatContent(structured) + actions;
   } else {

@@ -34,6 +34,10 @@ final class UsageMeteredModel implements Model {
     @Override
     public Flux<ChatResponse> stream(
             List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
+        return streamText(ChatImageModel.textOnly(messages), tools, options);
+    }
+
+    private Flux<ChatResponse> streamText(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
         if (usageMeter == null) return delegate.stream(messages, tools, options);
         usageMeter.enforce(category);
 

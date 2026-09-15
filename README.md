@@ -28,6 +28,21 @@ configured service; see the [privacy statement (Chinese)](PRIVACY.md).
 Closing the window keeps the app running in the system tray; use the tray menu to quit completely.
 The Help menu provides the user guide, issue reporting, and manual update checks.
 
+The desktop title bar places **Help** beside SelfAnalyst, with **User guide**, **Report an issue**,
+**Check for updates**, and **About SelfAnalyst**. The navigation row starts with Dashboard and Chat without repeating
+the app name. Closing the desktop window keeps it running in the system tray.
+
+**Check for updates** compares your desktop version with the latest stable release and shows the result
+in the app. If an update is available, **Go to download** opens its release page so you can choose an
+installer or portable package. Failed checks can be retried. Checks only run when requested; the app
+does not automatically download or install updates. About information is available from Help; the tray
+menu no longer includes About.
+
+The Web version keeps the app name in its navigation row and places Help next to Settings.
+Guides and issue reporting open in a browser tab; no activity data is attached or submitted.
+In the Web version, Check for updates offers the release page because it cannot determine your installed desktop version.
+Use Tab to focus Help, Enter to open it, arrow keys to select an item, and Esc to close it.
+
 ## Features
 
 - **Activity review**: Explore current, daily, and historical activities on the dashboard timeline, then ask follow-up questions with context from an entry.

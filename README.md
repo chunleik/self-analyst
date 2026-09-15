@@ -4,45 +4,38 @@
 
 [Website](https://chunleik.github.io/self-analyst/en/) · [Website preview and deployment (Chinese)](docs/website.md)
 
-SelfAnalyst is a local-first tool for analyzing personal activity. A local event service stores
-window/AFK activity and in-app context titles for Wiki aggregation. Filesystem metadata from
-folders explicitly configured by the user is stored locally, exposed through FileTools and the
-desktop API, and retained in local event history through metadata-only heartbeats.
+SelfAnalyst is a local-first tool for analyzing personal activity. It records foreground apps,
+window titles, and activity times to help you review your day. Connect a language model to
+summarize activities, organize your work history, and ask follow-up questions in chat.
 
 ![SelfAnalyst desktop chat interface](docs/mockups/desktop-chat-screenshot-en.png)
 
 > This screenshot shows the desktop chat interface: the session list, conversation area, and a
 > side panel with current status, recent activity, suggested to-dos, long-term memory, and context options.
 
-In embedded event-service mode, every raw event that passes privacy validation is first written
-permanently to append-only monthly SQLite partitions organized by UTC. The service then builds a
-mergeable, rebuildable `events.db` projection. External ActivityWatch mode does not provide this
-permanent-retention guarantee. When free disk space falls below the blocking threshold, new
-collection is rejected; old partitions are not automatically deleted.
+## Quick start
 
-“Content collection” currently means title collection only. The full UIA control tree may be read
-temporarily during recognition, but only system window titles, WeChat conversation names,
-article/document/page titles, and metadata such as source, confidence, and timestamps are saved.
-UIA body text must not be persisted.
+The desktop release is currently available for **Windows 10/11**. A macOS package is not yet available.
 
-## Help and window navigation
+1. Download the installer or portable ZIP from [GitHub Releases](https://github.com/chunleik/self-analyst/releases).
+2. Install the app, or extract the ZIP and run `SelfAnalyst.exe`. Release packages include a Java runtime; the development tools below are not required.
+3. Open Settings in the upper-right corner, enter your service URL, API key, and model in **Model settings**, then choose **Save and apply**. See the [model settings guide (Chinese)](docs/llm-settings.md).
+4. Review activities in **Dashboard**, or ask a question in **Chat**, such as "What did I mainly work on today?"
 
-The desktop title bar places **Help** beside SelfAnalyst, with **User guide**, **Report an issue**,
-**Check for updates**, and **About SelfAnalyst**. The navigation row starts with Dashboard and Chat without repeating
-the app name. Closing the desktop window keeps it running in the system tray.
+Local services can start without a configured model; chat and model-generated summaries need a working
+model connection. Activity data is stored locally. Model requests send the required inputs to your
+configured service; see the [privacy statement (Chinese)](PRIVACY.md).
+Closing the window keeps the app running in the system tray; use the tray menu to quit completely.
+The Help menu provides the user guide, issue reporting, and manual update checks.
 
-**Check for updates** compares your desktop version with the latest stable release and shows the result
-in the app. If an update is available, **Go to download** opens its release page so you can choose an
-installer or portable package. Failed checks can be retried. Checks only run when requested; the app
-does not automatically download or install updates. About information is available from Help; the tray
-menu no longer includes About.
+## Features
 
-The Web version keeps the app name in its navigation row and places Help next to Settings.
-Guides and issue reporting open in a browser tab; no activity data is attached or submitted.
-In the Web version, Check for updates offers the release page because it cannot determine your installed desktop version.
-Use Tab to focus Help, Enter to open it, arrow keys to select an item, and Esc to close it.
+- **Activity review**: Explore current, daily, and historical activities on the dashboard timeline, then ask follow-up questions with context from an entry.
+- **Images in chat**: Select or paste PNG/JPEG images for a model that supports image input. Each turn allows up to 4 images, each limited to 5 MiB and 20 megapixels. Images are stored with the conversation and sent to your configured model when submitted; this does not enable background screenshots.
+- **Generated files**: Ask for spreadsheets, documents, presentations, or HTML/SVG, then save or download them from file cards in chat.
+- **Long-term memory**: Automatically retain useful information and ask the assistant to correct or forget it in chat.
 
-## Requirements
+## Development requirements
 
 - JDK 21
 - Maven 3.9+
@@ -91,7 +84,6 @@ The portable package uses `data/` next to the executable only when a regular fil
 `portable.marker` exists in the same directory as the EXE.
 Existing compatible data without a marker is checked without modification before a marker is added
 in place; data from other directories is not moved automatically. See the [runtime data guide](docs/runtime-storage.md).
-Release packages do not include PaddleOCR, Tesseract, Whisper, or speech models.
 
 ## Interface language
 
@@ -135,6 +127,10 @@ the system language.
   times. Apart from safely parsing `.gitignore`, it does not read ordinary file contents, calculate
   content hashes, or generate summaries, topics, or vectors.
 
+The embedded event service permanently retains raw events that pass privacy validation. It does not
+automatically delete the oldest data; collection stops below the disk-space blocking threshold.
+External ActivityWatch mode does not provide this permanent-retention guarantee.
+
 See [PRIVACY.md](PRIVACY.md) for privacy details and [docs/README.md](docs/README.md) for the current
 specification index. These documents are maintained in Simplified Chinese.
 
@@ -148,12 +144,10 @@ continue using the previous version. Summaries and compaction retain their low-t
 policy; sessions and usage counters are not reset. See the [model settings guide](docs/llm-settings.md)
 for instructions.
 
-“Advanced configuration” retains the raw text editor for `./data/config/config.toml`. If the
-file is missing, it displays a commented template; opening the editor does not write to disk.
-The model form updates only the specified keys, preserving other text and comments. Complex
-target syntax that cannot be safely updated requires advanced configuration. The legacy generic
-structured API and Agent configuration tools may still regenerate the TOML file. Switching
-between the two views prompts for confirmation if there are unsaved changes.
+“Advanced configuration” retains the raw TOML editor. The model form updates only the specified
+keys, preserving other configuration and comments. Complex syntax that cannot be safely updated
+requires advanced configuration. The legacy generic structured API and Agent configuration tools
+may still regenerate the TOML file. Switching views prompts for confirmation if there are unsaved changes.
 
 Explicit TOML values take precedence over environment variables. Removing an override restores
 fallback to environment variables and defaults; an explicitly empty key prevents environment
@@ -196,41 +190,14 @@ The permanent raw-event layer is always enabled in embedded mode. TTL, maximum p
 and automatic deletion are not supported. Once partitions exist, ordinary configuration saves
 cannot change `events.raw.dir`; moving the directory requires a separate, explicit data-transfer process.
 
-Legacy OCR keys listed in the [removal notes](docs/archive/removed-features/removed-ocr-audio.md)
-and all `aw.audio.*` keys are no longer supported. They do not prevent old configuration files
-from loading, but they have no effect.
-
-## Images in chat
-
-Use **Add images** to choose PNG/JPEG files, or paste a screenshot into the chat input.
-Preview or remove images before sending. You can send images with a question or on their own;
-**Send with images** and Enter both submit the current text and images. The standard and fallback
-chat interfaces support the same image workflow. Limits: 4 images per turn, 5 MiB and 20 megapixels
-per image (20 MiB total).
-
-Selected images are stored locally with the conversation and sent to your configured chat model,
-which must support image input. If the model explicitly rejects images, switch to a vision model
-and retry the same turn. Refreshing or restarting restores image history; deleting the conversation
-also removes its managed images. Abandoned uploads expire after 24 hours. Older images that have
-been compacted out of model context are not automatically sent again with subsequent questions.
-This feature does not enable background screenshots or change metadata-only file collection.
-
-## Files generated in chat
-
-Ask the assistant to generate CSV, JSON, Markdown, Excel, Word, PDF, PowerPoint, HTML, or SVG files.
-Save or download them from the file cards in the conversation. Files remain available after a restart;
-asking for changes creates a new version and keeps the original.
-
-HTML files can contain inline CSS, JavaScript, data, and SVG for offline charts, filtering, and
-calculations. Download the single `.html` file and open it in your browser. Standalone `.svg` files
-preserve vector shapes and text and support internal references, without scripts or external resources.
-Neither format has an in-app preview or opens automatically. HTML scripts run only when you open the
-downloaded file; pages must not depend on external resources or SelfAnalyst APIs.
-
 ## Documentation
 
 The following documents are maintained in Simplified Chinese:
 
+- [Model settings guide](docs/llm-settings.md)
+- [Chat image input specification](openspec/specs/chat-image-input/spec.md)
+- [Desktop chat and generated files specification](openspec/specs/desktop-chat/spec.md)
+- [Help and updates specification](openspec/specs/desktop-help/spec.md)
 - [Architecture](docs/architecture.md)
 - [Documentation and specification index](docs/README.md)
 - [Testing and integration verification](docs/testing.md)
@@ -238,6 +205,22 @@ The following documents are maintained in Simplified Chinese:
 - [Title-minimized persistence specification](openspec/specs/content-event-persistence/spec.md)
 - [Temporary removal of OCR and audio modules](docs/archive/removed-features/removed-ocr-audio.md)
 - [Privacy](PRIVACY.md)
+
+## Long-term memory and clarification in chat
+
+Long-term memory is summarized and filtered automatically in the background by default, and the chat
+page no longer shows an approval panel. Information with lasting value and sufficient evidence is
+saved automatically; credentials, sensitive inferences, low-confidence content, and one-off activity
+logs are filtered out. Previously pending memories are reassessed in the background after startup:
+qualifying entries become active, while the rest are deleted. If the model or a save operation fails,
+the original records are retained for a later retry. Sessions with automatic summarization explicitly
+disabled remain disabled, and the legacy confirm-all policy is treated as automatic filtering.
+
+If a memory is inaccurate, you can say, "You remembered that incorrectly; I am now maintaining a
+different project," or "Forget the memory about this project." The assistant asks a follow-up question
+when the target is unclear. Once the target is clear, it corrects or disables the relevant memory and
+confirms completion only after saving successfully. Explicit corrections also work in sessions with
+automatic summarization disabled.
 
 ## Activity statistics
 
@@ -271,19 +254,3 @@ making changes, especially its sections on data boundaries and the specification
 This project is licensed under the [Apache License 2.0](LICENSE). See also [NOTICE](NOTICE).
 Third-party components used by the project or included in release distributions, along with their
 licenses, are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
-
-### Long-term memory and clarification in chat
-
-Long-term memory is summarized and filtered automatically in the background by default, and the chat
-page no longer shows an approval panel. Information with lasting value and sufficient evidence is
-saved automatically; credentials, sensitive inferences, low-confidence content, and one-off activity
-logs are filtered out. Previously pending memories are reassessed in the background after startup:
-qualifying entries become active, while the rest are deleted. If the model or a save operation fails,
-the original records are retained for a later retry. Sessions with automatic summarization explicitly
-disabled remain disabled, and the legacy confirm-all policy is treated as automatic filtering.
-
-If a memory is inaccurate, you can say, "You remembered that incorrectly; I am now maintaining a
-different project," or "Forget the memory about this project." The assistant asks a follow-up question
-when the target is unclear. Once the target is clear, it corrects or disables the relevant memory and
-confirms completion only after saving successfully. Explicit corrections also work in sessions with
-automatic summarization disabled.

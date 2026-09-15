@@ -221,6 +221,11 @@ public class DesktopServer {
      * Call this <b>before</b> {@code EventServer.start()}.
      */
     public void start() {
+        var imageCtrl = new com.selfanalyst.desktop.controller.DesktopChatImageController(chatSessionStore.images());
+        chatSessionStore.images().startMaintenance();
+        app.post("/desktop/chat/sessions/{id}/images", imageCtrl::upload);
+        app.get("/desktop/chat/sessions/{id}/images/{image}", imageCtrl::content);
+        app.delete("/desktop/chat/sessions/{id}/images/{image}", imageCtrl::delete);
         app.get("/desktop-ui/locales/{file}", ctx -> {
             String file = ctx.pathParam("file");
             boolean supported = com.selfanalyst.i18n.LanguageRegistry.bundled().supported().stream()

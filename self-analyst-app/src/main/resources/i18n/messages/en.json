@@ -1,4 +1,6 @@
 {
+  "error.chat.imageInvalid": "Image unavailable or invalid. Use PNG/JPEG, up to 5 MiB and 20 megapixels per image.",
+  "error.chat.imageUnsupported": "This model does not support images. Select a vision model and retry.",
   "error.llmSettings.baseUrl": "Base URL must be an HTTP(S) address without credentials, query, or fragment.",
   "error.llmSettings.model": "Model ID must not be empty.",
   "error.llmSettings.temperature": "Temperature must be a number between 0 and 2.",

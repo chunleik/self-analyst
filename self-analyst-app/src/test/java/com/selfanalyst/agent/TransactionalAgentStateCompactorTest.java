@@ -34,6 +34,36 @@ class TransactionalAgentStateCompactorTest {
     private static final String SESSION_ID = "a".repeat(32);
 
     @Test
+    void summarizesImagePlaceholdersButPreservesOriginalImagesInRecentTail(@TempDir Path tempDir) {
+        var captured = new java.util.concurrent.atomic.AtomicReference<String>();
+        Model summarizer = new Model() {
+            public String getModelName() { return "summary"; }
+            public Flux<ChatResponse> stream(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
+                captured.set(messages.stream().map(Msg::getTextContent).reduce("", String::concat));
+                return Flux.just(ChatResponse.builder().content(List.of(TextBlock.builder().text("Earlier image discussion").build())).build());
+            }
+        };
+        var store = new JsonFileAgentStateStore(tempDir.resolve("state"));
+        var agent = ReActAgent.builder().name("test").model(summarizer).stateStore(store).build();
+        try {
+            var messages = new ArrayList<>(sixMessages());
+            var image = new io.agentscope.core.message.ImageBlock(new io.agentscope.core.message.URLSource(
+                    "selfanalyst-image:" + SESSION_ID + "/" + "b".repeat(32), "image/png"));
+            for (int index : List.of(0, 4)) {
+                var content = new ArrayList<>(messages.get(index).getContent()); content.add(image);
+                messages.set(index, messages.get(index).withContent(content));
+            }
+            saveContext(agent, messages);
+            var compactor = new TransactionalAgentStateCompactor(agent, tempDir.resolve("workspace"), summarizer, config());
+            assertTrue(compactor.compactIfNeeded(USER_ID, SESSION_ID).block());
+            assertTrue(captured.get().contains("[User image]"));
+            assertFalse(captured.get().contains("selfanalyst-image:"));
+            var state = store.get(USER_ID, SESSION_ID, "agent_state", AgentState.class).orElseThrow();
+            assertTrue(state.getContext().getFirst().getContent().stream().anyMatch(io.agentscope.core.message.ImageBlock.class::isInstance));
+        } finally { agent.close(); store.close(); }
+    }
+
+    @Test
     void persistsSummaryAndRecentTailOnlyAfterSuccessfulSummary(@TempDir Path tempDir) {
         AtomicInteger calls = new AtomicInteger();
         Model summarizer = respondingModel("summary of first two turns", calls);

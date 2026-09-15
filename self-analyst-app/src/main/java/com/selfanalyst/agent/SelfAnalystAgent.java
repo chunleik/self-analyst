@@ -190,7 +190,7 @@ public class SelfAnalystAgent implements AutoCloseable {
             builtAgent = ReActAgent.builder()
                     .name("SelfAnalyst")
                     .sysPrompt(buildSystemPrompt())
-                    .model(chatModel)
+                    .model(new ChatImageModel(chatModel, config.memoryDir()))
                     .toolkit(toolkit)
                     .middlewares(List.of(
                             new ConversationContextMiddleware(),
@@ -329,13 +329,18 @@ public class SelfAnalystAgent implements AutoCloseable {
 
     /** Session-owned turn loaded under the application gate. */
     public record PersistedDesktopTurn(
-            String userInput, Object contextSnapshot, List<Msg> existingHistory, boolean managedDesktop) {
+            String userInput, Object contextSnapshot, List<Msg> existingHistory, boolean managedDesktop,
+            List<com.selfanalyst.desktop.store.ChatImageStore.Image> images) {
+        public PersistedDesktopTurn(String userInput, Object contextSnapshot, List<Msg> existingHistory, boolean managedDesktop) {
+            this(userInput, contextSnapshot, existingHistory, managedDesktop, List.of());
+        }
         public PersistedDesktopTurn(String userInput, Object contextSnapshot, List<Msg> existingHistory) {
             this(userInput, contextSnapshot, existingHistory, false);
         }
         public PersistedDesktopTurn {
             userInput = userInput != null ? userInput : "";
             existingHistory = existingHistory != null ? List.copyOf(existingHistory) : null;
+            images = images == null ? List.of() : List.copyOf(images);
         }
     }
 
@@ -423,7 +428,7 @@ public class SelfAnalystAgent implements AutoCloseable {
             seedSessionHistoryIfAbsent(sessionId, turn.existingHistory());
             CallPreparation prepared;
             try {
-                prepared = prepareCall(sessionId, userMessageId, turn.userInput());
+                prepared = prepareCall(sessionId, userMessageId, turn.userInput(), turn.images());
             } catch (RuntimeException | Error failure) {
                 agent.clearStateCache(DESKTOP_USER_ID, sessionId);
                 throw failure;
@@ -619,7 +624,8 @@ public class SelfAnalystAgent implements AutoCloseable {
     }
 
     private CallPreparation prepareCall(
-            String sessionId, String userMessageId, String userInput) {
+            String sessionId, String userMessageId, String userInput,
+            List<com.selfanalyst.desktop.store.ChatImageStore.Image> images) {
         if (userMessageId != null) {
             List<Msg> context = agent.getAgentState(DESKTOP_USER_ID, sessionId).getContext();
             for (int i = context.size() - 1; i >= 0; i--) {
@@ -656,12 +662,17 @@ public class SelfAnalystAgent implements AutoCloseable {
         Msg.Builder builder = Msg.builder()
                 .name("user")
                 .role(MsgRole.USER)
-                .textContent(userInput);
+                .content(imageContent(userInput, sessionId, images));
         if (userMessageId != null) builder.id(userMessageId);
         return new CallPreparation(List.of(builder.build()), null);
     }
 
     private record CallPreparation(List<Msg> messages, String completedReply) {
+    }
+
+    public static List<ContentBlock> imageContent(String text, String session,
+            List<com.selfanalyst.desktop.store.ChatImageStore.Image> images) {
+        return ChatImageModel.content(text, session, images);
     }
 
     public void deleteChatSessionState(String sessionId) {
@@ -998,9 +1009,15 @@ public class SelfAnalystAgent implements AutoCloseable {
         }
     }
 
-    private static RuntimeException safeModelFailure(Throwable failure) {
+    static RuntimeException safeModelFailure(Throwable failure) {
         if (failure instanceof ChatCancelledException cancelled) return cancelled;
         String message = failure == null ? "" : String.valueOf(failure.getMessage());
+        if (failure instanceof ChatImageModel.ImageUnavailableException) return (RuntimeException) failure;
+        String lower = message.toLowerCase(java.util.Locale.ROOT);
+        if (!Pattern.compile("\\b(401|403)\\b").matcher(lower).find()
+                && (lower.contains("image") || lower.contains("vision") || lower.contains("multimodal"))
+                && (lower.contains("not support") || lower.contains("unsupported") || lower.contains("does not support")))
+            return new RuntimeException("CHAT_IMAGE_UNSUPPORTED");
         var status = Pattern.compile("\\b(400|401|403|404|408|429|500|502|503|504)\\b").matcher(message);
         return new RuntimeException(status.find() ? "LLM 调用失败 (HTTP " + status.group(1) + ")"
                 : "LLM 调用失败，请检查模型配置或网络连接");

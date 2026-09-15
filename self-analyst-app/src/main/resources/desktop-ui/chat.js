@@ -517,6 +517,7 @@ function createChatSession(opts) {
 
 function deleteChatSession(id) {
   return api.deleteSession(id).then(function (resp) {
+    if (typeof clearChatImages === "function") clearChatImages(id, true);
     noteChatSessionMutation();
     state.chatSessions = state.chatSessions.filter(function (s) { return s.id !== id; });
     if (state.chatSessionSearchResults) {
@@ -631,6 +632,7 @@ function getLatestAssistantTurnIndex(messages) {
 // ---- Render ----
 
 function renderChatTab() {
+  if (typeof renderChatImages === "function") renderChatImages();
   renderChatSessionList();
   renderChatThread();
   renderChatContextPanel();
@@ -775,6 +777,7 @@ function renderLegacyChatThread() {
     html += '<div class="' + cls + '">';
     var visibleContent = m.content || (m.status === "error" ? m.error : "") || "";
     html += '<div class="msg-content">' + formatChatMessageContent(visibleContent) + '</div>';
+    if (typeof chatImageHtml === "function") html += chatImageHtml(m);
     if (i === retryableAssistantIdx &&
         (m.status === "error" || m.status === "pending")) {
       html += '<div class="msg-retry" data-mid="' + m.id + '">' + escHtml(t("chat.retry")) + '</div>';
@@ -897,13 +900,16 @@ function requireChatExecutionResponse(executionRequest) {
 }
 
 function sendChatTabMessage(request) {
+  if (typeof chatImageLoading !== "undefined" && chatImageLoading) return Promise.resolve({ skipped: true });
   if (state.chatSending) return Promise.resolve({ skipped: true });
   var deepChatRequest = request && request.source === "deep-chat";
   var input = state.dom.chatTabInput;
   var text = deepChatRequest
     ? String(request.text || "").trim()
     : String(input && input.value || "").trim();
-  if (!text) return Promise.resolve({ skipped: true });
+  var imageDraftKey = typeof chatImageKey === "function" ? chatImageKey() : null;
+  var imageDraft = typeof chatImageDraft === "function" ? chatImageDraft(imageDraftKey).slice() : [];
+  if (!text && !imageDraft.length) return Promise.resolve({ skipped: true });
 
   var outcome = {
     message: null,
@@ -918,6 +924,11 @@ function sendChatTabMessage(request) {
 
   var inputPersisted = false;
   return ensureActiveChatSession().then(function (session) {
+    if (imageDraft.length && imageDraftKey === "new") {
+      chatImageDrafts[session.id] = chatImageDrafts.new || imageDraft;
+      delete chatImageDrafts.new;
+      imageDraftKey = session.id;
+    }
     outcome.sessionId = session.id;
     return ensureSessionMessagesLoaded(session);
   }).then(function (session) {
@@ -926,13 +937,18 @@ function sendChatTabMessage(request) {
     var pendingMsg = { role: "assistant", content: t("chat.thinking"), status: "pending" };
 
     // Persist user + pending assistant; adopt server-assigned ids into cache.
-    return api.appendMessages(session.id, { messages: [userMsg, pendingMsg] })
+    return (imageDraft.length ? uploadChatImages(session.id, imageDraft) : Promise.resolve([]))
+      .then(function (imageIds) {
+        if (imageIds.length) userMsg.imageIds = imageIds;
+        return api.appendMessages(session.id, { messages: [userMsg, pendingMsg] });
+      })
       .then(function (appended) {
         var savedUser = appended[0];
         var savedPending = appended[1];
         if (!savedUser || !savedPending) throw new Error("Invalid append response");
         noteChatSessionMutation();
-        if (input) input.value = "";
+        if (input && state.activeChatSessionId === session.id) input.value = "";
+        if (imageDraft.length) clearChatImages(imageDraftKey, true);
         inputPersisted = true;
         outcome.inputPersisted = true;
         syncSessionMessageCache(session, [savedUser, savedPending]);

@@ -1,4 +1,13 @@
 {
+  "chat.addImage": "Add images",
+  "chat.imageLimits": "PNG/JPEG · up to 4 images · 5 MiB each · 20 megapixels",
+  "chat.imageInvalid": "The image is invalid or could not be uploaded.",
+  "chat.imageUnavailable": "Image unavailable",
+  "chat.imagePreview": "Selected image",
+  "chat.removeImage": "Remove",
+  "chat.sendImages": "Send with images",
+  "error.chat.imageInvalid": "Image unavailable or invalid. Use PNG/JPEG, up to 5 MiB and 20 megapixels per image.",
+  "error.chat.imageUnsupported": "This model does not support images. Select a vision model and retry.",
   "storage.dataRoot": "Data directory",
   "storage.loadFailed": "Unable to load the data location.",
   "storage.loading": "Loading data location…",

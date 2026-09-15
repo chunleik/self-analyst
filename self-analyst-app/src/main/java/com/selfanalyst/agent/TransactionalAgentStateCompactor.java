@@ -68,7 +68,7 @@ final class TransactionalAgentStateCompactor {
                                         .textContent(SIMPLE_SUMMARY_PREFIX + originalSummary)
                                         .build());
                             }
-                            compactionInput.addAll(originalContext);
+                            compactionInput.addAll(ChatImageModel.textOnly(originalContext));
                             if (!shouldCompact(originalContext, compactionInput)) {
                                 return Mono.just(false);
                             }
@@ -116,7 +116,11 @@ final class TransactionalAgentStateCompactor {
                 .skip(1)
                 .filter(message -> !ConversationCompactor.SUMMARY_MSG_NAME.equals(message.getName()))
                 .toList();
-        List<Msg> expandedTail = expandToUserTurnBoundary(compactionInput, tail);
+        List<Msg> expandedTail = expandToUserTurnBoundary(compactionInput, tail).stream()
+                .map(message -> originalContext.stream()
+                        .filter(original -> Objects.equals(original.getId(), message.getId()))
+                        .findFirst().orElse(message))
+                .toList();
         if (expandedTail.isEmpty()) return Mono.just(false);
 
         return Mono.fromCallable(() -> {

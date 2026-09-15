@@ -183,6 +183,21 @@ Legacy OCR keys listed in the [removal notes](docs/archive/removed-features/remo
 and all `aw.audio.*` keys are no longer supported. They do not prevent old configuration files
 from loading, but they have no effect.
 
+## Images in chat
+
+Use **Add images** to choose PNG/JPEG files, or paste a screenshot into the chat input.
+Preview or remove images before sending. You can send images with a question or on their own;
+**Send with images** and Enter both submit the current text and images. The standard and fallback
+chat interfaces support the same image workflow. Limits: 4 images per turn, 5 MiB and 20 megapixels
+per image (20 MiB total).
+
+Selected images are stored locally with the conversation and sent to your configured chat model,
+which must support image input. If the model explicitly rejects images, switch to a vision model
+and retry the same turn. Refreshing or restarting restores image history; deleting the conversation
+also removes its managed images. Abandoned uploads expire after 24 hours. Older images that have
+been compacted out of model context are not automatically sent again with subsequent questions.
+This feature does not enable background screenshots or change metadata-only file collection.
+
 ## Documentation
 
 The following documents are maintained in Simplified Chinese:

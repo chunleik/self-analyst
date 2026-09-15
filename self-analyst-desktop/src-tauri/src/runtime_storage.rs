@@ -83,6 +83,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn generated_acl_allows_data_directory_only_from_managed_main_window() {
+        use tauri::utils::acl::{resolved::Resolved, ExecutionContext};
+        let manifests = serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json"))
+            .expect("generated permission manifests");
+        let capabilities = serde_json::from_str(include_str!("../gen/schemas/capabilities.json"))
+            .expect("generated capabilities");
+        let acl = Resolved::resolve(
+            &manifests,
+            capabilities,
+            tauri::utils::platform::Target::Windows,
+        )
+        .expect("resolve desktop ACL");
+        let grants = acl
+            .allowed_commands
+            .get("open_data_directory")
+            .expect("open_data_directory must have an explicit application permission");
+        let allowed = |window: &str, address: &str| {
+            let address = tauri::Url::parse(address).unwrap();
+            grants.iter().any(|grant| {
+                grant.windows.iter().any(|pattern| pattern.matches(window))
+                    && matches!(&grant.context, ExecutionContext::Remote { url } if url.test(&address))
+            })
+        };
+        for host in ["localhost", "127.0.0.1"] {
+            let address = format!("http://{host}:5701/desktop-ui/index.html");
+            assert!(allowed("main", &address));
+            assert!(!allowed("other", &address));
+        }
+        for address in [
+            "https://example.com/desktop-ui/",
+            "http://localhost.evil.test:5701/desktop-ui/",
+        ] {
+            assert!(!allowed("main", address));
+        }
+        assert!(grants
+            .iter()
+            .all(|grant| !matches!(grant.context, ExecutionContext::Local)));
+    }
+
+    #[test]
     fn layout_selection_preserves_user_root_and_installer_priority() {
         let base = std::env::temp_dir().join(format!(
             "sa-runtime-{}-{}",

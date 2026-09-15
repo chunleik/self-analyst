@@ -20,7 +20,6 @@
   "storage.openFailed": "Unable to open the data directory.",
   "storage.runtimeRoot": "Runtime directory",
   "storage.title": "Runtime data",
-
   "document.title": "All session documents",
   "document.empty": "Ask for a report, spreadsheet, or presentation in chat",
   "document.loadFailed": "Session documents are temporarily unavailable",
@@ -392,5 +391,8 @@
   "error.chat.cancelled": "Chat request was cancelled",
   "error.chat.emptyResponse": "The model returned no text. Please retry.",
   "error.chat.stillRunning": "The previous message is still being processed. Please try again later.",
-  "error.chat.unavailable": "LLM is not configured. Set the API key in Settings."
+  "error.chat.unavailable": "LLM is not configured. Set the API key in Settings.",
+  "timeline.unknownActivity": "Unidentified application activity",
+  "timeline.estimated": "Incomplete AFK coverage: some durations include unverified idle time and are estimates.",
+  "timeline.activityDuration": "{minutes}m {seconds}s"
 }

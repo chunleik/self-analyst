@@ -37,9 +37,9 @@ class WikiPeriodFactoryTest {
         assertEquals(WikiLevel.HALF_DAY, periods.get(0).level());
         for (WikiPeriod p : periods) {
             long duration = p.end().getEpochSecond() - p.start().getEpochSecond();
-            assertEquals(12 * 3600, duration, "Half-day period must be exactly 12 hours");
+            assertEquals((p.start().atZone(tz).getHour() == 4 ? 8 : 16) * 3600, duration);
             int hour = p.start().atZone(tz).getHour();
-            assertTrue(hour == 0 || hour == 12, "Half-day must start at 0 or 12, got " + hour);
+            assertTrue(hour == 4 || hour == 12, "Half-day must start at 4 or 12, got " + hour);
         }
     }
 
@@ -52,7 +52,7 @@ class WikiPeriodFactoryTest {
         assertFalse(periods.isEmpty());
         assertEquals(WikiLevel.DAY, periods.get(0).level());
         for (WikiPeriod p : periods) {
-            assertEquals(0, p.start().atZone(tz).getHour(), "Day must start at midnight");
+            assertEquals(4, p.start().atZone(tz).getHour(), "Day must start at 04:00");
         }
     }
 

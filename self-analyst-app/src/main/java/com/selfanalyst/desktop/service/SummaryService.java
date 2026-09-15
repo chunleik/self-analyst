@@ -1,6 +1,8 @@
 package com.selfanalyst.desktop.service;
 
 import com.selfanalyst.events.model.Event;
+import com.selfanalyst.events.statistics.ActivityCalendar;
+import com.selfanalyst.events.statistics.ActivityStatistics;
 import com.selfanalyst.events.store.EventStore;
 import com.selfanalyst.memory.GrowthProfile;
 import com.selfanalyst.memory.MemoryStore;
@@ -75,59 +77,10 @@ public class SummaryService implements SummaryFactSource {
 
     /** Timeline entries for multiple periods. */
     public List<TimelineEntry> getTimeline() {
-        Instant now = Instant.now();
-        ZonedDateTime localNow = now.atZone(ZONE);
-        LocalDate today = localNow.toLocalDate();
-
-        List<TimelineEntry> entries = new ArrayList<>();
-
-        // 当前: last ~2 hours
-        Instant twoHoursAgo = now.minus(Duration.ofHours(2));
-        entries.add(new TimelineEntry("current", message("period.current"),
-                computeFacts(twoHoursAgo, now, message("period.current"))));
-
-        // Today 00:00 → now
-        Instant todayStart = today.atStartOfDay(ZONE).toInstant();
-        entries.add(new TimelineEntry("today", message("period.today"),
-                computeFacts(todayStart, now, message("period.today"))));
-
-        // 上午: if current time >= 12:00, show 00:00 → 12:00
-        if (localNow.getHour() >= 12) {
-            Instant morningEnd = today.atTime(12, 0).atZone(ZONE).toInstant();
-            entries.add(new TimelineEntry("morning", message("period.morning"),
-                    computeFacts(todayStart, morningEnd, message("period.morning"))));
-        }
-
-        // Yesterday 00:00 → 23:59:59
-        LocalDate yesterday = today.minusDays(1);
-        Instant yDayStart = yesterday.atStartOfDay(ZONE).toInstant();
-        Instant yDayEnd = yesterday.plusDays(1).atStartOfDay(ZONE).minusNanos(1).toInstant();
-        entries.add(new TimelineEntry("yesterday", message("period.yesterday"),
-                computeFacts(yDayStart, yDayEnd, message("period.yesterday"))));
-
-        // Day before yesterday
-        LocalDate dayBefore = today.minusDays(2);
-        Instant dbStart = dayBefore.atStartOfDay(ZONE).toInstant();
-        Instant dbEnd = dayBefore.plusDays(1).atStartOfDay(ZONE).minusNanos(1).toInstant();
-        entries.add(new TimelineEntry("dayBefore", message("period.dayBefore"),
-                computeFacts(dbStart, dbEnd, message("period.dayBefore"))));
-
-        // This week (Monday → now)
-        LocalDate thisMonday = today.with(DayOfWeek.MONDAY);
-        entries.add(new TimelineEntry("thisWeek", message("period.thisWeek"),
-                computeFacts(thisMonday.atStartOfDay(ZONE).toInstant(), now, message("period.thisWeek"))));
-
-        // 最近两周: rolling 14-day window ending now
-        Instant twoWeeksAgo = now.minus(14, java.time.temporal.ChronoUnit.DAYS);
-        entries.add(new TimelineEntry("lastTwoWeeks", message("period.lastTwoWeeks"),
-                computeFacts(twoWeeksAgo, now, message("period.lastTwoWeeks"))));
-
-        // This month (1st → now)
-        LocalDate firstOfMonth = today.withDayOfMonth(1);
-        entries.add(new TimelineEntry("thisMonth", message("period.thisMonth"),
-                computeFacts(firstOfMonth.atStartOfDay(ZONE).toInstant(), now, message("period.thisMonth"))));
-
-        return entries;
+        return new SummaryWindowClassifier().slots(Instant.now(), lang).stream()
+                .map(slot -> new TimelineEntry(slot.key(), slot.label(),
+                        computeFacts(slot.start(), slot.end(), slot.label())))
+                .toList();
     }
 
     /**
@@ -140,10 +93,19 @@ public class SummaryService implements SummaryFactSource {
     }
 
     public BehaviorData getBehaviorData() {
-        Instant now = Instant.now();
+        return getBehaviorData(Instant.now());
+    }
+
+    BehaviorData getBehaviorData(Instant now) {
         Instant sevenDaysAgo = now.minus(7, ChronoUnit.DAYS);
 
-        List<Event> windowEvents = safeQuery(windowBucket, sevenDaysAgo, now);
+        var ranges = queryRanges(sevenDaysAgo, now);
+        var statistics = statistics(ranges, sevenDaysAgo, now);
+        if (statistics.estimated() || !"complete".equals(ranges.get(windowBucket).status())
+                || !"complete".equals(ranges.get(afkBucket).status())) {
+            return new BehaviorData(0, 0, 0, 0, 0, 0, 0, List.of());
+        }
+        List<Event> windowEvents = splitAtDayAndEvening(statistics.activeEvents());
 
         if (windowEvents.isEmpty()) {
             return new BehaviorData(0, 0, 0, 0, 0, 0, 0, List.of());
@@ -152,7 +114,7 @@ public class SummaryService implements SummaryFactSource {
         // Group events by local date
         Map<LocalDate, List<Event>> byDay = new LinkedHashMap<>();
         for (Event e : windowEvents) {
-            LocalDate day = e.timestamp().atZone(ZONE).toLocalDate();
+            LocalDate day = ActivityCalendar.date(e.timestamp(), ZONE);
             byDay.computeIfAbsent(day, k -> new ArrayList<>()).add(e);
         }
 
@@ -171,17 +133,18 @@ public class SummaryService implements SummaryFactSource {
         double recentEvening = 0;
         int recentSwitches = 0;
         for (LocalDate day : recentDaysList) {
+            recentSwitches += statistics(ranges, ActivityCalendar.start(day, ZONE),
+                    ActivityCalendar.start(day.plusDays(1), ZONE)).switchCount();
             for (Event e : byDay.get(day)) {
                 if (e.duration() <= 0) continue;
                 String app = extractApp(e.data());
                 if (isEntertainmentApp(app)) {
                     recentEntertainment += e.duration();
                     ZonedDateTime eventTime = e.timestamp().atZone(ZONE);
-                    if (eventTime.getHour() >= 22) {
+                    if (eventTime.getHour() >= 22 || eventTime.getHour() < 4) {
                         recentEvening += e.duration();
                     }
                 }
-                recentSwitches++;
             }
         }
 
@@ -189,17 +152,18 @@ public class SummaryService implements SummaryFactSource {
         double baselineEvening = 0;
         int baselineSwitches = 0;
         for (LocalDate day : baselineDaysList) {
+            baselineSwitches += statistics(ranges, ActivityCalendar.start(day, ZONE),
+                    ActivityCalendar.start(day.plusDays(1), ZONE)).switchCount();
             for (Event e : byDay.get(day)) {
                 if (e.duration() <= 0) continue;
                 String app = extractApp(e.data());
                 if (isEntertainmentApp(app)) {
                     baselineEntertainment += e.duration();
                     ZonedDateTime eventTime = e.timestamp().atZone(ZONE);
-                    if (eventTime.getHour() >= 22) {
+                    if (eventTime.getHour() >= 22 || eventTime.getHour() < 4) {
                         baselineEvening += e.duration();
                     }
                 }
-                baselineSwitches++;
             }
         }
 
@@ -236,39 +200,14 @@ public class SummaryService implements SummaryFactSource {
     // ── Compute helpers ──────────────────────────────────────────
 
     private LocalFacts computeFacts(Instant start, Instant end, String label) {
-        List<Event> windowEvents = safeQuery(windowBucket, start, end);
-        List<Event> afkEvents = safeQuery(afkBucket, start, end);
-
-        // Aggregate window events by app name, and by (app -> title) for detail
-        Map<String, Double> appDurations = new LinkedHashMap<>();
-        Map<String, Map<String, Double>> appTitleDurations = new LinkedHashMap<>();
-        double activeTime = 0.0;
-        for (Event e : windowEvents) {
-            if (e.duration() > 0) {
-                String app = extractApp(e.data());
-                String title = extractTitle(e.data());
-                double dur = e.duration();
-                appDurations.merge(app, dur, Double::sum);
-                activeTime += dur;
-                if (!title.isEmpty()) {
-                    appTitleDurations.computeIfAbsent(app, k -> new LinkedHashMap<>())
-                            .merge(title, dur, Double::sum);
-                }
-            }
-        }
-
-        // AFK time
-        double afkTime = 0.0;
-        for (Event e : afkEvents) {
-            if (e.duration() > 0) {
-                Object raw = e.data().get("status");
-                if (raw != null && !"not-afk".equals(String.valueOf(raw))) {
-                    afkTime += e.duration();
-                }
-            }
-        }
-        // Subtract AFK from active
-        double effectiveActive = Math.max(0, activeTime - afkTime);
+        var ranges = queryRanges(start, end);
+        var statistics = statistics(ranges, start, end);
+        Map<String, Double> appDurations = statistics.apps();
+        Map<String, Map<String, Double>> appTitleDurations = statistics.titles();
+        double effectiveActive = statistics.activeSeconds();
+        double afkTime = statistics.afkSeconds();
+        String coverage = "failed".equals(ranges.get(windowBucket).status()) ? "failed"
+                : statistics.estimated() || !"complete".equals(ranges.get(afkBucket).status()) ? "estimated" : "complete";
 
         // Top apps (sorted by duration desc, max 5)
         List<String> topApps = appDurations.entrySet().stream()
@@ -280,7 +219,10 @@ public class SummaryService implements SummaryFactSource {
         // Headline: show top app + its most-used window title
         String headline;
         if (topApps.isEmpty()) {
-            headline = message("local.empty").formatted(label);
+            headline = "failed".equals(coverage) ? message("local.queryFailed")
+                    : statistics.unknownSeconds() > 0 ? message("local.unknownOnly")
+                    : statistics.windowCount() > 0 ? message("local.inactiveOnly")
+                    : message("local.empty").formatted(label);
         } else {
             Map.Entry<String, Double> topAppEntry = appDurations.entrySet().stream()
                     .max(Map.Entry.comparingByValue())
@@ -317,7 +259,10 @@ public class SummaryService implements SummaryFactSource {
             }
         }
         evidence.add(message("local.activity").formatted(duration(effectiveActive), duration(afkTime)));
-        evidence.add(message("local.switches").formatted(windowEvents.size()));
+        evidence.add(message("local.switches").formatted(statistics.switchCount()));
+        if (statistics.unknownSeconds() > 0) evidence.add(message("local.unknownActivity").formatted(duration(statistics.unknownSeconds())));
+        if ("estimated".equals(coverage)) evidence.add(message("local.estimated"));
+        if ("failed".equals(coverage)) evidence.add(message("local.queryFailed"));
 
         // Build goal context if memory is available
         String goalContext = "";
@@ -332,15 +277,37 @@ public class SummaryService implements SummaryFactSource {
 
         return new LocalFacts(headline, evidence, topApps,
                 duration(effectiveActive), duration(afkTime),
-                windowEvents.size(), goalContext);
+                statistics.switchCount(), goalContext, statistics.unknownSeconds(), coverage);
     }
 
-    private List<Event> safeQuery(String bucketId, Instant start, Instant end) {
+    private Map<String, EventStore.EventRange> queryRanges(Instant start, Instant end) {
         try {
-            return eventStore.queryEvents(bucketId, 50_000, start.toString(), end.toString());
-        } catch (Exception e) {
-            return List.of();
+            return eventStore.queryIntersecting(List.of(windowBucket, afkBucket), start, end);
+        } catch (Exception error) {
+            var failed = new EventStore.EventRange(List.of(), "failed");
+            return Map.of(windowBucket, failed, afkBucket, failed);
         }
+    }
+
+    private ActivityStatistics.Result statistics(Map<String, EventStore.EventRange> ranges, Instant start, Instant end) {
+        return ActivityStatistics.compute(ranges.get(windowBucket).events(), ranges.get(afkBucket).events(), start, end);
+    }
+
+    private static List<Event> splitAtDayAndEvening(List<Event> events) {
+        List<Event> result = new ArrayList<>();
+        for (Event event : events) {
+            Instant cursor = event.timestamp(), end = ActivityStatistics.end(event);
+            while (cursor.isBefore(end)) {
+                LocalDate day = ActivityCalendar.date(cursor, ZONE);
+                Instant next = ActivityCalendar.start(day.plusDays(1), ZONE);
+                Instant evening = day.atTime(22, 0).atZone(ZONE).toInstant();
+                if (evening.isAfter(cursor) && evening.isBefore(next)) next = evening;
+                if (next.isAfter(end)) next = end;
+                result.add(new Event(cursor, Duration.between(cursor, next).toNanos() / 1e9, event.data()));
+                cursor = next;
+            }
+        }
+        return result;
     }
 
     private static String extractApp(Map<String, Object> data) {
@@ -401,7 +368,13 @@ public class SummaryService implements SummaryFactSource {
             String activeTime,
             String afkTime,
             int switchCount,
-            String goalContext) {
+            String goalContext,
+            double unknownActivitySeconds,
+            String coverage) {
+        public LocalFacts(String headline, List<String> evidence, List<String> topApps,
+                          String activeTime, String afkTime, int switchCount, String goalContext) {
+            this(headline, evidence, topApps, activeTime, afkTime, switchCount, goalContext, 0, "complete");
+        }
     }
 
     public record TimelineEntry(

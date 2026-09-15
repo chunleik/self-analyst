@@ -26,6 +26,37 @@ class WikiWorkerTest {
     private WikiStore store;
     private Database awDatabase;
 
+    @Test
+    void historicalStatisticsDiscoveryIsBackgroundAndResumes(@TempDir Path dir) {
+        Path wiki = dir.resolve("llm-wiki.db");
+        store = new WikiStore(wiki);
+        awDatabase = new Database(dir.resolve("events"));
+        EventStore events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-08-20T12:00:00Z");
+        String host;
+        try { host = java.net.InetAddress.getLocalHost().getHostName(); }
+        catch (Exception error) { throw new IllegalStateException(error); }
+        String bucket = "watcher-window_" + host;
+        events.insertEvent(bucket, new com.selfanalyst.events.model.Event(now.minus(Duration.ofDays(20)), 60, Map.of("app", "editor")));
+        WikiFactBuilder builder = new WikiFactBuilder(events, 12000);
+        WikiSummarizer summarizer = new WikiSummarizer(prompt -> {
+            throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
+        });
+        worker = new WikiWorker(store, builder, summarizer, ZoneId.of("UTC"), Duration.ofSeconds(5), 3600, true, null, () -> now);
+        worker.start();
+        assertEquals(0, store.query(null, null, null).size(), "startup must not discover history synchronously");
+        worker.processOneRound();
+        Instant cursor = store.historyBefore();
+        assertEquals(now.minus(Duration.ofDays(8)), cursor);
+        worker.shutdown(); worker = null;
+        store.close(); store = new WikiStore(wiki);
+        assertEquals(cursor, store.historyBefore());
+        worker = new WikiWorker(store, builder, summarizer, ZoneId.of("UTC"), Duration.ofSeconds(5), 3600, true, null, () -> now);
+        worker.start(); worker.processOneRound();
+        assertEquals(now.minus(Duration.ofDays(9)), store.historyBefore());
+        assertEquals(1, events.countByBucket(bucket), "discovery never rewrites event facts");
+    }
+
     @AfterEach
     void tearDown() throws Exception {
         if (worker != null) worker.shutdown();
@@ -96,7 +127,7 @@ class WikiWorkerTest {
                 new WikiSummarizer(prompt -> "{}"), ZoneId.of("UTC"),
                 Duration.ofSeconds(5), 3_600, false, null);
 
-        Instant weekStart = Instant.parse("2026-08-10T00:00:00Z");
+        Instant weekStart = Instant.parse("2026-08-10T04:00:00Z");
         WikiEntry week = entry("week", WikiLevel.WEEK, weekStart,
                 weekStart.plus(7, ChronoUnit.DAYS), WikiStatus.PENDING);
         store.upsert(entry("day-0", WikiLevel.DAY, weekStart,
@@ -132,6 +163,7 @@ class WikiWorkerTest {
         worker.start();
         worker.processOneRound();
 
+        worker.processOneRound(); // Failed background discovery retries on the following round.
         Instant historicalHour = Instant.parse("2026-08-14T03:00:00Z");
         assertFalse(store.query(historicalHour, historicalHour.plus(1, ChronoUnit.HOURS),
                         WikiLevel.HOUR).isEmpty(),
@@ -153,7 +185,7 @@ class WikiWorkerTest {
                 summarizer, ZoneId.of("UTC"), Duration.ofSeconds(5), 3_600,
                 false, null);
 
-        Instant weekStart = Instant.parse("2026-08-10T00:00:00Z");
+        Instant weekStart = Instant.parse("2026-08-10T04:00:00Z");
         WikiEntry week = entry("week", WikiLevel.WEEK, weekStart,
                 weekStart.plus(7, ChronoUnit.DAYS), WikiStatus.PENDING);
         store.upsert(week);
@@ -195,7 +227,7 @@ class WikiWorkerTest {
         store.upsert(entry("recent-hour", WikiLevel.HOUR,
                 Instant.parse("2026-08-20T02:00:00Z"),
                 Instant.parse("2026-08-20T03:00:00Z"), WikiStatus.SKIPPED));
-        Instant weekStart = Instant.parse("2026-08-10T00:00:00Z");
+        Instant weekStart = Instant.parse("2026-08-10T04:00:00Z");
         store.upsert(failedEntry("failed-week", WikiLevel.WEEK, weekStart,
                 weekStart.plus(7, ChronoUnit.DAYS), 0));
         store.upsert(failedEntry("failed-day", WikiLevel.DAY, weekStart,
@@ -228,7 +260,7 @@ class WikiWorkerTest {
                     if (!ready.get()) throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
                     return "{\"summary\":\"recovered\",\"primaryTask\":\"task\",\"taskSegments\":[],\"metrics\":{}}";
                 }), ZoneId.of("UTC"), Duration.ofSeconds(5), 3_600, false, null);
-        Instant start = Instant.parse("2026-08-10T00:00:00Z");
+        Instant start = Instant.parse("2026-08-10T04:00:00Z");
         WikiEntry week = entry("waiting-week", WikiLevel.WEEK, start, start.plus(7, ChronoUnit.DAYS), WikiStatus.PENDING);
         store.upsert(week);
         for (int day = 0; day < 7; day++) {

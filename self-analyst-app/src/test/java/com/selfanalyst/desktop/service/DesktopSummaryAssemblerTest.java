@@ -42,6 +42,20 @@ class DesktopSummaryAssemblerTest {
     }
 
     @Test
+    void crossingFourRefreshesTextEvenWhenMetricsMatch() {
+        CountingFacts facts = new CountingFacts();
+        AtomicInteger calls = new AtomicInteger();
+        SummarySnapshotStore snapshots = new SummarySnapshotStore(tempDir);
+        Instant before = Instant.parse("2026-09-05T19:59:59Z");
+        for (Instant at : List.of(before, before.plusSeconds(1))) {
+            var assembler = new DesktopSummaryAssembler(facts, new BehaviorAdviceService(),
+                    new SummaryPromptService(), snapshots, null, Clock.fixed(at, ZONE));
+            assembler.assemble(new DesktopSummaryAssembler.Request(true, 4, Lang.chinese(), countingClient(calls)));
+        }
+        assertEquals(2, facts.behaviorCalls.get(), "a new statistical day invalidates old text and advice");
+    }
+
+    @Test
     void responseAlwaysHasRequiredFieldsAndReusesWikiForYesterday() {
         wikiStore = new WikiStore(tempDir.resolve("wiki.db"));
         upsertDay("昨天写方案", yesterdayStart(), yesterdayEnd());
@@ -214,11 +228,11 @@ class DesktopSummaryAssemblerTest {
     }
 
     private static Instant dayStart(LocalDate day) {
-        return day.atStartOfDay(ZONE).toInstant();
+        return day.atTime(4, 0).atZone(ZONE).toInstant();
     }
 
     private static Instant dayEnd(LocalDate day) {
-        return day.plusDays(1).atStartOfDay(ZONE).toInstant();
+        return day.plusDays(1).atTime(4, 0).atZone(ZONE).toInstant();
     }
 
     private static class CountingFacts implements SummaryFactSource {

@@ -20,7 +20,6 @@
   "storage.openFailed": "无法打开数据目录。",
   "storage.runtimeRoot": "运行目录",
   "storage.title": "运行数据",
-
   "document.title": "全部会话文档",
   "document.empty": "可在聊天中要求生成报告、数据表或 PPT",
   "document.loadFailed": "暂时无法读取会话文档",
@@ -392,5 +391,8 @@
   "error.chat.cancelled": "对话请求已取消",
   "error.chat.emptyResponse": "模型未返回文本，请重试",
   "error.chat.stillRunning": "上一条消息仍在处理中，请稍后再试...",
-  "error.chat.unavailable": "LLM 未配置，请在配置页面设置 API Key"
+  "error.chat.unavailable": "LLM 未配置，请在配置页面设置 API Key",
+  "timeline.unknownActivity": "未识别应用活动",
+  "timeline.estimated": "AFK 覆盖不足：部分时长未扣除非活跃时间，仅供估计。",
+  "timeline.activityDuration": "{minutes}分钟{seconds}秒"
 }

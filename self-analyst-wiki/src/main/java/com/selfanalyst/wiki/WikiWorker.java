@@ -72,9 +72,7 @@ public class WikiWorker {
         Instant startedAt = nowSupplier.get();
         if (backfillEnabled) {
             enqueueCursor = startedAt.minus(BACKFILL_LOOKBACK);
-            if (enqueueHistoricalPeriods(enqueueCursor, startedAt)) {
-                enqueueCursor = startedAt;
-            }
+            // Discovery runs on the background executor, never on the startup thread.
         } else {
             // Reconcile one recent hour on the first round so an opt-out from historical
             // backfill still produces live Wiki entries immediately.
@@ -119,6 +117,7 @@ public class WikiWorker {
         if (!running.get()) return;
 
         reconcileNewPeriods();
+        if (backfillEnabled) discoverOlderStatistics();
 
         try {
             // Process in priority order: lower levels first
@@ -144,6 +143,21 @@ public class WikiWorker {
             }
         } catch (Exception e) {
             log.warn("WikiWorker round failed: {}", e.getMessage());
+        }
+    }
+
+    private void discoverOlderStatistics() {
+        try {
+            Instant before = store.historyBefore();
+            if (before == null) before = nowSupplier.get().minus(BACKFILL_LOOKBACK);
+            Instant oldest = factBuilder.earliestEvent().orElse(before);
+            if (!oldest.isBefore(before)) return;
+            Instant from = before.minus(Duration.ofDays(1));
+            if (from.isBefore(oldest)) from = oldest;
+            enqueueMissingPeriods(from, before);
+            store.saveHistoryBefore(from);
+        } catch (Exception error) {
+            log.warn("Wiki historical statistics discovery failed: {}", error.getClass().getSimpleName());
         }
     }
 
@@ -194,6 +208,7 @@ public class WikiWorker {
 
     private boolean canProcess(WikiEntry entry) {
         WikiLevel childLevel = childLevel(entry.level());
+        if (!entry.currentStatistics() || entry.periodEnd().isAfter(nowSupplier.get())) return false;
         if (childLevel == null) return true;
 
         return completedExpectedChildren(entry, childLevel) != null;

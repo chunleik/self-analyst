@@ -59,6 +59,9 @@ public class WikiSummarizer {
                 .append(" (").append(tz).append(")\n\n");
 
         sb.append("## 统计指标\n");
+        sb.append("- 统计覆盖: ").append(facts.sourceCoverage()).append("\n");
+        sb.append("- 未识别应用活动秒数: ").append(facts.statistics().getOrDefault("unknownActivitySeconds", 0)).append("\n");
+        sb.append("- 若 AFK 覆盖不是 complete，时长是未完全扣除非活跃时间的估计，不得声称已确认使用。\n");
         sb.append("- 活跃时长: ").append(formatDuration(facts.activeSeconds())).append("\n");
         sb.append("- 离开时长: ").append(formatDuration(facts.afkSeconds())).append("\n");
         sb.append("- 窗口切换: ").append(facts.switchCount()).append("次\n");
@@ -154,6 +157,8 @@ public class WikiSummarizer {
                         .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
             }
 
+            extra = new java.util.LinkedHashMap<>(extra);
+            extra.putAll(facts.statistics());
             WikiEntry.WikiMetrics metrics = new WikiEntry.WikiMetrics(
                     facts.activeSeconds(), facts.afkSeconds(), facts.switchCount(),
                     facts.topApps(), extra);

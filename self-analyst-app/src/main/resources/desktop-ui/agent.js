@@ -85,6 +85,14 @@ function renderTimeline() {
         '<div class="llm-not-configured">' + escHtml(t("timeline.llmNotConfigured")) + '</div>';
     }
 
+    if (entry.unknownActivitySeconds > 0) {
+      html += '<div class="timeline-detail-section">' + escHtml(t("timeline.unknownActivity"))
+        + ' ' + escHtml(t("timeline.activityDuration", { minutes: Math.floor(entry.unknownActivitySeconds / 60),
+          seconds: Math.floor(entry.unknownActivitySeconds % 60) })) + '</div>';
+    }
+    if (entry.coverage === "estimated") {
+      html += '<div class="timeline-detail-section">' + escHtml(t("timeline.estimated")) + '</div>';
+    }
     if (evidence) {
       html +=
         '<div class="timeline-detail-section">' +

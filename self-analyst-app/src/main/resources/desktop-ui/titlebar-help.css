@@ -23,7 +23,8 @@
 #help-trigger { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 4px; padding: 4px 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
 #help-trigger:hover, #help-trigger[aria-expanded=true] { background: var(--accent-dim); color: var(--text-primary); }
 #help-menu { position: fixed; min-width: 196px; max-width: calc(100vw - 16px); padding: 5px; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 7px; box-shadow: var(--shadow-md); z-index: 250; }
-#help-menu[hidden], #help-dialog-link[hidden] { display: none; }
+#help-menu[hidden], #help-dialog-link[hidden], #help-update-retry[hidden] { display: none; }
+#help-update-retry { margin-top: 12px; }
 #help-menu button { display: block; width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--text-primary); text-align: left; font: inherit; font-size: 13px; padding: 7px 10px; cursor: pointer; }
 #help-menu button:hover, #help-menu button:focus { background: var(--accent-dim); }
 #help-menu button:focus-visible, #help-trigger:focus-visible, .titlebar-controls button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

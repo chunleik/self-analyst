@@ -243,12 +243,13 @@ public class DesktopServer {
             String path = "/desktop-ui/" + file;
             try (var in = getClass().getResourceAsStream(path)) {
                 if (in != null) {
-                    ctx.result(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                    ctx.result(in.readAllBytes());
                     ctx.header("Cache-Control", "no-cache, no-store, must-revalidate");
                     if (file.endsWith(".css")) ctx.contentType("text/css");
                     else if (file.endsWith(".js")) ctx.contentType("application/javascript");
                     else if (file.endsWith(".html")) ctx.contentType("text/html");
                     else if (file.endsWith(".svg")) ctx.contentType("image/svg+xml");
+                    else if (file.endsWith(".png")) ctx.contentType("image/png");
                 } else {
                     ctx.status(404);
                 }

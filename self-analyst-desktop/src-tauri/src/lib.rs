@@ -6,6 +6,7 @@ mod java_path;
 mod runtime_storage;
 mod startup_log;
 mod titlebar;
+mod updates;
 
 #[cfg(feature = "titlebar-review")]
 pub use titlebar::run_titlebar_review;
@@ -608,7 +609,6 @@ fn create_tray_menu(
     let show_item = MenuItem::with_id(app, "show", i18n::text("show"), true, None::<&str>)?;
     let web_desktop_item =
         MenuItem::with_id(app, "web_desktop", i18n::text("web"), true, None::<&str>)?;
-    let about_item = MenuItem::with_id(app, "about", i18n::text("about"), true, None::<&str>)?;
     let autostart_item = CheckMenuItem::with_id(
         app,
         "autostart",
@@ -620,13 +620,7 @@ fn create_tray_menu(
     let quit_item = MenuItem::with_id(app, "quit", i18n::text("quit"), true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[
-            &show_item,
-            &web_desktop_item,
-            &autostart_item,
-            &about_item,
-            &quit_item,
-        ],
+        &[&show_item, &web_desktop_item, &autostart_item, &quit_item],
     )?;
     Ok((menu, autostart_item))
 }
@@ -653,9 +647,6 @@ fn create_tray(app: &AppHandle, token: &str, port: u16) -> tauri::Result<tauri::
             "autostart" => toggle_autostart(&toggle_item),
             "web_desktop" => {
                 let _ = open::that(&desktop_session_url);
-            }
-            "about" => {
-                show_about_message(port);
             }
             "quit" => {
                 app.exit(0);

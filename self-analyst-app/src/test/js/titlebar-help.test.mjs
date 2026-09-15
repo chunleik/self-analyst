@@ -30,9 +30,9 @@ function setup({ native = false, language = 'zh', invoke, openError = false } = 
   document.activeElement = null;
   document.getElementById = id => nodes.get(id);
   document.createElement = () => { const link = element(); link.click = () => { if (openError) throw Error('blocked'); links.push(link); }; return link; };
-  for (const id of ['help-trigger', 'help-menu', 'help-dialog', 'help-dialog-title', 'help-dialog-body', 'help-dialog-link', 'window-minimize', 'window-maximize', 'window-close', 'titlebar-drag', 'titlebar-help-slot', 'web-help-slot']) nodes.set(id, element(id));
+  for (const id of ['help-trigger', 'help-menu', 'help-dialog', 'help-dialog-title', 'help-dialog-body', 'help-dialog-link', 'help-update-retry', 'window-minimize', 'window-maximize', 'window-close', 'titlebar-drag', 'titlebar-help-slot', 'web-help-slot']) nodes.set(id, element(id));
   const menu = nodes.get('help-menu'); menu.hidden = true;
-  const items = ['guide', 'feedback', 'about'].map(action => { const el = element(action); el.setAttribute('data-help-action', action); menu.appendChild(el); return el; });
+  const items = ['guide', 'feedback', 'check_update', 'about'].map(action => { const el = element(action); el.setAttribute('data-help-action', action); menu.appendChild(el); return el; });
   menu.querySelectorAll = () => items;
   nodes.get('web-help-slot').appendChild(nodes.get('help-trigger'));
   const host = element(); Object.assign(host, { innerWidth: 800, innerHeight: 600, devicePixelRatio: 1.5, location: { origin: 'http://localhost:5701' } });
@@ -67,9 +67,9 @@ test('menu toggles, closes outside and on blur without stealing outside focus', 
 
 test('keyboard navigation wraps, Esc returns to trigger and Tab allows normal traversal', () => {
   const s = setup();
-  s.trigger.fire('keydown', { key: 'ArrowUp' }); assert.equal(s.document.activeElement, s.items[2]);
+  s.trigger.fire('keydown', { key: 'ArrowUp' }); assert.equal(s.document.activeElement, s.items[3]);
   s.menu.fire('keydown', { key: 'ArrowDown' }); assert.equal(s.document.activeElement, s.items[0]);
-  s.menu.fire('keydown', { key: 'End' }); assert.equal(s.document.activeElement, s.items[2]);
+  s.menu.fire('keydown', { key: 'End' }); assert.equal(s.document.activeElement, s.items[3]);
   s.menu.fire('keydown', { key: 'Escape' }); assert.equal(s.menu.hidden, true); assert.equal(s.document.activeElement, s.trigger);
   s.ui.open(); const event = s.menu.fire('keydown', { key: 'Tab' });
   assert.equal(s.menu.hidden, true); assert.equal(event.prevented, undefined);
@@ -132,5 +132,96 @@ test('every help and window label is present in both catalogs', () => {
   for (const language of ['en', 'zh']) {
     const catalog = JSON.parse(fs.readFileSync(new URL(`../../main/resources/desktop-ui/locales/${language}.json`, import.meta.url), 'utf8'));
     for (const key of ['help.label', 'help.guide', 'help.feedback', 'help.about', 'help.webVersion', 'help.dismiss', 'help.failed', 'window.minimize', 'window.maximize', 'window.restore', 'window.close']) assert.equal(typeof catalog[key], 'string', key);
+  }
+});
+
+test('update check reports both versions and opens download only on explicit click', async () => {
+  for (const language of ['zh', 'en']) {
+    const s = setup({ native: true, language, invoke: (name, args) => args.action === 'check_update'
+      ? { available: true, currentVersion: '0.2.6', latestVersion: '0.2.10', tag: 'v0.2.10' } : false });
+    await settle();
+    await s.ui.execute('check_update');
+    assert.match(s.nodes.get('help-dialog-body').textContent, /0.2.6/);
+    assert.match(s.nodes.get('help-dialog-body').textContent, /0.2.10/);
+    assert.ok(s.nodes.get('help-dialog-body').textContent.startsWith(language + ':update.available'));
+    assert.equal(s.calls.filter(([, args]) => args.action === 'download').length, 0);
+    assert.equal(s.nodes.get('help-update-retry').hidden, true);
+    assert.equal(s.nodes.get('help-dialog-link').textContent, language + ':update.download');
+    s.nodes.get('help-dialog-link').click(); await settle();
+    assert.deepEqual(s.calls.at(-1), ['help_action', { action: 'download', tag: 'v0.2.10' }]);
+  }
+});
+
+test('up-to-date result has no download and Web mode does not invent a version', async () => {
+  const s = setup({ native: true, invoke: (name, args) => args.action === 'check_update'
+    ? { available: false, currentVersion: '0.2.6', latestVersion: '0.2.6' } : false });
+  await settle(); await s.ui.execute('check_update');
+  assert.match(s.nodes.get('help-dialog-body').textContent, /update.current/);
+  assert.equal(s.nodes.get('help-dialog-link').hidden, true);
+  const web = setup(); await web.ui.execute('check_update');
+  assert.equal(web.nodes.get('help-dialog-body').textContent, 'zh:update.web');
+  assert.equal(web.nodes.get('help-dialog-link').href, 'https://github.com/chunleik/self-analyst/releases/latest');
+  assert.equal(web.calls.length, 0); assert.equal(web.links.length, 0);
+});
+
+test('update errors are localized and retry restores a successful result', async () => {
+  for (const code of ['update.timeout', 'update.rateLimited', 'update.noRelease', 'update.invalid', 'private network details']) {
+    let failure = true;
+    const s = setup({ native: true, invoke: (name, args) => {
+      if (args.action !== 'check_update') return false;
+      if (failure) throw code;
+      return { available: false, currentVersion: '0.2.6', latestVersion: '0.2.6' };
+    } });
+    await settle(); await s.ui.execute('check_update');
+    assert.equal(s.nodes.get('help-dialog-body').textContent, 'zh:' + (code.startsWith('update.') ? code : 'update.failed'));
+    assert.equal(s.nodes.get('help-update-retry').hidden, false);
+    assert.ok(s.nodes.get('help-dialog-link').href.endsWith('/releases/latest'));
+    failure = false; s.nodes.get('help-update-retry').click(); await settle();
+    assert.equal(s.nodes.get('help-update-retry').hidden, true);
+    assert.match(s.nodes.get('help-dialog-body').textContent, /update.current/);
+  }
+});
+
+test('checks are deduplicated and a dismissed result cannot reopen the dialog', async () => {
+  for (const fail of [false, true]) {
+    let finish;
+    const s = setup({ native: true, invoke: (name, args) => args.action === 'check_update'
+      ? new Promise((resolve, reject) => { finish = () => fail ? reject('update.timeout') : resolve({ available: false }); }) : false });
+    await settle();
+    const first = s.ui.execute('check_update');
+    const second = s.ui.execute('check_update');
+    await settle();
+    assert.equal(first, second);
+    assert.equal(s.nodes.get('help-dialog-body').textContent, 'zh:update.checking');
+    assert.equal(s.calls.filter(([, args]) => args.action === 'check_update').length, 1);
+    s.dialog.close(); finish(); await first;
+    assert.equal(s.dialog.open, false);
+    assert.equal(s.state.chatDraft, '保留这段草稿');
+  }
+});
+
+test('a late update result cannot replace a newer help message', async () => {
+  let finish;
+  const s = setup({ native: true, invoke: (name, args) => {
+    if (args.action === 'check_update') return new Promise(resolve => { finish = resolve; });
+    if (args.action === 'guide') throw Error('browser unavailable');
+    return false;
+  } });
+  await settle();
+  const checking = s.ui.execute('check_update'); await settle();
+  s.dialog.close(); await s.ui.execute('guide');
+  finish({ available: true, currentVersion: '0.2.6', latestVersion: '0.2.7', tag: 'v0.2.7' });
+  await checking;
+  assert.equal(s.nodes.get('help-dialog-body').textContent, 'zh:help.failed');
+  assert.ok(s.nodes.get('help-dialog-link').href.endsWith('README.zh-CN.md'));
+});
+
+test('update labels are translated and actual menu includes all four actions in order', () => {
+  const html = fs.readFileSync(new URL('../../main/resources/desktop-ui/index.html', import.meta.url), 'utf8');
+  assert.deepEqual([...html.matchAll(/data-help-action="([^"]+)"/g)].map(match => match[1]), ['guide', 'feedback', 'check_update', 'about']);
+  const keys = ['check', 'checking', 'available', 'current', 'installed', 'latest', 'download', 'releases', 'retry', 'web', 'failed', 'timeout', 'rateLimited', 'noRelease', 'invalid', 'busy'];
+  for (const language of ['zh', 'en']) {
+    const catalog = JSON.parse(fs.readFileSync(new URL(`../../main/resources/desktop-ui/locales/${language}.json`, import.meta.url), 'utf8'));
+    for (const key of keys) assert.ok(catalog['update.' + key], key);
   }
 });

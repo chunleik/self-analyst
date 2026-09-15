@@ -54,12 +54,14 @@
 <div id="help-menu" role="menu" aria-labelledby="help-trigger" hidden>
   <button type="button" role="menuitem" tabindex="-1" data-help-action="guide" data-i18n="help.guide">User guide</button>
   <button type="button" role="menuitem" tabindex="-1" data-help-action="feedback" data-i18n="help.feedback">Report an issue</button>
+  <button type="button" role="menuitem" tabindex="-1" data-help-action="check_update" data-i18n="update.check">Check for updates</button>
   <div class="help-separator" role="separator"></div>
   <button type="button" role="menuitem" tabindex="-1" data-help-action="about" data-i18n="help.about">About SelfAnalyst</button>
 </div>
 <dialog id="help-dialog" aria-labelledby="help-dialog-title">
-  <h2 id="help-dialog-title"></h2><p id="help-dialog-body"></p>
+  <h2 id="help-dialog-title"></h2><p id="help-dialog-body" role="status" aria-live="polite"></p>
   <a id="help-dialog-link" target="_blank" rel="noopener noreferrer" hidden></a>
+  <button id="help-update-retry" type="button" class="btn" data-i18n="update.retry" hidden>Retry</button>
   <form method="dialog"><button class="btn" data-i18n="help.dismiss">Close</button></form>
 </dialog>
 

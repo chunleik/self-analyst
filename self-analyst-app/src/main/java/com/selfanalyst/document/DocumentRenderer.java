@@ -11,6 +11,7 @@ public final class DocumentRenderer {
         try (var output = budget.bound(Files.newOutputStream(target, StandardOpenOption.CREATE_NEW))) {
             switch (request.format()) {
                 case CSV, JSON, MARKDOWN -> new TextDocumentRenderer().render(request, output, budget);
+                case HTML, SVG -> new MarkupDocumentRenderer().render(request, output, budget);
                 case XLSX -> new SpreadsheetDocumentRenderer().render(request, output, budget);
                 case DOCX -> new WordDocumentRenderer().render(request, output, budget);
                 case PDF -> new PdfDocumentRenderer().render(request, output, budget);

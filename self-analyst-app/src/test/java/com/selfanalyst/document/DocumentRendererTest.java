@@ -100,6 +100,7 @@ class DocumentRendererTest {
         if (Boolean.getBoolean("document.visual.samples")) {
             Path samples = Path.of("target/document-samples"); Files.createDirectories(samples);
             for (var format : DocumentFormat.values()) {
+                if (format == DocumentFormat.SVG) continue; // 专用源码样例由 MarkupDocumentTest 验收。
                 Path file = render(format); Files.copy(file, samples.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
                 if (format == DocumentFormat.PDF) try (var pdf = Loader.loadPDF(file.toFile())) {
                     ImageIO.write(new PDFRenderer(pdf).renderImageWithDPI(0, 120), "png", samples.resolve("pdf.png").toFile());

@@ -2,16 +2,24 @@
 name = "self-analyst-desktop"
 version = "0.2.6"
 edition = "2021"
+default-run = "SelfAnalyst"
 
 [package.metadata]
 
 [features]
 native-menu-review = []
 document-review = []
+titlebar-review = []
 
 [[bin]]
 name = "SelfAnalyst"
 path = "src/main.rs"
+
+[[bin]]
+name = "titlebar-review"
+path = "src/bin/titlebar-review.rs"
+required-features = ["titlebar-review"]
+test = false
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -19,8 +27,9 @@ tauri-plugin-shell = "2"
 ureq = "3"
 open = "5"
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Registry", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls_Dialogs", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Registry", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_UI_WindowsAndMessaging", "Win32_UI_Controls", "Win32_UI_Shell", "Win32_UI_Controls_Dialogs", "Win32_Storage_FileSystem"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

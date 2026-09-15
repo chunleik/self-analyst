@@ -2662,6 +2662,7 @@ name = "self-analyst-desktop"
 version = "0.2.6"
 dependencies = [
  "open",
+ "serde",
  "serde_json",
  "sha2",
  "tauri",

@@ -387,6 +387,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the help_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-help-action",
+          "markdownDescription": "Enables the help_action command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_data_directory command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-data-directory",
@@ -399,6 +405,24 @@
           "markdownDescription": "Enables the save_document command without any pre-configured scope."
         },
         {
+          "description": "Enables the titlebar_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-titlebar-action",
+          "markdownDescription": "Enables the titlebar_action command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the titlebar_layout command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-titlebar-layout",
+          "markdownDescription": "Enables the titlebar_layout command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the help_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-help-action",
+          "markdownDescription": "Denies the help_action command without any pre-configured scope."
+        },
+        {
           "description": "Denies the open_data_directory command without any pre-configured scope.",
           "type": "string",
           "const": "deny-open-data-directory",
@@ -409,6 +433,18 @@
           "type": "string",
           "const": "deny-save-document",
           "markdownDescription": "Denies the save_document command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the titlebar_action command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-titlebar-action",
+          "markdownDescription": "Denies the titlebar_action command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the titlebar_layout command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-titlebar-layout",
+          "markdownDescription": "Denies the titlebar_layout command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

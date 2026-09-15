@@ -25,6 +25,16 @@ temporarily during recognition, but only system window titles, WeChat conversati
 article/document/page titles, and metadata such as source, confidence, and timestamps are saved.
 UIA body text must not be persisted.
 
+## Help and window navigation
+
+The desktop title bar places **Help** beside SelfAnalyst, with **User guide**, **Report an issue**,
+and **About SelfAnalyst**. The navigation row starts with Dashboard and Chat without repeating
+the app name. Closing the desktop window keeps it running in the system tray.
+
+The Web version keeps the app name in its navigation row and places Help next to Settings.
+Guides and issue reporting open in a browser tab; no activity data is attached or submitted.
+Use Tab to focus Help, Enter to open it, arrow keys to select an item, and Esc to close it.
+
 ## Requirements
 
 - JDK 21

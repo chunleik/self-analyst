@@ -5,6 +5,10 @@ mod instance;
 mod java_path;
 mod runtime_storage;
 mod startup_log;
+mod titlebar;
+
+#[cfg(feature = "titlebar-review")]
+pub use titlebar::run_titlebar_review;
 
 use std::fs::OpenOptions;
 use std::io;
@@ -490,19 +494,21 @@ fn create_main_window(
 ) -> tauri::Result<()> {
     let auth_script = desktop_auth_script(token);
 
-    WebviewWindowBuilder::new(
+    let window = WebviewWindowBuilder::new(
         app,
         "main",
         WebviewUrl::External(backend_url(port, "/desktop-ui/").parse().unwrap()),
     )
     .title("SelfAnalyst")
+    .decorations(false)
     .inner_size(1200.0, 800.0)
     .min_inner_size(800.0, 600.0)
     .center()
-    .visible(!automatic)
+    .visible(false)
     .focused(!automatic)
     .initialization_script(auth_script)
     .build()?;
+    titlebar::install(&window)?;
     startup_log::write(&format!("main window created automatic={automatic}"));
     let visible = app
         .state::<Mutex<instance::WindowIntent>>()
@@ -577,6 +583,7 @@ fn desktop_auth_script(token: &str) -> String {
     format!(
         r#"
         (() => {{
+            Object.defineProperty(window, '__SELF_ANALYST_DESKTOP__', {{ value: true }});
             const originalFetch = window.fetch.bind(window);
             window.fetch = (input, init = {{}}) => {{
                 const rawUrl = typeof input === 'string' ? input : input.url;
@@ -716,7 +723,10 @@ pub fn run() {
     let runtime_exit = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             documents::save_document,
-            runtime_storage::open_data_directory
+            runtime_storage::open_data_directory,
+            titlebar::titlebar_action,
+            titlebar::titlebar_layout,
+            titlebar::help_action
         ])
         .manage(Mutex::new(instance::WindowIntent::default()))
         .plugin(tauri_plugin_shell::init())

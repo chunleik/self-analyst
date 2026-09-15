@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-help-action"
+description = "Enables the help_action command without any pre-configured scope."
+commands.allow = ["help_action"]
+
+[[permission]]
+identifier = "deny-help-action"
+description = "Denies the help_action command without any pre-configured scope."
+commands.deny = ["help_action"]

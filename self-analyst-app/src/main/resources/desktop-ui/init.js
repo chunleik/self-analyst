@@ -92,6 +92,7 @@ function initializeLanguage() {
       state.status = st;
       document.documentElement.lang = st.language;
       applyI18n(document);
+      if (typeof window !== "undefined" && window.SelfAnalystTitlebar) window.SelfAnalystTitlebar.localize();
       hideError();
       initialized = true;
       state.dom.errorRetryBtn.removeEventListener("click", initializeLanguage);

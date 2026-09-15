@@ -31,7 +31,13 @@ fn main() {
     )
     .expect("embed language resources");
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&["save_document", "open_data_directory", "titlebar_action", "titlebar_layout", "help_action"]),
+        tauri_build::AppManifest::new().commands(&[
+            "save_document",
+            "open_data_directory",
+            "titlebar_action",
+            "titlebar_layout",
+            "help_action",
+        ]),
     ))
     .expect("build desktop permissions")
 }

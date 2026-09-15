@@ -89,8 +89,12 @@ mod tests {
             .expect("generated permission manifests");
         let capabilities = serde_json::from_str(include_str!("../gen/schemas/capabilities.json"))
             .expect("generated capabilities");
-        let acl = Resolved::resolve(&manifests, capabilities, tauri::utils::platform::Target::Windows)
-            .expect("resolve desktop ACL");
+        let acl = Resolved::resolve(
+            &manifests,
+            capabilities,
+            tauri::utils::platform::Target::Windows,
+        )
+        .expect("resolve desktop ACL");
         let grants = acl
             .allowed_commands
             .get("open_data_directory")

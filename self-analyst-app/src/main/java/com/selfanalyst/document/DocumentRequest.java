@@ -9,7 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-/** 版本化的被动文档结构；不接受可执行模板、公式或资源地址。 */
+/** 版本 1 是被动文档结构；版本 2 显式声明仅供下载的 HTML/SVG 源码。 */
 public record DocumentRequest(DocumentFormat format, String title, JsonNode source,
                               List<Block> blocks, List<Sheet> sheets) {
     public static final int MAX_SOURCE_BYTES = 1024 * 1024;
@@ -33,8 +33,21 @@ public record DocumentRequest(DocumentFormat format, String title, JsonNode sour
         if (title == null || title.isBlank() || title.codePointCount(0, title.length()) > 160)
             throw new IllegalArgumentException("文档标题须为 1 至 160 个字符");
         validateText(title);
+        if (source != null && source.path("schemaVersion").isIntegralNumber() && source.path("schemaVersion").canConvertToInt()
+                && source.path("schemaVersion").asInt() == 2) {
+            fields(source, Set.of("schemaVersion", "kind", "content"));
+            if (format != DocumentFormat.HTML && format != DocumentFormat.SVG
+                    || !text(source, "kind").equals(format.extension))
+                throw new IllegalArgumentException("源码 kind 必须与 html/svg 目标格式一致，不能转换为其他格式");
+            if (text(source, "content").isBlank()) throw new IllegalArgumentException("文档源码不能为空");
+            if (source.toString().getBytes(StandardCharsets.UTF_8).length > MAX_SOURCE_BYTES)
+                throw new IllegalArgumentException("文档源码超过 1 MiB，请缩小内容范围");
+            return new DocumentRequest(format, title, source.deepCopy(), List.of(), List.of());
+        }
+        if (format == DocumentFormat.SVG)
+            throw new IllegalArgumentException("SVG 需要 schemaVersion=2、kind=svg 和完整矢量源码 content");
         fields(source, Set.of("schemaVersion", "blocks", "sheets", "metadata"));
-        if (!source.path("schemaVersion").isIntegralNumber() || source.path("schemaVersion").asInt() != 1)
+        if (!source.path("schemaVersion").isIntegralNumber() || !source.path("schemaVersion").canConvertToInt() || source.path("schemaVersion").asInt() != 1)
             throw new IllegalArgumentException("不支持的文档 schemaVersion");
         List<Block> blocks = new ArrayList<>();
         List<Sheet> sheets = new ArrayList<>();
@@ -125,4 +138,6 @@ public record DocumentRequest(DocumentFormat format, String title, JsonNode sour
     public static String display(JsonNode value) {
         return value == null || value.isNull() ? "" : value.isTextual() ? value.textValue() : value.toString();
     }
+
+    public boolean hasMarkupSource() { return source.path("schemaVersion").asInt() == 2; }
 }

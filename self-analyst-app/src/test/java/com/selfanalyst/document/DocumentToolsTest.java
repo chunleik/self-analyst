@@ -20,6 +20,8 @@ class DocumentToolsTest {
             var toolkit = new Toolkit(ToolkitConfig.builder().parallel(false).build()); toolkit.registerTool(new DocumentTools(service));
             String schemas = DocumentRequest.JSON.writeValueAsString(toolkit.getToolSchemas());
             assertFalse(schemas.contains("sessionId")); assertFalse(schemas.contains("userMessageId"));
+            assertTrue(schemas.contains("html/svg")); assertTrue(schemas.contains("schemaVersion:2"));
+            assertTrue(schemas.contains("离线")); assertTrue(schemas.contains("SVG 不支持直接导出"));
             var session = chats.create(new ChatSessionStore.CreateRequest());
             var user = new ChatSessionStore.Message(); user.role = "user"; user.content = "生成";
             String turn = chats.appendMessages(session.id, List.of(user)).getFirst().id;

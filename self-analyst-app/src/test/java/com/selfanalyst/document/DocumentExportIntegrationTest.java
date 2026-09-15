@@ -36,11 +36,21 @@ class DocumentExportIntegrationTest {
             String turn = chats.appendMessages(session.id, List.of(message)).getFirst().id;
             String query = "{\"source\":\"raw\",\"bucketId\":\"bucket\",\"start\":\"2026-09-01T00:00:00Z\",\"end\":\"2026-09-01T00:00:02Z\"}";
             for (var format : DocumentFormat.values()) {
+                if (format == DocumentFormat.SVG) {
+                    assertThrows(IllegalArgumentException.class, () -> service.export(session.id, turn, format.name(), "原始记录", query, null, () -> false));
+                    continue;
+                }
                 var artifact = service.export(session.id, turn, format.name(), "原始记录", query, null, () -> false);
                 assertEquals("READY", artifact.status());
                 assertEquals(2, artifact.metadata().path("recordCount").asInt());
                 assertFalse(DocumentRequest.JSON.writeValueAsString(artifact).contains("不应进入模型"));
                 assertFalse(service.readSource(session.id, artifact.id()).contains("不应进入模型"));
+                if (format == DocumentFormat.HTML) service.readContent(session.id, artifact.id(), (a, input) -> {
+                    var document = org.jsoup.Jsoup.parse(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                    assertEquals(2, document.select("tbody tr").size());
+                    assertTrue(document.selectFirst("pre").text().contains("recordCount"));
+                    assertTrue(document.text().contains("不应进入模型的原始标题1"));
+                });
                 if (format == DocumentFormat.JSON) service.readContent(session.id, artifact.id(), (a, input) -> {
                     var body = DocumentRequest.JSON.readTree(input);
                     assertEquals(2, body.get("records").size());
@@ -64,6 +74,16 @@ class DocumentExportIntegrationTest {
                 try (var prepared = sources.prepare(query, DocumentFormat.JSON, "空结果", directory, new DocumentBudget(() -> false))) {
                     assertTrue(prepared.request().sheets().getFirst().rows().isEmpty());
                     assertTrue(prepared.request().source().at("/metadata/complete").asBoolean());
+                }
+                try (var prepared = sources.prepare(query, DocumentFormat.HTML, "空结果", directory, new DocumentBudget(() -> false))) {
+                    Path target = directory.resolve("empty.html");
+                    var budget = new DocumentBudget(() -> false);
+                    new DocumentRenderer().render(prepared.request(), target, budget);
+                    DocumentFormatVerifier.verify(DocumentFormat.HTML, target, budget);
+                    var document = org.jsoup.Jsoup.parse(Files.readString(target));
+                    assertEquals(0, document.select("tbody tr").size());
+                    assertFalse(document.select("thead th").isEmpty());
+                    assertTrue(document.selectFirst("pre").text().contains("\"recordCount\":0"));
                 }
             }
         }

@@ -14,6 +14,8 @@ final class DocumentFormatVerifier {
         budget.check();
         if (Files.size(path) > DocumentBudget.MAX_FILE_BYTES) throw new IOException("文档文件超限");
         switch (format) {
+            case HTML -> MarkupDocumentVerifier.html(Files.readString(path, StandardCharsets.UTF_8), budget, true);
+            case SVG -> MarkupDocumentVerifier.svg(Files.readString(path, StandardCharsets.UTF_8), budget);
             case DOCX, XLSX, PPTX -> {
                 String main = switch (format) {
                     case DOCX -> "word/document.xml";

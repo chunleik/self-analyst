@@ -19,6 +19,24 @@ function environment() {
 }
 const artifact = (sessionId, id = '1'.repeat(32)) => ({ sessionId, id, name: '<script>unsafe</script>.pdf', status: 'READY', format: 'PDF', size: 100, version: 1 });
 
+test('HTML and SVG remain download-only cards with literal filenames', async () => {
+  for (const format of ['HTML', 'SVG']) {
+    const { context, panel } = environment();
+    const name = '<svg onload="alert(1)">.' + format.toLowerCase();
+    context.documentView.documents = [{ ...artifact(context.state.activeChatSessionId), format, name }];
+    context.renderDocumentCards(panel);
+    assert.equal(panel.children[0].children[0].textContent, name);
+    assert.equal(panel.children[0].children[0].innerHTML, undefined);
+    assert.match(panel.children[0].children[1].textContent, new RegExp('^' + format));
+    assert.equal(context.document.body.children.length, 0);
+    panel.children[0].children[2].onclick();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(context.document.body.children[0].download, name);
+    assert.match(context.document.body.children[0].href, /\/content$/);
+    assert.equal(context.document.body.children[0].target, undefined);
+  }
+});
+
 test('document references are constrained and versions deduplicate by server id', () => {
   const { context } = environment();
   assert.throws(() => context.documentContentUrl('../secret', 'x'));

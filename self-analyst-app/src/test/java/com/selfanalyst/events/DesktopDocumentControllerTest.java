@@ -36,6 +36,20 @@ class DesktopDocumentControllerTest {
             assertEquals(200, client.send(HttpRequest.newBuilder(URI.create(url)).header("Cookie", "self_analyst_session=test-document-token").build(), HttpResponse.BodyHandlers.ofString()).statusCode());
             var other = chats.create(new ChatSessionStore.CreateRequest());
             assertEquals(404, client.send(HttpRequest.newBuilder(URI.create(url.replace(session.id, other.id))).header("X-SelfAnalyst-Token", "test-document-token").build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            for (String kind : List.of("html", "svg")) {
+                String markup = kind.equals("html") ? "<!DOCTYPE html><html><head><title>页面</title></head><body><script>throw new Error('download only')</script></body></html>"
+                        : "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 20 20\"><circle r=\"5\"/></svg>";
+                String source = com.selfanalyst.document.DocumentRequest.JSON.createObjectNode().put("schemaVersion", 2).put("kind", kind).put("content", markup).toString();
+                var file = service.generate(session.id, turn, kind, "中文成果", source, null, () -> false);
+                String contentUrl = url.replace(artifact.id(), file.id()) + "/content";
+                var download = client.send(HttpRequest.newBuilder(URI.create(contentUrl)).header("X-SelfAnalyst-Token", "test-document-token").build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, download.statusCode());
+                assertTrue(download.headers().firstValue("Content-Type").orElseThrow().startsWith(kind.equals("html") ? "text/html" : "image/svg+xml"));
+                assertTrue(download.headers().firstValue("Content-Disposition").orElseThrow().startsWith("attachment; filename=\"document." + kind));
+                assertFalse(download.body().contains("test-document-token"));
+                assertEquals(401, client.send(HttpRequest.newBuilder(URI.create(contentUrl)).build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+                assertEquals(404, client.send(HttpRequest.newBuilder(URI.create(contentUrl.replace(session.id, other.id))).header("X-SelfAnalyst-Token", "test-document-token").build(), HttpResponse.BodyHandlers.ofString()).statusCode());
+            }
         }
     }
     @Test void noConfiguredTokenFailsClosed() throws Exception {

@@ -9,13 +9,17 @@ public final class DocumentTools {
     private final DocumentService service;
     public DocumentTools(DocumentService service) { this.service = service; }
 
-    @Tool(name = "generate_document", description = "生成可保存的文档，支持 csv/json/markdown/xlsx/docx/pdf/pptx。"
+    @Tool(name = "generate_document", description = "生成可保存的文档，支持 csv/json/markdown/xlsx/docx/pdf/pptx/html/svg。"
+            + "交互 HTML 或独立 SVG 使用 {schemaVersion:2,kind:html|svg,content:完整源码字符串}，kind 必须匹配 format，不与 blocks/sheets 混用。"
+            + "HTML 必须包含完整 html/head/body，内嵌 CSS/JavaScript/数据/SVG，离线可用，不依赖 CDN、外部资源或 SelfAnalyst API；交互代码仅在用户下载后用浏览器打开时执行，无应用内预览。"
+            + "SVG 必须有 SVG 命名空间和有效 viewBox 或尺寸，只允许被动矢量元素和内部片段引用，不含脚本、事件属性、外部资源、DTD 或 foreignObject。"
+            + "普通报告或数据中的文字必须转义为文本，不能直接拼入脚本或标签；HTML 建议通过 textContent 展示数据。"
             + "sourceJson 格式为 {schemaVersion:1,blocks:[{type:heading|paragraph|slide,text:文字},{type:list,items:[文字]},{type:table,table:{name:名称,columns:[列名],rows:[[值]]}}],sheets:[{name:名称,columns:[列名],rows:[[值]]}]}。"
             + "slide 仅用于 PPT；CSV 只接受一个 sheets，Excel 只接受 sheets。文字/表格均可编辑。限制：源1MiB、文件50MiB、PPT100页。修改请先读取已有生成源，并提供 parentArtifactId。成功后界面自动展示文件卡片，不编造本地路径。")
     public Mono<DocumentStore.Artifact> generate(
             @ToolParam(name = "format", description = "目标格式") String format,
             @ToolParam(name = "title", description = "文档标题，不是路径") String title,
-            @ToolParam(name = "sourceJson", description = "schemaVersion=1 的结构化 JSON") String sourceJson,
+            @ToolParam(name = "sourceJson", description = "schemaVersion=1 的正文/表格，或 schemaVersion=2 的 html/svg 专用源码 JSON") String sourceJson,
             @ToolParam(name = "parentArtifactId", description = "修改已有文档时的文件 ID，新文档留空", required = false) String parent,
             DocumentExecution execution) {
         return Mono.fromCallable(() -> require(execution).run(() -> service.generate(execution.sessionId,
@@ -49,7 +53,7 @@ public final class DocumentTools {
         })).subscribeOn(Schedulers.boundedElastic());
     }
 
-    @Tool(name = "export_data", description = "直接导出已保存记录为 csv/json/markdown/xlsx/docx/pdf/pptx，记录不经模型转写。"
+    @Tool(name = "export_data", description = "直接导出已保存记录为 csv/json/markdown/xlsx/docx/pdf/pptx/html，记录不经模型转写。HTML 使用转义后的离线表格模板；SVG 不支持直接导出。"
             + "queryJson={source:raw|projection|file-metadata|wiki,bucketId:事件桶,start:ISO时间,end:ISO时间,timezone:Asia/Shanghai,fields:[字段],level:可选Wiki级别}。"
             + "时间范围开始包含结束不包含；raw 按 receivedAt，projection 按 timestamp，文件按 lastModified，Wiki 按时间块相交。"
             + "默认保留各来源字段；raw字段 eventId,bucketId,source,eventTimestamp,receivedAt,duration,data,schemaVersion；projection字段 id,timestamp,duration,data；"

@@ -6,6 +6,8 @@ public enum DocumentFormat {
     CSV("csv", "text/csv; charset=utf-8"),
     JSON("json", "application/json"),
     MARKDOWN("md", "text/markdown; charset=utf-8"),
+    HTML("html", "text/html; charset=utf-8"),
+    SVG("svg", "image/svg+xml"),
     XLSX("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     DOCX("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
     PDF("pdf", "application/pdf"),

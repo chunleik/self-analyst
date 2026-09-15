@@ -28,12 +28,16 @@ public class SummarySnapshotStore {
     }
 
     public Optional<SummarySnapshot> load() {
+        return load(java.time.ZoneId.systemDefault());
+    }
+
+    public Optional<SummarySnapshot> load(java.time.ZoneId zone) {
         if (!Files.isRegularFile(file)) {
             return Optional.empty();
         }
         try {
             SummarySnapshot snapshot = MAPPER.readValue(file.toFile(), SummarySnapshot.class);
-            if (snapshot == null || snapshot.current() == null || snapshot.timeline() == null) {
+            if (snapshot == null || snapshot.current() == null || snapshot.timeline() == null || !snapshot.compatible(zone)) {
                 return Optional.empty();
             }
             return Optional.of(snapshot);

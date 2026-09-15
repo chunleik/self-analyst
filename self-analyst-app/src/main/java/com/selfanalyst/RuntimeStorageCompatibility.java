@@ -139,7 +139,9 @@ final class RuntimeStorageCompatibility {
                     if (Files.size(file) != 0) throw invalid("数据库仍有日志状态，请先正常关闭原应用");
                     continue;
                 }
-                if (name.endsWith(".db")) { database(file, kind); continue; }
+                if (name.endsWith(".db") || (kind.equals("memory") && name.equals("llm-wiki.db.before-statistics-v4.bak"))) {
+                    database(file, kind); continue;
+                }
                 if (kind.equals("agent-session") && name.equals("agent_state.json")) {
                     var value = json(file);
                     if (!value.path("session_id").asText().equals(directory.getFileName().toString())
@@ -262,9 +264,16 @@ final class RuntimeStorageCompatibility {
             columns(connection, "sessions", "id,title,created_at,updated_at,source,context_label,context_snapshot,memory_policy,summary,last_message_preview,message_count");
             columns(connection, "messages", "id,session_id,seq,role,content,created_at,status,error,context_snapshot,suggested_tasks");
             columns(connection, "pending_deletions", "session_id,requested_at");
-        } else if (kind.equals("memory") && name.equals("llm-wiki.db")) {
-            scalar(connection, "PRAGMA user_version", "3");
-            columns(connection, "wiki_entries", "id,level,period_start,period_end,timezone,status,summary,primary_task,task_segments_json,metrics_json,source_entry_ids_json,model,prompt_version,retry_count,next_retry_at,last_error,created_at,updated_at,summarized_at,fact_builder_version,projector_version,source_coverage_json");
+        } else if (kind.equals("memory") && (name.equals("llm-wiki.db") || name.equals("llm-wiki.db.before-statistics-v4.bak"))) {
+            int wikiVersion;
+            try (var versionRows = statement.executeQuery("PRAGMA user_version")) {
+                if (!versionRows.next()) throw invalid("Wiki 数据库版本不兼容");
+                wikiVersion = versionRows.getInt(1);
+                if (wikiVersion != 3 && wikiVersion != 4) throw invalid("Wiki 数据库版本不兼容");
+            }
+            columns(connection, "wiki_entries", "id,level,period_start,period_end,timezone,status,summary,primary_task,task_segments_json,metrics_json,source_entry_ids_json,model,prompt_version,retry_count,next_retry_at,last_error,created_at,updated_at,summarized_at,fact_builder_version,projector_version,source_coverage_json"
+                    + (wikiVersion == 4 ? ",statistics_version,calendar_version" : ""));
+            if (wikiVersion == 4) columns(connection, "wiki_statistics_progress", "version,history_before");
             columns(connection, "wiki_semantic_documents", "doc_id,entry_id,doc_type,level,period_start,period_end,text_hash,embedding_model,embedding_dimensions,status,retry_count,next_retry_at,last_error,created_at,updated_at,indexed_at");
         } else if (kind.equals("memory") && name.equals("file-watch.db")) {
             scalar(connection, "PRAGMA user_version", "2");

@@ -1,6 +1,7 @@
 package com.selfanalyst.desktop.service;
 
 import com.selfanalyst.wiki.WikiLevel;
+import com.selfanalyst.events.statistics.ActivityCalendar;
 
 import java.time.Clock;
 import java.time.DayOfWeek;
@@ -61,15 +62,15 @@ public class SummaryWindowClassifier {
     public List<Slot> slots(Instant now) {
         ZoneId zone = zone();
         ZonedDateTime localNow = now.atZone(zone);
-        LocalDate today = localNow.toLocalDate();
-        Instant todayStart = today.atStartOfDay(zone).toInstant();
+        LocalDate today = ActivityCalendar.date(now, zone);
+        Instant todayStart = ActivityCalendar.start(today, zone);
 
         List<Slot> slots = new ArrayList<>();
         slots.add(new Slot("current", "当前",
                 now.minus(Duration.ofHours(2)), now, true, false, null));
         slots.add(new Slot("today", "今天", todayStart, now, true, false, null));
 
-        if (localNow.getHour() >= 12) {
+        if (!now.isBefore(ActivityCalendar.noon(today, zone))) {
             Instant morningEnd = today.atTime(LocalTime.NOON).atZone(zone).toInstant();
             slots.add(new Slot("morning", "上午", todayStart, morningEnd, false, false, WikiLevel.HALF_DAY));
         }
@@ -80,17 +81,17 @@ public class SummaryWindowClassifier {
 
         LocalDate monday = today.with(DayOfWeek.MONDAY);
         slots.add(new Slot("thisWeek", "本周",
-                monday.atStartOfDay(zone).toInstant(), now, false, true, WikiLevel.WEEK));
+                ActivityCalendar.start(monday, zone), now, false, true, WikiLevel.WEEK));
         slots.add(new Slot("lastTwoWeeks", "最近两周",
                 now.minus(Duration.ofDays(14)), now, false, true, WikiLevel.BIWEEK));
         slots.add(new Slot("thisMonth", "本月",
-                today.withDayOfMonth(1).atStartOfDay(zone).toInstant(), now, false, true, WikiLevel.MONTH));
+                ActivityCalendar.start(today.withDayOfMonth(1), zone), now, false, true, WikiLevel.MONTH));
         return List.copyOf(slots);
     }
 
     private static Slot closedDay(String key, String label, LocalDate day, ZoneId zone) {
-        Instant start = day.atStartOfDay(zone).toInstant();
-        Instant end = day.plusDays(1).atStartOfDay(zone).toInstant();
+        Instant start = ActivityCalendar.start(day, zone);
+        Instant end = ActivityCalendar.start(day.plusDays(1), zone);
         return new Slot(key, label, start, end, false, false, WikiLevel.DAY);
     }
 }

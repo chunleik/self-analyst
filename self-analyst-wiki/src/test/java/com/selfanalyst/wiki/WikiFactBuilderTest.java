@@ -23,6 +23,42 @@ class WikiFactBuilderTest {
     Path tempDir;
 
     @Test
+    void aggregatesAllEventsAndPreservesFractionalMetricsAcrossChildren() throws Exception {
+        try (Database db = new Database(tempDir.resolve("many"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            String host = java.net.InetAddress.getLocalHost().getHostName();
+            String window = "watcher-window_" + host, afk = "watcher-afk_" + host;
+            Instant start = Instant.parse("2026-09-01T04:00:00Z");
+            db.metaConnection().setAutoCommit(false);
+            try (var ps = db.metaConnection().prepareStatement("INSERT INTO events(bucket_id,timestamp,duration,datastr,app) VALUES(?,?,0.6,?,?)")) {
+                for (int i = 0; i < 2501; i++) {
+                    String app = i == 2500 ? "last-app" : "editor";
+                    ps.setString(1, window); ps.setString(2, start.plusSeconds(i).toString());
+                    ps.setString(3, "{\"app\":\"" + app + "\",\"title\":\"unknown\"}");
+                    ps.setString(4, app); ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+            db.metaConnection().commit(); db.metaConnection().setAutoCommit(true);
+            events.insertEvent(afk, new Event(start, 1000, Map.of("status", "afk")));
+            events.insertEvent(afk, new Event(start.plusSeconds(1000), 2600, Map.of("status", "not-afk")));
+            WikiFactBuilder builder = new WikiFactBuilder(events, 12000);
+            WikiPeriod period = new WikiPeriod(WikiLevel.HOUR, start, start.plusSeconds(3600), "UTC");
+            var facts = builder.buildFacts(period);
+            assertEquals(900.6, ((Number) facts.statistics().get("activeSecondsExact")).doubleValue(), 1e-9);
+            assertTrue(facts.topApps().stream().anyMatch(a -> a.app().equals("last-app")));
+            assertTrue(facts.titleSamples().isEmpty());
+            assertEquals("complete", facts.sourceCoverage().get("afk").status());
+            var metrics = new WikiEntry.WikiMetrics(facts.activeSeconds(), facts.afkSeconds(), facts.switchCount(), facts.topApps(), facts.statistics());
+            var child = new WikiEntry("child", WikiLevel.DAY, start, period.end(), "UTC", WikiStatus.SUMMARIZED,
+                    "summary", "task", java.util.List.of(), metrics, java.util.List.of(), "test", "v2", 0, null, null, start, start, start);
+            var parent = builder.buildFactsFromChildren(java.util.List.of(child, child), period);
+            assertEquals(1801.2, ((Number) parent.statistics().get("activeSecondsExact")).doubleValue(), 1e-9);
+            assertEquals(1801, parent.activeSeconds());
+        }
+    }
+
+    @Test
     void samplesContextTitlesAndNeverLegacyBodyText() throws Exception {
         try (Database db = new Database(tempDir.resolve("events"))) {
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);

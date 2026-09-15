@@ -44,14 +44,14 @@ public class DesktopSummaryAssembler {
         this.prompts = prompts != null ? prompts : new SummaryPromptService();
         this.snapshots = snapshots;
         this.windows = new SummaryWindowClassifier(clock);
-        this.timeline = new SummaryTimelineAssembler(wikiStore, facts, this.prompts);
+        this.timeline = new SummaryTimelineAssembler(wikiStore, facts, this.prompts, clock.getZone());
         this.clock = clock;
     }
 
     public Map<String, Object> assemble(Request request) {
         Instant now = clock.instant();
         Lang lang = request.lang() != null ? request.lang() : Lang.chinese();
-        Optional<SummarySnapshot> snapshot = snapshots != null ? snapshots.load() : Optional.empty();
+        Optional<SummarySnapshot> snapshot = snapshots != null ? snapshots.load(clock.getZone()) : Optional.empty();
 
         SummaryService.LocalFacts currentFacts = facts.currentStatus(now);
         SummaryWindowClassifier.Slot todaySlot = windows.slots(now, lang).stream()
@@ -59,7 +59,8 @@ public class DesktopSummaryAssembler {
                 .findFirst()
                 .orElseThrow();
         SummaryService.LocalFacts todayFacts = facts.factsFor(todaySlot.start(), todaySlot.end(), todaySlot.label());
-        String fingerprint = SummaryFactFingerprint.of(currentFacts, todayFacts);
+        String fingerprint = SummaryFactFingerprint.of(currentFacts, todayFacts)
+                + "|day=" + todaySlot.start() + "|zone=" + clock.getZone().getId();
         boolean refreshOpen = SummaryFactFingerprint.needsRefresh(
                 snapshot.map(SummarySnapshot::currentWindowFingerprint).orElse(null),
                 snapshot.map(SummarySnapshot::assembledAt).orElse(null),
@@ -98,12 +99,17 @@ public class DesktopSummaryAssembler {
         result.put("behaviorAdvice", adviceMap);
         result.put("current", currentMap);
         result.put("timeline", timelineList);
+        result.put("statisticsVersion", com.selfanalyst.events.statistics.ActivityStatistics.VERSION);
+        result.put("calendarVersion", com.selfanalyst.events.statistics.ActivityCalendar.VERSION);
+        result.put("timezone", clock.getZone().getId());
         result.put("assembledAt", now.toString());
         result.put("currentWindowFingerprint", fingerprint);
 
         if (snapshots != null) {
             snapshots.save(new SummarySnapshot(
-                    now.toString(), fingerprint, currentMap, timelineList, adviceMap));
+                    now.toString(), fingerprint, currentMap, timelineList, adviceMap,
+                    com.selfanalyst.events.statistics.ActivityStatistics.VERSION,
+                    com.selfanalyst.events.statistics.ActivityCalendar.VERSION, clock.getZone().getId()));
         }
         return result;
     }

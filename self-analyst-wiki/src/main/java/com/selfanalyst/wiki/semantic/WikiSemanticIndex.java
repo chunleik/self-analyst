@@ -67,6 +67,8 @@ public class WikiSemanticIndex implements AutoCloseable {
                                String text, String summary, String primaryTask,
                                String matchedText, float[] embedding) {
         Document doc = new Document();
+        doc.add(new StringField("statistics_version", com.selfanalyst.events.statistics.ActivityStatistics.VERSION, Field.Store.NO));
+        doc.add(new StringField("calendar_version", com.selfanalyst.events.statistics.ActivityCalendar.VERSION, Field.Store.NO));
         doc.add(new StringField(FIELD_DOC_ID, docId, Field.Store.YES));
         doc.add(new StringField(FIELD_ENTRY_ID, entryId, Field.Store.YES));
         doc.add(new StringField(FIELD_DOC_TYPE, docType, Field.Store.YES));
@@ -87,8 +89,6 @@ public class WikiSemanticIndex implements AutoCloseable {
                                    WikiLevel level) throws IOException {
         try (DirectoryReader reader = DirectoryReader.open(dir)) {
             IndexSearcher searcher = new IndexSearcher(reader);
-            Query knnQuery = new KnnFloatVectorQuery(FIELD_EMBEDDING, queryVector, topK);
-
             BooleanQuery.Builder filterBuilder = new BooleanQuery.Builder();
             if (start != null && end != null) {
                 filterBuilder.add(LongPoint.newRangeQuery(FIELD_PERIOD_START_MS,
@@ -99,15 +99,9 @@ public class WikiSemanticIndex implements AutoCloseable {
                         BooleanClause.Occur.FILTER);
             }
 
-            Query finalQuery;
-            if (filterBuilder.build().clauses().isEmpty()) {
-                finalQuery = knnQuery;
-            } else {
-                BooleanQuery.Builder combined = new BooleanQuery.Builder();
-                combined.add(knnQuery, BooleanClause.Occur.MUST);
-                filterBuilder.build().clauses().forEach(c -> combined.add(c.query(), c.occur()));
-                finalQuery = combined.build();
-            }
+            filterBuilder.add(new TermQuery(new Term("statistics_version", com.selfanalyst.events.statistics.ActivityStatistics.VERSION)), BooleanClause.Occur.FILTER);
+            filterBuilder.add(new TermQuery(new Term("calendar_version", com.selfanalyst.events.statistics.ActivityCalendar.VERSION)), BooleanClause.Occur.FILTER);
+            Query finalQuery = new KnnFloatVectorQuery(FIELD_EMBEDDING, queryVector, topK, filterBuilder.build());
 
             TopDocs topDocs = searcher.search(finalQuery, topK);
             List<SearchHit> hits = new ArrayList<>();

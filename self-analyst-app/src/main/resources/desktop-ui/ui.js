@@ -175,7 +175,16 @@ function closeConfigModal() {
 
 // ---- Data Loading ----
 
+function compatibleSummary(summary) {
+  return summary && summary.statisticsVersion === "activity-afk-v2"
+    && summary.calendarVersion === "day-0400-v1" && typeof summary.timezone === "string";
+}
+
 function loadAll() {
+  if (state.summary && !compatibleSummary(state.summary)) {
+    state.summary = null;
+    if (state.tab === "agent") renderTimeline();
+  }
   hideError();
   if (state.summary && state.tab === "agent") {
     renderTimeline();
@@ -211,7 +220,7 @@ function loadAll() {
   // Phase 2: summary may refresh the open window; keep any existing snapshot on screen.
   withTimeout(api.getSummary(), 30000)
     .then(function (summary) {
-      if (summary) state.summary = summary;
+      if (compatibleSummary(summary)) state.summary = summary;
       state.loading = false;
       if (state.tab === "agent" && state.summary) {
         renderTimeline();
@@ -288,7 +297,7 @@ function startAutoRefresh() {
     });
     // Summary refresh separately; keep the last rendered snapshot if the request fails.
     api.getSummary().then(function (summary) {
-      if (!summary) return;
+      if (!compatibleSummary(summary)) return;
       state.summary = summary;
       renderTimeline();
     }).catch(function () {});

@@ -1,6 +1,7 @@
 package com.selfanalyst.wiki;
 
 import com.selfanalyst.events.model.Event;
+import com.selfanalyst.events.statistics.ActivityStatistics;
 import com.selfanalyst.events.store.EventStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,7 +16,7 @@ public class WikiFactBuilder {
     private static final Logger log = LoggerFactory.getLogger(WikiFactBuilder.class);
     private static final int MAX_TITLE_LEN = 160;
     private static final int MAX_WINDOW_SESSIONS = 20;
-    public static final String FACT_BUILDER_VERSION = "wiki-facts-v1";
+    public static final String FACT_BUILDER_VERSION = "wiki-facts-afk-v2";
 
     private final EventStore eventStore;
     private final String hostname;
@@ -34,19 +35,37 @@ public class WikiFactBuilder {
         this.projectionLagSeconds = projectionLagSeconds;
     }
 
+    public java.util.Optional<Instant> earliestEvent() {
+        List<String> buckets = new ArrayList<>();
+        for (String kind : List.of("window", "afk", "content")) {
+            buckets.add("watcher-" + kind + "_" + hostname);
+            buckets.add("aw-watcher-" + kind + "_" + hostname);
+        }
+        return eventStore.earliestEvent(buckets);
+    }
+
     public WikiFacts buildFacts(WikiPeriod period) {
-        QueryResult window = queryKind("window", period.start(), period.end());
-        QueryResult afk = queryKind("afk", period.start(), period.end());
-        QueryResult content = queryKind("content", period.start(), period.end());
+        List<String> buckets = new ArrayList<>();
+        for (String kind : List.of("window", "afk", "content")) {
+            buckets.add("watcher-" + kind + "_" + hostname);
+            buckets.add("aw-watcher-" + kind + "_" + hostname);
+        }
+        var ranges = eventStore.queryIntersecting(buckets, period.start(), period.end());
+        QueryResult window = select(ranges, "window");
+        QueryResult afk = select(ranges, "afk");
+        QueryResult content = select(ranges, "content");
         List<Event> windowEvents = window.events();
         List<Event> afkEvents = afk.events();
         List<Event> contentEvents = content.events();
 
-        long activeSeconds = computeActiveSeconds(windowEvents, period);
-        long afkSeconds = computeAfkSeconds(afkEvents);
-        int switchCount = windowEvents.size();
-        List<WikiEntry.AppDuration> topApps = computeTopApps(windowEvents);
-        List<String> titleSamples = sampleTitles(windowEvents);
+        var stats = ActivityStatistics.compute(windowEvents, afkEvents, period.start(), period.end());
+        long activeSeconds = (long) stats.activeSeconds();
+        long afkSeconds = (long) stats.afkSeconds();
+        int switchCount = stats.switchCount();
+        List<WikiEntry.AppDuration> topApps = stats.apps().entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(10)
+                .map(e -> new WikiEntry.AppDuration(e.getKey(), e.getValue().longValue())).toList();
+        List<String> titleSamples = sampleTitles(stats.activeEvents());
         int titleChars = titleSamples.stream().mapToInt(String::length).sum();
         List<String> contextTitleSamples = sampleContextTitles(
                 contentEvents, Math.max(0, maxContentChars - titleChars));
@@ -54,18 +73,22 @@ public class WikiFactBuilder {
         Long lag = projectionLagSeconds.get();
         Map<String, WikiEntry.SourceCoverage> coverage = new LinkedHashMap<>();
         coverage.put("window", coverage(window.status(), period, lag));
-        coverage.put("afk", coverage(afk.status(), period, lag));
+        coverage.put("afk", coverage(stats.estimated() && "complete".equals(afk.status()) ? "partial" : afk.status(), period, lag));
         coverage.put("content", coverage(content.status(), period, lag));
         return new WikiFacts(period, activeSeconds, afkSeconds, switchCount,
                 topApps, titleSamples, contextTitleSamples, List.of(),
-                FACT_BUILDER_VERSION, eventStore.currentProjectorVersion(), coverage);
+                FACT_BUILDER_VERSION, eventStore.currentProjectorVersion(), coverage,
+                Map.of("unknownActivitySeconds", stats.unknownSeconds(), "uncoveredSeconds", stats.uncoveredSeconds(),
+                        "conflictSeconds", stats.conflictSeconds(), "activeSecondsExact", stats.activeSeconds(),
+                        "afkSecondsExact", stats.afkSeconds(), "appSecondsExact", stats.apps()));
     }
 
     public WikiFacts buildFactsFromChildren(List<WikiEntry> childEntries, WikiPeriod period) {
         long activeSeconds = 0;
         long afkSeconds = 0;
         int switchCount = 0;
-        Map<String, Long> appTotals = new LinkedHashMap<>();
+        Map<String, Double> appTotals = new LinkedHashMap<>();
+        Map<String, Object> totals = new LinkedHashMap<>();
         List<String> summaries = new ArrayList<>();
 
         for (WikiEntry child : childEntries) {
@@ -73,8 +96,18 @@ public class WikiFactBuilder {
                 activeSeconds += child.metrics().activeSeconds();
                 afkSeconds += child.metrics().afkSeconds();
                 switchCount += child.metrics().switchCount();
-                for (WikiEntry.AppDuration ad : child.metrics().topApps()) {
-                    appTotals.merge(ad.app(), ad.seconds(), Long::sum);
+                Map<String, Object> extra = child.metrics().extra() == null ? Map.of() : child.metrics().extra();
+                for (String key : List.of("unknownActivitySeconds", "uncoveredSeconds", "conflictSeconds",
+                        "activeSecondsExact", "afkSecondsExact")) {
+                    double value = extra.get(key) instanceof Number n ? n.doubleValue()
+                            : key.equals("activeSecondsExact") ? child.metrics().activeSeconds()
+                            : key.equals("afkSecondsExact") ? child.metrics().afkSeconds() : 0;
+                    totals.merge(key, value, (a, b) -> ((Number) a).doubleValue() + ((Number) b).doubleValue());
+                }
+                if (extra.get("appSecondsExact") instanceof Map<?, ?> exact) {
+                    exact.forEach((app, value) -> appTotals.merge(app.toString(), ((Number) value).doubleValue(), Double::sum));
+                } else for (WikiEntry.AppDuration ad : child.metrics().topApps()) {
+                    appTotals.merge(ad.app(), (double) ad.seconds(), Double::sum);
                 }
             }
             if (child.summary() != null && !child.summary().isBlank()) {
@@ -86,36 +119,27 @@ public class WikiFactBuilder {
         }
 
         List<WikiEntry.AppDuration> topApps = appTotals.entrySet().stream()
-                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
                 .limit(10)
-                .map(e -> new WikiEntry.AppDuration(e.getKey(), e.getValue()))
+                .map(e -> new WikiEntry.AppDuration(e.getKey(), e.getValue().longValue()))
                 .toList();
 
         Map<String, WikiEntry.SourceCoverage> coverage = new LinkedHashMap<>();
-        childEntries.forEach(child -> child.sourceCoverage().forEach(coverage::putIfAbsent));
+        childEntries.forEach(child -> child.sourceCoverage().forEach((key, value) -> coverage.merge(key, value,
+                (a, b) -> "complete".equals(a.status()) ? b : a)));
+        totals.put("appSecondsExact", appTotals);
+        activeSeconds = ((Number) totals.getOrDefault("activeSecondsExact", 0)).longValue();
+        afkSeconds = ((Number) totals.getOrDefault("afkSecondsExact", 0)).longValue();
         return new WikiFacts(period, activeSeconds, afkSeconds, switchCount,
                 topApps, List.of(), List.of(), summaries, FACT_BUILDER_VERSION,
                 childEntries.stream().map(WikiEntry::projectorVersion)
-                        .filter(Objects::nonNull).findFirst().orElse(null), coverage);
+                        .filter(Objects::nonNull).findFirst().orElse(null), coverage, totals);
     }
 
-    private QueryResult queryKind(String kind, Instant start, Instant end) {
-        QueryResult primary = safeQuery("watcher-" + kind + "_" + hostname, start, end);
-        if (!"missing".equals(primary.status())) return primary;
-        return safeQuery("aw-watcher-" + kind + "_" + hostname, start, end);
-    }
-
-    private QueryResult safeQuery(String bucketId, Instant start, Instant end) {
-        try {
-            List<Event> events = eventStore.queryEvents(
-                    bucketId, 2000, start.toString(), end.toString());
-            String status = events.isEmpty() && !eventStore.bucketExists(bucketId)
-                    ? "missing" : "complete";
-            return new QueryResult(events, status);
-        } catch (Exception e) {
-            log.debug("Bucket {} query failed: {}", bucketId, e.getMessage());
-            return new QueryResult(List.of(), "failed");
-        }
+    private QueryResult select(Map<String, EventStore.EventRange> ranges, String kind) {
+        var range = ranges.get("watcher-" + kind + "_" + hostname);
+        if ("missing".equals(range.status())) range = ranges.get("aw-watcher-" + kind + "_" + hostname);
+        return new QueryResult(range.events(), range.status());
     }
 
     private static WikiEntry.SourceCoverage coverage(
@@ -127,41 +151,12 @@ public class WikiFactBuilder {
 
     private record QueryResult(List<Event> events, String status) {}
 
-    private long computeActiveSeconds(List<Event> windowEvents, WikiPeriod period) {
-        if (windowEvents.isEmpty()) return 0;
-        long total = (long) windowEvents.stream()
-                .mapToDouble(Event::duration)
-                .sum();
-        long periodLen = period.end().getEpochSecond() - period.start().getEpochSecond();
-        return Math.min(total, periodLen);
-    }
-
-    private long computeAfkSeconds(List<Event> afkEvents) {
-        return (long) afkEvents.stream()
-                .filter(e -> "afk".equals(e.data().get("status")))
-                .mapToDouble(Event::duration)
-                .sum();
-    }
-
-    private List<WikiEntry.AppDuration> computeTopApps(List<Event> windowEvents) {
-        Map<String, Long> appTime = new LinkedHashMap<>();
-        for (Event e : windowEvents) {
-            String app = (String) e.data().getOrDefault("app", "unknown");
-            appTime.merge(app, (long) e.duration(), Long::sum);
-        }
-        return appTime.entrySet().stream()
-                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-                .limit(10)
-                .map(e -> new WikiEntry.AppDuration(e.getKey(), e.getValue()))
-                .toList();
-    }
-
     private List<String> sampleTitles(List<Event> windowEvents) {
         List<String> titles = new ArrayList<>();
         int totalChars = 0;
         for (Event e : windowEvents) {
             String title = (String) e.data().getOrDefault("title", "");
-            if (title.isBlank()) continue;
+            if (ActivityStatistics.unknown(title)) continue;
             String trimmed = title.length() > MAX_TITLE_LEN
                     ? title.substring(0, MAX_TITLE_LEN - 3) + "..." : title;
             if (totalChars + trimmed.length() > maxContentChars) break;
@@ -217,7 +212,17 @@ public class WikiFactBuilder {
             List<String> childSummaries,
             String factBuilderVersion,
             String projectorVersion,
-            Map<String, WikiEntry.SourceCoverage> sourceCoverage) {
+            Map<String, WikiEntry.SourceCoverage> sourceCoverage,
+            Map<String, Object> statistics) {
+
+        public WikiFacts(WikiPeriod period, long activeSeconds, long afkSeconds, int switchCount,
+                         List<WikiEntry.AppDuration> topApps, List<String> titleSamples,
+                         List<String> contextTitleSamples, List<String> childSummaries,
+                         String factBuilderVersion, String projectorVersion,
+                         Map<String, WikiEntry.SourceCoverage> sourceCoverage) {
+            this(period, activeSeconds, afkSeconds, switchCount, topApps, titleSamples, contextTitleSamples,
+                    childSummaries, factBuilderVersion, projectorVersion, sourceCoverage, Map.of());
+        }
 
         public WikiFacts(WikiPeriod period, long activeSeconds, long afkSeconds, int switchCount,
                           List<WikiEntry.AppDuration> topApps, List<String> titleSamples,

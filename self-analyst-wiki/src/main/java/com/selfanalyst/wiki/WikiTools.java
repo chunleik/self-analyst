@@ -178,6 +178,7 @@ public class WikiTools {
 
             List<Map<String, Object>> results = new ArrayList<>();
             for (WikiSemanticIndex.SearchHit hit : hits) {
+                if (!store.isCurrentEntry(hit.entryId())) continue;
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("score", hit.score());
                 item.put("docType", hit.docType());

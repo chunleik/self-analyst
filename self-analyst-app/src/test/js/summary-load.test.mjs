@@ -12,7 +12,9 @@ const agentSource = fs.readFileSync(
   "utf8",
 );
 
+const version = { statisticsVersion: "activity-afk-v2", calendarVersion: "day-0400-v1", timezone: "Asia/Shanghai" };
 function createSandbox(summary) {
+  if (summary) summary = { ...version, ...summary };
   const timeline = { innerHTML: summary ? "cached-timeline" : '<div class="loading-placeholder">加载中...</div>' };
   let summaryCalls = 0;
   const sandbox = {
@@ -123,6 +125,7 @@ test("dashboard refresh and task loading work without removed panel nodes", asyn
   const sandbox = createSandbox({ timeline: [{ label: "今天", headline: "旧摘要" }] });
   sandbox.api.getTasks = async () => [{ id: "task-1", status: "open", title: "待办" }];
   sandbox.api.getSummary = async () => ({
+    ...version,
     behaviorAdvice: { type: "suggestion", title: "不应展示的顶部建议" },
     timeline: [{ label: "今天", headline: "新摘要", suggestion: "保留条目建议" }],
   });
@@ -180,4 +183,18 @@ test("event setup without task nodes preserves timeline expand and discuss", () 
   assert.equal(sandbox.discussContext.type, "timeline_entry");
   assert.equal(sandbox.discussContext.id, "today");
   assert.equal(sandbox.discussContext.headline, "活动摘要");
+});
+
+test("old statistics snapshot cannot be reused", () => {
+  const sandbox = createSandbox({ timeline: [{ headline: "old" }] });
+  delete sandbox.state.summary.statisticsVersion;
+  sandbox.loadAll();
+  assert.equal(sandbox.state.summary, null);
+});
+
+test("unknown activity and estimated coverage remain visible in details", () => {
+  const sandbox = createSandbox({ timeline: [{ headline: "Known app", unknownActivitySeconds: 120, coverage: "estimated" }] });
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /timeline.unknownActivity/);
+  assert.match(sandbox.timeline.innerHTML, /timeline.estimated/);
 });

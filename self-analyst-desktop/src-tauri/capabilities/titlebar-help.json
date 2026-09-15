@@ -1,0 +1,8 @@
+{
+  "identifier": "titlebar-help",
+  "description": "受管主窗口标题栏和固定帮助操作，命令内校验当前后端端口与页面",
+  "windows": ["main"],
+  "local": false,
+  "remote": { "urls": ["http://localhost:*", "http://127.0.0.1:*"] },
+  "permissions": ["allow-titlebar-action", "allow-titlebar-layout", "allow-help-action"]
+}

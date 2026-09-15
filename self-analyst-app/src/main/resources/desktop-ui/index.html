@@ -7,8 +7,20 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="styles.css">
 <link rel="stylesheet" href="llm-settings.css">
+<link rel="stylesheet" href="titlebar-help.css">
 </head>
 <body>
+<script>if (window.__SELF_ANALYST_DESKTOP__ && window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') document.documentElement.classList.add('native-desktop');</script>
+<div id="desktop-titlebar">
+  <div class="titlebar-brand"><img src="app-icon.png" alt="" width="20" height="20"><span>SelfAnalyst</span></div>
+  <div id="titlebar-help-slot"></div>
+  <div id="titlebar-drag"></div>
+  <div class="titlebar-controls">
+    <button id="window-minimize" type="button" data-i18n-title="window.minimize" aria-label="Minimize"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6.5h10"/></svg></button>
+    <button id="window-maximize" type="button" data-i18n-title="window.maximize" aria-label="Maximize"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path class="maximize-icon" d="M1.5 1.5h9v9h-9z"/><path class="restore-icon" d="M3.5 3.5v-2h7v7h-2m-7-5h7v7h-7z"/></svg></button>
+    <button id="window-close" type="button" data-i18n-title="window.close" aria-label="Close"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="m1 1 10 10M1 11 11 1"/></svg></button>
+  </div>
+</div>
 
 <!-- ======== TOP NAVIGATION ======== -->
 <header id="top-nav">
@@ -33,11 +45,23 @@
     </button>
     <span class="status-dot" id="llm-dot"></span>
     <span id="llm-text" data-i18n="status.llm">LLM</span>
+    <div id="web-help-slot"><button id="help-trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="help-menu"><span data-i18n="help.label">Help</span></button></div>
     <button id="config-open-btn" class="btn btn-icon" title="配置" data-i18n-title="action.settings">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
   </div>
 </header>
+<div id="help-menu" role="menu" aria-labelledby="help-trigger" hidden>
+  <button type="button" role="menuitem" tabindex="-1" data-help-action="guide" data-i18n="help.guide">User guide</button>
+  <button type="button" role="menuitem" tabindex="-1" data-help-action="feedback" data-i18n="help.feedback">Report an issue</button>
+  <div class="help-separator" role="separator"></div>
+  <button type="button" role="menuitem" tabindex="-1" data-help-action="about" data-i18n="help.about">About SelfAnalyst</button>
+</div>
+<dialog id="help-dialog" aria-labelledby="help-dialog-title">
+  <h2 id="help-dialog-title"></h2><p id="help-dialog-body"></p>
+  <a id="help-dialog-link" target="_blank" rel="noopener noreferrer" hidden></a>
+  <form method="dialog"><button class="btn" data-i18n="help.dismiss">Close</button></form>
+</dialog>
 
 <!-- ======== MAIN CONTENT ======== -->
 <main id="main-content">
@@ -244,6 +268,7 @@
 <script src="files.js"></script>
 <script src="ui.js"></script>
 <script src="events.js"></script>
+<script src="titlebar-help.js"></script>
 <script src="init.js"></script>
 </body>
 </html>

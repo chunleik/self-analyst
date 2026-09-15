@@ -88,6 +88,13 @@ pub fn text(key: &str) -> String {
     lookup(&language, key, CATALOGS)
 }
 
+pub fn effective_language() -> String {
+    LANGUAGE.get().cloned().unwrap_or_else(|| {
+        let registry = serde_json::from_str(REGISTRY).expect("bundled registry");
+        resolve_system(&system_language(), &registry)
+    })
+}
+
 fn lookup(language: &str, key: &str, catalogs: &[(&str, &str)]) -> String {
     for code in [language, "en"] {
         if let Some((_, raw)) = catalogs.iter().find(|(candidate, _)| *candidate == code) {

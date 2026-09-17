@@ -14,3 +14,8 @@
 `docs/runtime-storage.md`、`docs/architecture.md`、`PRIVACY.md` 和双语 README 为当前说明；`docs/benchmarks/merged-event-storage.md` 为当前验证证据，旧 `docs/benchmarks/raw-event-retention.md` 标为历史报告，`docs/archive/` 保留历史背景，不作为当前契约。
 
 如需查看退役规格，可在本检出执行 `git show 73d6e7f:openspec/specs/raw-event-retention/spec.md`；如需恢复该文档文件，可使用 `git checkout 73d6e7f -- openspec/specs/raw-event-retention/spec.md`，这只恢复文档，不恢复应用数据或旧行为。
+
+## PR #53 跨平台测试夹具修正
+
+首个提交 612630d 的 macOS 守卫在格式发布断言失败。测试路径经过系统 /var 别名，被迁移链接保护提前拒绝。测试改为使用真实路径，并显式断言发布钩子已执行；未修改生产路径保护。RuntimeStorageGuardTest、RuntimeStorageProcessTest、RuntimeStorageCompatibilityTest 针对性测试及 151 项 Node 测试通过。远端 CI 复验以 PR 最新提交为准，由交付流程等待结果。
+

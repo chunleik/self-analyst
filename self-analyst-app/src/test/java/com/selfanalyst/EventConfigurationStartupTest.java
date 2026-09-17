@@ -51,14 +51,14 @@ class EventConfigurationStartupTest {
             String log = Files.readString(dir.resolve("process.log"));
             assertTrue(log.contains("2026-08"), log);
             assertFalse(Files.exists(dir.resolve("port.txt")));
-            assertFalse(Files.exists(dir.resolve("events")));
+            assertFalse(Files.exists(dir.resolve("events/events.db")));
         } finally {
             if (process.isAlive()) process.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
         }
         assertEquals("{}", Files.readString(manifest));
         assertEquals(hash, RawEventStore.fileSha256(older));
         try (var catalog = new RawPartitionCatalog(rawDir)) {
-            assertEquals(RawPartitionStatus.QUARANTINED, catalog.find("2026-08").orElseThrow().status());
+            assertEquals(RawPartitionStatus.SEALED, catalog.find("2026-08").orElseThrow().status());
         }
     }
     private static final List<String> OLD_ENVIRONMENT = List.of(

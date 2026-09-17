@@ -13,6 +13,9 @@ public final class ConfigResolver {
             Map.entry("events.timeout", "EVENTS_TIMEOUT"),
             Map.entry("events.mode", "EVENTS_MODE"),
             Map.entry("events.data-dir", "EVENTS_DATA_DIR"),
+            Map.entry("events.export.maxRangeDays", "EVENTS_EXPORT_MAX_RANGE_DAYS"),
+            Map.entry("events.storage.lowDisk.warnBytes", "EVENTS_STORAGE_LOW_DISK_WARN_BYTES"),
+            Map.entry("events.storage.lowDisk.blockBytes", "EVENTS_STORAGE_LOW_DISK_BLOCK_BYTES"),
             Map.entry("events.raw.dir", "EVENTS_RAW_DIR"),
             Map.entry("events.raw.query.maxRangeDays", "EVENTS_RAW_QUERY_MAX_RANGE_DAYS"),
             Map.entry("events.raw.query.maxPageSize", "EVENTS_RAW_QUERY_MAX_PAGE_SIZE"),
@@ -130,10 +133,10 @@ public final class ConfigResolver {
         effective("events.port", String.valueOf(config.eventsPort()));
         effective("events.data-dir", String.valueOf(config.eventsDataDir()));
         effective("events.raw.dir", String.valueOf(config.eventsRawDir()));
-        effective("events.raw.query.maxRangeDays", String.valueOf(config.eventsRawQueryMaxRangeDays()));
+        effective("events.export.maxRangeDays", String.valueOf(config.eventsRawQueryMaxRangeDays()));
         effective("events.raw.query.maxPageSize", String.valueOf(config.eventsRawQueryMaxPageSize()));
-        effective("events.raw.lowDisk.warnBytes", String.valueOf(config.eventsRawLowDiskWarnBytes()));
-        effective("events.raw.lowDisk.blockBytes", String.valueOf(config.eventsRawLowDiskBlockBytes()));
+        effective("events.storage.lowDisk.warnBytes", String.valueOf(config.eventsRawLowDiskWarnBytes()));
+        effective("events.storage.lowDisk.blockBytes", String.valueOf(config.eventsRawLowDiskBlockBytes()));
         effective("events.raw.integrity.startupScope", String.valueOf(config.eventsRawIntegrityStartupScope()));
         effective("events.raw.projector.batchSize", String.valueOf(config.eventsRawProjectorBatchSize()));
         effective("wiki.enabled", String.valueOf(config.wikiEnabled()));

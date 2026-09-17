@@ -1,3 +1,5 @@
+> 历史报告：逐心跳永久层已退役，当前方案与容量验证见 [合并事件存储](merged-event-storage.md)。
+
 # 原始事件永久保留基准
 
 启动完整性检查由 `events.raw.integrity.startupScope` 控制，默认 `latest` 检查最新分区，`all` 检查全部

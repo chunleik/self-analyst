@@ -65,3 +65,32 @@ test('native open waits for completion then restores button without error', asyn
   assert.equal(button.disabled, false);
   assert.equal(container.children.at(-1).textContent, '');
 });
+
+
+test('merged capacity panel separates backups and requires explicit cleanup confirmation', async () => {
+  const container = element();
+  const requests = [];
+  let confirmed = false;
+  const storage = { mode: 'merged', migration: 'complete', migrationId: 'test-migration',
+    activeBytes: 1048576, auxiliaryBytes: 524288, backupBytes: 2097152 };
+  const context = vm.createContext({ API_BASE: '', t: key => key,
+    document: { createElement: element }, window: { confirm: () => confirmed },
+    fetch: async (url, options) => {
+      requests.push({url, options});
+      return { ok: !options, json: async () => storage };
+    } });
+  vm.runInContext(source, context);
+  await context.loadMergedStorage(container);
+  const panel = container.children[0];
+  assert.ok(panel.children.some(child => child.textContent === 'storage.active: 1.0 MiB'));
+  assert.ok(panel.children.some(child => child.textContent === 'storage.backups: 2.0 MiB'));
+  const button = panel.children.find(child => child.type === 'button');
+  button.click();
+  assert.equal(requests.length, 1);
+  confirmed = true; button.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(requests[1].url, '/desktop/storage/backups/cleanup');
+  assert.equal(JSON.parse(requests[1].options.body).migrationId, 'test-migration');
+  assert.equal(button.disabled, false);
+  assert.equal(panel.children[0].textContent, 'storage.cleanFailed');
+});

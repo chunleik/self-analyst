@@ -123,8 +123,9 @@ language = "en" # auto、zh 或 en
 - 文件模块只采集文件名、路径、大小和创建/修改时间等文件系统元数据；除安全解析 `.gitignore` 外，
   不读取普通文件正文，不计算内容哈希，也不生成摘要、主题或向量。
 
-嵌入式事件服务永久保留通过隐私校验的原始事件，不会自动清理最旧数据；磁盘低于阻断阈值时停止新采集。
-外部 ActivityWatch 模式不提供此永久保留保证。
+嵌入式事件服务采用 ActivityWatch 式心跳合并：连续相同状态延长同一活动区间，不再保存永久逐心跳副本。
+事件库是权威数据，需要定期备份；逐心跳原始查询、导出和重放已退役。磁盘低于阻断阈值时停止新采集，
+不会自动删除历史活动。
 
 隐私细节见 [PRIVACY.md](PRIVACY.md)，现行规格索引见 [docs/README.md](docs/README.md)。
 
@@ -160,15 +161,14 @@ language = "en" # auto、zh 或 en
 | `events.port` | —（仅 `config.toml`） | `5700` |
 | `events.collection.title.enabled` | `EVENTS_COLLECTION_TITLE_ENABLED` | `true` |
 | `events.raw.dir` | `EVENTS_RAW_DIR` | `{events.data-dir}/raw` |
-| `events.raw.query.maxRangeDays` | `EVENTS_RAW_QUERY_MAX_RANGE_DAYS` | `31` |
-| `events.raw.query.maxPageSize` | `EVENTS_RAW_QUERY_MAX_PAGE_SIZE` | `1000` |
-| `events.raw.lowDisk.warnBytes` | `EVENTS_RAW_LOW_DISK_WARN_BYTES` | `10737418240` |
-| `events.raw.lowDisk.blockBytes` | `EVENTS_RAW_LOW_DISK_BLOCK_BYTES` | `1073741824` |
-| `events.raw.integrity.startupScope` | `EVENTS_RAW_INTEGRITY_STARTUP_SCOPE` | `latest` |
-| `events.raw.projector.batchSize` | `EVENTS_RAW_PROJECTOR_BATCH_SIZE` | `1000` |
+| `events.export.maxRangeDays` | `EVENTS_EXPORT_MAX_RANGE_DAYS` | `31` |
+| `events.storage.lowDisk.warnBytes` | `EVENTS_STORAGE_LOW_DISK_WARN_BYTES` | `10737418240` |
+| `events.storage.lowDisk.blockBytes` | `EVENTS_STORAGE_LOW_DISK_BLOCK_BYTES` | `1073741824` |
 
-嵌入式模式的永久原始层固定启用，不支持 TTL、最大分区数或自动删除配置。产生分区后，普通配置
-保存不能修改 `events.raw.dir`；目录迁移需要独立的显式转存流程。
+现有双层数据经过校验后迁移到紧凑事件库，旧库保留为备份。设置分别显示活动库和备份占用；显式清理迁移
+备份后才释放旧文件，同时失去逐心跳恢复和旧格式回退能力。提交身份的重试去重保证为 24 小时。
+`events.raw.*` 配置已退役，只有 `events.raw.dir` 继续用于定位迁移输入。降级前请阅读
+[存储与恢复说明](docs/runtime-storage.md)。
 
 ## 文档
 

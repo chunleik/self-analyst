@@ -13,8 +13,8 @@ Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2
 用户配置的监控目录 ─> 文件系统元数据采集 ─> file-watch.db ─> FileTools / 桌面 API
                                    └─> metadata-only heartbeat ─> 事件服务通用历史
 
-通过策略的 heartbeat/events/import ─> 月度 raw SQLite（永久、只追加）
-                                      └─> 幂等投影器 ─> events.db（合并、可重建）
+通过策略的 heartbeat/events/import ─> 事务性合并存储 ─> events.db（权威活动区间）
+                                      └─> 24 小时重试回执（到期回收）
 ```
 
 OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
@@ -51,13 +51,12 @@ UIA，将整棵树作为单次调用内的临时输入，依次尝试应用专�
 
 ## 4. 持久化边界
 
-嵌入式模式以 `{events.raw.dir}/<yyyy>/raw-events-<yyyy-MM>.db` 作为事实源，按服务端 `receivedAt`
-的 UTC 月份分区。catalog 和封存 manifest 记录计数、边界、schema 版本与 SHA-256；封存分区只读。
-写入顺序固定为隐私校验、raw 事务提交、幂等投影与 checkpoint。投影失败只产生 pending 状态，
-不得回滚或删除已经提交的 raw 事实。`events.db`、Wiki 与语义索引都是可删除、可重建的派生数据。
+嵌入式模式以 `events.db` 为权威活动存储。连续相同 heartbeat 在 pulsetime 内更新同一活动区间，
+结束时间取较大值；状态变化、采集中断或新会话新建区间。events 与导入保留独立事件语义。
+事件、bucket 更新时间和 24 小时幂等回执同事务提交，失败全部回滚。回执不保存事件正文并定期回收。
 
-启动时先恢复中断封存，再按 `events.raw.integrity.startupScope` 检查最新或全部分区；分区与 manifest
-只读校验，成功更新 catalog 最近校验时间，失败则记录隔离并终止启动，不发布端口或启动采集。
+旧 raw/投影双层数据经独占锁、旁路复制、待处理提交核对和完整性校验后切换，旧库作为显式清理的备份。
+新格式不再提供逐心跳查询或从 raw 重建的保证。Wiki 与语义索引仍为派生数据，事件库需要独立备份。
 
 内容事件 v2 允许 `app`、`title`、可选 `context_title/context_kind`、`title_source`、可选
 `title_confidence`、`uia_chars` 和时间元数据。共享写入策略覆盖 HTTP heartbeat/events、导入和
@@ -70,10 +69,9 @@ Wiki 只能消费标题事实；文件采集器不得读取普通文件正文、
 
 ## 5. 生命周期
 
-`AppSession` 的主要顺序是：加载配置 → 初始化/验证 raw → 初始化并恢复事件投影 →
-启动 HTTP → 启动窗口/AFK 与标题 watcher → 启动 Wiki/文件/Agent → 启动桌面服务。关闭时先停止
-产生新事件的 watcher，再等待 raw/投影事务完成并关闭数据库。raw 初始化失败不得启动采集器；
-投影恢复失败时只允许 raw 接收与诊断，Wiki 等依赖完整投影的消费者保持降级。
+`AppSession` 的主要顺序是：取得数据根锁与格式准入 → 受控事件迁移/恢复 → 开放权威事件库 →
+内容策略准备 → watcher 与派生工作。启动失败阻止采集和端口发布；停止时关闭采集器、事务写入器及数据库。
+事件服务持有独立目录锁至关闭，生产数据根锁保守保留至 JVM 退出。
 
 Windows 登录自启动由 Tauri 壳管理当前用户 Run 入口 `SelfAnalystDesktop`，注册桌面 EXE 的
 `--autostart` 启动方式。首次使用默认关闭；自动启动复用后端生命周期并从创建时隐藏主窗口。

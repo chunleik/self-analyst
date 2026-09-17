@@ -3,14 +3,7 @@ package com.selfanalyst.events;
 import com.selfanalyst.events.controller.*;
 import com.selfanalyst.events.log.ServerLog;
 import com.selfanalyst.events.settings.SettingsManager;
-import com.selfanalyst.events.projection.EventProjector;
-import com.selfanalyst.events.projection.EventIngestionService;
-import com.selfanalyst.events.projection.HeartbeatIngestionService;
 import com.selfanalyst.events.projection.RawEventProjector;
-import com.selfanalyst.events.projection.ProjectionRecoveryService;
-import com.selfanalyst.events.raw.RawEventStore;
-import com.selfanalyst.events.raw.RawEventQueryService;
-import com.selfanalyst.events.raw.RawStorageStatusService;
 import com.selfanalyst.events.store.*;
 import com.selfanalyst.events.webui.WebUiHandler;
 import io.javalin.Javalin;
@@ -24,9 +17,12 @@ public class EventServer {
     private final Database db;
     private final BucketStore bucketStore;
     private final EventStore eventStore;
-    private final RawEventStore rawEventStore;
-    private final RawEventQueryService rawEventQueries;
-    private final RawStorageStatusService rawStatus;
+    private final MergedStorageMigration migration;
+    private final MergedEventStore mergedStore;
+    private final Path dataDirectory;
+    private final com.selfanalyst.events.raw.RawDiskSpaceMonitor diskMonitor;
+    private long previousSize;
+    private long previousSampleNanos;
     private final SettingsManager settings;
     private final ServerLog serverLog;
     private volatile int port;
@@ -72,20 +68,16 @@ public class EventServer {
                      int projectorBatchSize, boolean verifyAllOnStartup) {
         this.port = port;
         this.desktopToken = desktopToken;
+        if (lowDiskBlockBytes <= 0 || lowDiskWarnBytes <= lowDiskBlockBytes)
+            throw new IllegalArgumentException("Invalid disk thresholds");
         PulseTimeConfig pulseConfig = PulseTimeConfig.DEFAULT;
-        this.rawEventStore = new RawEventStore(rawDir);
-        try {
-            rawEventStore.verifyOnStartup(verifyAllOnStartup);
-        } catch (com.selfanalyst.events.raw.RawStartupIntegrityException invalid) {
-            try { rawEventStore.close(); } catch (Exception ignored) { }
-            throw invalid;
-        }
-        this.rawEventQueries = new RawEventQueryService(
-                rawDir, queryMaxRangeDays, queryMaxPageSize);
-        this.rawStatus = new RawStorageStatusService(rawDir,
-                dataDir.resolve(Database.PROJECTION_FILENAME), lowDiskWarnBytes, lowDiskBlockBytes);
+        this.dataDirectory = dataDir;
+        this.migration = new MergedStorageMigration(dataDir, rawDir);
         this.db = new Database(dataDir);
         this.eventStore = new EventStore(db, pulseConfig);
+        this.mergedStore = new MergedEventStore(db, pulseConfig.pulsetime());
+        this.diskMonitor = new com.selfanalyst.events.raw.RawDiskSpaceMonitor(dataDir, lowDiskWarnBytes, lowDiskBlockBytes);
+        mergedStore.setWritableCheck(diskMonitor::requireWritable);
         this.bucketStore = new BucketStore(db);
         this.settings = new SettingsManager(dataDir.resolve("settings.json"));
         this.serverLog = new ServerLog(500);
@@ -93,33 +85,30 @@ public class EventServer {
         InfoController infoCtrl = new InfoController();
         LogController logCtrl = new LogController(serverLog);
         BucketController bucketCtrl = new BucketController(bucketStore, eventStore);
-        RawEventProjector projector = projectorOverride != null
-                ? projectorOverride
-                : new EventProjector(db, pulseConfig.pulsetime(), projectorBatchSize, "v1");
-        boolean recovered = true;
-        if (projector instanceof EventProjector eventProjector) {
-            try (ProjectionRecoveryService recovery = new ProjectionRecoveryService(
-                    rawDir, eventProjector)) {
-                recovery.recoverPending();
-            } catch (Exception recoveryFailure) {
-                recovered = false;
-            }
-        }
-        this.projectionReady = recovered;
-        EventController eventCtrl = new EventController(eventStore, bucketStore,
-                new EventIngestionService(rawEventStore, projector));
-        HeartbeatController heartbeatCtrl = new HeartbeatController(eventStore, bucketStore,
-                new HeartbeatIngestionService(rawEventStore, projector));
+        this.projectionReady = true;
+        EventController eventCtrl = new EventController(eventStore, bucketStore, mergedStore);
+        HeartbeatController heartbeatCtrl = new HeartbeatController(eventStore, bucketStore, mergedStore);
         QueryController queryCtrl = new QueryController(eventStore, bucketStore);
-        ExportController exportCtrl = new ExportController(
-                bucketStore, eventStore, rawEventStore, projector);
+        ExportController exportCtrl = new ExportController(bucketStore, eventStore, mergedStore);
         SettingsController settingsCtrl = new SettingsController(settings);
-        RawEventController rawEventCtrl = new RawEventController(rawEventQueries);
+
 
         this.app = Javalin.create(cfg -> {
             cfg.http.defaultContentType = "application/json";
         });
-        app.get("/desktop/raw-events", rawEventCtrl::query);
+        app.get("/desktop/raw-events", ctx -> ctx.status(410).json(Map.of(
+                "error", "RAW_STORAGE_RETIRED", "message", "请使用合并事件查询或导出")));
+        app.post("/desktop/raw-rebuild", ctx -> ctx.status(410).json(Map.of(
+                "error", "RAW_STORAGE_RETIRED", "message", "合并事件库需要从有效备份恢复")));
+        app.get("/desktop/storage/backups", ctx -> ctx.json(migration.backupStatus()));
+        app.get("/desktop/storage/status", ctx -> ctx.json(rawStatus()));
+        app.post("/desktop/storage/backups/cleanup", ctx -> {
+            try {
+                var body = ctx.bodyAsClass(Map.class);
+                ctx.json(migration.cleanBackups((String) body.get("migrationId")));
+            } catch (IllegalArgumentException e) { ctx.status(400).json(Map.of("error", "请确认迁移备份清理范围")); }
+            catch (Exception e) { ctx.status(409).json(Map.of("error", "备份清理未完成，活动数据已保留")); }
+        });
 
         // Enforce the loopback trust boundary before any API route can mutate state.
         this.app.before(ctx -> {
@@ -213,21 +202,9 @@ public class EventServer {
         } catch (Exception error) {
             serverLog.error("Failed to close event service database: " + error.getMessage());
         }
-        try {
-            rawEventStore.close();
-        } catch (Exception error) {
-            serverLog.error("Failed to close raw event store: " + error.getClass().getSimpleName());
-        }
-        try {
-            rawEventQueries.close();
-        } catch (Exception error) {
-            serverLog.error("Failed to close raw event queries: " + error.getClass().getSimpleName());
-        }
-        try {
-            rawStatus.close();
-        } catch (Exception error) {
-            serverLog.error("Failed to close raw status: " + error.getClass().getSimpleName());
-        }
+        try { mergedStore.close(); } catch (Exception ignored) { }
+        try { migration.close(); } catch (Exception ignored) { }
+
     }
 
     public Database db() {
@@ -242,12 +219,31 @@ public class EventServer {
         return eventStore;
     }
 
-    public RawEventStore rawEventStore() {
-        return rawEventStore;
-    }
-
-    public Map<String, Object> rawStatus() {
-        return rawStatus.snapshot();
+    public synchronized Map<String, Object> rawStatus() {
+        Map<String, Object> status = new java.util.LinkedHashMap<>(migration.backupStatus());
+        status.put("mode", "merged"); status.put("status", "running");
+        status.put("databaseHealth", mergedStore.writeFailed() ? "write_failed" : "verified_at_startup");
+        if (mergedStore.writeFailed() || "failed".equals(status.get("migration"))) status.put("status", "degraded");
+        try {
+            Path file = dataDirectory.resolve("events.db");
+            status.put("activeBytes", java.nio.file.Files.size(file));
+            long auxiliary = 0;
+            for (String suffix : new String[]{"-wal", "-shm"}) {
+                Path p = dataDirectory.resolve("events.db" + suffix);
+                if (java.nio.file.Files.exists(p)) auxiliary += java.nio.file.Files.size(p);
+            }
+            status.put("auxiliaryBytes", auxiliary);
+            status.put("usableBytes", java.nio.file.Files.getFileStore(dataDirectory).getUsableSpace());
+            var disk = diskMonitor.sample();
+            status.put("diskWarning", disk != com.selfanalyst.events.raw.RawDiskSpaceMonitor.State.NORMAL);
+            if (disk == com.selfanalyst.events.raw.RawDiskSpaceMonitor.State.BLOCKED) status.put("status", "blocked");
+            long size = java.nio.file.Files.size(file) + auxiliary;
+            long now = System.nanoTime();
+            status.put("growthBytesPerSecond", previousSampleNanos == 0 ? 0.0
+                    : (size - previousSize) / Math.max(0.001, (now - previousSampleNanos) / 1_000_000_000.0));
+            previousSampleNanos = now; previousSize = size;
+        } catch (Exception e) { status.put("status", "failed"); }
+        return status;
     }
 
     public boolean projectionReady() {

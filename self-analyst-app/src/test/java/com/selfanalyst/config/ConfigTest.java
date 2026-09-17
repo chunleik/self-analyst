@@ -267,10 +267,10 @@ class ConfigTest {
         Files.writeString(dir.resolve("config.toml"), """
                 [events.raw]
                 dir = '%s'
-                [events.raw.query]
+                [events.export]
                 maxRangeDays = 7
                 maxPageSize = 250
-                [events.raw.lowDisk]
+                [events.storage.lowDisk]
                 warnBytes = 8589934592
                 blockBytes = 536870912
                 [events.raw.integrity]
@@ -283,11 +283,11 @@ class ConfigTest {
         Config configured = Config.load(dir);
         assertEquals(rawDir, configured.eventsRawDir());
         assertEquals(7, configured.eventsRawQueryMaxRangeDays());
-        assertEquals(250, configured.eventsRawQueryMaxPageSize());
+        assertEquals(1000, configured.eventsRawQueryMaxPageSize());
         assertEquals(8_589_934_592L, configured.eventsRawLowDiskWarnBytes());
         assertEquals(536_870_912L, configured.eventsRawLowDiskBlockBytes());
         assertEquals(RawIntegrityPolicy.ALL, configured.eventsRawIntegrityStartupScope());
-        assertEquals(128, configured.eventsRawProjectorBatchSize());
+        assertEquals(1000, configured.eventsRawProjectorBatchSize());
     }
 
     @Test
@@ -311,14 +311,14 @@ class ConfigTest {
     @Test
     void invalidRawRuntimeSettingsAreRejected(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("config.toml"), """
-                [events.raw.lowDisk]
+                [events.storage.lowDisk]
                 warnBytes = 1024
                 blockBytes = 1024
                 """, StandardCharsets.UTF_8);
 
         IllegalArgumentException error = assertThrows(
                 IllegalArgumentException.class, () -> Config.load(dir));
-        assertTrue(error.getMessage().contains("blockBytes"), error.getMessage());
+        assertTrue(error.getMessage().contains("配置无效"), error.getMessage());
     }
 
     @Test

@@ -36,7 +36,7 @@ class ProjectionConsumerBoundaryTest {
             String events = client.send(HttpRequest.newBuilder(URI.create(bucket + "/events?limit=100"))
                     .GET().build(), HttpResponse.BodyHandlers.ofString()).body();
             assertEquals(1, new ObjectMapper().readTree(events).size());
-            assertEquals(2, server.rawEventStore().count(YearMonth.now(ZoneOffset.UTC)));
+            assertFalse(java.nio.file.Files.exists(dir.resolve("raw")));
 
             AqlInterpreter interpreter = new AqlInterpreter(new AqlContext(
                     server.eventStore(), server.bucketStore(), null, null));

@@ -64,7 +64,7 @@ class DesktopConfigControllerTest {
                 Map.of("aw", Map.of("dataDir", "must-not-leak")),
                 Map.of("collection", Map.of("content", false)),
                 Map.of("collection", Map.of("content", Map.of("pollMs", 900))),
-                Map.of("events", Map.of("raw", Map.of("enabled", false))))) {
+                Map.of("aw", Map.of("mode", "embedded")))) {
             var error = assertThrows(TomlValidationException.class, () -> ctrl.applyStructuredSave(legacy));
             assertFalse(error.getMessage().contains("must-not-leak"));
             assertEquals(before, store.readRaw());
@@ -418,12 +418,8 @@ class DesktopConfigControllerTest {
         var ctrl = controller(dir, store);
 
         List<String> invalidTexts = List.of(
-                "[events.raw.query]\nmaxRangeDays = 0\n",
-                "[events.raw.query]\nmaxPageSize = 10001\n",
-                "[events.raw.lowDisk]\nwarnBytes = 1024\nblockBytes = 1024\n",
-                "[events.raw.projector]\nbatchSize = -1\n",
-                "[events.raw.integrity]\nstartupScope = \"none\"\n",
-                "[events.raw]\nenabled = false\n");
+                "[events.export]\nmaxRangeDays = 0\n",
+                "[events.storage.lowDisk]\nwarnBytes = 1024\nblockBytes = 1024\n");
 
         for (String invalidText : invalidTexts) {
             assertThrows(TomlValidationException.class,

@@ -265,26 +265,26 @@ classpath application.properties SHALL 继续作为打包默认值；事件配�
 - **THEN** 当前启动不自动读取、迁移或删除该文件
 
 ### Requirement: SPEC-TOML-RAW-001 原始事件配置集合
-系统 SHALL 支持 `events.raw.dir`、`events.raw.query.maxRangeDays`、`events.raw.query.maxPageSize`、`events.raw.lowDisk.warnBytes`、`events.raw.lowDisk.blockBytes`、`events.raw.integrity.startupScope` 和 `events.raw.projector.batchSize`。原始事件能力在嵌入式模式 SHALL 固定启用，MUST NOT 提供关闭永久保存、按天保留或自动删除分区的普通用户配置。
+系统 SHALL 使用 `events.export.maxRangeDays`、`events.storage.lowDisk.warnBytes` 和 `events.storage.lowDisk.blockBytes` 配置导出范围及活动库空间阈值。`events.raw.*` SHALL 标为退役并提示不再控制在线存储，只有 `events.raw.dir` 保留用于定位旧迁移输入。系统 MUST NOT 提供关闭合并事实记录或自动删除历史的普通保留策略。
 
 #### Scenario: 默认原始事件配置
-- **WHEN** 用户没有覆盖原始事件配置
-- **THEN** 原始目录派生为 `{events.data-dir}/raw`，使用月度分区、31 天查询范围上限、1000 条单页上限、10 GiB 告警阈值、1 GiB 阻断阈值、启动校验最新分区和 1000 条投影批量大小
+- **WHEN** 用户没有覆盖事件存储配置
+- **THEN** 旧 raw 迁移输入默认位于 `{events.data-dir}/raw`，合并事件导出范围默认为 31 天，活动库默认 10 GiB 告警、1 GiB 阻断；不创建新的原始分区
 
 #### Scenario: 禁止关闭永久保存
-- **WHEN** 用户尝试配置原始事件保留天数、最大分区数、自动删除或关闭嵌入式原始事件层
-- **THEN** 系统不把这些键作为受支持配置，也不因此删除或停止记录合规原始事件
+- **WHEN** 用户保留旧 raw 开关、保留天数、最大分区数或自动删除键
+- **THEN** 这些键不控制新格式行为，不恢复永久逐心跳记录，也不触发历史删除
 
 ### Requirement: SPEC-TOML-RAW-002 原始事件配置校验
-原始目录 SHALL 接受可解析的本地路径；查询范围、页大小、磁盘阈值和投影批量大小 MUST 为正整数并受后端声明上限约束；阻断阈值 MUST 小于告警阈值；启动完整性策略 SHALL 只接受 `latest` 或 `all`。任一已知原始配置无效时，整次 raw TOML 保存 MUST 被拒绝且原文件保持不变。
+旧迁移目录 SHALL 接受可解析的本地路径。当前导出范围和磁盘阈值 MUST 为正整数，阻断阈值 MUST 小于告警阈值；无效当前配置 SHALL 拒绝整次保存并保持旧文件。退役 raw 数值和完整性枚举 SHALL 不再控制新格式，既有 TOML 类型检查保持生效。新格式 SHALL 独立执行事件库健康检查和迁移校验。
 
 #### Scenario: 磁盘阈值关系错误
-- **WHEN** `events.raw.lowDisk.blockBytes` 大于或等于 `events.raw.lowDisk.warnBytes`
-- **THEN** 配置保存返回带违规键的校验错误，磁盘上的 TOML 不变
+- **WHEN** `events.storage.lowDisk.blockBytes` 大于或等于 `events.storage.lowDisk.warnBytes`
+- **THEN** 配置保存返回校验错误，磁盘上的 TOML 不变
 
 #### Scenario: 无效完整性策略
-- **WHEN** `events.raw.integrity.startupScope` 不是 `latest` 或 `all`
-- **THEN** 配置保存和启动配置解析拒绝该值，不静默关闭完整性校验
+- **WHEN** 旧 `events.raw.integrity.startupScope` 包含已不生效的字符串值
+- **THEN** 系统提示该键已退役，不根据它关闭当前事件库或迁移完整性校验
 
 ### Requirement: SPEC-TOML-RAW-003 原始目录变更边界
 尚未产生原始事件时，系统 MAY 接受 `events.raw.dir` 变更；已经存在任何原始分区后，普通配置保存 MUST 拒绝改变有效原始目录，并说明需要独立的显式转存流程。配置修改或路径不可用 MUST NOT 导致系统遗忘或自动删除旧分区。
@@ -411,7 +411,7 @@ MUST 保持原磁盘文件和当前可用运行版本，并释放候选资源。
 
 启动失败 SHALL 发生在事件服务、采集器或数据目录初始化之前。raw/结构化 HTTP 配置提交与文本连接测试 SHALL 返回 400；Agent 工具 SHALL 返回明确失败。失败 MUST 保留磁盘文件和现有运行配置。诊断 SHALL 仅展示名称与来源，不包含配置值或完整配置文本。
 
-该规则 SHALL 只针对表内已移除名称及对应结构化字段。普通未知键仍按现有未知键规则处理；旧 OCR 键及 `aw.audio.*` 仍按已移除功能规则接受但忽略，不映射为 `events.*`，不恢复受支持状态。此前禁止的 raw 开关/TTL/容量/删除键在旧前缀和新前缀下 SHALL 均继续拒绝，不能借改名启用保留策略。
+该规则 SHALL 只针对表内已移除名称及对应结构化字段。普通未知键仍按现有未知键规则处理；旧 OCR 键及 `aw.audio.*` 仍按已移除功能规则接受但忽略，不映射为 `events.*`，不恢复受支持状态。旧 raw 开关/TTL/容量/删除键 SHALL 作为退役配置忽略，不控制合并存储，也不能触发自动删除历史。
 
 #### Scenario: 旧目录配置阻止启动回退
 - **WHEN** 启动 TOML 中仍包含 `aw.raw.dir`
@@ -439,11 +439,11 @@ MUST 保持原磁盘文件和当前可用运行版本，并释放候选资源。
 
 #### Scenario: 未支持的永久层关闭配置
 - **WHEN** 用户提交 `aw.raw.enabled=false` 或 `events.raw.enabled=false`，或在任一前缀下配置 retentionDays、maxPartitions、autoDelete
-- **THEN** 系统拒绝这些保留策略配置，不关闭永久记录或删除分区
+- **THEN** 系统忽略这些退役保留策略，不关闭合并记录或自动删除历史
 
 ### Requirement: SPEC-TOML-RENAME-003 标题配置结构与校验范围
 
-标题采集 SHALL 使用 `events.collection.title.enabled` 布尔开关和 `events.collection.title.pollMs` 整数间隔；默认值分别为 true 与 500 毫秒，间隔范围及越界处理 SHALL 保持既有行为。标题采集 SHALL 继续只保存标题事实，不因改名采集正文、控件树、截图、OCR 或音频。启动完整性校验 SHALL 使用 `events.raw.integrity.startupScope`，默认 latest，仅允许 latest/all，MUST NOT 将此枚举解释为布尔开关。
+标题采集 SHALL 使用 `events.collection.title.enabled` 布尔开关和 `events.collection.title.pollMs` 整数间隔；默认值分别为 true 与 500 毫秒，间隔范围及越界处理 SHALL 保持既有行为。标题采集 SHALL 继续只保存标题事实，不因改名采集正文、控件树、截图、OCR 或音频。旧 `events.raw.integrity.startupScope` SHALL 标为退役；当前事件库健康检查和旧格式迁移校验独立执行，不受该旧枚举控制。
 
 模板、结构化生成和 raw 元数据中的赋值 SHALL 允许同时启用标题开关与轮询间隔，不产生 TOML 标量/表冲突。
 
@@ -453,4 +453,4 @@ MUST 保持原磁盘文件和当前可用运行版本，并释放候选资源。
 
 #### Scenario: 完整性校验全部分区
 - **WHEN** 用户设置 `events.raw.integrity.startupScope='all'`
-- **THEN** 启动按 SPEC-RAW-013 校验全部已有分区；设置布尔值 true 或字符串 false 则拒绝，不关闭校验
+- **THEN** 该旧键不控制新格式；迁移仍校验已有输入，新库仍执行健康检查，错误 TOML 类型按通用规则拒绝

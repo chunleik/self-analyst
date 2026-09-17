@@ -39,25 +39,29 @@ public class AfkWatcher extends Watcher {
     }
 
     @Override
+    protected void resetContinuity(Instant now) {
+        lastChangeTime = now;
+    }
+
+    @Override
     protected Event collect() {
         try {
             long idleMs = tracker.getIdleTimeMillis();
             boolean isAfk = idleMs >= AFK_THRESHOLD_MS;
             Instant now = Instant.now();
-            long durationMs = Duration.between(lastChangeTime, now).toMillis();
+            long durationMs = Math.max(0, Duration.between(lastChangeTime, now).toMillis());
             double duration = durationMs / 1000.0;
 
             Event event;
             if (isAfk != lastAfk) {
-                event = new Event(lastChangeTime, duration,
-                    Map.of("status", (Object) (lastAfk ? "afk" : "not-afk")));
                 lastChangeTime = now;
                 lastAfk = isAfk;
+                event = new Event(now, 0, Map.of("status", (Object) (isAfk ? "afk" : "not-afk")));
             } else {
                 event = new Event(lastChangeTime, duration,
                     Map.of("status", (Object) (isAfk ? "afk" : "not-afk")));
             }
-            return event.duration() > 0 ? event : null;
+            return event;
         } catch (Exception e) {
             return null;
         }

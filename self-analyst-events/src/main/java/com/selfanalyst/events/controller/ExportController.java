@@ -15,6 +15,14 @@ public class ExportController {
 
     private final DataExporter exporter;
     private final DataImporter importer;
+    private com.selfanalyst.events.export.MergedDataImporter mergedImporter;
+
+    public ExportController(BucketStore bucketStore, EventStore eventStore,
+                            com.selfanalyst.events.store.MergedEventStore merged) {
+        this.exporter = new DataExporter(bucketStore, eventStore);
+        this.importer = null;
+        this.mergedImporter = new com.selfanalyst.events.export.MergedDataImporter(merged);
+    }
 
     public ExportController(BucketStore bucketStore, EventStore eventStore,
                             RawEventAppender rawAppender, RawEventProjector projector) {
@@ -35,7 +43,7 @@ public class ExportController {
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> data = ctx.bodyAsClass(Map.class);
-            Map<String, Object> result = importer.importData(data);
+            Map<String, Object> result = mergedImporter != null ? mergedImporter.importData(data) : importer.importData(data);
             ctx.json(result);
         } catch (ContentEventPolicyViolationException e) {
             ctx.status(422).json(Map.of(

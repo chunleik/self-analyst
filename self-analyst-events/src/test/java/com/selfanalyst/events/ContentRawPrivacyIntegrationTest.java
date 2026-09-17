@@ -28,9 +28,8 @@ class ContentRawPrivacyIntegrationTest {
     @Test
     void forbiddenContentNeverReachesAnyPersistentOrDiagnosticSurface(@TempDir Path dir)
             throws Exception {
-        seedSafeSealedManifest(dir.resolve("raw"));
         EventServer server = new EventServer(dir, dir.resolve("raw"), 0,
-                31, 1000, 1, 1, 1000);
+                31, 1000, 2, 1, 1000);
         server.start(0);
         try {
             HttpClient client = HttpClient.newHttpClient();

@@ -31,7 +31,8 @@ const context = {
       raw: {
         status: "blocked",
         diskWarning: true,
-        projectionLagSeconds: 42,
+        mode: "merged",
+        activeBytes: 1048576, backupBytes: 2097152,
         data: "SELF_ANALYST_DOM_SECRET",
       },
       aw: {},
@@ -70,6 +71,7 @@ assert.match(context.state.dom.fileStatusBtn.title, /status\.running/);
 assert.match(context.state.dom.rawDot.className, /red/);
 assert.match(context.state.dom.rawDot.title, /status\.blocked/);
 assert.match(context.state.dom.rawDot.title, /status\.diskWarning/);
-assert.match(context.state.dom.rawDot.title, /42s/);
+assert.match(context.state.dom.rawDot.title, /1.0 MiB/);
+assert.match(context.state.dom.rawDot.title, /2.0 MiB/);
 assert.doesNotMatch(context.state.dom.rawDot.title, /SELF_ANALYST_DOM_SECRET/);
 assert.doesNotMatch(context.state.dom.rawText.title, /SELF_ANALYST_DOM_SECRET/);

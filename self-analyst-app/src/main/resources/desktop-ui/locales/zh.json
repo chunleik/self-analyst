@@ -120,7 +120,7 @@
   "tab.files": "文件",
   "status.service": "服务",
   "status.capture": "采集",
-  "status.raw": "原始事件",
+  "status.raw": "合并事件",
   "status.blocked": "已阻断",
   "status.unavailable": "不可用",
   "status.diskWarning": "磁盘空间告警",
@@ -421,5 +421,13 @@
   "error.chat.unavailable": "LLM 未配置，请在配置页面设置 API Key",
   "timeline.unknownActivity": "未识别应用活动",
   "timeline.estimated": "AFK 覆盖不足：部分时长未扣除非活跃时间，仅供估计。",
-  "timeline.activityDuration": "{minutes}分钟{seconds}秒"
+  "timeline.activityDuration": "{minutes}分钟{seconds}秒",
+  "storage.active": "活动库",
+  "storage.backups": "旧库备份",
+  "storage.auxiliary": "辅助文件",
+  "storage.cleanBackups": "清理迁移备份",
+  "storage.backupWarning": "清理后将无法恢复逐心跳历史或回退旧格式。确认清理本次迁移登记的旧事件库和原始分区备份？",
+  "storage.cleanFailed": "备份清理未完成，活动数据已保留",
+  "storage.mergedNote": "合并事件是权威活动记录，请定期备份。旧库备份需单独清理才会释放空间。",
+  "storage.staging": "迁移临时文件"
 }

@@ -142,9 +142,10 @@ the system language.
   times. Apart from safely parsing `.gitignore`, it does not read ordinary file contents, calculate
   content hashes, or generate summaries, topics, or vectors.
 
-The embedded event service permanently retains raw events that pass privacy validation. It does not
-automatically delete the oldest data; collection stops below the disk-space blocking threshold.
-External ActivityWatch mode does not provide this permanent-retention guarantee.
+The embedded event service stores merged activity intervals, following ActivityWatch-style heartbeat
+merging. Repeated unchanged heartbeats extend one event instead of creating permanent raw copies.
+The event database is authoritative: back it up regularly. Raw heartbeat queries, exports, and replay
+are retired. Collection stops below the disk-space blocking threshold; history is not automatically deleted.
 
 See [PRIVACY.md](PRIVACY.md) for privacy details and [docs/README.md](docs/README.md) for the current
 specification index. These documents are maintained in Simplified Chinese.
@@ -194,16 +195,15 @@ restart the backend. For concurrent updates to the same field, the last committe
 | `events.port` | None (`config.toml` only) | `5700` |
 | `events.collection.title.enabled` | `EVENTS_COLLECTION_TITLE_ENABLED` | `true` |
 | `events.raw.dir` | `EVENTS_RAW_DIR` | `{events.data-dir}/raw` |
-| `events.raw.query.maxRangeDays` | `EVENTS_RAW_QUERY_MAX_RANGE_DAYS` | `31` |
-| `events.raw.query.maxPageSize` | `EVENTS_RAW_QUERY_MAX_PAGE_SIZE` | `1000` |
-| `events.raw.lowDisk.warnBytes` | `EVENTS_RAW_LOW_DISK_WARN_BYTES` | `10737418240` |
-| `events.raw.lowDisk.blockBytes` | `EVENTS_RAW_LOW_DISK_BLOCK_BYTES` | `1073741824` |
-| `events.raw.integrity.startupScope` | `EVENTS_RAW_INTEGRITY_STARTUP_SCOPE` | `latest` |
-| `events.raw.projector.batchSize` | `EVENTS_RAW_PROJECTOR_BATCH_SIZE` | `1000` |
+| `events.export.maxRangeDays` | `EVENTS_EXPORT_MAX_RANGE_DAYS` | `31` |
+| `events.storage.lowDisk.warnBytes` | `EVENTS_STORAGE_LOW_DISK_WARN_BYTES` | `10737418240` |
+| `events.storage.lowDisk.blockBytes` | `EVENTS_STORAGE_LOW_DISK_BLOCK_BYTES` | `1073741824` |
 
-The permanent raw-event layer is always enabled in embedded mode. TTL, maximum partition counts,
-and automatic deletion are not supported. Once partitions exist, ordinary configuration saves
-cannot change `events.raw.dir`; moving the directory requires a separate, explicit data-transfer process.
+Existing two-layer data is migrated to a verified compact database while legacy backups are retained.
+Settings show active and backup space separately; explicitly cleaning migration backups releases the
+old files and removes per-heartbeat recovery and rollback. Submission IDs are deduplicated for 24 hours.
+`events.raw.*` settings are retired; `events.raw.dir` is retained only to locate migration input.
+See [storage and recovery guidance](docs/runtime-storage.md) before downgrading.
 
 ## Documentation
 

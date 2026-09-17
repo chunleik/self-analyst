@@ -102,7 +102,8 @@ public final class RuntimeStorageGuard implements AutoCloseable {
                     throw invalid();
                 }
                 if (!document.get("formatVersion").canConvertToInt()
-                        || document.get("formatVersion").intValue() != 1) {
+                        || (document.get("formatVersion").intValue() != 1
+                            && document.get("formatVersion").intValue() != 2)) {
                     throw new StorageException(Failure.DATA_FORMAT_UNSUPPORTED, "当前程序不支持此数据格式");
                 }
                 return;
@@ -134,6 +135,22 @@ public final class RuntimeStorageGuard implements AutoCloseable {
     }
 
     public Path dataRoot() { return dataRoot; }
+
+    /** 事件迁移提交后发布；旧版只接受版本 1，因此不会继续写入新格式。 */
+    public synchronized void publishMergedFormat() throws IOException {
+        if (!lock.isValid()) throw new StorageException(Failure.DATA_LOCK_UNAVAILABLE, "格式升级需要数据根锁");
+        Path marker = dataRoot.resolve("storage-format.json");
+        requireRegular(marker);
+        Path temporary = dataRoot.resolve("storage-format.json.tmp");
+        if (Files.exists(temporary, LinkOption.NOFOLLOW_LINKS)) requireRegular(temporary);
+        try (var output = FileChannel.open(temporary, StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING, LinkOption.NOFOLLOW_LINKS)) {
+            var bytes = ByteBuffer.wrap("{\"formatVersion\":2}\n".getBytes(StandardCharsets.UTF_8));
+            while (bytes.hasRemaining()) output.write(bytes);
+            output.force(true);
+        }
+        Files.move(temporary, marker, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
 
     @Override
     public synchronized void close() throws IOException {

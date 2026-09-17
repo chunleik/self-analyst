@@ -39,6 +39,11 @@ public class WindowWatcher extends Watcher {
     }
 
     @Override
+    protected void resetContinuity(Instant now) {
+        lastChangeTime = now;
+    }
+
+    @Override
     protected Event collect() {
         try {
             String app = tracker.getActiveApp();
@@ -47,23 +52,21 @@ public class WindowWatcher extends Watcher {
             if (title == null) title = "unknown";
 
             Instant now = Instant.now();
-            long durationMs = Duration.between(lastChangeTime, now).toMillis();
+            long durationMs = Math.max(0, Duration.between(lastChangeTime, now).toMillis());
             double duration = durationMs / 1000.0;
 
             Event event;
             if (!app.equals(lastApp) || !title.equals(lastTitle)) {
-                // State changed - emit event for the previous state
-                event = new Event(lastChangeTime, duration,
-                    Map.of("app", (Object) lastApp, "title", (Object) lastTitle));
                 lastChangeTime = now;
                 lastApp = app;
                 lastTitle = title;
+                event = new Event(now, 0, Map.of("app", (Object) app, "title", (Object) title));
             } else {
                 // Same state - emit heartbeat for current state
                 event = new Event(lastChangeTime, duration,
                     Map.of("app", (Object) app, "title", (Object) title));
             }
-            return event.duration() > 0 ? event : null;
+            return event;
         } catch (Exception e) {
             return null;
         }

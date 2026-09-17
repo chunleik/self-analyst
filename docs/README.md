@@ -14,22 +14,21 @@ SelfAnalyst 不是 [ActivityWatch](https://activitywatch.net) 的分支、发行
 
 在本项目中，ActivityWatch 兼容层承担**本地活动时间线与查询协议**：窗口、AFK、上下文标题和
 文件元数据等采集结果进入兼容存储；Wiki 聚合与 Agent 查询都消费这条时间线，而不是直接读采集库。
-SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始事件永久层、Wiki 与桌面 Agent，并不
+SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并事件存储、Wiki 与桌面 Agent，并不
 复刻官方桌面客户端，也不替代官方 ActivityWatch 发行版。
 
 | 模式 | 配置 | 本项目做什么 | 不做 / 不保证什么 |
 |------|------|--------------|-------------------|
-| `embedded`（默认） | `events.mode=embedded`，端口由 `events.port` 决定（默认 `5700`） | 进程内启动兼容服务与窗口/AFK watcher；合规事件先写入月度 raw SQLite，再投影为可重建的 `events.db` | 不是官方 `aw-server`；不随包分发官方 Web UI |
-| `external` | `events.mode=external`，查询 `events.base-url`（默认 `http://localhost:5600/api/0`） | 不启动内嵌服务；Agent 通过兼容 HTTP API 访问已有 ActivityWatch | 不控制外部数据目录；[原始事件永久保留](../openspec/specs/raw-event-retention/spec.md) 不可用，也不得声称外部事件已被本项目永久层保存 |
+| `embedded`（默认） | `events.mode=embedded`，端口由 `events.port` 决定（默认 `5700`） | 进程内启动兼容服务与窗口/AFK watcher；合规 heartbeat 合并写入权威 `events.db`，不保留永久逐心跳副本 | 不是官方 `aw-server`；不随包分发官方 Web UI |
+| `external` | `events.mode=external`，查询 `events.base-url`（默认 `http://localhost:5600/api/0`） | 不启动内嵌服务；Agent 通过兼容 HTTP API 访问已有 ActivityWatch | 不控制外部数据目录，不提供本地迁移或备份清理功能 |
 
 兼容边界：
 
 - **兼容并继续使用的协议面**：`info`、buckets、events、heartbeat、AQL、settings、export/import。
   Agent 面向模型的事件查询通过 [EventQueryTools](../openspec/specs/event-query-tools/spec.md) 走 HTTP；文档批量导出由后端受控适配器读取快照，不把原始记录送入模型。
-- **本项目扩展，不属于官方 ActivityWatch**：内容事件 v2 标题策略、受桌面认证保护的原始事件查询、
+- **本项目扩展，不属于官方 ActivityWatch**：内容事件 v2 标题策略、受桌面认证保护的合并事件导出、
   桌面 API、Wiki 摘要投影与文件元数据采集。这些能力只在嵌入式控制的写入链路上完整成立。
-- **查询语义**：现有 events / AQL / Agent 工具读取 heartbeat 合并后的投影；逐条原始 heartbeat 只经
-  受保护桌面 API 提供。
+- **查询语义**：现有 events / AQL / Agent 工具读取 heartbeat 合并后的权威记录；逐条原始 heartbeat 查询已退役。
 
 数据流与模块边界见 [architecture.md](architecture.md)；内容字段与嵌入式启动顺序见
 [content-event-persistence](../openspec/specs/content-event-persistence/spec.md)。
@@ -58,7 +57,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 | `llm-budget` | [spec](../openspec/specs/llm-budget/spec.md) | [旧文档](archive/legacy-specs/llm-budget.md) |
 | `llm-wiki` | [spec](../openspec/specs/llm-wiki/spec.md) | [旧文档](archive/legacy-specs/llm-wiki.md) |
 | `long-term-memory` | [spec](../openspec/specs/long-term-memory/spec.md) | [旧文档](archive/legacy-specs/long-term-memory.md) |
-| `raw-event-retention` | [spec](../openspec/specs/raw-event-retention/spec.md) | [归档 change](../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md) |
+| `merged-event-storage` | [spec](../openspec/specs/merged-event-storage/spec.md) | 合并事件权威存储；旧永久层见历史变更 |
 | `title-capture` | [spec](../openspec/specs/title-capture/spec.md) | Git 历史 |
 | `user-configuration` | [spec](../openspec/specs/user-configuration/spec.md) | [配置旧文档](archive/legacy-specs/config-toml.md)、[核心旧文档](archive/legacy-specs/core.md) |
 | `user-profile-memory` | [spec](../openspec/specs/user-profile-memory/spec.md) | [旧文档](archive/legacy-specs/core.md) |
@@ -73,3 +72,5 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式原始�
 - [archive/design-proposals/](archive/design-proposals/) — 已被正式规格取代、但仍保留背景价值的历史设计提案，包括[原始事件永久保留设计](archive/design-proposals/2026-08-30-raw-event-permanent-retention-design.md)
 - [archive/legacy-specs/](archive/legacy-specs/) — 未逐项纳入主规格的旧实施决策、测试条目和稳定 ID
 - [archive/removed-features/](archive/removed-features/) — 已移除功能的恢复基线索引
+
+旧 `raw-event-retention` 能力已退役，原 Purpose 与 SPEC-RAW-001～013 的背景保留在 [历史变更](../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md) 和 Git 历史中。

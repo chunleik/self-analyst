@@ -41,7 +41,7 @@ class EventServerContentPolicyTest {
                     event(legalData));
             assertEquals(200, legal.statusCode());
             assertEquals(1, server.eventStore().countByBucket(bucketId));
-            assertEquals(1, server.rawEventStore().count(YearMonth.now(ZoneOffset.UTC)));
+            assertFalse(java.nio.file.Files.exists(dataDir.resolve("raw")));
 
             String forbiddenData = "{\"app\":\"Weixin.exe\",\"title\":\"微信\","
                     + "\"text_content\":\"" + FORBIDDEN + "\"}";
@@ -57,8 +57,7 @@ class EventServerContentPolicyTest {
             assertEquals(422, batch.statusCode());
             assertFalse(batch.body().contains(FORBIDDEN));
             assertEquals(1, server.eventStore().countByBucket(bucketId));
-            assertEquals(1, server.rawEventStore().count(YearMonth.now(ZoneOffset.UTC)),
-                    "禁止字段不得进入原始分区");
+            assertFalse(java.nio.file.Files.exists(dataDir.resolve("raw")));
         } finally {
             server.stop();
         }

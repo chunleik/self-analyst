@@ -20,7 +20,7 @@ class RawEventControllerTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
-    void endpointRequiresBoundedParametersAndReturnsFieldsAndCoverage(@TempDir Path dir)
+    void retiredEndpointNeverReturnsRawData(@TempDir Path dir)
             throws Exception {
         EventServer server = new EventServer(dir, 0, "test-token");
         server.start(0);
@@ -33,23 +33,17 @@ class RawEventControllerTest {
                     "{\"timestamp\":\"2026-09-03T12:00:00Z\",\"duration\":2,"
                             + "\"sourceEventId\":\"stable\",\"data\":{\"app\":\"editor\"}}");
 
-            HttpResponse<String> missing = get(client, origin + "/desktop/raw-events");
-            assertEquals(400, missing.statusCode(), missing.body());
-            assertEquals(400, get(client, origin + "/desktop/raw-events?bucketId=bucket&start=bad&end=bad")
-                    .statusCode());
-            assertEquals(400, get(client, origin + query("bucket", "2026-01-01T00:00:00Z",
-                    "2026-03-01T00:00:00Z", 10)).statusCode());
-            assertEquals(400, get(client, origin + query("bucket", "2026-09-01T00:00:00Z",
-                    "2026-09-30T00:00:00Z", 1001)).statusCode());
-
-            HttpResponse<String> ok = get(client, origin + query("bucket",
-                    "2026-09-01T00:00:00Z", "2026-09-30T00:00:00Z", 100));
-            assertEquals(200, ok.statusCode());
-            JsonNode json = MAPPER.readTree(ok.body());
-            assertEquals(1, json.path("events").size());
-            assertEquals("stable", json.path("events").get(0).path("sourceEventId").asText());
-            assertEquals("editor", json.path("events").get(0).path("data").path("app").asText());
-            assertFalse(json.path("coverage").path("partitions").isMissingNode());
+            for (String query : new String[]{"", "?bucketId=bucket&start=bad&end=bad",
+                    "?bucketId=bucket&start=2026-09-01T00:00:00Z&end=2026-09-30T00:00:00Z"}) {
+                var response = get(client, origin + "/desktop/raw-events" + query);
+                assertEquals(410, response.statusCode());
+                assertEquals("RAW_STORAGE_RETIRED", MAPPER.readTree(response.body()).path("error").asText());
+                assertFalse(MAPPER.readTree(response.body()).has("events"));
+            }
+            var rebuild = client.send(HttpRequest.newBuilder(URI.create(origin + "/desktop/raw-rebuild"))
+                    .header("X-SelfAnalyst-Token", "test-token").POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(410, rebuild.statusCode());
         } finally {
             server.stop();
         }

@@ -5,6 +5,7 @@ import com.selfanalyst.events.projection.HeartbeatIngestionService;
 import com.selfanalyst.events.raw.ProjectionStatus;
 import com.selfanalyst.events.store.BucketStore;
 import com.selfanalyst.events.store.EventStore;
+import com.selfanalyst.events.store.MergedEventStore;
 import com.selfanalyst.events.store.ContentEventPolicyViolationException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +21,12 @@ public class HeartbeatController {
     private final EventStore eventStore;
     private final BucketStore bucketStore;
     private final HeartbeatIngestionService ingestionService;
+    private MergedEventStore merged;
+
+    public HeartbeatController(EventStore eventStore, BucketStore bucketStore, MergedEventStore merged) {
+        this(eventStore, bucketStore, (HeartbeatIngestionService) null);
+        this.merged = merged;
+    }
 
     public HeartbeatController(EventStore eventStore, BucketStore bucketStore,
                                HeartbeatIngestionService ingestionService) {
@@ -50,6 +57,13 @@ public class HeartbeatController {
             Event event = new Event(timestamp, duration, data);
             eventStore.validateEvent(bucketId, event);
             String sourceEventId = body.get("sourceEventId") instanceof String value ? value : null;
+            if (merged != null) {
+                String session = body.get("captureSessionId") instanceof String value ? value : null;
+                Event result = merged.heartbeat(bucketId, event, sourceEventId, session);
+                ctx.json(Map.of("id", result.id(), "timestamp", result.timestamp().toString(),
+                        "duration", result.duration(), "data", result.data(), "storageMode", "merged"));
+                return;
+            }
             HeartbeatIngestionService.Result ingestion =
                     ingestionService.ingest(bucket.get(), event, sourceEventId);
             if (ingestion.projectionStatus() == ProjectionStatus.PENDING) {
@@ -74,8 +88,10 @@ public class HeartbeatController {
             ctx.status(422).json(Map.of(
                     "error", "Content event violates persisted-field policy",
                     "field", e.field()));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", "Invalid heartbeat or submission identity"));
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to process heartbeat: " + e.getMessage()));
+            ctx.status(500).json(Map.of("error", "Failed to commit heartbeat"));
         }
     }
 }

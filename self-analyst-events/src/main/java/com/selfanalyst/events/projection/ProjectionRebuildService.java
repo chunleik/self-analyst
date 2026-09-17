@@ -47,6 +47,11 @@ public final class ProjectionRebuildService {
         Path stagingDir = awDataDir.resolve(".projection-rebuilding-" + id);
         Path backup = awDataDir.resolve(Database.PROJECTION_FILENAME + ".backup-" + id);
         try {
+            if (Files.exists(current)) {
+                try (Connection existing = DriverManager.getConnection("jdbc:sqlite:" + current.toAbsolutePath().toUri() + "?mode=ro")) {
+                    if (Database.hasMergedSchema(existing)) throw new IllegalStateException("RAW_STORAGE_RETIRED");
+                }
+            }
             Files.createDirectories(awDataDir);
             Files.createDirectory(stagingDir);
             int projected;

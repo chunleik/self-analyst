@@ -3,6 +3,7 @@ package com.selfanalyst.desktop.controller;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.config.ConfigApplicationService;
 import com.selfanalyst.config.ConfigPolicy;
+import com.selfanalyst.config.ConfigResolver;
 import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.RawConfigValidator;
 import com.selfanalyst.config.RemovedEventConfig;
@@ -182,13 +183,7 @@ public class DesktopConfigController {
 
     private static void rejectUnsupportedEventKeys(Collection<String> keys) {
         RemovedEventConfig.rejectKeys(keys);
-        Properties names = new Properties();
-        keys.forEach(key -> names.setProperty(key, ""));
-        try {
-            RawConfigValidator.rejectUnsupportedRetentionKeys(names);
-        } catch (IllegalArgumentException invalid) {
-            throw new TomlValidationException(List.of(invalid.getMessage()));
-        }
+
     }
 
     public void getEffectiveConfig(Context ctx) {
@@ -426,7 +421,7 @@ public class DesktopConfigController {
 
     static void validateRawSettings(Properties userProperties) {
         try {
-            RawConfigValidator.validate(userProperties);
+            ConfigResolver.resolve(userProperties, Map.of());
         } catch (IllegalArgumentException invalidRawConfig) {
             throw new TomlValidationException(List.of(invalidRawConfig.getMessage()));
         }

@@ -32,9 +32,8 @@ class FileRawPrivacyIntegrationTest {
     void fileBodyNeverReachesMetadataStoresRawProjectionManifestOrLogs(@TempDir Path dir)
             throws Exception {
         Path rawDir = dir.resolve("raw");
-        seedManifest(rawDir);
         EventServer server = new EventServer(dir.resolve("aw"), rawDir, 0,
-                31, 1000, 1, 1, 1000);
+                31, 1000, 2, 1, 1000);
         server.start(0);
         Path watched = Files.createDirectory(dir.resolve("watched"));
         Path fileDb = dir.resolve("file-watch.db");
@@ -54,10 +53,10 @@ class FileRawPrivacyIntegrationTest {
 
             long deadline = System.currentTimeMillis() + 20_000;
             while (System.currentTimeMillis() < deadline
-                    && server.rawEventStore().count(YearMonth.now(ZoneOffset.UTC)) == 0) {
+                    && server.eventStore().getAllEvents().size() == 0) {
                 Thread.sleep(100);
             }
-            assertTrue(server.rawEventStore().count(YearMonth.now(ZoneOffset.UTC)) > 0);
+            assertTrue(server.eventStore().getAllEvents().size() > 0);
         } finally {
             if (watcher != null) watcher.shutdown();
             server.stop();

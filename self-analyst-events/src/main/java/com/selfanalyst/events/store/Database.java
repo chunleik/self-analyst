@@ -135,6 +135,7 @@ public class Database implements AutoCloseable {
                         ")");
                 stmt.execute("CREATE TABLE IF NOT EXISTS schema_migrations ("
                         + "id TEXT PRIMARY KEY, completed_at TEXT NOT NULL)");
+                if (!hasMergedSchema(connection)) {
                 stmt.execute("""
                     CREATE TABLE IF NOT EXISTS raw_projection_sources (
                         raw_event_id TEXT PRIMARY KEY,
@@ -167,6 +168,7 @@ public class Database implements AutoCloseable {
                     CREATE INDEX IF NOT EXISTS idx_raw_projection_sources_event
                     ON raw_projection_sources(bucket_id, projection_event_id)
                     """);
+                }
                 migrateEventAppSchema(connection);
                 if (createIndexes) {
                     createEventIndexes(stmt);
@@ -220,6 +222,13 @@ public class Database implements AutoCloseable {
                 migration.setString(1, APP_SCHEMA_MIGRATION_ID);
                 migration.executeUpdate();
             }
+        }
+    }
+
+    public static boolean hasMergedSchema(Connection connection) throws SQLException {
+        try (Statement s = connection.createStatement();
+             ResultSet rows = s.executeQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name='merged_storage'")) {
+            return rows.next();
         }
     }
 

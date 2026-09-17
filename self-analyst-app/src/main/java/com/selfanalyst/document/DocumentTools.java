@@ -54,9 +54,9 @@ public final class DocumentTools {
     }
 
     @Tool(name = "export_data", description = "直接导出已保存记录为 csv/json/markdown/xlsx/docx/pdf/pptx/html，记录不经模型转写。HTML 使用转义后的离线表格模板；SVG 不支持直接导出。"
-            + "queryJson={source:raw|projection|file-metadata|wiki,bucketId:事件桶,start:ISO时间,end:ISO时间,timezone:Asia/Shanghai,fields:[字段],level:可选Wiki级别}。"
-            + "时间范围开始包含结束不包含；raw 按 receivedAt，projection 按 timestamp，文件按 lastModified，Wiki 按时间块相交。"
-            + "默认保留各来源字段；raw字段 eventId,bucketId,source,eventTimestamp,receivedAt,duration,data,schemaVersion；projection字段 id,timestamp,duration,data；"
+            + "queryJson={source:projection|file-metadata|wiki,bucketId:事件桶,start:ISO时间,end:ISO时间,timezone:Asia/Shanghai,fields:[字段],level:可选Wiki级别}。"
+            + "时间范围开始包含结束不包含；projection 为合并事件，按 timestamp，文件按 lastModified，Wiki 按时间块相交。"
+            + "默认保留各来源字段；projection字段 id,timestamp,duration,data；"
             + "file-metadata字段 id,absolutePath,relativePath,watchRoot,extension,sizeBytes,lastModified,fileCreatedAt；wiki字段 id,level,periodStart,periodEnd,timezone,status,summary,primaryTask。"
             + "最多100000条，时间上限沿用本地查询配置，超限需缩小范围。")
     public Mono<DocumentStore.Artifact> export(

@@ -90,10 +90,10 @@ class EventServerSecurityTest {
             assertEquals(401, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
                     .header("X-SelfAnalyst-Token", "wrong")
                     .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
-            assertEquals(400, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
+            assertEquals(410, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
                     .header("X-SelfAnalyst-Token", "launch-secret")
                     .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
-            assertEquals(400, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
+            assertEquals(410, client.send(HttpRequest.newBuilder(URI.create(rawUrl))
                     .header("Cookie", "self_analyst_session=launch-secret")
                     .GET().build(), HttpResponse.BodyHandlers.ofString()).statusCode());
 

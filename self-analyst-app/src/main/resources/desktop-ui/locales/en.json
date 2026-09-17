@@ -120,7 +120,7 @@
   "tab.files": "Files",
   "status.service": "Service",
   "status.capture": "Capture",
-  "status.raw": "Raw events",
+  "status.raw": "Merged events",
   "status.blocked": "Blocked",
   "status.unavailable": "Unavailable",
   "status.diskWarning": "Low disk space",
@@ -421,5 +421,13 @@
   "error.chat.unavailable": "LLM is not configured. Set the API key in Settings.",
   "timeline.unknownActivity": "Unidentified application activity",
   "timeline.estimated": "Incomplete AFK coverage: some durations include unverified idle time and are estimates.",
-  "timeline.activityDuration": "{minutes}m {seconds}s"
+  "timeline.activityDuration": "{minutes}m {seconds}s",
+  "storage.active": "Active database",
+  "storage.backups": "Legacy backups",
+  "storage.auxiliary": "Auxiliary files",
+  "storage.cleanBackups": "Clean migration backups",
+  "storage.backupWarning": "This permanently removes the registered legacy event database and raw partition backups. Per-heartbeat history and rollback will no longer be available. Continue?",
+  "storage.cleanFailed": "Backup cleanup incomplete; active data was preserved",
+  "storage.mergedNote": "Merged events are authoritative activity records. Back them up regularly. Legacy backups occupy space until explicitly cleaned.",
+  "storage.staging": "Migration staging files"
 }

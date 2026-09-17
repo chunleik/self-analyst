@@ -65,10 +65,20 @@ public class AppSession implements AutoCloseable {
     private static Prepared prepare() throws IOException {
         RuntimeStorageGuard guard = RuntimeStorageGuard.acquire(Path.of("data"));
         try {
-            Prepared prepared = new Prepared(guard, Config.load(), new UserConfigStore(Config.resolveConfigDir()));
+            Config config = Config.load();
+            if (config.eventsEmbedded()) {
+                try (var migration = new com.selfanalyst.events.store.MergedStorageMigration(
+                        config.eventsDataDir(), config.eventsRawDir(), () -> {
+                            try { guard.publishMergedFormat(); }
+                            catch (IOException failure) { throw new java.io.UncheckedIOException(failure); }
+                        })) {
+                    guard.publishMergedFormat();
+                }
+            }
+            Prepared prepared = new Prepared(guard, config, new UserConfigStore(Config.resolveConfigDir()));
             PROCESS_STORAGE_LEASES.add(guard);
             return prepared;
-        } catch (RuntimeException | Error failure) {
+        } catch (IOException | RuntimeException | Error failure) {
             guard.close();
             throw failure;
         }
@@ -89,6 +99,10 @@ public class AppSession implements AutoCloseable {
     private AppSession(String desktopToken, Runnable desktopShutdownSignal, Prepared prepared) throws IOException {
         this(desktopToken, desktopShutdownSignal, prepared.config(), prepared.store());
         runtimeStorage = prepared.guard();
+        if (eventServer != null) {
+            try { runtimeStorage.publishMergedFormat(); }
+            catch (IOException failure) { close(); throw failure; }
+        }
     }
 
     AppSession(String desktopToken, Runnable desktopShutdownSignal, Config initialConfig,
@@ -215,10 +229,7 @@ public class AppSession implements AutoCloseable {
                     && contentPersistenceReady && eventServer.projectionReady()) {
                 try {
                     WikiFactBuilder factBuilder = new WikiFactBuilder(
-                            eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> {
-                                Object lag = eventServer.rawStatus().get("projectionLagSeconds");
-                                return lag instanceof Number number ? number.longValue() : null;
-                            });
+                            eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> 0L);
                     WikiSummarizer summarizer = new WikiSummarizer(a.wikiLLMClient());
                     wikiWorker = new WikiWorker(wikiStore, factBuilder, summarizer,
                             ZoneId.systemDefault(),
@@ -316,7 +327,7 @@ public class AppSession implements AutoCloseable {
             if (e instanceof com.selfanalyst.events.raw.RawStartupIntegrityException integrityFailure) {
                 throw integrityFailure;
             }
-            log.warn("嵌入式 AW 启动失败: {}", e.getMessage());
+            throw new IllegalStateException("事件存储启动失败，已阻止采集；请检查数据格式和迁移状态", e);
         }
     }
 

@@ -115,16 +115,19 @@ public final class ConfigApplicationService implements AutoCloseable {
         Properties input = new ConfigResolver(user, environment).inputProperties();
         try {
             LlmSettings.validate(input);
-            RawConfigValidator.validate(user);
             FileFilterConfig.parse(Long.parseLong(input.getProperty("file.watch.maxFileSizeKb", "0")),
                     FileFilterConfig.splitCsv(input.getProperty("file.watch.excludeDirs", "")),
                     FileFilterConfig.splitCsv(input.getProperty("file.watch.excludeGlobs", "")),
                     FileFilterConfig.splitCsv(input.getProperty("file.watch.extensions", "")),
                     Boolean.parseBoolean(input.getProperty("file.watch.respectGitIgnore", "true")));
         } catch (IllegalArgumentException invalid) {
-            throw new TomlValidationException(List.of("配置语义无效，请检查模型参数、原始事件及文件过滤设置"));
+            throw new TomlValidationException(List.of("配置语义无效，请检查模型参数、事件存储及文件过滤设置"));
         }
-        ConfigResolver.Snapshot proposed = resolve(user);
+        ConfigResolver.Snapshot proposed;
+        try { proposed = resolve(user); }
+        catch (IllegalArgumentException invalid) {
+            throw new TomlValidationException(List.of("事件存储或导出配置无效"));
+        }
         if (!startup.eventsRawDir().toAbsolutePath().normalize()
                 .equals(proposed.config().eventsRawDir().toAbsolutePath().normalize())
                 && RawPartitionCatalog.hasExistingPartitions(startup.eventsRawDir())) {

@@ -21,7 +21,7 @@ class HeartbeatRawFirstIntegrationTest {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
-    void projectionFailureReturns202WithCommittedRawEvent(@TempDir Path dir) throws Exception {
+    void mergedWriteDoesNotInvokeLegacyProjection(@TempDir Path dir) throws Exception {
         EventServer server = new EventServer(dir, 0, null,
                 event -> { throw new IllegalStateException("injected projection failure"); });
         server.start(0);
@@ -36,12 +36,12 @@ class HeartbeatRawFirstIntegrationTest {
                      "sourceEventId":"stable-1","data":{"app":"editor"}}
                     """);
 
-            assertEquals(202, response.statusCode());
+            assertEquals(200, response.statusCode());
             JsonNode body = MAPPER.readTree(response.body());
-            assertEquals("pending", body.path("projectionStatus").asText());
-            assertFalse(body.path("rawEventId").asText().isBlank());
-            assertEquals(1, server.rawEventStore().count(YearMonth.now(java.time.ZoneOffset.UTC)));
-            assertEquals(0, server.eventStore().countByBucket("bucket"));
+            assertEquals("merged", body.path("storageMode").asText());
+            assertFalse(body.has("rawEventId"));
+            assertEquals(1, server.eventStore().countByBucket("bucket"));
+            assertFalse(java.nio.file.Files.exists(dir.resolve("raw")));
         } finally {
             server.stop();
         }

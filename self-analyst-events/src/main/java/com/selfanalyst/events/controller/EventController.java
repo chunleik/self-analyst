@@ -4,6 +4,7 @@ import com.selfanalyst.events.model.Event;
 import com.selfanalyst.events.projection.EventIngestionService;
 import com.selfanalyst.events.store.BucketStore;
 import com.selfanalyst.events.store.EventStore;
+import com.selfanalyst.events.store.MergedEventStore;
 import com.selfanalyst.events.store.ContentEventPolicyViolationException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,6 +22,12 @@ public class EventController {
     private final EventStore eventStore;
     private final BucketStore bucketStore;
     private final EventIngestionService ingestionService;
+    private MergedEventStore merged;
+
+    public EventController(EventStore eventStore, BucketStore bucketStore, MergedEventStore merged) {
+        this(eventStore, bucketStore, (EventIngestionService) null);
+        this.merged = merged;
+    }
 
     public EventController(EventStore eventStore, BucketStore bucketStore,
                            EventIngestionService ingestionService) {
@@ -91,6 +98,16 @@ public class EventController {
             for (Event event : parsedEvents) {
                 eventStore.validateEvent(bucketId, event);
             }
+            if (merged != null) {
+                List<MergedEventStore.Submission> batch = new ArrayList<>();
+                for (int i = 0; i < parsedEvents.size(); i++) {
+                    batch.add(new MergedEventStore.Submission(parsedEvents.get(i), sourceEventIds.get(i)));
+                }
+                List<Event> saved = merged.insertBatch(bucketId, batch);
+                ctx.status(201).json(Map.of("success", true, "count", saved.size(),
+                        "eventIds", saved.stream().map(Event::id).toList(), "storageMode", "merged"));
+                return;
+            }
             List<EventIngestionService.Submission> submissions = new ArrayList<>();
             for (int i = 0; i < parsedEvents.size(); i++) {
                 submissions.add(new EventIngestionService.Submission(
@@ -108,8 +125,10 @@ public class EventController {
             ctx.status(422).json(Map.of(
                     "error", "Content event violates persisted-field policy",
                     "field", e.field()));
+        } catch (IllegalArgumentException e) {
+            ctx.status(400).json(Map.of("error", "Invalid events or submission identity"));
         } catch (Exception e) {
-            ctx.status(500).json(Map.of("error", "Failed to insert events: " + e.getMessage()));
+            ctx.status(500).json(Map.of("error", "Failed to commit events"));
         }
     }
 

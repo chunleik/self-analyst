@@ -58,6 +58,9 @@ public class EventStore {
     }
 
     public String currentProjectorVersion() {
+        try {
+            if (Database.hasMergedSchema(db.metaConnection())) return "merged-v2";
+        } catch (SQLException failure) { return null; }
         try (Statement statement = db.metaConnection().createStatement();
              ResultSet result = statement.executeQuery(
                      "SELECT projector_version FROM raw_projection_sources ORDER BY projected_at DESC LIMIT 1")) {
@@ -248,6 +251,7 @@ public class EventStore {
             boolean previousAutoCommit = connection.getAutoCommit();
             connection.setAutoCommit(false);
             try {
+                if (!Database.hasMergedSchema(connection)) {
                 try (PreparedStatement coverage = connection.prepareStatement(
                         "DELETE FROM projection_event_coverage WHERE bucket_id = ?")) {
                     coverage.setString(1, bucketId);
@@ -257,6 +261,7 @@ public class EventStore {
                         "DELETE FROM raw_projection_sources WHERE bucket_id = ?")) {
                     sources.setString(1, bucketId);
                     sources.executeUpdate();
+                }
                 }
                 int deleted;
                 try (PreparedStatement events = connection.prepareStatement(

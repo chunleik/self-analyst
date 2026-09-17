@@ -129,18 +129,19 @@ public record Config(
                 memDir + "/events"));
         Path eventsRawDir = Path.of(values.explicit("events.raw.dir",
                 eventsDataDir.resolve("raw").toString()));
-        int eventsRawQueryMaxRangeDays = Integer.parseInt(values.get("events.raw.query.maxRangeDays", "31"));
-        int eventsRawQueryMaxPageSize = Integer.parseInt(values.get("events.raw.query.maxPageSize", "1000"));
-        long eventsRawLowDiskWarnBytes = Long.parseLong(values.get("events.raw.lowDisk.warnBytes", "10737418240"));
-        long eventsRawLowDiskBlockBytes = Long.parseLong(values.get("events.raw.lowDisk.blockBytes", "1073741824"));
-        RawIntegrityPolicy eventsRawIntegrityStartupScope = RawIntegrityPolicy.parse(
-                values.get("events.raw.integrity.startupScope", "latest"));
-        int eventsRawProjectorBatchSize = Integer.parseInt(values.get("events.raw.projector.batchSize", "1000"));
-        RawConfigValidator.rejectUnsupportedRetentionKeys(userProps);
-        RawConfigValidator.validate(eventsRawDir, eventsRawQueryMaxRangeDays,
-                eventsRawQueryMaxPageSize, eventsRawLowDiskWarnBytes,
-                eventsRawLowDiskBlockBytes, eventsRawIntegrityStartupScope,
-                eventsRawProjectorBatchSize);
+        if (userProps.stringPropertyNames().stream().anyMatch(key -> key.startsWith("events.raw."))) {
+            log.warn("events.raw 配置已退役；raw.dir 仅用于旧数据迁移，请使用 events.storage 与 events.export 配置");
+        }
+        // Raw-only settings are retired. Keep raw.dir solely for controlled legacy migration.
+        int eventsRawQueryMaxRangeDays = Integer.parseInt(values.get("events.export.maxRangeDays", "31"));
+        int eventsRawQueryMaxPageSize = 1000;
+        long eventsRawLowDiskWarnBytes = Long.parseLong(values.get("events.storage.lowDisk.warnBytes", "10737418240"));
+        long eventsRawLowDiskBlockBytes = Long.parseLong(values.get("events.storage.lowDisk.blockBytes", "1073741824"));
+        RawIntegrityPolicy eventsRawIntegrityStartupScope = RawIntegrityPolicy.ALL;
+        int eventsRawProjectorBatchSize = 1000;
+        if (eventsRawQueryMaxRangeDays <= 0 || eventsRawLowDiskBlockBytes <= 0
+                || eventsRawLowDiskWarnBytes <= eventsRawLowDiskBlockBytes)
+            throw new IllegalArgumentException("事件存储或导出配置无效");
 
         boolean wikiEnabled = Boolean.parseBoolean(
                 values.get("wiki.enabled", "false"));

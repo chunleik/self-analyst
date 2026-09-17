@@ -31,6 +31,16 @@ public abstract class Watcher implements Runnable {
     protected String lastDataJson = "";
     private static final int MAX_SEND_ATTEMPTS = 3;
     private PendingHeartbeat pendingHeartbeat;
+    private String captureSessionId = UUID.randomUUID().toString();
+    private Instant lastObservation;
+    private long lastTick;
+    private boolean discontinuity = true;
+
+    protected Instant observationTime() { return Instant.now(); }
+    protected long observationNanos() { return System.nanoTime(); }
+
+    protected void resetContinuity(Instant now) { }
+
 
     protected Watcher(String name, String bucketId, long intervalMs, String serverUrl) {
         this.name = name;
@@ -73,17 +83,32 @@ public abstract class Watcher implements Runnable {
 
     void processOnce() {
         try {
+            Instant observed = observationTime();
+            long tick = observationNanos();
+            if (lastObservation != null && (observed.isBefore(lastObservation)
+                    || java.time.Duration.between(lastObservation, observed).toMillis() > Math.max(10_000, intervalMs * 5)
+                    || tick - lastTick > TimeUnit.MILLISECONDS.toNanos(Math.max(10_000, intervalMs * 5)))) {
+                discontinuity = true;
+                if (pendingHeartbeat != null && java.time.Duration.between(lastObservation, observed).toHours() >= 24)
+                    pendingHeartbeat = null;
+            }
+            lastObservation = observed; lastTick = tick;
             if (pendingHeartbeat == null) {
+                if (discontinuity) {
+                    captureSessionId = UUID.randomUUID().toString();
+                    resetContinuity(observed); discontinuity = false;
+                }
                 Event event = collect();
                 if (event != null) {
                     pendingHeartbeat = new PendingHeartbeat(
                             event, UUID.randomUUID().toString(), 0);
-                }
+                } else discontinuity = true;
             }
             if (pendingHeartbeat != null) {
                 if (sendHeartbeat(pendingHeartbeat.event(), pendingHeartbeat.sourceEventId())) {
                     pendingHeartbeat = null;
                 } else {
+                    discontinuity = true;
                     int attempts = pendingHeartbeat.attempts() + 1;
                     if (attempts >= MAX_SEND_ATTEMPTS) {
                         log.warn("{} heartbeat delivery exhausted retries sourceEventId={}",
@@ -96,6 +121,7 @@ public abstract class Watcher implements Runnable {
                 }
             }
         } catch (Exception e) {
+            discontinuity = true;
             log.error("{} heartbeat processing failed type={}",
                     name, e.getClass().getSimpleName());
         }
@@ -110,6 +136,7 @@ public abstract class Watcher implements Runnable {
                     "timestamp", event.timestamp().toString(),
                     "duration", event.duration(),
                     "sourceEventId", sourceEventId,
+                    "captureSessionId", captureSessionId,
                     "data", event.data()));
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(url))

@@ -13,6 +13,46 @@ import static org.junit.jupiter.api.Assertions.*;
 class RuntimeStorageGuardTest {
     @TempDir Path root;
 
+    @Test void publishesMergedFormatAndAcceptsItOnRestart() throws Exception {
+        try (var guard = RuntimeStorageGuard.acquire(root, path -> {})) {
+            guard.publishMergedFormat();
+            assertEquals("{\"formatVersion\":2}\n", Files.readString(root.resolve("storage-format.json")));
+        }
+        try (var guard = RuntimeStorageGuard.acquire(root, path -> fail("marked root needs no adoption"))) {
+            assertEquals(root.toRealPath(), guard.dataRoot());
+        }
+    }
+
+    @Test void formatTwoIsPublishedBeforeAnInterruptedDatabaseSwitch() throws Exception {
+        // macOS exposes its temporary directory through /var -> /private/var.
+        // Use the same real-path identity as data-root admission; do not ask the
+        // migration's link guard to follow the platform alias.
+        Path events = root.toRealPath().resolve("events");
+        try (var old = new com.selfanalyst.events.store.Database(events)) { }
+        var published = new java.util.concurrent.atomic.AtomicBoolean();
+        try (var guard = RuntimeStorageGuard.acquire(root, path -> {})) {
+            assertThrows(IllegalStateException.class, () -> new com.selfanalyst.events.store.MergedStorageMigration(
+                    events, events.resolve("raw"), () -> {
+                        try {
+                            assertTrue(Files.readString(events.resolve("merged-migration.json")).contains("prepared"));
+                            guard.publishMergedFormat();
+                            published.set(true);
+                        } catch (IOException e) { throw new java.io.UncheckedIOException(e); }
+                        throw new IllegalStateException("power loss before switching");
+                    }));
+            assertTrue(published.get(), "The failure must occur after reaching the format-publication hook");
+            assertTrue(Files.readString(root.resolve("storage-format.json")).contains(":2"));
+            try (var c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + events.resolve("events.db").toUri() + "?mode=ro")) {
+                assertFalse(com.selfanalyst.events.store.Database.hasMergedSchema(c));
+            }
+        }
+        try (var guard = RuntimeStorageGuard.acquire(root, path -> fail("version 2 admitted"));
+             var resumed = new com.selfanalyst.events.store.MergedStorageMigration(events, events.resolve("raw"));
+             var db = new com.selfanalyst.events.store.Database(events)) {
+            assertTrue(com.selfanalyst.events.store.Database.hasMergedSchema(db.metaConnection()));
+        }
+    }
+
     @Test void holdsLockAcrossAliasesAndLeavesReusableLockFile() throws Exception {
         var guard = RuntimeStorageGuard.acquire(root, path -> {});
         var failure = assertThrows(RuntimeStorageGuard.StorageException.class,
@@ -52,7 +92,7 @@ class RuntimeStorageGuardTest {
     @Test void rejectsInvalidAndUnsupportedMarkersWithoutOverwriting() throws Exception {
         for (String content : new String[]{"", "{}", "null", "{\"formatVersion\":\"1\"}",
                 "{\"formatVersion\":1,\"formatVersion\":1}", "{\"formatVersion\":1} {}",
-                "{\"formatVersion\":0}", "{\"formatVersion\":2}"}) {
+                "{\"formatVersion\":0}", "{\"formatVersion\":3}"}) {
             Path marker = root.resolve("storage-format.json");
             Files.writeString(marker, content);
             assertThrows(RuntimeStorageGuard.StorageException.class,

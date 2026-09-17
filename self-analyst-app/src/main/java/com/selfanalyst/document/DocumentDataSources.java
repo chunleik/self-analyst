@@ -37,6 +37,7 @@ public final class DocumentDataSources {
                     throw new IllegalArgumentException("不支持的导出筛选字段：" + key);
             });
             String source = node.path("source").asText();
+            if (source.equals("raw")) throw new IllegalArgumentException("RAW_STORAGE_RETIRED: 请选择合并事件导出");
             if (!FIELDS.containsKey(source)) throw new IllegalArgumentException("不支持的数据来源");
             Instant start = Instant.parse(node.path("start").asText()), end = Instant.parse(node.path("end").asText());
             if (!start.isBefore(end) || Duration.between(start, end).compareTo(Duration.ofDays(config.eventsRawQueryMaxRangeDays())) > 0)
@@ -62,7 +63,7 @@ public final class DocumentDataSources {
     }
     public ObjectNode descriptor(Query query) {
         var node = DocumentRequest.JSON.createObjectNode();
-        node.put("source", query.source); node.put("bucketId", query.bucketId); node.put("start", query.start.toString());
+        node.put("source", query.source); node.put("storageSemantics", query.source.equals("projection") ? "merged-events" : query.source); node.put("bucketId", query.bucketId); node.put("start", query.start.toString());
         node.put("end", query.end.toString()); node.put("timezone", query.timezone); node.put("level", query.level);
         node.set("fields", DocumentRequest.JSON.valueToTree(query.fields)); return node;
     }
@@ -77,20 +78,7 @@ public final class DocumentDataSources {
             };
             List<String> coverage = new ArrayList<>();
             switch (query.source) {
-                case "raw" -> {
-                    if (!config.eventsEmbedded()) throw new IllegalArgumentException("原始事件导出不可用");
-                    try (var raw = new RawEventQueryService(config.eventsRawDir(), config.eventsRawQueryMaxRangeDays(), config.eventsRawQueryMaxPageSize())) {
-                        coverage = raw.exportSnapshot(query.bucketId, query.start, query.end, DocumentRequest.MAX_ROWS, event -> {
-                            var row = DocumentRequest.JSON.createObjectNode();
-                            row.put("eventId", event.eventId()); row.put("bucketId", event.bucketId()); row.put("source", event.source().storageValue());
-                            row.put("eventTimestamp", event.eventTimestamp().toString()); row.put("receivedAt", event.receivedAt().toString());
-                            row.put("duration", event.duration()); row.put("schemaVersion", event.schemaVersion());
-                            try { row.set("data", DocumentRequest.JSON.readTree(event.canonicalDataJson())); }
-                            catch (java.io.IOException e) { throw new IllegalStateException("原始记录格式无效"); }
-                            consume.accept(row);
-                        }, budget::check);
-                    }
-                }
+                case "raw" -> throw new IllegalArgumentException("RAW_STORAGE_RETIRED: 逐心跳原始导出已退役，请使用合并事件导出");
                 case "projection" -> {
                     if (events == null) throw new IllegalArgumentException("事件投影不可用");
                     events.exportSnapshot(query.bucketId, query.start, query.end, DocumentRequest.MAX_ROWS, event -> {

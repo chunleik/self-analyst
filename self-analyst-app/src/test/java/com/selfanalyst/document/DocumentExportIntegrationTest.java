@@ -14,27 +14,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DocumentExportIntegrationTest {
     @TempDir Path temp;
-    @Test void rawExportsAllFormatsWithoutExposingRecordsToAgent() throws Exception {
+    @Test void mergedExportsAllFormatsWithoutExposingRecordsToAgent() throws Exception {
         var properties = new Properties();
         properties.setProperty("events.mode", "embedded");
         properties.setProperty("memory.dir", temp.resolve("memory").toString());
         properties.setProperty("events.data.dir", temp.resolve("events").toString());
         properties.setProperty("events.raw.dir", temp.resolve("raw").toString());
         var config = com.selfanalyst.config.ConfigResolver.resolve(properties, Map.of()).config();
-        var ids = new RawEventIdGenerator();
         Instant start = Instant.parse("2026-09-01T00:00:00Z");
-        try (var raw = new RawEventStore(config.eventsRawDir())) {
-            for (int i = 0; i < 3; i++) raw.append(RawEvent.create(ids, "source-" + i, "bucket", RawEventSource.WINDOW, 1,
-                    RawIngestKind.HEARTBEAT, start.plusSeconds(i), start.plusSeconds(i), 1,
-                    Map.of("title", "不应进入模型的原始标题" + i), null, null));
-        }
-        try (var chats = new ChatSessionStore(config.memoryDir())) {
+        try (var db = new com.selfanalyst.events.store.Database(temp.resolve("events"));
+             var chats = new ChatSessionStore(config.memoryDir())) {
+            new com.selfanalyst.events.store.BucketStore(db).create(com.selfanalyst.events.model.Bucket.create("bucket", "bucket", "window", "window", "host"));
+            var events = new com.selfanalyst.events.store.EventStore(db, com.selfanalyst.events.store.PulseTimeConfig.DEFAULT);
+            for (int i = 0; i < 3; i++) events.insertEvent("bucket", new com.selfanalyst.events.model.Event(start.plusSeconds(i), 1,
+                    Map.of("title", "不应进入模型的原始标题" + i)));
             var service = new DocumentService(config.memoryDir(), chats);
-            service.setDataSources(new DocumentDataSources(config, null, null, null));
+            service.setDataSources(new DocumentDataSources(config, events, null, null));
             var session = chats.create(new ChatSessionStore.CreateRequest());
             var message = new ChatSessionStore.Message(); message.role = "user"; message.content = "导出";
             String turn = chats.appendMessages(session.id, List.of(message)).getFirst().id;
-            String query = "{\"source\":\"raw\",\"bucketId\":\"bucket\",\"start\":\"2026-09-01T00:00:00Z\",\"end\":\"2026-09-01T00:00:02Z\"}";
+            String query = "{\"source\":\"projection\",\"bucketId\":\"bucket\",\"start\":\"2026-09-01T00:00:00Z\",\"end\":\"2026-09-01T00:00:02Z\"}";
             for (var format : DocumentFormat.values()) {
                 if (format == DocumentFormat.SVG) {
                     assertThrows(IllegalArgumentException.class, () -> service.export(session.id, turn, format.name(), "原始记录", query, null, () -> false));

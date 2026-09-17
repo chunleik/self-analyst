@@ -10,6 +10,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ContentHeartbeatDeliveryTest {
 
+    @Test void sleepAndExpiredRetryStartNewCaptureSessions() {
+        var delivery = new ContentHeartbeatDelivery();
+        var data = Map.<String, Object>of("title", "safe");
+        var first = delivery.request(data, Instant.EPOCH, 2);
+        delivery.complete(true);
+        var afterSleep = delivery.request(data, Instant.EPOCH.plusSeconds(60), 2);
+        assertFalse(first.get("captureSessionId").equals(afterSleep.get("captureSessionId")));
+        delivery.complete(false);
+        var afterDay = delivery.request(data, Instant.EPOCH.plusSeconds(100_000), 2);
+        assertFalse(afterSleep.get("sourceEventId").equals(afterDay.get("sourceEventId")));
+    }
+
     @Test
     void retriesReuseIdAndRequestContainsOnlyAllowedTitleFacts() {
         ContentHeartbeatDelivery delivery = new ContentHeartbeatDelivery();

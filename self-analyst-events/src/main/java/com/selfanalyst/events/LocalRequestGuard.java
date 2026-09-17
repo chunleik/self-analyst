@@ -55,7 +55,8 @@ final class LocalRequestGuard {
     }
 
     static boolean isSensitiveRawPath(String path) {
-        return "/desktop/raw-events".equals(path)
+        return (path != null && path.startsWith("/desktop/storage/"))
+                || "/desktop/raw-events".equals(path)
                 || (path != null && path.startsWith("/desktop/raw-"));
     }
 

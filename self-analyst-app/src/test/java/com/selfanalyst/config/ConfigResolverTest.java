@@ -8,6 +8,7 @@ class ConfigResolverTest {
 
     @Test void everyRemovedKeyAndEnvironmentNameIsRejectedBeforeFallback() {
         for (EventSetting setting : eventSettings()) {
+            if (setting.key().startsWith("events.export.") || setting.key().startsWith("events.storage.")) continue;
             String oldKey = switch (setting.key()) {
                 case "events.collection.title.enabled" -> "aw.collection.content";
                 case "events.collection.title.pollMs" -> "aw.collection.content.pollMs";
@@ -50,7 +51,7 @@ class ConfigResolverTest {
             for (String suffix : List.of("enabled", "retentionDays", "maxPartitions", "autoDelete")) {
                 Properties invalid = new Properties();
                 invalid.setProperty(prefix + suffix, "false");
-                assertThrows(IllegalArgumentException.class, () -> ConfigResolver.resolve(invalid, Map.of()));
+                assertDoesNotThrow(() -> ConfigResolver.resolve(invalid, Map.of()));
             }
         }
     }
@@ -66,12 +67,9 @@ class ConfigResolverTest {
                 new EventSetting("events.timeout", "EVENTS_TIMEOUT", "16001", "16002", Config::eventsTimeout),
                 new EventSetting("events.data-dir", "EVENTS_DATA_DIR", "env-events", "toml-events", Config::eventsDataDir),
                 new EventSetting("events.raw.dir", "EVENTS_RAW_DIR", "env-raw", "toml-raw", Config::eventsRawDir),
-                new EventSetting("events.raw.query.maxRangeDays", "EVENTS_RAW_QUERY_MAX_RANGE_DAYS", "32", "33", Config::eventsRawQueryMaxRangeDays),
-                new EventSetting("events.raw.query.maxPageSize", "EVENTS_RAW_QUERY_MAX_PAGE_SIZE", "101", "102", Config::eventsRawQueryMaxPageSize),
-                new EventSetting("events.raw.lowDisk.warnBytes", "EVENTS_RAW_LOW_DISK_WARN_BYTES", "20000000000", "21000000000", Config::eventsRawLowDiskWarnBytes),
-                new EventSetting("events.raw.lowDisk.blockBytes", "EVENTS_RAW_LOW_DISK_BLOCK_BYTES", "1001", "1002", Config::eventsRawLowDiskBlockBytes),
-                new EventSetting("events.raw.integrity.startupScope", "EVENTS_RAW_INTEGRITY_STARTUP_SCOPE", "all", "latest", c -> c.eventsRawIntegrityStartupScope().configValue()),
-                new EventSetting("events.raw.projector.batchSize", "EVENTS_RAW_PROJECTOR_BATCH_SIZE", "111", "112", Config::eventsRawProjectorBatchSize),
+                new EventSetting("events.export.maxRangeDays", "EVENTS_EXPORT_MAX_RANGE_DAYS", "32", "33", Config::eventsRawQueryMaxRangeDays),
+                new EventSetting("events.storage.lowDisk.warnBytes", "EVENTS_STORAGE_LOW_DISK_WARN_BYTES", "20000000000", "21000000000", Config::eventsRawLowDiskWarnBytes),
+                new EventSetting("events.storage.lowDisk.blockBytes", "EVENTS_STORAGE_LOW_DISK_BLOCK_BYTES", "1001", "1002", Config::eventsRawLowDiskBlockBytes),
                 new EventSetting("events.collection.window", "EVENTS_COLLECTION_WINDOW", "false", "true", Config::collectWindow),
                 new EventSetting("events.collection.afk", "EVENTS_COLLECTION_AFK", "false", "true", Config::collectAfk),
                 new EventSetting("events.collection.title.enabled", "EVENTS_COLLECTION_TITLE_ENABLED", "false", "true", Config::collectTitle),
@@ -107,7 +105,7 @@ class ConfigResolverTest {
         var snapshot = ConfigResolver.resolve(user, Map.of());
         assertEquals("http://localhost:5810/api/0", snapshot.config().eventsBaseUrl());
         assertEquals("events.port", snapshot.values().get("events.base-url").inheritedFrom());
-        assertEquals(16, SupportedKeys.defaults().keySet().stream().filter(k -> k.startsWith("events.")).count());
+        assertEquals(19, SupportedKeys.defaults().keySet().stream().filter(k -> k.startsWith("events.")).count());
         assertFalse(snapshot.publicValues().keySet().stream().anyMatch(k -> k.startsWith("aw.")));
         for (EventSetting setting : eventSettings()) {
             assertTrue(ConfigPolicy.requiresRestart(setting.key()));

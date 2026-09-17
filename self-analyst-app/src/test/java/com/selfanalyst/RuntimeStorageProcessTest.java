@@ -14,7 +14,7 @@ class RuntimeStorageProcessTest {
 
     @Test void productionEntrypointRejectsBeforePublishingOrOpeningStores() throws Exception {
         Path data = Files.createDirectory(root.resolve("data"));
-        for (int version : new int[]{0, 2}) {
+        for (int version : new int[]{0, 3}) {
             Files.writeString(data.resolve("storage-format.json"), "{\"formatVersion\":" + version + "}");
             assertEquals(22, runApplication());
             assertFalse(Files.exists(root.resolve("port.txt")));

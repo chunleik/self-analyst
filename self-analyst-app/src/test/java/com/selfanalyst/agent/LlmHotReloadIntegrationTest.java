@@ -136,7 +136,7 @@ class LlmHotReloadIntegrationTest {
                 var reply = f.agent.chat(SESSION, "000000000001", "first").toFuture();
                 assertTrue(entered.await(5, TimeUnit.SECONDS));
                 var settings = new com.selfanalyst.llm.settings.LlmSettingsService(new com.selfanalyst.llm.settings.TomlLlmSettingsRepository(f.config()));
-                var update = settings.save(Map.of("updates", Map.of("model", "new", "maxTokens", 32),
+                var update = settings.save(Map.of("updates", Map.of("model", "new"),
                         "credential", Map.of("action", "replace", "value", "new-key")));
                 assertEquals("draining", ((Map<?, ?>) ((Map<?, ?>) update.get("application")).get("llm")).get("status"));
                 assertEquals("new", f.agent.completePlain("summary", Duration.ofSeconds(5)));
@@ -144,8 +144,11 @@ class LlmHotReloadIntegrationTest {
                 assertEquals("old", reply.get(10, TimeUnit.SECONDS));
                 assertEquals("new", f.agent.chat(SESSION, "000000000002", "second").block(Duration.ofSeconds(10)));
                 assertEquals(List.of("Bearer old-key", "Bearer new-key", "Bearer new-key"), f.keys);
-                assertEquals(64, f.calls.get(0).path("max_tokens").asInt());
-                assertEquals(32, f.calls.get(1).path("max_tokens").asInt());
+                for (var call : f.calls) {
+                    assertFalse(call.has("max_tokens"));
+                    assertFalse(call.has("max_completion_tokens"));
+                    assertFalse(call.has("max_output_tokens"));
+                }
                 assertEquals(.2, f.calls.get(1).path("temperature").asDouble());
                 assertEquals(21, f.meter.totalTokens());
                 assertTrue(f.calls.get(2).path("messages").toString().contains("first"));

@@ -19,6 +19,7 @@ class LlmSettingsServiceTest {
     @Test void readsWithoutWritingAndKeepsCredentialsPrivate() throws Exception {
         var store = new UserConfigStore(dir); var service = service(store);
         var snapshot = service.read();
+        assertFalse(snapshot.fields().containsKey("maxTokens"));
         assertEquals("environment-model", snapshot.fields().get("model").effectiveValue());
         assertEquals("environment", snapshot.credential().source());
         assertTrue(snapshot.credential().configured());
@@ -44,6 +45,8 @@ class LlmSettingsServiceTest {
     @Test void invalidFieldsCannotPersistAndProbeDoesNotSave() throws Exception {
         var store = new UserConfigStore(dir); var service = service(store);
         for (var request : List.of(Map.of("protocol", "anthropic"), Map.of("updates", Map.of("maxTokens", 0.5)),
+                Map.of("updates", Map.of("maxTokens", 32)), Map.of("updates", Map.of("maxTokens", 0)),
+                Map.of("reset", List.of("maxTokens")),
                 Map.of("updates", Map.of("temperature", 3)), Map.of("updates", Map.of("model", "")),
                 Map.of("updates", Map.of("model", "x"), "reset", List.of("model")),
                 Map.of("credential", Map.of("action", "keep", "value", "oops")),

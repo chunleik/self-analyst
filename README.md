@@ -154,7 +154,7 @@ specification index. These documents are maintained in Simplified Chinese.
 
 Desktop Settings opens a dedicated “Model settings” view by default. It supports one
 OpenAI-compatible connection, connection presets, a write-only API key field, model discovery
-and manual entry, temperature, output limits, and a minimal generation test. After saving,
+and manual entry, temperature, and a generation test using a short prompt. After saving,
 new chats and summary jobs use the new configuration, while responses already in progress
 continue using the previous version. Summaries and compaction retain their low-temperature
 policy; sessions and usage counters are not reset. See the [model settings guide](docs/llm-settings.md)
@@ -165,6 +165,13 @@ keys, preserving other configuration and comments. Complex syntax that cannot be
 requires advanced configuration. The legacy generic structured API and Agent configuration tools
 may still regenerate the TOML file. Switching views prompts for confirmation if there are unsaved changes.
 
+Settings is organized into three tabs: **Model settings**, **Advanced configuration**, and
+**Runtime data**. Both editors keep their save and discard actions visible while scrolling.
+Runtime data shows the actual runtime and data directories, storage usage by category, and
+migration backup cleanup with confirmation. Directory opening is available in the desktop app;
+the browser shows the path instead. The model form can reveal only a newly entered API key,
+and model discovery offers clickable candidates as well as manual entry.
+
 Explicit TOML values take precedence over environment variables. Removing an override restores
 fallback to environment variables and defaults; an explicitly empty key prevents environment
 fallback. Leaving the password field blank keeps the current key. “Clear key” and “Restore key
@@ -174,12 +181,17 @@ and `SupportedKeys` for supported keys. An explicit JVM property takes precedenc
 `events.port` does not accept an environment variable.
 
 The keys that can be updated without restarting are `llm.api-key`, `llm.base-url`, `llm.model`,
-`llm.temperature`, and `llm.max-tokens`. Ports, budgets, `maxIters`, compaction thresholds, and the
+and `llm.temperature`. Ports, budgets, `maxIters`, compaction thresholds, and the
 Embedding client continue using their startup configuration. Changes to a key inherited by the
 Embedding client trigger a separate restart notice. Local services can still start without a
 configured model; after completing the model settings, new work can resume without restarting.
 
-The generation test sends one fixed, minimal request and may incur a small charge. Neither this
+Chat, summaries, and generation tests do not send output limit parameters such as `max_tokens`.
+The model service still applies its own limits. The retired `llm.max-tokens` setting and
+`LLM_MAX_TOKENS` environment variable are ignored; existing TOML lines are preserved. Daily
+budgets, usage metering, iteration limits, and context compaction remain in effect.
+
+The generation test sends a fixed short prompt; usage and charges depend on the model service. Neither this
 test nor model discovery saves the configuration. The legacy LLM check in advanced configuration
 only verifies connectivity to the model catalog. A successful save does not guarantee that the
 remote model can be called, and a successful test does not change the runtime configuration.

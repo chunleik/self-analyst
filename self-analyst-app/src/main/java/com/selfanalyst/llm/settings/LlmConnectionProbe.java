@@ -29,7 +29,7 @@ public final class LlmConnectionProbe {
                     .timeout(timeout).header("Authorization", "Bearer " + connection.apiKey());
             if (discovery) request.GET();
             else request.header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(
-                    JSON.writeValueAsString(Map.of("model", connection.model(), "stream", false, "max_tokens", 16,
+                    JSON.writeValueAsString(Map.of("model", connection.model(), "stream", false,
                             "messages", List.of(Map.of("role", "user", "content", "Reply OK."))))));
             var subscriber = new BoundedBody();
             var future = client.sendAsync(request.build(), info -> subscriber);

@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>配置界面布局整理 · 效果图</title>
+<style>
+/* ===== 变量：与 desktop-ui/styles.css 一致 ===== */
+:root {
+  --bg-primary: #fbfcff;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f5f8fd;
+  --bg-input: #f7faff;
+  --bg-overlay: rgba(15, 23, 42, 0.28);
+  --border-color: #e7edf6;
+  --border-light: #d8e3f2;
+  --text-primary: #172033;
+  --text-secondary: #526071;
+  --accent: #2f62bd;
+  --accent-hover: #2857ad;
+  --accent-soft: #f2f7ff;
+  --accent-dim: rgba(47, 98, 189, 0.14);
+  --accent-strong: #2f62bd;
+  --green: #0f6f4a;
+  --green-dim: rgba(15, 111, 74, 0.12);
+  --orange: #9a5a00;
+  --orange-dim: rgba(154, 90, 0, 0.13);
+  --red: #b42318;
+  --red-dim: rgba(180, 35, 24, 0.12);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --shadow-md: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 24px 60px rgba(15, 23, 42, 0.14);
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei",
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font-family);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: #e9eef6;
+  padding: 32px 20px 80px;
+}
+h1 { font-size: 20px; margin-bottom: 6px; }
+.page-intro { max-width: 820px; margin: 0 auto 28px; }
+.page-intro p { color: var(--text-secondary); font-size: 13px; }
+
+/* ===== 按钮：与 styles.css 一致 ===== */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; font-family: inherit; font-size: 13px; font-weight: 500;
+  line-height: 1.4; border: 1px solid transparent; border-radius: var(--radius-sm);
+  cursor: pointer; background: transparent; color: var(--text-primary); white-space: nowrap;
+}
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-primary {
+  background: var(--accent-strong); color: #fff; border-color: var(--accent-strong);
+  box-shadow: 0 4px 10px rgba(55, 109, 204, 0.22);
+}
+.btn-outline {
+  background: #fff; border-color: var(--border-color); color: var(--text-secondary);
+}
+.btn:disabled { opacity: 0.48; cursor: not-allowed; }
+.btn-icon {
+  padding: 6px; border: 1px solid transparent; background: transparent;
+  color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer;
+}
+
+/* ===== 模态外壳：与 config-modal 一致（静态展示，取消定位/滚动） ===== */
+.mock-wrap { max-width: 820px; margin: 0 auto 56px; }
+.mock-caption {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
+}
+.mock-caption h2 { font-size: 16px; }
+.mock-caption span { font-size: 12px; color: var(--text-secondary); }
+.config-modal-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.config-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+}
+.config-modal-header h3 { font-size: 15px; font-weight: 600; }
+.config-view-tabs { display: flex; gap: 8px; padding: 14px 18px 0; }
+.config-view-tabs .is-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.config-modal-body { padding: 16px 18px 0; }
+
+/* ===== 改动点编号标记 ===== */
+.mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: var(--orange); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  margin-right: 6px; flex-shrink: 0; vertical-align: 2px;
+}
+.legend {
+  margin-top: 12px; padding: 12px 16px;
+  background: #fff; border: 1px dashed var(--border-light); border-radius: var(--radius-md);
+  font-size: 12.5px; color: var(--text-secondary);
+}
+.legend li { margin: 3px 0 3px 2px; list-style: none; }
+
+/* ===== 模型设置视图（整理后） ===== */
+.llm-intro { color: var(--text-secondary); font-size: 13px; margin: 2px 0 18px; }
+.llm-section { margin-bottom: 22px; }
+.llm-section > h4 {
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  text-transform: none; letter-spacing: 0.02em;
+  padding-bottom: 8px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex; align-items: center;
+}
+.llm-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; }
+.llm-wide { grid-column: 1 / -1; }
+.llm-settings label { display: block; font-size: 13.5px; font-weight: 600; }
+.llm-settings input, .llm-settings select {
+  width: 100%; min-width: 0; margin-top: 6px; padding: 9px 12px;
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  font: inherit; font-size: 13.5px; background: var(--bg-card); color: inherit;
+}
+.llm-field-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; padding-top: 5px;
+  color: var(--text-secondary); font-size: 12px;
+}
+.llm-hint { color: var(--text-secondary); font-size: 12.5px; margin-top: 10px; }
+#llm-key-state { color: var(--text-secondary); font-size: 12.5px; margin: 8px 0; }
+.key-actions { display: flex; gap: 8px; }
+.llm-probes {
+  background: var(--bg-input); border: 1px solid var(--border-color);
+  padding: 14px 16px; border-radius: var(--radius-md);
+}
+.llm-probes > p { color: var(--text-secondary); font-size: 12.5px; margin-bottom: 10px; }
+.llm-probes .probe-actions { display: flex; gap: 8px; }
+.llm-probes [role="status"] { font-size: 12.5px; margin-top: 8px; color: var(--text-secondary); }
+.llm-probes [role="status"].ok { color: var(--green); }
+
+/* 生效状态折叠区（两视图共用样式） */
+.runtime-details {
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  background: var(--bg-input); margin-bottom: 20px;
+}
+.runtime-details summary {
+  cursor: pointer; padding: 10px 14px; font-size: 13px; font-weight: 600;
+  color: var(--text-secondary); list-style: none; display: flex; align-items: center; gap: 8px;
+}
+.runtime-details summary::before {
+  content: ""; width: 0; height: 0;
+  border-left: 5px solid var(--text-secondary);
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  transition: transform 150ms ease;
+}
+.runtime-details[open] summary::before { transform: rotate(90deg); }
+.runtime-details .runtime-body { padding: 2px 14px 12px 27px; font-size: 13px; }
+.runtime-details ul { padding-left: 18px; line-height: 1.8; color: var(--text-secondary); }
+.runtime-details table { width: 100%; margin-top: 8px; border-collapse: collapse; font-size: 12.5px; }
+.runtime-details th, .runtime-details td {
+  padding: 5px 8px; text-align: left; color: var(--text-secondary);
+  border-top: 1px solid var(--border-color); word-break: break-word;
+}
+.runtime-details th { color: var(--text-primary); font-weight: 600; }
+
+/* 底部操作条（两视图统一，sticky） */
+.config-action-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 12px 18px; background: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  position: sticky; bottom: 0;
+}
+.config-action-meta {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-width: 0;
+}
+.config-action-title { font-size: 13px; font-weight: 600; }
+.config-action-status { font-size: 12px; color: var(--text-secondary); }
+.config-action-buttons { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.config-save-result { font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm); }
+.config-save-result.success { color: var(--green); background: var(--green-dim); }
+.config-save-result.error { color: var(--red); background: var(--red-dim); }
+
+/* ===== 高级配置视图（整理后） ===== */
+.config-file-heading {
+  display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 12px;
+}
+.config-file-heading code { font-size: 14px; font-weight: 600; }
+.config-file-heading span {
+  min-width: 0; overflow: hidden; color: var(--text-secondary);
+  font-size: 12px; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.config-file-heading .heading-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.config-raw-editor {
+  display: block; width: 100%; min-height: 300px;
+  padding: 12px 14px;
+  font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+  font-size: 13px; line-height: 1.55; white-space: pre; tab-size: 4;
+  color: var(--text-primary); background: var(--bg-input);
+  border: 1px solid var(--border-color); border-radius: var(--radius-md);
+  resize: vertical; outline: none;
+}
+.config-language-setting {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 14px 0 16px; font-size: 13px;
+}
+.config-language-setting label { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.config-language-setting select {
+  padding: 5px 10px; border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm); font: inherit; font-size: 13px;
+  background: var(--bg-card); color: inherit;
+}
+.config-language-setting > span { color: var(--text-secondary); font-size: 12.5px; }
+
+/* ===== 运行数据区块（模态底部，样式统一） ===== */
+.runtime-storage {
+  margin-top: 4px; padding: 14px 18px 18px;
+  border-top: 1px solid var(--border-color);
+  font-size: 13px; line-height: 1.8; color: var(--text-secondary);
+}
+.runtime-storage strong { color: var(--text-primary); display: block; margin-bottom: 2px; }
+.runtime-storage .btn { margin-top: 8px; }
+@media (max-width: 640px) {
+  .llm-field-grid { grid-template-columns: 1fr; }
+  .config-file-heading { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+
+<div class="page-intro">
+  <h1>配置界面布局整理 · 效果图</h1>
+  <p>橙色数字为改动点标记，说明见每个视图下方的图例。行为契约（脏态、保存校验、测试语义）不变，仅调整结构与样式。底部操作条在实际实现中为 sticky，滚动时保持可见。</p>
+</div>
+
+<!-- ==================== 视图 1：模型设置 ==================== -->
+<div class="mock-wrap">
+  <div class="mock-caption">
+    <h2>视图 1 · 模型设置</h2>
+    <span>分组卡片化 + 反馈归入底部操作条</span>
+  </div>
+
+  <div class="config-modal-panel">
+    <div class="config-modal-header">
+      <h3>配置文件</h3>
+      <button class="btn btn-icon" title="关闭">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <nav class="config-view-tabs">
+      <button type="button" class="btn btn-sm is-active">模型设置</button>
+      <button type="button" class="btn btn-sm btn-outline">高级配置</button>
+    </nav>
+
+    <div class="config-modal-body llm-settings">
+      <p class="llm-intro"><span class="mark">1</span>管理当前 OpenAI-compatible 模型连接。保存后新工作生效，正在进行的回答继续使用原模型。</p>
+
+      <section class="llm-section">
+        <h4><span class="mark">2</span>连接</h4>
+        <div class="llm-field-grid">
+          <label class="llm-wide">连接预设
+            <select><option>自定义 OpenAI-compatible</option><option selected>OpenAI</option><option>DeepSeek</option></select>
+          </label>
+          <div class="llm-field llm-wide">
+            <label>Base URL</label>
+            <input type="text" value="https://api.openai.com/v1">
+            <div class="llm-field-meta"><span><span class="mark">3</span>来源：用户 TOML</span><button class="btn btn-sm btn-outline">恢复继承</button></div>
+          </div>
+          <div class="llm-field llm-wide">
+            <label>模型 ID（可手工输入）</label>
+            <input type="text" value="gpt-4o-mini">
+            <div class="llm-field-meta"><span>来源：用户 TOML</span><button class="btn btn-sm btn-outline">恢复继承</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="llm-section">
+        <h4>生成参数</h4>
+        <div class="llm-field-grid">
+          <div class="llm-field">
+            <label>温度（0–2）</label>
+            <input type="number" value="0.7" min="0" max="2" step="0.1">
+            <div class="llm-field-meta"><span>来源：默认值</span><button class="btn btn-sm btn-outline">恢复继承</button></div>
+          </div>
+          <div class="llm-field">
+            <label>单次最大输出 Tokens</label>
+            <input type="number" value="0" min="0" step="1">
+            <div class="llm-field-meta"><span>来源：默认值</span><button class="btn btn-sm btn-outline">恢复继承</button></div>
+          </div>
+        </div>
+        <p class="llm-hint">0 表示不发送输出上限参数。模型列表仅提供候选 ID，不保证每个模型都支持聊天。</p>
+      </section>
+
+      <section class="llm-section">
+        <h4>API Key</h4>
+        <div class="llm-field-grid">
+          <div class="llm-wide">
+            <label>API Key</label>
+            <input type="password" placeholder="留空保留当前密钥；不会回显已有密钥">
+            <p id="llm-key-state">保留当前密钥 · 密钥已配置 · 来源：用户 TOML</p>
+            <div class="key-actions">
+              <button class="btn btn-sm btn-outline">清空密钥</button>
+              <button class="btn btn-sm btn-outline">恢复密钥继承</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="llm-section">
+        <h4><span class="mark">4</span>连接检查</h4>
+        <div class="llm-probes">
+          <p>生成测试将向所选模型发送一次固定的最小请求，可能产生少量计费。发现和测试均不会保存配置。</p>
+          <div class="probe-actions">
+            <button class="btn btn-sm btn-outline">加载模型列表</button>
+            <button class="btn btn-sm btn-outline">测试生成连接</button>
+          </div>
+          <p role="status" class="ok">验证成功 (312 ms)</p>
+        </div>
+      </section>
+
+      <details class="runtime-details">
+        <summary><span class="mark">5</span>配置生效状态</summary>
+        <div class="runtime-body">
+          <ul>
+            <li>chat: 已生效</li>
+            <li>embedding: 已生效</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+
+    <div class="config-action-bar">
+      <div class="config-action-meta">
+        <span class="mark">6</span>
+        <span class="config-action-title">配置更改</span>
+        <span class="config-action-status">有未保存更改</span>
+        <span class="config-save-result success">配置已保存，请查看运行状态</span>
+      </div>
+      <div class="config-action-buttons">
+        <button class="btn btn-sm btn-outline">放弃更改</button>
+        <button class="btn btn-sm btn-primary">保存并应用</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <li><span class="mark">1</span>移除视图内 22px 重复大标题（模态标题与标签页已表达「模型设置」），只保留一行简介</li>
+    <li><span class="mark">2</span>表单按「连接 / 生成参数 / API Key / 连接检查」分组，小节标题加分隔线，视觉层次清晰</li>
+    <li><span class="mark">3</span>字段来源与「恢复继承」压缩为一行 12px meta，不再喧宾夺主</li>
+    <li><span class="mark">4</span>连接检查的提示、按钮、结果整合进同一卡片（原先是散落的文本 + 按钮 + 两个结果行）</li>
+    <li><span class="mark">5</span>「配置生效状态」改为可折叠 details，默认收起，需要时展开</li>
+    <li><span class="mark">6</span>错误/保存提示从表单顶部移入底部 sticky 操作条左侧——反馈与「保存」按钮同一视野；与高级配置视图操作条完全一致</li>
+  </div>
+</div>
+
+<!-- ==================== 视图 2：高级配置 ==================== -->
+<div class="mock-wrap">
+  <div class="mock-caption">
+    <h2>视图 2 · 高级配置</h2>
+    <span>标题 → 编辑器 → 辅助 → 操作 的阅读顺序</span>
+  </div>
+
+  <div class="config-modal-panel">
+    <div class="config-modal-header">
+      <h3>配置文件</h3>
+      <button class="btn btn-icon" title="关闭">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <nav class="config-view-tabs">
+      <button type="button" class="btn btn-sm btn-outline">模型设置</button>
+      <button type="button" class="btn btn-sm is-active">高级配置</button>
+    </nav>
+
+    <div class="config-modal-body">
+      <div class="config-file-heading">
+        <span class="mark">1</span>
+        <code>config.toml</code>
+        <span title="C:\Users\you\AppData\Roaming\SelfAnalyst\config.toml">C:\Users\you\AppData\Roaming\SelfAnalyst\config.toml</span>
+        <div class="heading-actions">
+          <button class="btn btn-sm btn-outline">检查 LLM 目录连接</button>
+          <button class="btn btn-sm btn-outline">测试 Embedding 连接</button>
+        </div>
+      </div>
+
+      <textarea class="config-raw-editor" spellcheck="false" wrap="off"># SelfAnalyst 用户配置
+# 仅包含对打包默认值的覆盖项
+
+[app]
+language = "zh"
+
+[llm]
+base-url = "https://api.openai.com/v1"
+model = "gpt-4o-mini"
+api-key = "sk-..."
+# temperature = 0.7
+# max-tokens = 0
+
+[embedding]
+# base-url = "https://api.openai.com/v1"
+# model = "text-embedding-3-small"
+
+[events.export]
+# maxRangeDays = 31</textarea>
+
+      <div class="config-language-setting">
+        <span class="mark">2</span>
+        <label>语言
+          <select><option>跟随系统</option><option selected>简体中文</option><option>English</option></select>
+        </label>
+        <span>当前生效：简体中文</span>
+      </div>
+
+      <details class="runtime-details">
+        <summary><span class="mark">3</span>配置生效状态</summary>
+        <div class="runtime-body">
+          <ul>
+            <li>chat: 已生效</li>
+            <li>embedding: 新任务已生效，当前回答继续使用原配置 (embedding.model)</li>
+          </ul>
+          <table>
+            <thead><tr><th>配置项</th><th>已保存的有效值</th><th>新任务使用的值</th><th>来源</th></tr></thead>
+            <tbody>
+              <tr><td>llm.base-url</td><td>https://api.openai.com/v1</td><td>https://api.openai.com/v1</td><td>用户 TOML</td></tr>
+              <tr><td>llm.model</td><td>gpt-4o-mini</td><td>gpt-4o-mini</td><td>用户 TOML</td></tr>
+              <tr><td>llm.temperature</td><td>0.7</td><td>0.7</td><td>默认值</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+
+    <div class="config-action-bar">
+      <div class="config-action-meta">
+        <span class="mark">4</span>
+        <span class="config-action-title">配置更改</span>
+        <span class="config-action-status">有未保存更改</span>
+        <span class="config-save-result success">保存成功</span>
+      </div>
+      <div class="config-action-buttons">
+        <button class="btn btn-sm btn-outline">放弃更改</button>
+        <button class="btn btn-sm btn-primary">保存更改</button>
+      </div>
+    </div>
+
+    <section class="runtime-storage">
+      <strong><span class="mark">5</span>运行数据</strong>
+      <div>运行模式: 用户目录</div>
+      <div>运行目录: C:\Users\you\AppData\Roaming\SelfAnalyst\runtime</div>
+      <div>数据目录: C:\Users\you\AppData\Roaming\SelfAnalyst\data</div>
+      <button class="btn btn-sm btn-outline">打开数据目录</button>
+    </section>
+  </div>
+
+  <div class="legend">
+    <li><span class="mark">1</span>测试按钮并入文件标题行右侧（原先孤立成行、右对齐漂浮在顶部）；按钮与所测试的配置文件同一行，归属明确</li>
+    <li><span class="mark">2</span>语言设置移到编辑器下方——它是 TOML 的快捷编辑控件，紧贴编辑对象；原先夹在操作条与工具行之间</li>
+    <li><span class="mark">3</span>「配置生效状态 + 来源表格」整体折叠为 details 默认收起（原先整块插在操作条与编辑器之间，把编辑器压出首屏）</li>
+    <li><span class="mark">4</span>操作条从编辑器上方移至底部 sticky：左侧变更状态 + 保存结果，右侧放弃/保存——编辑完视线自然落到下方保存；与模型设置视图统一</li>
+    <li><span class="mark">5</span>「运行数据」区块统一分隔线与内边距，作为模态固定尾部信息区</li>
+  </div>
+</div>
+
+</body>
+</html>

@@ -52,7 +52,6 @@ public final class ConfigResolver {
             Map.entry("file.watch.excludeGlobs", "FILE_WATCH_EXCLUDE_GLOBS"),
             Map.entry("file.watch.respectGitIgnore", "FILE_WATCH_RESPECT_GITIGNORE"),
             Map.entry("file.watch.semantic.index-dir", "FILE_WATCH_SEMANTIC_INDEX_DIR"),
-            Map.entry("llm.max-tokens", "LLM_MAX_TOKENS"),
             Map.entry("llm.agent.maxIters", "LLM_AGENT_MAX_ITERS"),
             Map.entry("agent.compaction.enabled", "AGENT_COMPACTION_ENABLED"),
             Map.entry("agent.compaction.triggerMessages", "AGENT_COMPACTION_TRIGGER_MESSAGES"),
@@ -102,6 +101,7 @@ public final class ConfigResolver {
         this.environment = Map.copyOf(environment);
         Set<String> keys = new TreeSet<>(defaults.stringPropertyNames());
         keys.addAll(user.stringPropertyNames());
+        keys.remove("llm.max-tokens"); // Retired: preserve raw text, never expose an effective value.
         for (String key : keys) read(key, defaults.getProperty(key, ""), true, false);
     }
 
@@ -172,7 +172,6 @@ public final class ConfigResolver {
         effective("file.watch.excludeGlobs", String.valueOf(config.fileWatchExcludeGlobs()));
         effective("file.watch.respectGitIgnore", String.valueOf(config.fileWatchRespectGitIgnore()));
         effective("file.watch.semantic.index-dir", String.valueOf(config.legacyFileSemanticIndexDir()));
-        effective("llm.max-tokens", String.valueOf(config.llmMaxTokens()));
         effective("llm.agent.maxIters", String.valueOf(config.agentMaxIters()));
         effective("agent.compaction.enabled", String.valueOf(config.agentCompactionEnabled()));
         effective("agent.compaction.triggerMessages", String.valueOf(config.agentCompactionTriggerMessages()));

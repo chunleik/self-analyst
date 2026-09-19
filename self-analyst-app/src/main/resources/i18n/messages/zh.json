@@ -4,7 +4,6 @@
   "error.llmSettings.baseUrl": "Base URL 必须是不含凭据、查询或片段的 HTTP(S) 地址。",
   "error.llmSettings.model": "模型 ID 不能为空。",
   "error.llmSettings.temperature": "温度必须是 0 到 2 之间的数字。",
-  "error.llmSettings.maxTokens": "最大输出必须是非负整数。",
   "error.llmSettings.credential": "请输入有效的非空 API Key。",
   "error.llmSettings.invalid_request": "请求或当前配置无效，请检查字段及高级配置。",
   "error.llmSettings.unsupported_field": "请求包含不支持的字段或协议。",

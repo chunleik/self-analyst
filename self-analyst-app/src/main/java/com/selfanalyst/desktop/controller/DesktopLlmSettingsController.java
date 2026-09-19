@@ -9,7 +9,7 @@ import java.util.Set;
 
 public final class DesktopLlmSettingsController {
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Set<String> CODES = Set.of("baseUrl", "model", "temperature", "maxTokens", "credential",
+    private static final Set<String> CODES = Set.of("baseUrl", "model", "temperature", "credential",
             "invalid_request", "unsupported_field", "unsupported_toml_edit", "credential_required");
     private final LlmSettingsService service;
     private final LlmConnectionProbe probe;

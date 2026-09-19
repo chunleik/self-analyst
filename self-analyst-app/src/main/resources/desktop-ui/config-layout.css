@@ -1,0 +1,145 @@
+/* Configuration workspace. Scoped to keep file-collection settings unchanged. */
+#config-modal {
+  --accent: #28745b;
+  --accent-hover: #205f4b;
+  --accent-strong: #28745b;
+  --accent-strong-hover: #205f4b;
+  --border-color: #e0e6de;
+  --bg-input: #fafbf8;
+  --config-wash: #f3f6f0;
+  --text-primary: #24332f;
+  --text-secondary: #69776d;
+}
+#config-modal .config-modal-panel {
+  width: min(980px, calc(100vw - 32px));
+  height: min(820px, calc(100dvh - 48px));
+  max-height: calc(100dvh - 48px);
+  border-radius: 14px;
+  overflow: hidden;
+}
+#config-modal .config-modal-header { padding: 17px 24px; }
+#config-modal .config-modal-header h3 { font-size: 17px; }
+#config-modal .config-modal-body { display: flex; flex-direction: column; overflow: hidden; }
+#config-modal .config-view-tabs { flex: 0 0 auto; gap: 25px; padding: 0 24px; border-bottom: 1px solid var(--border-color); }
+#config-modal .config-view-tabs .btn {
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  padding: 13px 0 11px; background: none; color: var(--text-secondary); font-size: 13px;
+}
+#config-modal .config-view-tabs .is-active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+#config-modal :focus-visible { outline: 2px solid #70aa91; outline-offset: 2px; }
+#config-modal .config-grid { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; padding: 0; gap: 0; overflow: hidden; }
+#config-modal .config-loading { padding: 24px; color: var(--text-secondary); }
+#config-modal .llm-settings, #config-modal .config-raw-workspace {
+  display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; width: 100%; max-width: none; margin: 0;
+}
+#config-modal .config-scroll-area { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; scrollbar-gutter: stable; }
+#config-modal .config-action-bar {
+  position: static; display: flex; flex-shrink: 0; align-items: center; justify-content: space-between;
+  padding: 13px 24px; gap: 16px; margin: 0; border: 0; border-top: 1px solid var(--border-color);
+  border-radius: 0; background: var(--bg-secondary); width: 100%;
+}
+#config-modal .config-action-meta { flex: 1; min-width: 0; gap: 3px; align-items: flex-start; flex-direction: column; }
+#config-modal .config-action-title { display: none; }
+#config-modal .config-action-status { font-size: 12px; font-weight: 500; }
+#config-modal .config-action-buttons { flex: 0 0 auto; gap: 8px; margin: 0; }
+#config-modal .config-action-buttons .btn { font-size: 12px; }
+#config-modal #llm-error, #config-modal #llm-notice, #config-modal .config-save-result {
+  display: block; max-height: 66px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 0;
+}
+#config-modal #llm-error:empty, #config-modal #llm-notice:empty { display: none; }
+#config-modal .config-raw-header { padding: 18px 24px 0; flex-shrink: 0; }
+#config-modal .config-file-heading { flex-direction: column; align-items: flex-start; gap: 4px; margin: 0; }
+#config-modal .config-file-heading code { font-size: 17px; }
+#config-modal .config-file-heading span { max-width: 100%; font-size: 11px; }
+#config-modal .config-toolbar-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 13px 0; }
+#config-modal .config-editor-toolbar { margin: 0; justify-content: flex-start; flex-wrap: wrap; }
+#config-modal .config-editor-toolbar .btn { font-size: 12px; }
+#config-modal #config-language-setting { font-size: 11px; color: var(--text-secondary); min-width: 0; }
+#config-modal #config-language-setting select { border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 8px; background: var(--bg-input); color: var(--text-primary); max-width: 160px; }
+#config-modal #config-language-setting p { max-width: 480px; overflow-wrap: anywhere; }
+#config-modal .config-raw-workspace > .config-scroll-area { padding-top: 0; }
+#config-modal .config-editor-card { border: 1px solid var(--border-color); border-radius: 9px; overflow: hidden; }
+#config-modal .config-editor-label { display: flex; justify-content: space-between; gap: 10px; padding: 8px 13px; font-size: 11px; background: var(--config-wash); color: var(--text-secondary); }
+#config-modal .config-editor-label span { font-size: 10px; }
+#config-modal .config-raw-editor { height: clamp(165px, 36dvh, 390px); min-height: 130px; padding: 14px 16px; border: 0; border-top: 1px solid var(--border-color); border-radius: 0; font-size: 12px; line-height: 1.9; }
+#config-modal .config-raw-editor:focus { outline: 2px solid #70aa91; outline-offset: -2px; }
+#config-modal .config-runtime-status { margin-top: 18px; padding: 0; font-size: 12px; overflow-wrap: anywhere; }
+#config-modal .config-runtime-status ul, #config-modal #llm-runtime { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 0; margin: 10px 0; gap: 9px; }
+#config-modal .config-runtime-status li, #config-modal #llm-runtime li { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; font-size: 12px; overflow-wrap: anywhere; }
+#config-modal .config-runtime-status li span:last-child, #config-modal #llm-runtime li span:last-child { font-size: 11px; color: var(--text-secondary); }
+#config-modal .config-runtime-status details { border-top: 1px solid var(--border-color); padding-top: 10px; margin-top: 14px; }
+#config-modal .config-runtime-status table { table-layout: fixed; font-size: 11px; }
+#config-modal .config-runtime-status th, #config-modal .config-runtime-status td { border-bottom: 1px solid var(--border-color); }
+#config-modal .llm-settings header { margin: 0 0 20px; }
+#config-modal .llm-settings header h3 { font-size: 19px; margin-bottom: 5px; }
+#config-modal .llm-settings header p { font-size: 12px; }
+#config-modal .llm-form-section { margin-bottom: 20px; }
+#config-modal .llm-settings h4 { font-size: 12px; display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+#config-modal .config-step { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 10px; color: var(--accent); }
+#config-modal .llm-field-grid { gap: 14px 18px; }
+#config-modal .llm-field { min-width: 0; }
+#config-modal .llm-settings label { font-size: 12px; font-weight: 500; }
+#config-modal .llm-settings input, #config-modal .llm-settings select { padding: 9px 11px; font-size: 12px; margin-top: 6px; background: var(--bg-input); }
+#config-modal .llm-input-row { display: flex; gap: 8px; align-items: center; }
+#config-modal .llm-input-row input { flex: 1; width: 0; }
+#config-modal .llm-input-row > .btn { flex-shrink: 0; font-size: 11px; margin-top: 6px; }
+#config-modal .llm-field-meta, #config-modal #llm-key-state, #config-modal .llm-hint { font-size: 11px; }
+#config-modal .llm-hint { margin-top: 10px; }
+#config-modal .llm-link-button { border: 0; background: none; padding: 2px 0; color: var(--accent); font-size: 11px; }
+#config-modal .llm-credential-actions { display: flex; gap: 16px; flex-wrap: wrap; }
+#config-modal .llm-probes { background: var(--config-wash); padding: 12px 14px; margin: 18px 0; }
+#config-modal .llm-probes p, #config-modal #llm-discover-result { font-size: 12px; overflow-wrap: anywhere; }
+#config-modal .llm-model-candidates { display: flex; gap: 6px; flex-wrap: wrap; max-height: 140px; overflow: auto; }
+#config-modal .llm-model-candidates button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; font: 11px var(--font-mono); }
+#config-modal .runtime-storage { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 20px 24px; margin: 0; border: 0; }
+#config-modal .storage-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+#config-modal .storage-heading h3 { font-size: 19px; margin-bottom: 5px; }
+#config-modal .storage-heading p, #config-modal .storage-note { font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+#config-modal .storage-heading button { flex-shrink: 0; }
+#config-modal .storage-location { border: 1px solid var(--border-color); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+#config-modal .storage-location-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 14px; padding: 12px 15px; align-items: center; font-size: 12px; }
+#config-modal .storage-location-row + .storage-location-row { border-top: 1px solid var(--border-color); }
+#config-modal .storage-location-row > span { color: var(--text-secondary); }
+#config-modal .storage-location-row code { overflow-wrap: anywhere; font: 11px/1.7 var(--font-mono); }
+#config-modal .storage-location-actions { background: var(--config-wash); padding: 10px 15px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border-color); font-size: 11px; }
+#config-modal .storage-usage h4 { font-size: 12px; margin-bottom: 10px; }
+#config-modal .storage-total { font-size: 28px; font-weight: 600; overflow-wrap: anywhere; }
+#config-modal .storage-total small { font-size: 11px; color: var(--text-secondary); font-weight: normal; }
+#config-modal .storage-track { display: flex; height: 9px; border-radius: 8px; overflow: hidden; background: var(--border-color); margin: 13px 0 16px; }
+#config-modal .storage-part { flex-basis: 0; }
+#config-modal .storage-part-0 { --part-color: #408b71; }
+#config-modal .storage-part-1 { --part-color: #94b7a0; }
+#config-modal .storage-part-2 { --part-color: #d4b573; }
+#config-modal .storage-part-3 { --part-color: #a5adc3; }
+#config-modal .storage-track span { background: var(--part-color); }
+#config-modal .storage-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+#config-modal .storage-stat { border: 1px solid var(--border-color); border-top: 2px solid var(--part-color); border-radius: 8px; padding: 12px; overflow-wrap: anywhere; }
+#config-modal .storage-stat span, #config-modal .storage-stat small { display: block; color: var(--text-secondary); font-size: 11px; }
+#config-modal .storage-stat strong { display: block; font-size: 18px; margin-top: 5px; font-weight: 600; }
+#config-modal .storage-note { margin: 13px 0 19px; }
+#config-modal .storage-backup { background: #fffaf1; border: 1px solid #e9dfc8; border-radius: 10px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 15px; }
+#config-modal .storage-backup p { font-size: 11px; color: #806c48; line-height: 1.8; margin: 0; }
+#config-modal .storage-backup button { flex-shrink: 0; }
+#config-modal .storage-feedback { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; margin: 10px 0; }
+#config-modal .storage-feedback:empty { display: none; }
+#config-modal .storage-feedback.error { color: var(--red); }
+@media (max-width: 620px) {
+  #config-modal .config-modal-panel { width: calc(100vw - 16px); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); }
+  #config-modal .config-modal-header, #config-modal .config-scroll-area, #config-modal .runtime-storage { padding: 14px 15px; }
+  #config-modal .config-view-tabs { padding: 0 15px; gap: 22px; }
+  #config-modal .config-raw-header { padding: 14px 15px 0; }
+  #config-modal .config-action-bar { padding: 10px 15px; flex-wrap: wrap; gap: 8px; }
+  #config-modal .config-action-meta { flex-basis: 100%; }
+  #config-modal .config-action-buttons { margin-left: auto; justify-content: flex-end; width: auto; }
+  #config-modal .llm-field-grid { grid-template-columns: 1fr; }
+  #config-modal .llm-field-meta { flex-wrap: wrap; }
+  #config-modal .storage-stats { grid-template-columns: 1fr 1fr; }
+  #config-modal .storage-location-row { grid-template-columns: 65px minmax(0, 1fr); }
+  #config-modal .storage-backup { flex-direction: column; align-items: flex-start; }
+}
+@media (max-height: 650px) {
+  #config-modal .config-modal-panel { height: calc(100dvh - 16px); max-height: calc(100dvh - 16px); }
+  #config-modal .config-modal-header { padding-top: 10px; padding-bottom: 10px; }
+  #config-modal .config-view-tabs .btn { padding-top: 9px; padding-bottom: 8px; }
+  #config-modal .config-toolbar-row { padding: 9px 0; }
+}

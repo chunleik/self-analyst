@@ -12,6 +12,32 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ConfigApplicationServiceTest {
 
+    @Test void retiredOutputLimitIsIgnoredAndDoesNotRebuildModels() throws Exception {
+        var store = new UserConfigStore(dir);
+        var environment = Map.of("LLM_MAX_TOKENS", "8");
+        store.saveRaw("[llm]\nmodel='old'\nmax-tokens=64\n");
+        var service = new ConfigApplicationService(store, Config.load(dir, environment), environment);
+        var closes = new AtomicInteger();
+        try (var runtime = attach(service, closes)) {
+            long revision = ((Number) runtime.status().get("revision")).longValue();
+            for (String value : List.of("204800", "0", "-1", "'legacy-value'")) {
+                String text = "[llm]\nmodel='old'\nmax-tokens=" + value + "\n";
+                var result = service.saveRaw(text);
+                assertEquals(text, store.readRaw());
+                assertEquals(revision, result.llmRevision());
+                assertFalse(result.restartRequired().contains("llm.max-tokens"));
+                assertFalse(service.saved().values().containsKey("llm.max-tokens"));
+                assertDoesNotThrow(() -> Config.load(dir, environment));
+            }
+            assertEquals(revision, service.saveRaw("[llm]\nmodel='old'\n").llmRevision());
+            assertEquals(0, closes.get());
+        }
+        assertTrue(DeprecatedKeys.contains("llm.max-tokens"));
+        assertFalse(SupportedKeys.contains("llm.max-tokens"));
+        assertFalse(ConfigPolicy.LLM.contains("llm.max-tokens"));
+        assertThrows(IllegalArgumentException.class, () -> service.update(Map.of("llm.max-tokens", "64")));
+    }
+
     @Test void languageSaveAndModelReloadKeepStartupLanguage() throws Exception {
         var store = new UserConfigStore(dir.resolve("language"));
         store.saveRaw("[app]\nlanguage='zh'\n");
@@ -213,7 +239,7 @@ class ConfigApplicationServiceTest {
         var store = new UserConfigStore(dir);
         var service = service(store);
         for (var update : List.of(Map.of("llm.temperature", "NaN"), Map.of("llm.temperature", "2.1"),
-                Map.of("llm.max-tokens", "-1"), Map.of("llm.base-url", "file:///secret"))) {
+                Map.of("llm.base-url", "file:///secret"))) {
             assertThrows(TomlValidationException.class, () -> service.update(update));
             assertFalse(Files.exists(store.filePath()));
         }

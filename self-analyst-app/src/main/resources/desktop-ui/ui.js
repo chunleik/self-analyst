@@ -132,20 +132,27 @@ function openConfigModal(focusKey) {
   state.configReturnFocus = document.activeElement;
   state.configOpen = true;
   state.dom.configModal.classList.remove("hidden");
-  if (typeof loadRuntimeStorage === "function") loadRuntimeStorage();
   if (state.dom.configCloseBtn && state.dom.configCloseBtn.focus) state.dom.configCloseBtn.focus();
   return switchConfigView(focusKey ? "raw" : "llm", focusKey);
 }
 
 function switchConfigView(view, focusKey) {
   if (state.configSaving) return Promise.resolve();
+  if (["llm", "raw", "storage"].indexOf(view) < 0) return Promise.resolve();
+  if (state.configView === view && !focusKey && state.dom.configModal.dataset.view === view) return Promise.resolve();
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()))
       && !window.confirm(t("config.confirmDiscardClose"))) return Promise.resolve();
   if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
+  if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
   state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
   state.configDirty = false; state.configRawText = ""; state.configRawBaseline = "";
+  state.configRuntime = null; state.configRuntimeError = false;
   state.configView = view;
+  state.dom.configModal.dataset.view = view;
+  state.dom.configGrid.classList.toggle("hidden", view === "storage");
+  var storagePanel = document.getElementById("runtime-storage");
+  if (storagePanel) storagePanel.classList.toggle("hidden", view !== "storage");
   var tabs = document.getElementById("config-view-tabs");
   if (tabs) tabs.querySelectorAll("button").forEach(function (button) {
     button.classList.toggle("is-active", button.dataset.configView === view);
@@ -155,6 +162,11 @@ function switchConfigView(view, focusKey) {
     state.llmSettingsView = mountLlmSettings(state.dom.configGrid);
     return Promise.resolve();
   }
+  if (view === "storage") {
+    state.dom.configGrid.innerHTML = "";
+    return loadRuntimeStorage();
+  }
+  state.dom.configGrid.innerHTML = '<div class="config-loading" role="status">' + escHtml(t("config.loading")) + '</div>';
   return loadConfig().then(function () { if (focusKey) focusConfigEditorKey(focusKey); });
 }
 
@@ -165,10 +177,14 @@ function closeConfigModal() {
     return;
   }
   state.configOpen = false;
+  delete state.dom.configModal.dataset.view;
   state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
   if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
+  if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
   state.configDirty = false;
+  state.configRawText = ""; state.configRawBaseline = "";
+  state.dom.configGrid.innerHTML = "";
   state.dom.configModal.classList.add("hidden");
   if (state.configReturnFocus && state.configReturnFocus.focus) state.configReturnFocus.focus();
   state.configReturnFocus = null;

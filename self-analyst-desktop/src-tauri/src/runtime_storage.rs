@@ -23,11 +23,36 @@ pub fn open_data_directory(
     if !directory.is_dir() {
         return Err(fail());
     }
-    use tauri_plugin_shell::ShellExt;
-    #[allow(deprecated)]
-    app.shell()
-        .open(directory.to_string_lossy().as_ref(), None)
-        .map_err(|_| fail())
+    open_directory(&directory).map_err(|_| fail())
+}
+
+fn open_directory(directory: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+
+    // Use the OS directory verb directly: a detached launcher only acknowledges
+    // creation of its intermediary process, not whether the shell accepts the path.
+    let path: Vec<u16> = directory.as_os_str().encode_wide().chain(Some(0)).collect();
+    let operation: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            path.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+    shell_open_result(result)
+}
+
+fn shell_open_result(result: isize) -> io::Result<()> {
+    if result > 32 {
+        Ok(())
+    } else {
+        Err(io::Error::other("directory open failed"))
+    }
 }
 
 pub struct RuntimeStorage {
@@ -83,6 +108,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_shell_result_rejects_all_error_codes() {
+        for code in 0..=32 {
+            assert!(shell_open_result(code).is_err());
+        }
+        assert!(shell_open_result(33).is_ok());
+        assert!(shell_open_result(isize::MAX).is_ok());
+    }
+
+    #[test]
     fn generated_acl_allows_data_directory_only_from_managed_main_window() {
         use tauri::utils::acl::{resolved::Resolved, ExecutionContext};
         let manifests = serde_json::from_str(include_str!("../gen/schemas/acl-manifests.json"))
@@ -101,15 +135,32 @@ mod tests {
             .expect("open_data_directory must have an explicit application permission");
         let allowed = |window: &str, address: &str| {
             let address = tauri::Url::parse(address).unwrap();
+            let config: tauri::Config =
+                serde_json::from_str(include_str!("../tauri.conf.json")).expect("desktop config");
+            // Tauri classifies a page relative to devUrl as Local, even when
+            // WebviewUrl::External was used to create the window.
+            let local_in_dev = config
+                .build
+                .dev_url
+                .as_ref()
+                .is_some_and(|base| base.make_relative(&address).is_some());
             grants.iter().any(|grant| {
                 grant.windows.iter().any(|pattern| pattern.matches(window))
-                    && matches!(&grant.context, ExecutionContext::Remote { url } if url.test(&address))
+                    && match &grant.context {
+                        ExecutionContext::Local => local_in_dev,
+                        ExecutionContext::Remote { url } => !local_in_dev && url.test(&address),
+                    }
             })
         };
         for host in ["localhost", "127.0.0.1"] {
-            let address = format!("http://{host}:5701/desktop-ui/index.html");
-            assert!(allowed("main", &address));
-            assert!(!allowed("other", &address));
+            for port in [5700, 5701] {
+                let address = format!("http://{host}:{port}/desktop-ui/index.html");
+                assert!(
+                    allowed("main", &address),
+                    "managed development page denied: {address}"
+                );
+                assert!(!allowed("other", &address));
+            }
         }
         for address in [
             "https://example.com/desktop-ui/",

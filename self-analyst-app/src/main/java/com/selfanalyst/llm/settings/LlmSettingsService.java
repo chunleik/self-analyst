@@ -8,7 +8,7 @@ import java.util.*;
 public final class LlmSettingsService {
     private static final Map<String, String> FIELDS = Map.of(
             "baseUrl", "llm.base-url", "model", "llm.model",
-            "temperature", "llm.temperature", "maxTokens", "llm.max-tokens");
+            "temperature", "llm.temperature");
     private final LlmSettingsRepository repository;
     public LlmSettingsService(LlmSettingsRepository repository) { this.repository = repository; }
 
@@ -37,7 +37,6 @@ public final class LlmSettingsService {
             FIELDS.forEach((name, key) -> {
                 Object value = switch (name) {
                     case "temperature" -> settings.temperature();
-                    case "maxTokens" -> settings.maxTokens();
                     default -> resolved.values().get(key).value();
                 };
                 fields.put(name, new FieldState(value, user.getProperty(key), resolved.values().get(key).source()));
@@ -97,7 +96,7 @@ public final class LlmSettingsService {
             if (!credential.action().equals("replace") && !base.equals(baseUrl(saved.baseUrl())))
                 throw invalid("credential_required");
             credential.apply(user);
-            return new LlmSettings(repository.resolve(user).config().llmApiKey(), base, model, 0, 16);
+            return new LlmSettings(repository.resolve(user).config().llmApiKey(), base, model, 0);
         }
     }
 
@@ -117,8 +116,7 @@ public final class LlmSettingsService {
             if (number < 0 || number > 2) throw invalid(name);
             return Double.toString(number);
         }
-        if (number < 0 || number > Integer.MAX_VALUE || number != Math.rint(number)) throw invalid(name);
-        return Integer.toString(n.intValue());
+        throw invalid("unsupported_field");
     }
     private static void validate(LlmSettings settings) {
         baseUrl(settings.baseUrl());

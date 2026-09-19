@@ -22,11 +22,14 @@ class LlmConnectionProbeTest {
         });
         server.start();
         try {
-            var connection = new LlmSettings("private-key", "http://127.0.0.1:" + server.getAddress().getPort(), "test", .7, 2048);
+            var connection = new LlmSettings("private-key", "http://127.0.0.1:" + server.getAddress().getPort(), "test", .7);
             var probe = new LlmConnectionProbe();
             assertEquals(java.util.List.of("a", "<model>"), probe.run(connection, true).models());
             assertEquals("protocol", probe.run(connection, false).code());
-            assertTrue(request.get().contains("Reply OK.")); assertTrue(request.get().contains("\"max_tokens\":16"));
+            assertTrue(request.get().contains("Reply OK.")); var sent = new com.fasterxml.jackson.databind.ObjectMapper().readTree(request.get());
+            assertFalse(sent.has("max_tokens"));
+            assertFalse(sent.has("max_completion_tokens"));
+            assertFalse(sent.has("max_output_tokens"));
             response.set("{\"choices\":[{\"message\":{\"content\":\"OK\"}}]}");
             assertTrue(probe.run(connection, false).ok());
             response.set("not json private-key");
@@ -55,7 +58,7 @@ class LlmConnectionProbeTest {
         });
         server.start();
         try {
-            var connection = new LlmSettings("key", "http://127.0.0.1:" + server.getAddress().getPort(), "m", 0, 16);
+            var connection = new LlmSettings("key", "http://127.0.0.1:" + server.getAddress().getPort(), "m", 0);
             var probe = new LlmConnectionProbe(Duration.ofMillis(300));
             assertEquals("authentication", probe.run(connection, false).code());
             mode.set(403); assertEquals("permission", probe.run(connection, false).code());

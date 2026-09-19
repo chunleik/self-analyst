@@ -162,12 +162,10 @@ public class SelfAnalystAgent implements AutoCloseable {
         Config config = startupConfig;
         OpenAIChatModel builtPlainModel;
         ReActAgent builtAgent;
-            Integer maxTokens = settings.maxTokens() > 0 ? settings.maxTokens() : null;
             String llmBaseUrl = settings.baseUrl();
 
             GenerateOptions.Builder chatOpts = GenerateOptions.builder()
                     .temperature(settings.temperature());
-            if (maxTokens != null) chatOpts.maxTokens(maxTokens);
             OpenAIChatModel chatModel = OpenAIChatModel.builder()
                     .apiKey((settings.available() ? settings.apiKey() : "UNCONFIGURED"))
                     .modelName(settings.model())
@@ -178,7 +176,6 @@ public class SelfAnalystAgent implements AutoCloseable {
             GenerateOptions.Builder plainOpts = GenerateOptions.builder()
                     .temperature(0.2)
                     .stream(false);
-            if (maxTokens != null) plainOpts.maxTokens(maxTokens);
             builtPlainModel = OpenAIChatModel.builder()
                     .apiKey((settings.available() ? settings.apiKey() : "UNCONFIGURED"))
                     .modelName(settings.model())

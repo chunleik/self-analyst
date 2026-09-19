@@ -68,7 +68,6 @@ public record Config(
         String fileWatchConfigurationError,
         /** Legacy content-index path retained only so startup can purge old artifacts. */
         Path legacyFileSemanticIndexDir,
-        int llmMaxTokens,
         int agentMaxIters,
         boolean agentCompactionEnabled,
         int agentCompactionTriggerMessages,
@@ -231,9 +230,6 @@ public record Config(
         Path legacyFileSemanticIndexDir = Path.of(values.get("file.watch.semantic.index-dir", memDir + "/file-semantic-index"));
 
         // ── Token 用量限制 / 预算 (SPEC-BUDGET-*) ──
-        int llmMaxTokens = parseIntOr(props,
-                values.get("llm.max-tokens", "2048"), 2048);
-        if (llmMaxTokens < 0) llmMaxTokens = 0; // 0 = 不限
         int agentMaxIters = parseIntOr(props,
                 values.get("llm.agent.maxIters", "8"), 8);
         if (agentMaxIters < 1) agentMaxIters = 8;
@@ -331,7 +327,7 @@ public record Config(
                 fileWatchExcludeDirs, fileWatchExcludeGlobs, fileWatchRespectGitIgnore,
                 fileWatchConfigurationError,
                 legacyFileSemanticIndexDir,
-                llmMaxTokens, agentMaxIters,
+                agentMaxIters,
                 agentCompactionEnabled, agentCompactionTriggerMessages,
                 agentCompactionTriggerTokens, agentCompactionKeepMessages,
                 agentCompactionKeepTokens, desktopSummaryMaxTimelineLlm,
@@ -364,7 +360,7 @@ public record Config(
                 false, "", 0, 60, 5, 5, FileFilterConfig.DEFAULT_EXTENSIONS_CSV,
                 "", "", true, null,
                 baseDir.resolve("file-semantic-index"),
-                2048, 8, false, 30, 60000, 10, 12000,
+                8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,
                 "auto", LangResolver.resolve("auto", Locale.getDefault()));
     }

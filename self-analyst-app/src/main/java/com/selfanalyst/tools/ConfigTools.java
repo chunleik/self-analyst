@@ -25,7 +25,7 @@ public class ConfigTools {
             "embedding.enabled", "embedding.base-url", "embedding.api-key",
             "embedding.model", "embedding.dimensions", "embedding.send-encoding-format",
             "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
-            "llm.max-tokens", "llm.agent.maxIters", "desktop.summary.maxTimelineLlm",
+            "llm.agent.maxIters", "desktop.summary.maxTimelineLlm",
             "llm.budget.mode", "llm.budget.dailyTokens", "llm.budget.warnRatio"
     );
 
@@ -44,7 +44,7 @@ public class ConfigTools {
             "desktop.hideToTray、desktop.autoOpenWindow、desktop.autoStartBackend；" +
             "events.collection.window、events.collection.afk、events.collection.title.enabled；" +
             "embedding.enabled、embedding.model、embedding.base-url、embedding.api-key；" +
-            "token 用量限制 llm.max-tokens、llm.agent.maxIters、desktop.summary.maxTimelineLlm、" +
+            "token 用量限制 llm.agent.maxIters、desktop.summary.maxTimelineLlm、" +
             "llm.budget.mode（off/warn/block）、llm.budget.dailyTokens、llm.budget.warnRatio。")
     public String getConfig() {
         Properties eff = userStore.application().saved().properties();
@@ -86,7 +86,6 @@ public class ConfigTools {
                 {"embedding.api-key",  eff.getProperty("embedding.api-key",  ""),                              "masked"},
         });
         appendSection(sb, "用量限制", new String[][]{
-                {"llm.max-tokens",                  eff.getProperty("llm.max-tokens",                  "2048"),    null},
                 {"llm.agent.maxIters",              eff.getProperty("llm.agent.maxIters",              "8"),       null},
                 {"desktop.summary.maxTimelineLlm",  eff.getProperty("desktop.summary.maxTimelineLlm",  "4"),       null},
                 {"llm.budget.mode",                 eff.getProperty("llm.budget.mode",                 "warn"),    null},

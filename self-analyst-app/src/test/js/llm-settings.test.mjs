@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source = fs.readFileSync(new URL('../../main/resources/desktop-ui/llm-settings.js', import.meta.url), 'utf8');
 const ui = fs.readFileSync(new URL('../../main/resources/desktop-ui/ui.js', import.meta.url), 'utf8');
 function snapshot() {
-  return { fields: Object.fromEntries(Object.entries({ baseUrl: 'https://example.org/v1', model: 'old', temperature: .7, maxTokens: 2048 })
+  return { fields: Object.fromEntries(Object.entries({ baseUrl: 'https://example.org/v1', model: 'old', temperature: .7 })
     .map(([key, value]) => [key, { effectiveValue: value, savedValue: null, source: 'environment' }])),
     credential: { configured: true, source: 'environment', hasUserOverride: false },
     runtime: { application: { llm: { status: 'applied' } } } };
@@ -25,6 +25,16 @@ function setup(handler) {
   return { model, calls, timers, context };
 }
 const plain = value => JSON.parse(JSON.stringify(value));
+
+test('model view has no output-limit control and explains server-controlled limits', () => {
+  assert.doesNotMatch(source, /maxTokens|llm\.tokensHint/);
+  assert.match(source, /llm\.outputPolicy/);
+  for (const lang of ['zh', 'en']) {
+    const catalog = JSON.parse(fs.readFileSync(new URL(`../../main/resources/desktop-ui/locales/${lang}.json`, import.meta.url), 'utf8'));
+    assert.equal(catalog['llm.maxTokens'], undefined);
+    assert.equal(typeof catalog['llm.outputPolicy'], 'string');
+  }
+});
 
 test('opening only queries settings and presets; saving sends changed fields and keep', async () => {
   const h = setup((path, method) => method === 'PUT' ? Promise.resolve({ settings: snapshot() }) : undefined);
@@ -54,14 +64,14 @@ test('blank password preserves key; clear and reset are distinct; success clears
 test('save error retains draft; saving locks edits and prevents duplicate requests', async () => {
   let fail;
   const h = setup((path, method) => method === 'PUT' ? new Promise((resolve, reject) => { fail = reject; }) : undefined);
-  await h.model.load(); h.model.change('maxTokens', '1.5'); h.model.setCredential('replace', 'key');
+  await h.model.load(); h.model.change('temperature', '3'); h.model.setCredential('replace', 'key');
   const pending = h.model.save();
   h.model.change('model', 'should-not-change'); await h.model.save();
   assert.equal(h.calls.filter(c => c[1] === 'PUT').length, 1);
-  fail(new Error('invalid maxTokens')); await pending;
-  assert.equal(h.model.value('maxTokens'), '1.5'); assert.equal(h.model.value('model'), 'old');
+  fail(new Error('invalid temperature')); await pending;
+  assert.equal(h.model.value('temperature'), '3'); assert.equal(h.model.value('model'), 'old');
   assert.equal(h.model.credential.value, 'key'); assert.equal(h.model.dirty(), true);
-  assert.equal(h.model.error, 'invalid maxTokens'); assert.equal(h.model.saving, false);
+  assert.equal(h.model.error, 'invalid temperature'); assert.equal(h.model.saving, false);
 });
 
 test('changed connection and close discard stale probe results and abort signals', async () => {
@@ -110,9 +120,9 @@ test('runtime refresh preserves draft and load failures disable edits and save',
 test('window tabs protect both drafts, reload after discard and route key navigation to raw', async () => {
   let confirm = false, mounted = 0, destroyed = 0, rawLoads = 0, focused;
   const state = { configOpen: false, configSaving: false, configDirty: false, configLoadGeneration: 0,
-    dom: { configModal: { classList: { add() {}, remove() {} } }, configGrid: {} } };
+    dom: { configModal: { dataset: {}, classList: { add() {}, remove() {} } }, configGrid: { classList: { toggle() {} } } } };
   const context = vm.createContext({ state, document: { getElementById: () => null }, window: { confirm: () => confirm },
-    t: key => key, mountLlmSettings: () => { mounted++; return { dirty: () => true, destroy: () => { destroyed++; } }; },
+    t: key => key, escHtml: value => value, mountLlmSettings: () => { mounted++; return { dirty: () => true, destroy: () => { destroyed++; } }; },
     stopConfigRuntimeRefresh() {}, focusConfigEditorKey: key => { focused = key; } });
   vm.runInContext(ui, context);
   context.loadConfig = () => { rawLoads++; return Promise.resolve(); };
@@ -126,4 +136,28 @@ test('window tabs protect both drafts, reload after discard and route key naviga
   state.configSaving = true; context.closeConfigModal(); await context.switchConfigView('raw'); assert.equal(rawLoads, 1);
   state.configSaving = false; await context.openConfigModal('file.watch.paths');
   assert.equal(focused, 'file.watch.paths'); assert.equal(state.configView, 'raw');
+});
+
+test('runtime data is lazy, guards unsaved drafts and clears raw content when closed', async () => {
+  let approved = false, storageLoads = 0, mounted = 0, confirmations = 0;
+  const storage = { classList: { toggle() {} } };
+  const state = { configOpen: false, configSaving: false, configDirty: false,
+    dom: { configModal: { dataset: {}, classList: { add() {}, remove() {} } },
+      configGrid: { innerHTML: '', classList: { toggle() {} } } } };
+  const context = vm.createContext({ state,
+    document: { getElementById: id => id === 'runtime-storage' ? storage : null },
+    window: { confirm: () => { confirmations++; return approved; } }, t: key => key, escHtml: v => v,
+    mountLlmSettings: () => { mounted++; return { dirty: () => true, destroy() {} }; },
+    loadRuntimeStorage: () => { storageLoads++; return Promise.resolve(); }, stopRuntimeStorage() {} });
+  vm.runInContext(ui, context);
+  context.loadConfig = async () => {};
+  await context.openConfigModal(); assert.equal(mounted, 1); assert.equal(storageLoads, 0);
+  await context.switchConfigView('llm'); assert.equal(confirmations, 0, 'active tab does not discard a draft');
+  await context.switchConfigView('storage'); assert.equal(storageLoads, 0); assert.equal(state.configView, 'llm');
+  approved = true; await context.switchConfigView('storage');
+  assert.equal(storageLoads, 1); assert.equal(state.configView, 'storage');
+  assert.equal(state.llmSettingsView, null); assert.equal(state.dom.configGrid.innerHTML, '');
+  state.configRawText = 'sensitive'; state.configRawBaseline = 'sensitive';
+  context.closeConfigModal(); assert.equal(state.configRawText, ''); assert.equal(state.configRawBaseline, '');
+  await context.openConfigModal(); assert.equal(mounted, 2); assert.equal(state.configView, 'llm');
 });

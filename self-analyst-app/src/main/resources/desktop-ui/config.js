@@ -12,26 +12,29 @@ function renderConfigTab() {
   var readOnly = state.configLoadError ? " readonly" : "";
 
   var html = ""
-    + '<div class="config-file-heading">'
+    + '<section class="config-raw-workspace">'
+    + '<div class="config-raw-header"><div class="config-file-heading">'
     +   '<code>config.toml</code>'
     +   '<span title="' + escHtml(state.configPath || "config.toml") + '">' + escHtml(state.configPath || "config.toml") + '</span>'
     + '</div>'
-    + '<div class="config-editor-toolbar">'
+    + '<div class="config-toolbar-row"><div class="config-editor-toolbar">'
     +   '<button id="test-llm-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.testLlm")) + '</button>'
     +   '<button id="test-embedding-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.testEmbedding")) + '</button>'
     + '</div>'
     + renderLanguageSetting(state.configRawText || "")
-    + renderConfigActionBar()
-    + '<div id="config-runtime-status" class="config-runtime-status" aria-live="polite">' + renderConfigRuntime() + "</div>";
+    + '</div></div><div class="config-scroll-area">';
 
   if (state.configLoadError) {
     html += '<div class="config-load-error">' + escHtml(t("config.loadErrorReadonly")) + '</div>';
   }
 
-  html += '<textarea id="config-raw-editor" class="config-raw-editor" spellcheck="false" wrap="off"'
+  html += '<div class="config-editor-card"><div class="config-editor-label"><label for="config-raw-editor">' + escHtml(t("config.rawLabel"))
+    + '</label><span>UTF-8 · TOML</span></div>'
+    + '<textarea id="config-raw-editor" class="config-raw-editor" spellcheck="false" wrap="off"'
     + readOnly + '>'
     + escHtml(state.configRawText || "")
-    + '</textarea>';
+    + '</textarea></div><div id="config-runtime-status" class="config-runtime-status" aria-live="polite">' + renderConfigRuntime() + '</div></div>'
+    + renderConfigActionBar() + '</section>';
 
   grid.innerHTML = html;
   updateConfigActionBar();
@@ -46,10 +49,10 @@ function renderConfigActionBar() {
     '<div class="config-action-bar" id="config-action-bar">' +
     '<div class="config-action-meta">' +
     '<span class="config-action-title">' + escHtml(t("config.changesTitle")) + '</span>' +
-    '<span class="config-action-status" id="config-action-status"></span>' +
+    '<span class="config-action-status" id="config-action-status" role="status"></span>' +
     '<span class="config-save-result' +
     resultClass +
-    '" id="config-save-result">' +
+    '" id="config-save-result" role="status">' +
     resultText +
     "</span>" +
     "</div>" +
@@ -240,6 +243,12 @@ function updateConfigActionBar() {
   if (languageSelect) {
     languageSelect.disabled = state.configSaving || state.configLoadError || !languageDraft(currentEditorText());
   }
+  var editor = document.getElementById("config-raw-editor");
+  if (editor) editor.readOnly = state.configSaving || state.configLoadError;
+  ["test-llm-btn", "test-embedding-btn"].forEach(function (id) {
+    var button = document.getElementById(id);
+    if (button) button.disabled = state.configSaving || state.configLoadError;
+  });
 
   if (saveBtn) {
     saveBtn.disabled = state.configSaving || !state.configDirty || state.configLoadError;
@@ -308,16 +317,16 @@ function renderConfigRuntime() {
   var html = '<strong>' + escHtml(t("config.runtimeTitle")) + '</strong><ul>';
   Object.keys(application).forEach(function (component) {
     var item = application[component];
-    html += '<li>' + escHtml(component) + ': ' + escHtml(t("config.runtime." + item.status));
+    html += '<li><span>' + escHtml(component) + '</span><span>' + escHtml(t("config.runtime." + item.status));
     if (item.changedKeys && item.changedKeys.length) html += ' (' + escHtml(item.changedKeys.join(", ")) + ')';
-    html += '</li>';
+    html += '</span></li>';
   });
   html += '</ul>';
   if (data.configured) {
     html += '<details><summary>' + escHtml(t("config.sourcesTitle")) + '</summary><table><thead><tr>'
       + '<th>' + escHtml(t("config.key")) + '</th><th>' + escHtml(t("config.savedValue")) + '</th>'
       + '<th>' + escHtml(t("config.runningValue")) + '</th><th>' + escHtml(t("config.source")) + '</th></tr></thead><tbody>';
-    ["llm.api-key", "llm.base-url", "llm.model", "llm.temperature", "llm.max-tokens"].forEach(function (key) {
+    ["llm.api-key", "llm.base-url", "llm.model", "llm.temperature"].forEach(function (key) {
       var value = data.configured[key];
       if (!value) return;
       html += '<tr><td>' + escHtml(key) + '</td><td>' + escHtml(value.value) + '</td><td>'

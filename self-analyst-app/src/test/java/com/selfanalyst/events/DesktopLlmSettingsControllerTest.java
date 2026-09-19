@@ -37,7 +37,7 @@ class DesktopLlmSettingsControllerTest {
             var response = send(client, base, "", "GET", null);
             assertEquals(200, response.statusCode());
             assertFalse(response.body().contains("private-test-key")); assertFalse(response.body().contains("****"));
-            response = send(client, base, "", "PUT", "{\"updates\":{\"model\":\"new\",\"maxTokens\":32}}");
+            response = send(client, base, "", "PUT", "{\"updates\":{\"model\":\"new\"}}");
             assertEquals(200, response.statusCode(), response.body());
             var body = new ObjectMapper().readTree(response.body()); assertTrue(body.path("saved").asBoolean());
             assertEquals("new", body.path("settings").path("fields").path("model").path("effectiveValue").asText());

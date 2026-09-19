@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LlmRuntimeManagerTest {
-    private LlmSettings settings(String model) { return new LlmSettings("key", "http://localhost/v1", model, .7, 64); }
+    private LlmSettings settings(String model) { return new LlmSettings("key", "http://localhost/v1", model, .7); }
     @Test void leasesKeepOldVersionAliveAndCloseExactlyOnce() {
         AtomicInteger closed = new AtomicInteger();
         var runtime = new LlmRuntimeManager<AutoCloseable>(new Object(), settings("old"), ignored -> closed::incrementAndGet);

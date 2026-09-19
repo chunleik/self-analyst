@@ -50,7 +50,7 @@ function createLlmSettingsModel(request, changed) {
   model.save = function () {
     if (model.saving || !model.snapshot || !model.dirty()) return Promise.resolve();
     var updates = Object.assign({}, model.updates);
-    ["temperature", "maxTokens"].forEach(function (key) { if (key in updates) updates[key] = updates[key] === "" ? null : Number(updates[key]); });
+    if ("temperature" in updates) updates.temperature = updates.temperature === "" ? null : Number(updates.temperature);
     model.saving = true; model.error = ""; invalidate(); emit();
     return request("", "PUT", { updates: updates, reset: model.reset.slice(), credential: model.credential })
       .then(function (result) {
@@ -97,34 +97,49 @@ function createLlmSettingsModel(request, changed) {
 }
 
 function mountLlmSettings(root) {
-  var built = false, lastSnapshot = null;
+  var built = false, lastSnapshot = null, lastLoading = null;
   var model = createLlmSettingsModel(api.llmSettings, render);
   function button(action, label, extra) {
     return '<button type="button" class="btn btn-sm ' + (extra || 'btn-outline') + '" data-llm-action="' + action + '">' + escHtml(t(label)) + '</button>';
   }
   function render(data) {
-    if (!built || lastSnapshot !== data.snapshot) {
-      built = true; lastSnapshot = data.snapshot;
+    if (!built || lastSnapshot !== data.snapshot || (!data.snapshot && lastLoading !== data.loading)) {
+      built = true; lastSnapshot = data.snapshot; lastLoading = data.loading;
       root.innerHTML = '<section class="llm-settings" aria-label="' + escHtml(t("llm.title")) + '">'
-        + '<header><h3>' + escHtml(t("llm.title")) + '</h3><p>' + escHtml(t("llm.intro")) + '</p></header>'
-        + '<div id="llm-error" role="alert" tabindex="-1"></div><div id="llm-notice" role="status" tabindex="-1"></div>'
-        + (data.snapshot ? form(data) : '<p>' + escHtml(t(data.loading ? "config.loading" : "llm.loadFailed")) + '</p>' + button("retry", "llm.retry"))
+        + '<div class="config-scroll-area"><header><h3>' + escHtml(t("llm.title")) + '</h3><p>' + escHtml(t("llm.intro")) + '</p></header>'
+        + (data.snapshot ? form(data) : '<p role="status">' + escHtml(t(data.loading ? "config.loading" : "llm.loadFailed")) + '</p>' + button("retry", "llm.retry"))
+        + '</div><footer class="config-action-bar"><div class="config-action-meta"><span id="llm-draft-status" class="config-action-status" role="status"></span>'
+        + '<div id="llm-error" role="alert" tabindex="-1"></div><div id="llm-notice" role="status" tabindex="-1"></div></div>'
+        + '<div class="config-action-buttons">' + button("discard", "config.discard") + button("save", "llm.save", "btn-primary") + '</div></footer>'
         + '</section>';
     }
     root.querySelector("#llm-error").textContent = data.error;
     root.querySelector("#llm-notice").textContent = data.notice ? t("llm.saved") : "";
-    if (!data.snapshot) return;
+    state.configSaving = data.saving;
+    root.querySelector('#llm-draft-status').textContent = t(data.loading ? "config.loading" : data.saving ? "config.saving"
+      : data.dirty() ? "config.unsavedChanges" : "config.noUnsavedChanges");
+    root.querySelector('[data-llm-action="save"]').disabled = data.saving || !data.snapshot || !data.dirty();
+    root.querySelector('[data-llm-action="discard"]').disabled = data.saving || !data.snapshot || !data.dirty();
+    if (!data.snapshot) {
+      root.querySelector('[data-llm-action="retry"]').disabled = data.loading;
+      return;
+    }
     var matchedPreset = data.presets.find(function (p) { return p.baseUrl && p.baseUrl.replace(/\/+$/, "") === String(data.value("baseUrl")).replace(/\/+$/, ""); });
     root.querySelector('[data-llm-preset]').value = matchedPreset ? matchedPreset.id : "";
     root.querySelectorAll("input,select,button").forEach(function (el) { el.disabled = data.saving; });
-    ["baseUrl", "model", "temperature", "maxTokens"].forEach(function (key) {
+    ["baseUrl", "model", "temperature"].forEach(function (key) {
       var input = root.querySelector('[data-llm-field="' + key + '"]');
       if (document.activeElement !== input) input.value = data.value(key);
       input.disabled = data.saving || data.reset.indexOf(key) >= 0;
       var source = root.querySelector('[data-llm-source="' + key + '"]');
       source.textContent = data.reset.indexOf(key) >= 0 ? t("llm.inheritPending") : t("config.source." + data.snapshot.fields[key].source);
     });
-    if (data.credential.action !== "replace") root.querySelector('[data-llm-key]').value = "";
+    if (data.credential.action !== "replace") {
+      root.querySelector('[data-llm-key]').value = "";
+      root.querySelector('[data-llm-key]').type = "password";
+      root.querySelector('[data-llm-action="reveal-key"]').textContent = t("llm.showKey");
+      root.querySelector('[data-llm-action="reveal-key"]').setAttribute("aria-pressed", "false");
+    }
     root.querySelector("#llm-key-state").textContent = t("llm.credential." + data.credential.action) + " · "
       + t(data.snapshot.credential.configured ? "llm.configured" : "llm.notConfigured") + " · " + t("config.source." + data.snapshot.credential.source);
     root.querySelector('[data-llm-action="save"]').disabled = data.saving || !data.dirty();
@@ -136,35 +151,40 @@ function mountLlmSettings(root) {
         ? (result.message || t("llm.probe." + result.code)) + (result.latencyMs != null ? ' (' + result.latencyMs + ' ms)' : '')
           + (result.truncated ? ' · ' + t("llm.truncated") : '') : "";
     });
-    root.querySelector('#llm-models').innerHTML = data.candidates.map(function (id) { return '<option value="' + escHtml(id) + '"></option>'; }).join("");
+    root.querySelector('#llm-models').innerHTML = data.candidates.map(function (id) {
+      return '<button type="button" class="btn btn-sm btn-outline" data-llm-action="select-model" data-model-id="' + escHtml(id) + '">' + escHtml(id) + '</button>';
+    }).join("");
     root.querySelector('#llm-runtime').innerHTML = Object.keys(data.snapshot.runtime.application || {}).map(function (key) {
       var item = data.snapshot.runtime.application[key];
-      return '<li>' + escHtml(key) + ': ' + escHtml(t("config.runtime." + item.status))
-        + (item.changedKeys && item.changedKeys.length ? ' (' + escHtml(item.changedKeys.join(", ")) + ')' : '') + '</li>';
+      return '<li><span>' + escHtml(key) + '</span><span>' + escHtml(t("config.runtime." + item.status))
+        + (item.changedKeys && item.changedKeys.length ? ' (' + escHtml(item.changedKeys.join(", ")) + ')' : '') + '</span></li>';
     }).join("");
     state.configSaving = data.saving;
   }
   function form(data) {
-    var html = '<div class="llm-field-grid"><label class="llm-wide">' + escHtml(t("llm.preset"))
+    function field(key) {
+      return '<div class="llm-field' + (key === "baseUrl" || key === "model" ? ' llm-wide' : '') + '"><label for="llm-' + key + '">' + escHtml(t("llm." + key))
+        + '</label><div class="llm-input-row"><input id="llm-' + key + '" data-llm-field="' + key + '" value="' + escHtml(data.value(key)) + '"'
+        + (key === "temperature" ? ' type="number" min="0" max="2" step="0.1"' : ' type="text"')
+        + '>' + (key === "model" ? button("discover", "llm.discover") : '') + '</div><div class="llm-field-meta"><span data-llm-source="' + key + '"></span>'
+        + button('reset-' + key, "llm.inherit", "llm-link-button") + '</div></div>';
+    }
+    var html = '<section class="llm-form-section"><h4><span class="config-step">01</span>' + escHtml(t("llm.connectionSection")) + '</h4>'
+      + '<div class="llm-field-grid"><label class="llm-wide">' + escHtml(t("llm.preset"))
       + '<select data-llm-preset><option value="">' + escHtml(t("llm.custom")) + '</option>'
       + data.presets.filter(function (p) { return p.id !== "custom"; }).map(function (p) {
         return '<option value="' + escHtml(p.id) + '"' + (p.baseUrl === data.value("baseUrl") ? ' selected' : '') + '>' + escHtml(p.name) + '</option>';
       }).join("") + '</select></label>';
-    ["baseUrl", "model", "temperature", "maxTokens"].forEach(function (key) {
-      html += '<div class="llm-field' + (key === "baseUrl" || key === "model" ? ' llm-wide' : '') + '"><label for="llm-' + key + '">' + escHtml(t("llm." + key))
-        + '</label><input id="llm-' + key + '" data-llm-field="' + key + '" value="' + escHtml(data.value(key)) + '"'
-        + (key === "model" ? ' list="llm-models"' : '')
-        + (key === "temperature" ? ' type="number" min="0" max="2" step="0.1"' : key === "maxTokens" ? ' type="number" min="0" step="1"' : ' type="text"')
-        + '><div class="llm-field-meta"><span data-llm-source="' + key + '"></span>' + button('reset-' + key, "llm.inherit") + '</div></div>';
-    });
-    html += '<datalist id="llm-models"></datalist><div class="llm-wide"><label for="llm-key">API Key</label>'
-      + '<input id="llm-key" data-llm-key type="password" autocomplete="new-password" placeholder="' + escHtml(t("llm.keyHint")) + '">'
-      + '<p id="llm-key-state"></p>' + button("clear-key", "llm.clearKey") + ' ' + button("reset-key", "llm.resetKey") + '</div></div>'
-      + '<p class="llm-hint">' + escHtml(t("llm.tokensHint")) + '</p><section class="llm-probes"><p>' + escHtml(t("llm.billing")) + '</p>'
-      + button("discover", "llm.discover") + ' ' + button("test", "llm.test")
-      + '<p id="llm-discover-result" role="status"></p><p id="llm-test-result" role="status"></p></section>'
-      + '<section><h4>' + escHtml(t("config.runtimeTitle")) + '</h4><ul id="llm-runtime"></ul></section>'
-      + '<footer>' + button("discard", "config.discard") + button("save", "llm.save", "btn-primary") + '</footer>';
+    html += field("baseUrl") + '<div class="llm-wide"><label for="llm-key">API Key</label>'
+      + '<div class="llm-input-row"><input id="llm-key" data-llm-key type="password" autocomplete="new-password" placeholder="' + escHtml(t("llm.keyHint")) + '">'
+      + button("reveal-key", "llm.showKey") + '</div><p id="llm-key-state"></p><div class="llm-credential-actions">'
+      + button("clear-key", "llm.clearKey", "llm-link-button") + button("reset-key", "llm.resetKey", "llm-link-button") + '</div></div></div></section>'
+      + '<section class="llm-form-section"><h4><span class="config-step">02</span>' + escHtml(t("llm.generationSection")) + '</h4><div class="llm-field-grid">'
+      + field("model") + '<div class="llm-wide"><p id="llm-discover-result" role="status"></p><div id="llm-models" class="llm-model-candidates"></div></div>'
+      + field("temperature") + '</div><p class="llm-hint">' + escHtml(t("llm.outputPolicy")) + '</p></section>'
+      + '<section class="llm-probes"><p>' + escHtml(t("llm.billing")) + '</p>' + button("test", "llm.test")
+      + '<p id="llm-test-result" role="status"></p></section>'
+      + '<section><h4>' + escHtml(t("config.runtimeTitle")) + '</h4><ul id="llm-runtime" aria-live="polite"></ul></section>';
     return html;
   }
   function input(event) {
@@ -184,6 +204,17 @@ function mountLlmSettings(root) {
       var target = root.querySelector(model.error ? '#llm-error' : '#llm-notice');
       if (target) target.focus();
     });
+    else if (action === "reveal-key") {
+      var keyInput = root.querySelector('[data-llm-key]');
+      var show = keyInput.type === "password";
+      keyInput.type = show ? "text" : "password";
+      el.textContent = t(show ? "llm.hideKey" : "llm.showKey");
+      el.setAttribute("aria-pressed", String(show));
+    }
+    else if (action === "select-model") {
+      model.change("model", el.dataset.modelId);
+      root.querySelector('[data-llm-field="model"]').focus();
+    }
     else if (action === "discard" || action === "retry") model.load();
     else if (action === "test" || action === "discover") model.run(action);
     else if (action === "clear-key" || action === "reset-key") {

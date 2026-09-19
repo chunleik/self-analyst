@@ -6,7 +6,7 @@ import java.util.Set;
 public final class ConfigPolicy {
     private ConfigPolicy() {}
     public static final Set<String> LLM = Set.of(
-            "llm.api-key", "llm.base-url", "llm.model", "llm.temperature", "llm.max-tokens");
+            "llm.api-key", "llm.base-url", "llm.model", "llm.temperature");
     private static final Set<String> DYNAMIC = Set.of(
             "agent.allowAgentTasks", "agent.cacheSummaries", "desktop.hideToTray", "desktop.autoOpenWindow");
     public static boolean requiresRestart(String key) {

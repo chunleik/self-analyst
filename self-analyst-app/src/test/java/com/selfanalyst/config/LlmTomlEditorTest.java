@@ -10,9 +10,9 @@ class LlmTomlEditorTest {
                 + "[file]\r\nwatch.paths='D:\\资料'\r\n[other]\r\ntext=\"\"\"\nmodel='fake'\n\"\"\"\r\n";
         String edited = LlmTomlEditor.edit(text, Map.of("llm.model", "new"));
         assertEquals(text.replace("'old=#'", "\"new\""), edited);
-        String added = LlmTomlEditor.edit(text, Map.of("llm.max-tokens", "64"));
-        assertTrue(added.contains("max-tokens = 64\r\n"));
-        assertEquals("64", TomlSupport.parseAndFlatten(added).get("llm.max-tokens"));
+        String added = LlmTomlEditor.edit(text, Map.of("llm.temperature", "0.4"));
+        assertTrue(added.contains("temperature = 0.4\r\n"));
+        assertEquals("0.4", TomlSupport.parseAndFlatten(added).get("llm.temperature"));
     }
     @Test void dottedKeysAndRemovalPreserveComment() {
         String text = "llm.\"model\"='old' # keep\nllm.temperature=0.3\n";
@@ -29,7 +29,7 @@ class LlmTomlEditorTest {
     }
     @Test void multipleEditsDoNotChangeOtherValues() {
         String text = "[llm]\nmodel='x'\ntemperature=0.7\n[unknown]\nvalue=['a','b']\n";
-        String result = LlmTomlEditor.edit(text, Map.of("llm.model", "y", "llm.temperature", "1.0", "llm.max-tokens", "0"));
+        String result = LlmTomlEditor.edit(text, Map.of("llm.model", "y", "llm.temperature", "1.0"));
         assertTrue(result.endsWith("[unknown]\nvalue=['a','b']\n"));
         assertEquals("1", TomlSupport.parseAndFlatten(result).get("llm.temperature"));
     }

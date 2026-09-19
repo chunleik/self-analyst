@@ -51,7 +51,9 @@ function setupEvents() {
   state.dom.configModal.addEventListener("keydown", function (e) {
     if (e.key === "Escape") { e.preventDefault(); closeConfigModal(); }
     if (e.key !== "Tab") return;
-    var focusable = Array.from(state.dom.configModal.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)"));
+    var focusable = Array.from(state.dom.configModal.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex='0']"))
+      .filter(function (element) { return element.getClientRects().length > 0; });
+    if (!focusable.length) return;
     var first = focusable[0], last = focusable[focusable.length - 1];
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }

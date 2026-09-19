@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(fileURLToPath(new URL('../self-analyst-app/src/main/resources/desktop-ui/', import.meta.url)));
-const fields = Object.fromEntries(Object.entries({ baseUrl: 'https://api.openai.com/v1', model: 'demo-model', temperature: 0.7, maxTokens: 2048 })
+const fields = Object.fromEntries(Object.entries({ baseUrl: 'https://api.openai.com/v1', model: 'demo-model', temperature: 0.7 })
   .map(([key, value]) => [key, { effectiveValue: value, savedValue: null, source: 'default' }]));
 const snapshot = { protocol: 'openai-completions', fields, credential: { configured: false, source: 'default', hasUserOverride: false },
   runtime: { application: { llm: { status: 'unavailable', activeWorkCount: 0 } } } };

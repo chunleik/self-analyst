@@ -84,8 +84,10 @@ test("saving failure preserves dirty text and the last successful baseline", asy
   h.context.api.saveRawConfig = () => Promise.reject(new Error("write failed"));
   h.context.saveAllConfig();
   assert.equal(languageSelect.disabled, true);
+  assert.equal(h.elements.get("config-raw-editor").readOnly, true, "in-flight save cannot discard later keystrokes");
   await new Promise(setImmediate);
   assert.equal(languageSelect.disabled, false);
+  assert.equal(h.elements.get("config-raw-editor").readOnly, false);
   assert.equal(h.state.configDirty, true);
   assert.equal(h.state.configRawBaseline, "old");
   assert.equal(h.state.configSaving, false);

@@ -6,6 +6,7 @@ import java.util.Set;
 public final class DeprecatedKeys {
 
     private static final Set<String> KEYS = Set.of(
+            "llm.max-tokens",
             "aw.ocr.engine",
             "ocr.sample.enabled",
             "ocr.sample.dir",

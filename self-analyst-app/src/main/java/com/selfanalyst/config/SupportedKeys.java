@@ -46,7 +46,6 @@ public final class SupportedKeys {
         put("llm.base-url", "https://api.openai.com/v1", KeyType.STRING);
         put("llm.model", "gpt-4o", KeyType.STRING);
         put("llm.temperature", "0.7", KeyType.FLOAT);
-        put("llm.max-tokens", "2048", KeyType.INTEGER);
         put("llm.agent.maxIters", "8", KeyType.INTEGER);
         put("llm.budget.mode", "warn", KeyType.STRING);
         put("llm.budget.dailyTokens", "100000000", KeyType.INTEGER);
@@ -129,7 +128,6 @@ public final class SupportedKeys {
         describe("llm.base-url", "OpenAI 兼容 LLM API 的基础地址。", "Base URL of the OpenAI-compatible LLM API.");
         describe("llm.model", "用于对话、总结和 Agent 的模型名称。", "Model name used for chat, summaries, and the agent.");
         describe("llm.temperature", "模型采样温度，值越高输出越随机（0–2）。", "Model sampling temperature; higher values are more random (0–2).");
-        describe("llm.max-tokens", "单次 LLM 响应的最大 token 数；0 表示不限。", "Maximum tokens in one LLM response; 0 means unlimited.");
         describe("llm.agent.maxIters", "Agent 单次任务允许的最大推理迭代次数。", "Maximum reasoning iterations allowed for one agent task.");
         describe("llm.budget.mode", "Token 预算模式：off、warn 或 block。", "Token budget mode: off, warn, or block.");
         describe("llm.budget.dailyTokens", "每日 token 预算；0 表示不限。", "Daily token budget; 0 means unlimited.");

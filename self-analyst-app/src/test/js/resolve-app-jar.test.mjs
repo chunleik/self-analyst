@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,10 @@ import { spawnSync } from 'node:child_process';
 
 const script = fileURLToPath(new URL('../../../../scripts/resolve-app-jar.ps1', import.meta.url));
 const windowsOnly = { skip: process.platform !== 'win32' };
+
+// CI 的 TEMP 可能是 8.3 短名（RUNNER~1），而 PowerShell 输出解析后的长名；
+// 两端都取最终长路径后再比较。
+const finalPath = p => realpathSync.native(p);
 
 function fixture(t, files) {
   const root = mkdtempSync(join(tmpdir(), 'self-analyst-jar-'));
@@ -44,7 +48,7 @@ test('resolves the formal JAR and excludes original artifacts', windowsOnly, t =
   });
   const result = run(target);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), join(target, 'self-analyst-app-0.2.8.jar'));
+  assert.equal(finalPath(result.stdout.trim()), finalPath(join(target, 'self-analyst-app-0.2.8.jar')));
 });
 
 for (const shaded of ['formal', 'different intermediate bytes']) {
@@ -53,7 +57,7 @@ for (const shaded of ['formal', 'different intermediate bytes']) {
     const target = fixture(t, files);
     const result = run(target);
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), join(target, 'self-analyst-app-0.2.8.jar'));
+    assert.equal(finalPath(result.stdout.trim()), finalPath(join(target, 'self-analyst-app-0.2.8.jar')));
     assert.deepEqual(readdirSync(target).sort(), Object.keys(files).sort());
     for (const [name, content] of Object.entries(files)) assert.equal(readFileSync(join(target, name), 'utf8'), content);
   });
@@ -66,7 +70,7 @@ test('handles snapshot versions without hardcoding the release version', windows
   });
   const result = run(target);
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), join(target, 'self-analyst-app-1.0.0-SNAPSHOT.jar'));
+  assert.equal(finalPath(result.stdout.trim()), finalPath(join(target, 'self-analyst-app-1.0.0-SNAPSHOT.jar')));
 });
 
 test('rejects multiple formal versions instead of choosing one', windowsOnly, t => {

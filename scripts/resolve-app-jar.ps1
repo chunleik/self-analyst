@@ -1,5 +1,5 @@
 # 解析 self-analyst-app 的可执行 JAR 路径，避免各脚本硬编码版本号。
-# shade 插件会同时产生 original-*.jar，通配符前缀匹配天然将其排除。
+# original-*.jar 由前缀匹配排除；*-shaded.jar 是 Shade 中间产物，不能作为分发候选。
 
 param(
     [string]$TargetDir
@@ -18,6 +18,7 @@ if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
 
 $candidates = @(
     Get-ChildItem -LiteralPath $TargetDir -Filter "self-analyst-app-*.jar" -File |
+        Where-Object { $_.Name -notlike '*-shaded.jar' } |
         Sort-Object -Property Name
 )
 

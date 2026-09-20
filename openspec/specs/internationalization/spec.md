@@ -44,12 +44,16 @@ Agent system prompt SHALL 明确要求以有效语言回复。English 变体 MUS
 - **THEN** 会话摘要提示要求中文概括，引用的用户原文保持原样
 
 ### Requirement: SPEC-I18N-PROMPT-004、005 日期与兜底文本
-提示词中的 current time 和 UTC→本地时间说明 SHALL 按有效语言使用对应 Locale 文本。预算阻断、Wiki
+提示词中的 current time 和 UTC→本地时间说明 SHALL 按有效语言使用对应 Locale 文本。主 Agent 每轮调用时提供的 current time SHALL 取该轮调用时的系统本地时间与时区，MUST NOT 沿用 Agent 初始化或前一轮的时间。预算阻断、Wiki
 不可用和其它确定性提示 SHALL 跟随有效语言；由用户原文构造的确定性摘要 SHALL 保持用户语言。
 
 #### Scenario: English 时间文本
 - **WHEN** effective language 为 en 且 prompt 注入当前时间
 - **THEN** 日期和时间说明使用英文 Locale 与 English 文案
+
+#### Scenario: 长时间运行后的当前时间
+- **WHEN** 同一 Agent 在不同本地时间先后处理两轮对话
+- **THEN** 后一轮提供给模型的 current time 为后一轮的系统本地时间与时区，不复用前一轮或启动时的值
 
 ### Requirement: SPEC-I18N-DEC-006、SPEC-I18N-UI-001、002 前端消息目录
 桌面 UI SHALL 使用稳定 key 和按语言维护的消息目录及 `t(key, params)` 查找函数，资源 SHALL 在业务渲染前就绪，且不引入打包器或框架。查找 SHALL 支持命名参数替换；当前语言缺失时 SHALL 依次回退英文和 key 本身，不能中断渲染。参数值 MUST 作为数据插入，不得作为模板再次解析或作为未转义 HTML 执行。

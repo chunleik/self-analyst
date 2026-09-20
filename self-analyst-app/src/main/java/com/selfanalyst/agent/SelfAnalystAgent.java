@@ -46,7 +46,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -282,9 +281,9 @@ public class SelfAnalystAgent implements AutoCloseable {
     }
 
     private String buildSystemPrompt() {
-        return AgentPrompts.systemPrompt(lang, "",
-                wikiStore != null, semanticEnabled, hasFileTools, hasConfigTools,
-                ZonedDateTime.now()) + "\n" + com.selfanalyst.i18n.Messages.text(lang, "memory.clarification");
+        return AgentPrompts.systemPromptTemplate(lang, "",
+                wikiStore != null, semanticEnabled, hasFileTools, hasConfigTools)
+                + "\n" + com.selfanalyst.i18n.Messages.text(lang, "memory.clarification");
     }
 
     public Mono<String> chat(String userInput) {

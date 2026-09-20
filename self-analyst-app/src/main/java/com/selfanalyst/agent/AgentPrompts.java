@@ -15,18 +15,38 @@ import java.util.Map;
  */
 final class AgentPrompts {
 
+    static final String CURRENT_TIME_PLACEHOLDER = "__SELFANALYST_CURRENT_LOCAL_TIME__";
+
     private AgentPrompts() {}
 
     /** 装配主 Agent 的基础系统提示；能力片段由 Agent 初始化时的可用组件决定。 */
     static String systemPrompt(Lang lang, String memorySummary, boolean wikiEnabled,
                                boolean semanticEnabled, boolean hasFileTools,
                                boolean hasConfigTools, ZonedDateTime now) {
-        String code = languageCode(lang);
+        return renderSystemPrompt(lang, memorySummary, wikiEnabled, semanticEnabled,
+                hasFileTools, hasConfigTools, formatCurrentTime(lang, now));
+    }
+
+    static String systemPromptTemplate(Lang lang, String memorySummary, boolean wikiEnabled,
+                                       boolean semanticEnabled, boolean hasFileTools,
+                                       boolean hasConfigTools) {
+        return renderSystemPrompt(lang, memorySummary, wikiEnabled, semanticEnabled,
+                hasFileTools, hasConfigTools, CURRENT_TIME_PLACEHOLDER);
+    }
+
+    static String formatCurrentTime(Lang lang, ZonedDateTime now) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern(
                 "yyyy-MM-dd HH:mm:ss EEEE (z, OOOO)", (lang != null ? lang : Lang.english()).locale());
+        return now.format(formatter);
+    }
+
+    private static String renderSystemPrompt(Lang lang, String memorySummary, boolean wikiEnabled,
+                                             boolean semanticEnabled, boolean hasFileTools,
+                                             boolean hasConfigTools, String currentTime) {
+        String code = languageCode(lang);
 
         return PromptResources.render("system." + code + ".md", Map.of(
-                "current_time", now.format(formatter),
+                "current_time", currentTime,
                 "initial_memory_summary", memorySummary == null ? "" : memorySummary,
                 "wiki_context", wikiContext(code, wikiEnabled, semanticEnabled),
                 "file_tools_context", hasFileTools

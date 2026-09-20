@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SelfAnalystAgentMemoryPromptTest {
 
@@ -36,6 +37,8 @@ class SelfAnalystAgentMemoryPromptTest {
 
             assertFalse(systemPrompt.contains("用户偏好中文交流。"),
                     "mutable long-term memory must only be injected per chat turn");
+            assertTrue(systemPrompt.contains(AgentPrompts.CURRENT_TIME_PLACEHOLDER),
+                    "current time must be supplied for each turn");
         }
     }
 }

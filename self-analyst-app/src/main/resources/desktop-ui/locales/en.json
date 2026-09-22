@@ -135,7 +135,6 @@
   "tab.files": "Files",
   "status.service": "Service",
   "status.capture": "Capture",
-  "status.raw": "Merged events",
   "status.blocked": "Blocked",
   "status.unavailable": "Unavailable",
   "status.diskWarning": "Low disk space",

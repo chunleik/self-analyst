@@ -23,6 +23,48 @@ class WikiFactBuilderTest {
     Path tempDir;
 
     @Test
+    void structuredPromptKeepsAllMetricsRegardlessOfSamplingAndCallsModelOnce() throws Exception {
+        try (Database db = new Database(tempDir.resolve("structured"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            String host = java.net.InetAddress.getLocalHost().getHostName();
+            Instant start = Instant.parse("2026-09-21T04:00:00Z");
+            String window = "watcher-window_" + host;
+            events.insertEvent(window, new Event(start.minusSeconds(60), 180.6,
+                    Map.of("app", "IDE", "title", "订单模块")));
+            events.insertEvent("watcher-afk_" + host, new Event(start.plusSeconds(30), 30,
+                    Map.of("status", "afk")));
+            var period = new WikiPeriod(WikiLevel.DAY, start, start.plusSeconds(86400), "UTC");
+            var complete = new WikiFactBuilder(events, 12000).buildFacts(period);
+            var tiny = new WikiFactBuilder(events, 20).buildFacts(period);
+            assertEquals(complete.activeSeconds(), tiny.activeSeconds());
+            assertEquals(complete.afkSeconds(), tiny.afkSeconds());
+            assertEquals(complete.switchCount(), tiny.switchCount());
+            assertEquals(complete.topApps(), tiny.topApps());
+            for (String key : java.util.List.of("activeSecondsExact", "afkSecondsExact", "appSecondsExact",
+                    "unknownActivitySeconds", "uncoveredSeconds", "conflictSeconds")) {
+                assertEquals(complete.statistics().get(key), tiny.statistics().get(key));
+            }
+            assertEquals(90.6, ((Number) complete.statistics().get("activeSecondsExact")).doubleValue(), 1e-9);
+            assertTrue(tiny.sampledTitles().facts().isEmpty());
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            var summarizer = new WikiSummarizer(prompt -> {
+                calls.incrementAndGet();
+                assertTrue(prompt.contains("结构化标题事实"));
+                assertTrue(prompt.contains("\"id\""));
+                assertFalse(prompt.contains("sourceEventIds"));
+                assertTrue(prompt.contains("订单模块"));
+                assertFalse(prompt.contains("## 窗口标题样本"));
+                assertTrue(prompt.contains("不得相加"));
+                return "{\"summary\":\"相关开发\",\"primaryTask\":\"开发\",\"metrics\":{\"activeSeconds\":99999}}";
+            });
+            var summary = summarizer.summarize(complete, java.time.Duration.ofSeconds(30));
+            assertEquals(1, calls.get());
+            assertEquals(complete.activeSeconds(), summary.metrics().activeSeconds());
+            assertEquals(complete.statistics().get("titleSampling"), summary.metrics().extra().get("titleSampling"));
+        }
+    }
+
+    @Test
     void aggregatesAllEventsAndPreservesFractionalMetricsAcrossChildren() throws Exception {
         try (Database db = new Database(tempDir.resolve("many"))) {
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);

@@ -149,9 +149,9 @@ public record Config(
         int wikiWorkerIntervalSeconds = Integer.parseInt(
                 values.get("wiki.worker.intervalSeconds", "60"));
         int wikiPromptMaxContentChars = Integer.parseInt(
-                values.get("wiki.prompt.maxContentChars", "12000"));
+                values.get("wiki.prompt.maxContentChars", "24000"));
         if (wikiPromptMaxContentChars < 1000) {
-            wikiPromptMaxContentChars = 12000;
+            wikiPromptMaxContentChars = 24000;
         }
         int wikiTopAppsLimit = Integer.parseInt(
                 values.get("wiki.topApps.limit", "10"));
@@ -352,7 +352,7 @@ public record Config(
                 baseDir.resolve("events/raw"), 31, 1000,
                 10_737_418_240L, 1_073_741_824L,
                 RawIntegrityPolicy.LATEST, 1000,
-                false, false, 60, 12000, 10,
+                false, false, 60, 24000, 10,
                 false, baseDir.resolve("wiki-semantic-index"), 8,
                 false, "", "", "", 1024, true, 500,
                 false, "https://search.parallel.ai/mcp", "",

@@ -91,7 +91,7 @@ public final class SupportedKeys {
         put("wiki.enabled", "false", KeyType.BOOLEAN);
         put("wiki.backfill.enabled", "false", KeyType.BOOLEAN);
         put("wiki.worker.intervalSeconds", "60", KeyType.INTEGER);
-        put("wiki.prompt.maxContentChars", "12000", KeyType.INTEGER);
+        put("wiki.prompt.maxContentChars", "24000", KeyType.INTEGER);
         put("wiki.topApps.limit", "10", KeyType.INTEGER);
         put("wiki.semantic.enabled", "true", KeyType.BOOLEAN);
         put("wiki.semantic.index-dir", "./data/memory/wiki-semantic-index", KeyType.STRING);
@@ -167,7 +167,9 @@ public final class SupportedKeys {
         describe("wiki.enabled", "是否启用个人 Wiki 摘要生成。", "Whether to enable personal wiki summary generation.");
         describe("wiki.backfill.enabled", "是否为历史活动补生成 Wiki 内容。", "Whether to backfill wiki content for historical activity.");
         describe("wiki.worker.intervalSeconds", "Wiki 后台任务运行间隔（秒）。", "Interval between wiki background runs, in seconds.");
-        describe("wiki.prompt.maxContentChars", "单次 Wiki 提示词包含的最大内容字符数。", "Maximum content characters included in one wiki prompt.");
+        describe("wiki.prompt.maxContentChars",
+                "单次 Wiki 结构化标题事实的最大字符数，含序列化开销，不含固定提示词和全量统计指标。",
+                "Maximum serialized characters of structured title facts in one wiki prompt, excluding fixed instructions and aggregate metrics.");
         describe("wiki.topApps.limit", "Wiki 摘要统计的高频应用数量上限。", "Maximum number of top applications included in wiki summaries.");
         describe("wiki.semantic.enabled", "是否为 Wiki 内容启用语义检索。", "Whether to enable semantic search for wiki content.");
         describe("wiki.semantic.index-dir", "Wiki 语义索引的保存目录。", "Directory where the wiki semantic index is stored.");

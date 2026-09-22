@@ -306,6 +306,8 @@ public class WikiWorker {
     private boolean isEmpty(WikiFactBuilder.WikiFacts facts) {
         return facts.activeSeconds() == 0 && facts.afkSeconds() == 0
                 && facts.titleSamples().isEmpty() && facts.contextTitleSamples().isEmpty()
+                && (facts.sampledTitles() == null
+                    || ((Number) facts.sampledTitles().coverage().get("candidateFacts")).intValue() == 0)
                 && facts.childSummaries().isEmpty();
     }
 

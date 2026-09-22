@@ -112,6 +112,30 @@ class ConfigTest {
     }
 
     @Test
+    void wikiTitleBudgetDefaultsAreConsistent(@TempDir Path dir) {
+        assertEquals("24000", Config.loadClasspathProps().getProperty("wiki.prompt.maxContentChars"));
+        assertEquals("24000", SupportedKeys.defaults().get("wiki.prompt.maxContentChars"));
+        assertEquals(24_000, Config.load(dir, java.util.Map.of()).wikiPromptMaxContentChars());
+        assertEquals(24_000, Config.testDefaults(dir).wikiPromptMaxContentChars());
+    }
+
+    @Test
+    void wikiTitleBudgetKeepsExplicitOverridesAndFallsBackBelowMinimum(@TempDir Path dir) throws Exception {
+        var environment = java.util.Map.of("WIKI_PROMPT_MAX_CONTENT_CHARS", "36000");
+        assertEquals(36_000, Config.load(dir, environment).wikiPromptMaxContentChars());
+
+        Path file = dir.resolve("config.toml");
+        Files.writeString(file, "[wiki]\nprompt.maxContentChars = 12000\n");
+        assertEquals(12_000, Config.load(dir, environment).wikiPromptMaxContentChars());
+
+        Files.writeString(file, "[wiki]\nprompt.maxContentChars = 999\n");
+        assertEquals(24_000, Config.load(dir, environment).wikiPromptMaxContentChars());
+
+        Files.writeString(file, "[wiki]\nprompt.maxContentChars = 1000\n");
+        assertEquals(1_000, Config.load(dir, environment).wikiPromptMaxContentChars());
+    }
+
+    @Test
     void explicitEmptyFileExtensionListRemainsFailClosed(@TempDir Path dir) throws Exception {
         Files.writeString(dir.resolve("config.toml"), """
                 [file.watch]

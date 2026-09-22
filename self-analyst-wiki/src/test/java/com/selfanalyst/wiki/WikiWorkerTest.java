@@ -27,6 +27,52 @@ class WikiWorkerTest {
     private Database awDatabase;
 
     @Test
+    void statisticsNarrativeFailsSafelyWithoutCommittingSummary(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("llm-wiki.db"));
+        awDatabase = new Database(dir.resolve("events"));
+        EventStore events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-09-21T05:00:00Z");
+        String host = java.net.InetAddress.getLocalHost().getHostName();
+        events.insertEvent("watcher-window_" + host, new com.selfanalyst.events.model.Event(
+                now.minusSeconds(1800), 60, Map.of("app", "Editor", "title", "Database module")));
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        worker = new WikiWorker(store, new WikiFactBuilder(events, 24000), new WikiSummarizer(prompt -> {
+            calls.incrementAndGet();
+            return "{\"summary\":\"AFK覆盖为partial PRIVATE_NARRATIVE\",\"primaryTask\":\"开发\"}";
+        }), ZoneId.of("UTC"), Duration.ofSeconds(5), 3600, false, null, () -> now);
+        worker.start();
+        worker.processOneRound();
+        assertEquals(1, calls.get());
+        WikiEntry entry = store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst();
+        assertEquals(WikiStatus.FAILED, entry.status());
+        assertEquals("WIKI_NARRATIVE_STATISTICS:summary", entry.lastError());
+        org.junit.jupiter.api.Assertions.assertNull(entry.summary());
+        org.junit.jupiter.api.Assertions.assertNotNull(entry.nextRetryAt());
+    }
+
+    @Test
+    void sampledOutContextIsNotMisreportedAsNoEvents(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("llm-wiki.db"));
+        awDatabase = new Database(dir.resolve("events"));
+        EventStore events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-09-21T05:00:00Z");
+        String host = java.net.InetAddress.getLocalHost().getHostName();
+        events.insertEvent("watcher-content_" + host, new com.selfanalyst.events.model.Event(
+                now.minusSeconds(1800), 30, Map.of("schema_version", 2, "app", "Editor", "title", "Notes",
+                "title_source", "window", "uia_chars", 0)));
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        worker = new WikiWorker(store, new WikiFactBuilder(events, 20), new WikiSummarizer(prompt -> {
+            calls.incrementAndGet();
+            org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("selectedFacts=0"));
+            return "{\"summary\":\"标题证据未纳入预算，无法判断任务\",\"primaryTask\":\"信息不足\"}";
+        }), ZoneId.of("UTC"), Duration.ofSeconds(5), 3600, false, null, () -> now);
+        worker.start();
+        worker.processOneRound();
+        assertEquals(1, calls.get());
+        assertEquals(WikiStatus.SUMMARIZED, store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst().status());
+    }
+
+    @Test
     void historicalStatisticsDiscoveryIsBackgroundAndResumes(@TempDir Path dir) {
         Path wiki = dir.resolve("llm-wiki.db");
         store = new WikiStore(wiki);

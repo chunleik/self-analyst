@@ -14,9 +14,7 @@ import java.util.*;
 public class WikiFactBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(WikiFactBuilder.class);
-    private static final int MAX_TITLE_LEN = 160;
-    private static final int MAX_WINDOW_SESSIONS = 20;
-    public static final String FACT_BUILDER_VERSION = "wiki-facts-afk-v2";
+    public static final String FACT_BUILDER_VERSION = "wiki-facts-topics-v4";
 
     private final EventStore eventStore;
     private final String hostname;
@@ -65,10 +63,12 @@ public class WikiFactBuilder {
         List<WikiEntry.AppDuration> topApps = stats.apps().entrySet().stream()
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(10)
                 .map(e -> new WikiEntry.AppDuration(e.getKey(), e.getValue().longValue())).toList();
-        List<String> titleSamples = sampleTitles(stats.activeEvents());
-        int titleChars = titleSamples.stream().mapToInt(String::length).sum();
-        List<String> contextTitleSamples = sampleContextTitles(
-                contentEvents, Math.max(0, maxContentChars - titleChars));
+        WikiTitleSampler.Selection sampled = WikiTitleSampler.sample(
+                period, stats.activeEvents(), windowEvents, contentEvents, maxContentChars);
+        List<String> titleSamples = sampled.facts().stream().filter(f -> "window".equals(f.source()))
+                .map(WikiTitleSampler.Fact::title).toList();
+        List<String> contextTitleSamples = sampled.facts().stream().filter(f -> "content".equals(f.source()))
+                .map(f -> "[" + f.app() + "] " + f.title()).toList();
 
         Long lag = projectionLagSeconds.get();
         Map<String, WikiEntry.SourceCoverage> coverage = new LinkedHashMap<>();
@@ -80,7 +80,8 @@ public class WikiFactBuilder {
                 FACT_BUILDER_VERSION, eventStore.currentProjectorVersion(), coverage,
                 Map.of("unknownActivitySeconds", stats.unknownSeconds(), "uncoveredSeconds", stats.uncoveredSeconds(),
                         "conflictSeconds", stats.conflictSeconds(), "activeSecondsExact", stats.activeSeconds(),
-                        "afkSecondsExact", stats.afkSeconds(), "appSecondsExact", stats.apps()));
+                        "afkSecondsExact", stats.afkSeconds(), "appSecondsExact", stats.apps(),
+                        "titleSampling", sampled.coverage()), sampled);
     }
 
     public WikiFacts buildFactsFromChildren(List<WikiEntry> childEntries, WikiPeriod period) {
@@ -151,48 +152,6 @@ public class WikiFactBuilder {
 
     private record QueryResult(List<Event> events, String status) {}
 
-    private List<String> sampleTitles(List<Event> windowEvents) {
-        List<String> titles = new ArrayList<>();
-        int totalChars = 0;
-        for (Event e : windowEvents) {
-            String title = (String) e.data().getOrDefault("title", "");
-            if (ActivityStatistics.unknown(title)) continue;
-            String trimmed = title.length() > MAX_TITLE_LEN
-                    ? title.substring(0, MAX_TITLE_LEN - 3) + "..." : title;
-            if (totalChars + trimmed.length() > maxContentChars) break;
-            titles.add(trimmed);
-            totalChars += trimmed.length();
-        }
-        return titles;
-    }
-
-    /** Sample unique application/window context titles without reading persisted body text. */
-    private List<String> sampleContextTitles(List<Event> contentEvents, int charBudget) {
-        if (charBudget <= 0) return List.of();
-        Set<String> seen = new LinkedHashSet<>();
-        List<String> samples = new ArrayList<>();
-        int totalChars = 0;
-        for (Event e : contentEvents) {
-            String app  = (String) e.data().getOrDefault("app",  "");
-            String title = (String) e.data().getOrDefault("title", "");
-            String contextTitle = (String) e.data().getOrDefault("context_title", "");
-            String effectiveTitle = !contextTitle.isBlank() ? contextTitle : title;
-            if (effectiveTitle.isBlank()) continue;
-            String kind = (String) e.data().getOrDefault("context_kind", "unknown");
-            String key = app + "\u0000" + effectiveTitle + "\u0000" + kind;
-            if (!seen.add(key)) continue;
-            if (samples.size() >= MAX_WINDOW_SESSIONS) break;
-            String normalized = effectiveTitle.length() > MAX_TITLE_LEN
-                    ? effectiveTitle.substring(0, MAX_TITLE_LEN - 3) + "..."
-                    : effectiveTitle;
-            String entry = "[" + app + "] " + normalized;
-            if (totalChars + entry.length() > charBudget) break;
-            samples.add(entry);
-            totalChars += entry.length();
-        }
-        return samples;
-    }
-
     private static String resolveHostname() {
         try {
             return InetAddress.getLocalHost().getHostName();
@@ -213,7 +172,17 @@ public class WikiFactBuilder {
             String factBuilderVersion,
             String projectorVersion,
             Map<String, WikiEntry.SourceCoverage> sourceCoverage,
-            Map<String, Object> statistics) {
+            Map<String, Object> statistics,
+            WikiTitleSampler.Selection sampledTitles) {
+
+        public WikiFacts(WikiPeriod period, long activeSeconds, long afkSeconds, int switchCount,
+                         List<WikiEntry.AppDuration> topApps, List<String> titleSamples,
+                         List<String> contextTitleSamples, List<String> childSummaries,
+                         String factBuilderVersion, String projectorVersion,
+                         Map<String, WikiEntry.SourceCoverage> sourceCoverage, Map<String, Object> statistics) {
+            this(period, activeSeconds, afkSeconds, switchCount, topApps, titleSamples, contextTitleSamples,
+                    childSummaries, factBuilderVersion, projectorVersion, sourceCoverage, statistics, null);
+        }
 
         public WikiFacts(WikiPeriod period, long activeSeconds, long afkSeconds, int switchCount,
                          List<WikiEntry.AppDuration> topApps, List<String> titleSamples,

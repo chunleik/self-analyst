@@ -36,8 +36,6 @@ function createSandbox(summary) {
         backendText: { textContent: "", title: "" },
         collectorsDot: { className: "", title: "" },
         collectorsText: { textContent: "", title: "" },
-        rawDot: { className: "", title: "" },
-        rawText: { textContent: "", title: "" },
         fileDot: { className: "", title: "" },
         fileText: { textContent: "", title: "" },
         fileStatusBtn: { title: "" },

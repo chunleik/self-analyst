@@ -12,8 +12,6 @@ function cacheDom() {
     backendText: $("#backend-text"),
     collectorsDot: $("#collectors-dot"),
     collectorsText: $("#collectors-text"),
-    rawDot: $("#raw-dot"),
-    rawText: $("#raw-text"),
     fileStatusBtn: $("#file-status-btn"),
     fileDot: $("#file-dot"),
     fileText: $("#file-text"),

@@ -42,8 +42,6 @@ const context = {
       backendText: element(),
       collectorsDot: element(),
       collectorsText: element(),
-      rawDot: element(),
-      rawText: element(),
       fileStatusBtn: element(),
       fileDot: element(),
       fileText: element(),
@@ -68,10 +66,14 @@ assert.equal(
 );
 assert.match(context.state.dom.fileDot.className, /green/);
 assert.match(context.state.dom.fileStatusBtn.title, /status\.running/);
-assert.match(context.state.dom.rawDot.className, /red/);
-assert.match(context.state.dom.rawDot.title, /status\.blocked/);
-assert.match(context.state.dom.rawDot.title, /status\.diskWarning/);
-assert.match(context.state.dom.rawDot.title, /1.0 MiB/);
-assert.match(context.state.dom.rawDot.title, /2.0 MiB/);
-assert.doesNotMatch(context.state.dom.rawDot.title, /SELF_ANALYST_DOM_SECRET/);
-assert.doesNotMatch(context.state.dom.rawText.title, /SELF_ANALYST_DOM_SECRET/);
+assert.match(context.state.dom.backendDot.className, /green/);
+assert.match(context.state.dom.llmDot.className, /orange/);
+
+// Storage status must not require removed DOM entries or leak into other statuses.
+for (const status of ["running", "degraded", "blocked", "unavailable"]) {
+  context.state.status.raw.status = status;
+  context.updateStatusBar();
+  assert.match(context.state.dom.backendDot.className, /green/);
+  assert.match(context.state.dom.fileDot.className, /green/);
+  assert.doesNotMatch(JSON.stringify(context.state.dom), /SELF_ANALYST_DOM_SECRET/);
+}

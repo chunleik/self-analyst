@@ -52,19 +52,6 @@ function updateStatusBar() {
     syncFileUiVisibility();
   }
 
-  // Merged event storage: only diagnostic metadata is rendered.
-  var raw = st.raw || { status: "unavailable" };
-  setStatusDotByState(state.dom.rawDot, raw.status, t("status.raw"));
-  state.dom.rawText.textContent = t("status.raw");
-  var rawTitle = state.dom.rawDot.title;
-  if (raw.diskWarning) rawTitle += "; " + t("status.diskWarning");
-  if (raw.mode === "merged") {
-    rawTitle += "; " + t("storage.active") + ": " + ((raw.activeBytes || 0) / 1048576).toFixed(1) + " MiB";
-    rawTitle += "; " + t("storage.backups") + ": " + ((raw.backupBytes || 0) / 1048576).toFixed(1) + " MiB";
-  }
-  state.dom.rawDot.title = rawTitle;
-  state.dom.rawText.title = rawTitle;
-
   // LLM
   var llmOk = st.llm && st.llm.configured;
   var llmTitle = t("status.llm") + " " + (llmOk ? t("status.ok") : t("status.notReady"));

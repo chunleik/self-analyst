@@ -143,7 +143,6 @@
   "tab.files": "文件",
   "status.service": "服务",
   "status.capture": "采集",
-  "status.raw": "合并事件",
   "status.blocked": "已阻断",
   "status.unavailable": "不可用",
   "status.diskWarning": "磁盘空间告警",

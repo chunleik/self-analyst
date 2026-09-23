@@ -27,6 +27,84 @@ class WikiSummarizerTest {
         """;
 
     @Test
+    void promptSeparatesInternalStatisticsFromAllNarrativeFields() {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var summarizer = new WikiSummarizer(prompt -> {
+            calls.incrementAndGet();
+            assertTrue(prompt.contains("仅用于内部判断，不得复述"));
+            assertTrue(prompt.contains("taskSegments.title/summary/evidence"));
+            assertTrue(prompt.contains("旧子摘要中的统计说明也不得复制"));
+            String outputSection = prompt.substring(prompt.indexOf("## 输出要求"));
+            assertFalse(outputSection.contains("\"metrics\":"), "the model should only generate narrative fields");
+            return SAMPLE_VALID_JSON.replace("\"activeSeconds\": 3600", "\"activeSeconds\": 99999");
+        });
+        var result = summarizer.summarize(factsWithCoverage("partial", java.util.Map.of()), Duration.ofSeconds(30));
+        assertEquals(1, calls.get());
+        assertEquals(7200, result.metrics().activeSeconds());
+        assertEquals(300, result.metrics().afkSeconds());
+    }
+
+    @Test
+    void incompleteCoverageCapsConfidenceWithoutAddingStatisticsToText() {
+        var summarizer = new WikiSummarizer(prompt -> SAMPLE_VALID_JSON);
+        for (String status : List.of("missing", "partial", "failed", "lagging")) {
+            var result = summarizer.summarize(factsWithCoverage(status, java.util.Map.of()), Duration.ofSeconds(30));
+            assertEquals("medium", result.taskSegments().getFirst().confidence(), status);
+            assertEquals("主要在进行Java后端开发", result.summary());
+            assertEquals(List.of("IDE可见"), result.taskSegments().getFirst().evidence());
+        }
+        var certain = summarizer.summarize(factsWithCoverage("complete", java.util.Map.of()), Duration.ofSeconds(30));
+        assertEquals("high", certain.taskSegments().getFirst().confidence());
+        var conflict = summarizer.summarize(factsWithCoverage("complete", java.util.Map.of("conflictSeconds", 1.5)), Duration.ofSeconds(30));
+        assertEquals("medium", conflict.taskSegments().getFirst().confidence());
+    }
+
+    @Test
+    void rejectsStatisticsInEveryNarrativeFieldWithoutExtraModelCallsOrTextInError() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        for (String field : List.of("summary", "primaryTask", "taskSegments.title", "taskSegments.summary", "taskSegments.evidence")) {
+            var tree = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(SAMPLE_VALID_JSON);
+            String forbidden = "AFK覆盖为partial，PRIVATE_RESPONSE_MARKER";
+            if (!field.startsWith("taskSegments.")) tree.put(field, forbidden);
+            else {
+                var segment = (com.fasterxml.jackson.databind.node.ObjectNode) tree.get("taskSegments").get(0);
+                String key = field.substring("taskSegments.".length());
+                if (key.equals("evidence")) segment.putArray(key).add(forbidden);
+                else segment.put(key, forbidden);
+            }
+            var calls = new java.util.concurrent.atomic.AtomicInteger();
+            var summarizer = new WikiSummarizer(prompt -> { calls.incrementAndGet(); return tree.toString(); });
+            var exception = assertThrows(IllegalArgumentException.class,
+                    () -> summarizer.summarize(factsWithCoverage("complete", java.util.Map.of()), Duration.ofSeconds(30)), field);
+            assertEquals("WIKI_NARRATIVE_STATISTICS:" + field, exception.getMessage());
+            assertFalse(exception.getMessage().contains("PRIVATE_RESPONSE_MARKER"));
+            assertEquals(1, calls.get());
+        }
+    }
+
+    @Test
+    void responseWithoutModelMetricsPreservesLocalExactValues() {
+        var stats = java.util.Map.<String, Object>of("activeSecondsExact", 7200.75, "uncoveredSeconds", 10.25);
+        var summarizer = new WikiSummarizer(prompt -> """
+                {"summary":"查看数据库同步与ETL资料", "primaryTask":"数据库相关开发",
+                 "taskSegments":[{"title":"排查连接超时", "summary":"排查30秒连接超时，并调试AFK采集器",
+                 "evidence":["编辑器出现相关配置标题"], "apps":["IDE"], "confidence":"low"}]}
+                """);
+        var result = summarizer.summarize(factsWithCoverage("partial", stats), Duration.ofSeconds(30));
+        assertEquals(7200, result.metrics().activeSeconds());
+        assertEquals(stats, result.metrics().extra());
+        assertEquals("low", result.taskSegments().getFirst().confidence());
+    }
+
+    private WikiFactBuilder.WikiFacts factsWithCoverage(String status, java.util.Map<String, Object> stats) {
+        return new WikiFactBuilder.WikiFacts(new WikiPeriod(WikiLevel.DAY, t1, t2, tz.getId()),
+                7200, 300, 25, List.of(new WikiEntry.AppDuration("IDE", 7200)),
+                List.of("数据库同步设计"), List.of(), List.of("旧摘要：活跃时长2小时，AFK覆盖partial。"),
+                WikiFactBuilder.FACT_BUILDER_VERSION, null,
+                java.util.Map.of("afk", new WikiEntry.SourceCoverage(status, t1, t2, null)), stats);
+    }
+
+    @Test
     void shouldUseRawFactsForHour() {
         WikiSummarizer summarizer = new WikiSummarizer(prompt -> {
             assertTrue(prompt.contains("应用内标题样本"));

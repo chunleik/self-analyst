@@ -263,6 +263,14 @@ refreshed; outdated Wiki summaries are retained for traceability and excluded fr
 Historical regeneration runs in the background when Wiki backfill is enabled and follows the
 existing model budget and retry settings. Original events remain unchanged.
 
+Wiki's structured title facts use a default budget of **24,000 characters**
+(`wiki.prompt.maxContentChars`), excluding fixed prompts and aggregate metrics.
+Explicit valid settings take precedence, so an existing 12,000-character budget remains effective.
+New Wiki summaries focus on tasks, projects, and technical topics. Activity durations and AFK
+coverage remain in structured statistics for internal prioritization and confidence assessment;
+they are not repeated in summary text or task evidence. Existing summaries and dashboard statistics
+remain available.
+
 See the [activity statistics guide](docs/activity-statistics.md) for migration and recovery details.
 
 ## Contributing

@@ -128,8 +128,10 @@ cargo test --manifest-path self-analyst-axsidecar/Cargo.toml
 - GitHub Actions 的 Windows CI SHALL 执行 OpenSpec 严格校验、Java/Node/Rust 测试、Rust 格式与
   Clippy、可执行 JAR 打包及真实进程冒烟。
 - Windows release workflow SHALL 重建 portable ZIP 和 NSIS 安装包，校验内置 JAR/JRE、生成
-  SHA-256，并完成隔离目录中的静默安装与卸载。由 `v*` 标签触发时 SHALL 在校验通过后创建或更新
-  同名 GitHub Release，并附上上述分发文件；`workflow_dispatch` 只构建和上传 artifact，不发 Release。
+  SHA-256，并完成隔离目录中的静默安装与卸载。`vX.Y.Z` 标签在项目版本一致且校验通过后 SHALL
+  创建或更新同名正式 GitHub Release。`vX.Y.Z-beta.N` 与 `vX.Y.Z-rc.N` SHALL 创建或更新同名
+  Pre-release，且不得成为最新发布。其他 `v*` 标签 SHALL 失败且不创建 Release。对分支手动运行
+  `workflow_dispatch` 只构建和上传 artifact，不发 Release。
 
 ### 运行数据准入验证
 

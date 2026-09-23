@@ -1,0 +1,348 @@
+package com.selfanalyst.wiki;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.selfanalyst.events.model.Event;
+import com.selfanalyst.events.statistics.ActivityStatistics;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+
+/** Deterministic, metadata-only sampling. Statistics are supplied, never recomputed from samples. */
+public final class WikiTitleSampler {
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int REPRESENTATIVES = 4;
+
+    private WikiTitleSampler() {}
+
+    public record Interval(String start, String end, boolean activityMatched,
+                           List<Long> sourceEventIds, int omittedSourceIds) {}
+    public record Fact(String id, String source, String app, String title, String kind,
+                       Double activeSeconds, int occurrences, List<Interval> intervals,
+                       int omittedIntervals) {}
+    public record Selection(List<Fact> facts, String jsonLines, Map<String, Object> coverage) {}
+
+    private record Key(String source, String app, String title, String kind) {}
+    private record Span(Instant start, Instant end, SortedSet<Long> ids, boolean active) {}
+    private record Candidate(Key key, Fact fact, Instant start, int timeMask, Set<String> tokens, String json) {}
+
+    public static Selection sample(WikiPeriod period, List<Event> active,
+                                   List<Event> windows, List<Event> contents, int maxChars) {
+        Map<Key, List<Span>> groups = new HashMap<>();
+        Map<String, EventIndex> originals = byIdentity(windows);
+        Map<String, EventIndex> effective = byIdentity(active);
+        int deduplicatedObservations = 0;
+        for (Event event : active) {
+            String app = text(event, "app"), title = text(event, "title");
+            if (ActivityStatistics.unknown(title) || ActivityStatistics.unknown(app)) continue;
+            SortedSet<Long> ids = new TreeSet<>();
+            for (Event original : intersections(originals, app, title, event.timestamp(), ActivityStatistics.end(event))) {
+                if (original.id() > 0) ids.add(original.id());
+            }
+            add(groups, new Key("window", app, title, "window"),
+                    event.timestamp(), ActivityStatistics.end(event), ids, true);
+        }
+        for (Event event : contents) {
+            if (!valid(event)) continue;
+            String app = text(event, "app"), windowTitle = text(event, "title");
+            String context = text(event, "context_title");
+            String title = context.isBlank() ? windowTitle : context;
+            if (ActivityStatistics.unknown(title) || ActivityStatistics.unknown(app)) continue;
+            String kind = context.isBlank() ? "window" : text(event, "context_kind");
+            if (!Set.of("chat", "article", "document", "page", "window").contains(kind)) kind = "unknown";
+            Instant start = max(period.start(), event.timestamp());
+            Instant end = min(period.end(), ActivityStatistics.end(event));
+            if (!start.isBefore(end)) continue;
+            SortedSet<Long> ids = new TreeSet<>();
+            if (event.id() > 0) ids.add(event.id());
+            List<Event> matches = intersections(effective, app, windowTitle, start, end);
+            boolean fallback = context.isBlank() || (context.equals(windowTitle)
+                    && (kind.equals("window") || kind.equals("unknown")));
+            if (fallback) {
+                // Matched system-title intervals already have an authoritative window fact.
+                List<Span> remainder = subtract(start, end, matches, ids);
+                if (!matches.isEmpty()) deduplicatedObservations++;
+                for (Span span : remainder) {
+                    add(groups, new Key("content", app, title, "window"), span.start(), span.end(), ids, false);
+                }
+                continue;
+            }
+            for (Event window : matches) {
+                Instant a = max(start, window.timestamp()), b = min(end, ActivityStatistics.end(window));
+                if (!a.isBefore(b)) continue;
+                add(groups, new Key("content", app, title, kind), a, b, ids, true);
+            }
+            // Even a partly matched semantic observation may have unmatched edges.
+            for (Span span : subtract(start, end, matches, ids)) {
+                add(groups, new Key("content", app, title, kind), span.start(), span.end(), ids, false);
+            }
+        }
+
+        List<Map.Entry<Key, List<Span>>> ordered = new ArrayList<>(groups.entrySet());
+        ordered.sort(Comparator.comparing(e -> keyOrder(e.getKey())));
+        List<Candidate> candidates = new ArrayList<>();
+        int nextId = 1;
+        for (var group : ordered) {
+            List<Span> spans = new ArrayList<>();
+            spans.addAll(union(group.getValue().stream().filter(Span::active).toList()));
+            spans.addAll(union(group.getValue().stream().filter(s -> !s.active()).toList()));
+            spans.sort(Comparator.comparing(Span::start).thenComparing(Span::end).thenComparing(Span::active));
+            Key key = group.getKey();
+            Double activeSeconds = spans.stream().anyMatch(Span::active)
+                    ? spans.stream().filter(Span::active).mapToDouble(s -> seconds(s.start(), s.end())).sum() : null;
+            List<Interval> intervals = representatives(spans).stream().map(s -> new Interval(
+                    s.start().toString(), s.end().toString(), s.active(), s.ids().stream().limit(REPRESENTATIVES).toList(),
+                    Math.max(0, s.ids().size() - REPRESENTATIVES))).toList();
+            Fact fact = new Fact("f" + nextId++, key.source(), bounded(key.app()), bounded(key.title()), key.kind(),
+                    activeSeconds, spans.size(), intervals, spans.size() - intervals.size());
+            candidates.add(new Candidate(key, fact, spans.getFirst().start(), timeMask(period, spans),
+                    tokens(key.title()), compactJson(fact, period)));
+        }
+        candidates = removeCommonTokens(candidates);
+        List<Candidate> windowCandidates = candidates.stream().filter(c -> c.key().source().equals("window")).toList();
+        List<Candidate> contextCandidates = candidates.stream().filter(c -> c.key().source().equals("content")).toList();
+        List<Candidate> semanticCandidates = contextCandidates.stream().filter(c -> !c.key().kind().equals("window")).toList();
+        int budget = Math.max(0, maxChars);
+        List<Candidate> selected = new ArrayList<>();
+        int windowBudget = semanticCandidates.isEmpty() ? budget : windowCandidates.isEmpty() ? 0 : budget / 2;
+        int used = select(windowCandidates, selected, windowBudget);
+        used += select(semanticCandidates, selected, budget - windowBudget);
+        // Reuse unused reservations only after both sources had their own opportunity.
+        used += select(candidates, selected, budget - used);
+        selected.sort(Comparator.comparing(Candidate::start).thenComparing(c -> keyOrder(c.key())));
+        StringBuilder lines = new StringBuilder();
+        selected.forEach(c -> lines.append(c.json()).append('\n'));
+        Map<String, Object> coverage = new LinkedHashMap<>();
+        coverage.put("candidateFacts", candidates.size());
+        coverage.put("selectedFacts", selected.size());
+        coverage.put("windowCandidates", windowCandidates.size());
+        coverage.put("windowSelected", selected.stream().filter(c -> c.key().source().equals("window")).count());
+        coverage.put("contextCandidates", contextCandidates.size());
+        coverage.put("contextSelected", selected.stream().filter(c -> c.key().source().equals("content")).count());
+        coverage.put("semanticContextCandidates", semanticCandidates.size());
+        coverage.put("deduplicatedObservations", deduplicatedObservations);
+        int totalIntervals = candidates.stream().mapToInt(c -> c.fact().occurrences()).sum();
+        int shownIntervals = selected.stream().mapToInt(c -> c.fact().intervals().size()).sum();
+        coverage.put("omittedIntervals", totalIntervals - shownIntervals);
+        coverage.put("budgetChars", budget);
+        coverage.put("usedChars", used);
+        return new Selection(selected.stream().map(Candidate::fact).toList(), lines.toString(),
+                Collections.unmodifiableMap(coverage));
+    }
+
+    private static int select(List<Candidate> candidates, List<Candidate> selected, int budget) {
+        int used = 0;
+        Set<String> selectedIds = new HashSet<>();
+        selected.forEach(c -> selectedIds.add(c.fact().id()));
+        boolean progress;
+        do {
+            progress = false;
+            for (int layer = 0; layer < 4; layer++) {
+                Candidate best = null;
+                double bestScore = -1;
+                for (Candidate candidate : candidates) {
+                    if (selectedIds.contains(candidate.fact().id()) || (candidate.timeMask() & (1 << layer)) == 0
+                            || candidate.json().length() + 1 > budget - used) continue;
+                    double score = score(candidate, selected);
+                    // candidates are initially ordered by full identity, giving deterministic ties.
+                    if (score > bestScore) { best = candidate; bestScore = score; }
+                }
+                if (best == null) continue;
+                selected.add(best);
+                selectedIds.add(best.fact().id());
+                used += best.json().length() + 1;
+                progress = true;
+            }
+        } while (progress);
+        return used;
+    }
+
+    private static double score(Candidate candidate, List<Candidate> selected) {
+        int appCount = 0;
+        double similarity = 0;
+        for (Candidate prior : selected) {
+            if (!prior.key().app().equals(candidate.key().app())) continue;
+            appCount++;
+            long intersection = candidate.tokens().stream().filter(prior.tokens()::contains).count();
+            int union = candidate.tokens().size() + prior.tokens().size() - (int) intersection;
+            if (union > 0) similarity = Math.max(similarity, (double) intersection / union);
+        }
+        double activity = candidate.fact().activeSeconds() == null ? 0.25
+                : Math.sqrt(Math.max(0, candidate.fact().activeSeconds()));
+        return activity * (1 - 0.75 * similarity) / (1 + 0.35 * appCount);
+    }
+
+    private static int timeMask(WikiPeriod period, List<Span> spans) {
+        double length = seconds(period.start(), period.end());
+        if (length <= 0) return 1;
+        int mask = 0;
+        for (Span span : spans) {
+            double a = seconds(period.start(), span.start()), b = seconds(period.start(), span.end());
+            for (int i = 0; i < 4; i++) {
+                if (a < length * (i + 1) / 4 && b > length * i / 4) mask |= 1 << i;
+            }
+        }
+        return mask;
+    }
+
+    private static Set<String> tokens(String title) {
+        Set<String> tokens = new TreeSet<>();
+        for (String token : bounded(title).toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
+            if (token.length() > 1) tokens.add(token);
+        }
+        return tokens;
+    }
+
+    private static List<Candidate> removeCommonTokens(List<Candidate> candidates) {
+        Map<String, Integer> counts = new HashMap<>();
+        Map<String, Map<String, Integer>> frequencies = new HashMap<>();
+        for (Candidate c : candidates) {
+            counts.merge(c.key().app(), 1, Integer::sum);
+            Map<String, Integer> freq = frequencies.computeIfAbsent(c.key().app(), k -> new HashMap<>());
+            c.tokens().forEach(t -> freq.merge(t, 1, Integer::sum));
+        }
+        return candidates.stream().map(c -> {
+            Set<String> informative = new TreeSet<>(c.tokens());
+            informative.removeIf(t -> frequencies.get(c.key().app()).get(t)
+                    >= Math.max(3, Math.ceil(counts.get(c.key().app()) * 0.8)));
+            return new Candidate(c.key(), c.fact(), c.start(), c.timeMask(), informative, c.json());
+        }).toList();
+    }
+
+    private static List<Span> subtract(Instant start, Instant end, List<Event> matches, SortedSet<Long> ids) {
+        List<Span> result = new ArrayList<>();
+        Instant cursor = start;
+        for (Event match : matches) {
+            Instant a = max(start, match.timestamp()), b = min(end, ActivityStatistics.end(match));
+            if (cursor.isBefore(a)) result.add(new Span(cursor, a, ids, false));
+            cursor = max(cursor, b);
+            if (!cursor.isBefore(end)) break;
+        }
+        if (cursor.isBefore(end)) result.add(new Span(cursor, end, ids, false));
+        return result;
+    }
+
+    private static String compactJson(Fact fact, WikiPeriod period) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", fact.id());
+        row.put("src", fact.source());
+        row.put("app", fact.app());
+        row.put("title", fact.title());
+        row.put("kind", fact.kind());
+        row.put("s", fact.activeSeconds() == null ? null : roundSeconds(fact.activeSeconds()));
+        row.put("n", fact.occurrences());
+        row.put("r", fact.intervals().stream().map(interval -> List.of(
+                roundSeconds(seconds(period.start(), Instant.parse(interval.start()))),
+                roundSeconds(seconds(period.start(), Instant.parse(interval.end()))),
+                interval.activityMatched() ? 1 : 0)).toList());
+        row.put("omit", fact.omittedIntervals());
+        try { return JSON.writeValueAsString(row); }
+        catch (JsonProcessingException e) { throw new IllegalStateException("Cannot serialize title facts", e); }
+    }
+
+    private static double roundSeconds(double seconds) {
+        return Math.round(seconds * 1000) / 1000.0;
+    }
+
+    private static List<Span> union(List<Span> input) {
+        input = new ArrayList<>(input);
+        input.sort(Comparator.comparing(Span::start).thenComparing(Span::end));
+        List<Span> result = new ArrayList<>();
+        for (Span span : input) {
+            if (result.isEmpty() || result.getLast().end().isBefore(span.start())) {
+                result.add(new Span(span.start(), span.end(), new TreeSet<>(span.ids()), span.active()));
+            } else {
+                Span prior = result.removeLast();
+                SortedSet<Long> ids = prior.ids();
+                ids.addAll(span.ids());
+                result.add(new Span(prior.start(), max(prior.end(), span.end()), ids, prior.active()));
+            }
+        }
+        return result;
+    }
+
+    private static <T> List<T> representatives(List<T> items) {
+        if (items.size() <= REPRESENTATIVES) return items;
+        List<T> result = new ArrayList<>();
+        for (int i = 0; i < REPRESENTATIVES; i++) {
+            result.add(items.get((int) ((long) i * (items.size() - 1) / (REPRESENTATIVES - 1))));
+        }
+        return result;
+    }
+
+    private static Map<String, EventIndex> byIdentity(List<Event> events) {
+        Map<String, List<Event>> grouped = new HashMap<>();
+        for (Event event : events) {
+            if (valid(event)) grouped.computeIfAbsent(identity(text(event, "app"), text(event, "title")),
+                    k -> new ArrayList<>()).add(event);
+        }
+        Map<String, EventIndex> result = new HashMap<>();
+        grouped.forEach((key, values) -> result.put(key, new EventIndex(values)));
+        return result;
+    }
+
+    /** Prefix maximum end bounds avoid rescanning a full day's repeated windows for every segment. */
+    private static final class EventIndex {
+        private final List<Event> events;
+        private final List<Instant> ends = new ArrayList<>();
+
+        private EventIndex(List<Event> events) {
+            this.events = events;
+            events.sort(Comparator.comparing(Event::timestamp).thenComparingLong(Event::id));
+            Instant end = Instant.MIN;
+            for (Event event : events) {
+                end = max(end, ActivityStatistics.end(event));
+                ends.add(end);
+            }
+        }
+
+        private List<Event> intersecting(Instant start, Instant end) {
+            int low = 0, high = events.size();
+            while (low < high) {
+                int mid = (low + high) >>> 1;
+                if (!ends.get(mid).isAfter(start)) low = mid + 1;
+                else high = mid;
+            }
+            List<Event> matches = new ArrayList<>();
+            for (int i = low; i < events.size() && events.get(i).timestamp().isBefore(end); i++) {
+                if (ActivityStatistics.end(events.get(i)).isAfter(start)) matches.add(events.get(i));
+            }
+            return matches;
+        }
+    }
+
+    private static List<Event> intersections(Map<String, EventIndex> index, String app, String title,
+                                            Instant start, Instant end) {
+        EventIndex events = index.get(identity(app, title));
+        return events == null ? List.of() : events.intersecting(start, end);
+    }
+
+    private static void add(Map<Key, List<Span>> groups, Key key, Instant start, Instant end,
+                            SortedSet<Long> ids, boolean active) {
+        groups.computeIfAbsent(key, k -> new ArrayList<>()).add(new Span(start, end, ids, active));
+    }
+
+    private static boolean valid(Event event) {
+        return event != null && event.timestamp() != null && event.data() != null
+                && Double.isFinite(event.duration()) && event.duration() > 0;
+    }
+
+    private static String text(Event event, String key) {
+        return event.data().get(key) instanceof String value ? value.strip() : "";
+    }
+
+    private static String identity(String app, String title) { return app + "\u0000" + title; }
+    private static String keyOrder(Key key) {
+        return key.source() + "\u0000" + identity(key.app(), key.title()) + "\u0000" + key.kind();
+    }
+
+    private static String bounded(String value) {
+        return value.codePointCount(0, value.length()) <= 160 ? value
+                : value.substring(0, value.offsetByCodePoints(0, 157)) + "...";
+    }
+
+    private static double seconds(Instant a, Instant b) { return Duration.between(a, b).toNanos() / 1e9; }
+    private static Instant min(Instant a, Instant b) { return a.isBefore(b) ? a : b; }
+    private static Instant max(Instant a, Instant b) { return a.isAfter(b) ? a : b; }
+}

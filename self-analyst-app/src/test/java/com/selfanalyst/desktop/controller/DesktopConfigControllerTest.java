@@ -279,7 +279,7 @@ class DesktopConfigControllerTest {
         assertFalse(defaults.keySet().stream().anyMatch(DeprecatedKeys::contains));
         assertTrue(defaults.containsKey("memory.dir"));
         assertTrue(defaults.containsKey("events.base-url"));
-        assertTrue(defaults.containsKey("wiki.prompt.maxContentChars"));
+        assertEquals("24000", defaults.get("wiki.prompt.maxContentChars"));
         assertTrue(defaults.containsKey("file.watch.paths"));
         assertEquals("0", defaults.get("file.watch.maxFileSizeKb"));
         assertTrue(defaults.get("file.watch.extensions").contains("docx"));

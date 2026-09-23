@@ -28,3 +28,5 @@
 最终验收：完整离线Maven 944项Java（6项既有跳过）、Node169通过；最后类型化错误定向24项Java通过。三日均生成成功、没有预算裁剪输入或卡片，三次进程恢复均0新增调用且内容/账本一致；未归类及真实语义不足详见docs/summary-quality-results.md。实际复验使用300秒整树上限，产品worker为180秒，报告已明确差异。29项主规格同步并严格验证通过，差异检查通过。
 
 保留docs/architecture.md作为现行架构说明，docs/summary-quality-evaluation.md作为可重复使用的评测指南，docs/summary-quality-results.md作为分阶段验证历史；README双语同步。无用户配置、数据库或日志进入版本控制产物。
+
+PR验收补充：`docs/README.md` 已补齐新增 `summary-quality-evaluation` capability 的索引及评测文档入口。[看板合成截图](../../../../docs/review/summary-generation-progress.png) 使用实际桌面HTML/CSS/JS和合成数据展示周期预算暂停、保守计量说明、跨应用主题及覆盖不足提示；不连接生产后端、采集器或模型，不包含私人活动数据。截图已进行视觉检查。

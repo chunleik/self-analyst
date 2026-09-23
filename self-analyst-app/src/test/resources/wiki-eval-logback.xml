@@ -1,0 +1,4 @@
+<configuration>
+    <!-- Evaluation reports contain safe diagnostics; never create the user's application log. -->
+    <root level="OFF"/>
+</configuration>

@@ -11,6 +11,27 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class WikiNarrativePolicyTest {
 
     @Test
+    void technicalSubjectsDoNotBecomeReportsThroughRegexBacktracking() {
+        for (String narrative : List.of(
+                "使用30分钟连接超时配置验证重试策略",
+                "使用30秒钟的超时配置验证重试策略",
+                "修复AFK数据缺失时仍显示高置信度的问题。",
+                "调试 AFK 数据缺失情况下的降级逻辑。",
+                "调查activeSeconds=0时的除零问题。",
+                "修复窗口切换次数为25次时的边界条件。")) {
+            assertDoesNotThrow(() -> WikiNarrativePolicy.validate("summary", narrative), narrative);
+        }
+        for (String report : List.of(
+                "使用30分钟处理日常任务。", "使用30秒钟。",
+                "调试了采集器，AFK数据缺失。",
+                "窗口切换了25次，Chrome排名第一。", "Chrome占比70%。",
+                "应用切换次数为12次。", "Chrome ranked first.")) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> WikiNarrativePolicy.validate("summary", report), report);
+        }
+    }
+
+    @Test
     void rejectsExplicitCoverageAndDurationReports() {
         List<String> reports = List.of(
                 "AFK 覆盖为 partial，相关活动仅为估计。",

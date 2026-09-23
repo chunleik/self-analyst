@@ -92,6 +92,11 @@ public final class SupportedKeys {
         put("wiki.backfill.enabled", "false", KeyType.BOOLEAN);
         put("wiki.worker.intervalSeconds", "60", KeyType.INTEGER);
         put("wiki.prompt.maxContentChars", "24000", KeyType.INTEGER);
+        put("wiki.summary.maxCalls", "6", KeyType.INTEGER);
+        put("wiki.summary.maxRequestChars", "32000", KeyType.INTEGER);
+        put("wiki.summary.periodMaxCalls", "12", KeyType.INTEGER);
+        put("wiki.summary.periodMaxTokens", "256000", KeyType.INTEGER);
+        put("wiki.summary.outputTokenReserve", "4096", KeyType.INTEGER);
         put("wiki.topApps.limit", "10", KeyType.INTEGER);
         put("wiki.semantic.enabled", "true", KeyType.BOOLEAN);
         put("wiki.semantic.index-dir", "./data/memory/wiki-semantic-index", KeyType.STRING);
@@ -167,6 +172,11 @@ public final class SupportedKeys {
         describe("wiki.enabled", "是否启用个人 Wiki 摘要生成。", "Whether to enable personal wiki summary generation.");
         describe("wiki.backfill.enabled", "是否为历史活动补生成 Wiki 内容。", "Whether to backfill wiki content for historical activity.");
         describe("wiki.worker.intervalSeconds", "Wiki 后台任务运行间隔（秒）。", "Interval between wiki background runs, in seconds.");
+        describe("wiki.summary.maxCalls", "每份摘要最多模型调用次数（1至16）。", "Maximum model calls per summary (1–16).");
+        describe("wiki.summary.maxRequestChars", "完整模型请求的字符上限，含系统提示与事实。", "Maximum characters per complete model request, including system instructions and facts.");
+        describe("wiki.summary.periodMaxCalls", "每个摘要周期跨重试和重启的累计调用额度；调高后重启可恢复。", "Lifetime model call allowance per summary period, across retries and restarts; raise it and restart to resume.");
+        describe("wiki.summary.periodMaxTokens", "每个摘要周期累计 token 准入额度，不随日期或模型变化重置。", "Lifetime token admission allowance per summary period, preserved across date and model changes.");
+        describe("wiki.summary.outputTokenReserve", "每次调用为输出预留的估计 token，不向服务端设置输出上限。", "Estimated output tokens reserved per call; does not set a provider output limit.");
         describe("wiki.prompt.maxContentChars",
                 "单次 Wiki 结构化标题事实的最大字符数，含序列化开销，不含固定提示词和全量统计指标。",
                 "Maximum serialized characters of structured title facts in one wiki prompt, excluding fixed instructions and aggregate metrics.");

@@ -1,6 +1,7 @@
 package com.selfanalyst.agent;
 
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.LlmSettings;
 import com.selfanalyst.usage.UsageMeter;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SelfAnalystAgentOpenAiCompatibilityTest {
@@ -49,14 +52,39 @@ class SelfAnalystAgentOpenAiCompatibilityTest {
         UsageMeter meter = new UsageMeter(config, tempDir);
         try (SelfAnalystAgent agent =
                      new SelfAnalystAgent(config, null, null, null, null, meter)) {
-            assertEquals("pong", agent.completePlain("ping", Duration.ofSeconds(5)));
+            try (var task = agent.plainTask()) {
+                var result = task.completeDetailed("ping", Duration.ofSeconds(5));
+                assertEquals("pong", result.text());
+                assertEquals(5L, result.inputTokens());
+                assertEquals(2L, result.outputTokens());
+            }
             assertEquals("Bearer test-key", authorization.get());
             assertTrue(requestBody.get().contains("\"model\":\"test-model\""));
+            assertTrue(requestBody.get().contains("\"temperature\":0.2"));
+            assertFalse(requestBody.get().contains("max_tokens"));
+            assertFalse(requestBody.get().contains("max_completion_tokens"));
+            assertFalse(requestBody.get().contains("max_output_tokens"));
             assertEquals(7L, meter.totalTokens());
         } finally {
             meter.flush();
             server.stop(0);
         }
+    }
+
+    @Test
+    void plainIdentityIsStableAndSeparatesSemanticConfiguration() {
+        var original = new LlmSettings("private-key", "https://EXAMPLE.test:443/v1/", "model-a", .7);
+        var rotated = new LlmSettings("rotated-key", "https://example.test/v1", "model-a", 1.3);
+        String fingerprint = SelfAnalystAgent.plainCacheIdentity(original, "zh", "摘要系统提示");
+        assertEquals(fingerprint, SelfAnalystAgent.plainCacheIdentity(rotated, "zh", "摘要系统提示"));
+        assertFalse(fingerprint.contains("private-key"));
+        assertFalse(fingerprint.contains("example.test"));
+        assertNotEquals(fingerprint, SelfAnalystAgent.plainCacheIdentity(
+                new LlmSettings("private-key", "https://other.test/v1", "model-a", .7), "zh", "摘要系统提示"));
+        assertNotEquals(fingerprint, SelfAnalystAgent.plainCacheIdentity(
+                new LlmSettings("private-key", "https://example.test/v1", "model-b", .7), "zh", "摘要系统提示"));
+        assertNotEquals(fingerprint, SelfAnalystAgent.plainCacheIdentity(original, "en", "摘要系统提示"));
+        assertNotEquals(fingerprint, SelfAnalystAgent.plainCacheIdentity(original, "zh", "修改后的系统提示"));
     }
 
     private static Config withLlm(Config base, String apiKey, String baseUrl, String model)

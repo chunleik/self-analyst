@@ -15,6 +15,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WikiStoreTest {
 
+    @Test
+    void generationPauseIsDurableNotDueAndDoesNotIncrementRetryCount() {
+        var entry = new WikiEntry("paused", WikiLevel.HOUR, t1, t2, tz.getId(), WikiStatus.PENDING,
+                null, null, List.of(), new WikiEntry.WikiMetrics(0, 0, 0, List.of(), Map.of()), List.of(),
+                null, null, 0, null, null, t1, t1, null);
+        store.upsert(entry);
+        store.markGenerationFailure(entry, null, Map.of("state", "period_budget", "reason", "WIKI_PERIOD_BUDGET_EXHAUSTED",
+                "calls", 12, "maxCalls", 12, "configurationStamp", "private-stamp"),
+                Instant.parse("9999-12-31T00:00:00Z"), false);
+        var stored = store.query(t1, t2, WikiLevel.HOUR).getFirst();
+        assertEquals(0, stored.retryCount());
+        assertEquals(1, store.findGenerationPaused().size());
+        assertTrue(store.findPending(WikiLevel.HOUR, 10, t2).isEmpty());
+        assertFalse(WikiGenerationProgress.from(stored).containsKey("configurationStamp"));
+        assertEquals(12, WikiGenerationProgress.from(stored).get("calls"));
+        store.resumeGeneration(stored);
+        assertEquals(1, store.findPending(WikiLevel.HOUR, 10, t2).size());
+        assertTrue(store.findGenerationPaused().isEmpty());
+    }
+
     @TempDir
     Path tempDir;
 
@@ -87,6 +107,44 @@ class WikiStoreTest {
         assertEquals("coding", loaded.taskSegments().get(0).title());
         assertEquals(3600, loaded.metrics().activeSeconds());
         assertEquals("IntelliJ", loaded.metrics().topApps().get(0).app());
+        assertEquals("legacy", loaded.taskSegments().getFirst().claimType());
+        assertTrue(loaded.taskSegments().getFirst().evidenceFactIds().isEmpty());
+    }
+
+    @Test
+    void shouldReadOldJsonWithoutInventingReferences() throws Exception {
+        store.upsert(createPendingEntry("legacy-json", WikiLevel.HOUR, t1, t2));
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + tempDir.resolve("test-wiki.db"));
+             var statement = connection.prepareStatement("UPDATE wiki_entries SET task_segments_json=? WHERE id=?")) {
+            statement.setString(1, """
+                    [{"title":"旧任务","summary":"旧摘要","evidence":["旧证据"],"apps":["IDE"],"confidence":"high"}]
+                    """);
+            statement.setString(2, "legacy-json");
+            statement.executeUpdate();
+        }
+        var segment = store.query(t1, t2, WikiLevel.HOUR).getFirst().taskSegments().getFirst();
+        assertEquals("legacy", segment.claimType());
+        assertEquals(List.of(), segment.evidenceFactIds());
+        assertEquals(List.of("旧证据"), segment.evidence());
+    }
+
+    @Test
+    void shouldRoundTripFactReferencesAndBoundedSourceCatalog() {
+        var segment = new WikiEntry.TaskSegment("查看设计", "涉及数据库同步", List.of("标题观察"),
+                List.of("IDE"), "medium", List.of("f1"), "inferred");
+        var fact = new WikiTitleSampler.Fact("f1", "window", "IDE", "数据库同步设计", "window", 30.0, 1,
+                List.of(new WikiTitleSampler.Interval(t1.toString(), t1.plusSeconds(30).toString(), true, List.of(7L), 0)), 0);
+        store.upsert(createPendingEntry("reference-json", WikiLevel.HOUR, t1, t2));
+        store.updateStatus("reference-json", WikiStatus.SUMMARIZED, "查看设计", "数据库同步", List.of(segment),
+                new WikiEntry.WikiMetrics(30, 0, 0, List.of(), Map.of("evidenceFacts", List.of(fact))),
+                List.of(), "test", "v7");
+        var loaded = store.query(t1, t2, WikiLevel.HOUR).getFirst();
+        assertEquals(segment, loaded.taskSegments().getFirst());
+        var catalog = (List<?>) loaded.metrics().extra().get("evidenceFacts");
+        var restoredFact = (Map<?, ?>) catalog.getFirst();
+        assertEquals("f1", restoredFact.get("id"));
+        assertEquals("数据库同步设计", restoredFact.get("title"));
+        assertEquals(List.of(7), ((Map<?, ?>) ((List<?>) restoredFact.get("intervals")).getFirst()).get("sourceEventIds"));
     }
 
     @Test

@@ -19,6 +19,28 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WikiFactBuilderTest {
 
+    @Test
+    void parentKeepsDatedTasksAndNonemptyCoverageWithoutDroppingEvidence() {
+        Instant start = Instant.parse("2026-09-01T04:00:00Z");
+        Instant end = start.plusSeconds(86400);
+        var metrics = new WikiEntry.WikiMetrics(60, 0, 1,
+                java.util.List.of(new WikiEntry.AppDuration("Editor", 60)), Map.of());
+        var task = new WikiEntry.TaskSegment("订单模块", "查看订单模块资料", java.util.List.of("标题观察"),
+                java.util.List.of("Editor"), "medium", java.util.List.of("f7"), "inferred");
+        var child = new WikiEntry("day-a", WikiLevel.DAY, start, end, "UTC", WikiStatus.SUMMARIZED,
+                "查看项目资料", "订单模块", java.util.List.of(task), metrics, java.util.List.of(), "model", "v7",
+                0, null, null, start, end, end, "facts-v5", "events-v2",
+                Map.of("afk", new WikiEntry.SourceCoverage("partial", start, end, 0L)));
+        var parent = new WikiFactBuilder(null, 24000).buildFactsFromChildren(java.util.List.of(child),
+                new WikiPeriod(WikiLevel.WEEK, start, start.plusSeconds(604800), "UTC"));
+        assertTrue(parent.childSummaries().getFirst().contains("2026-09-01T04:00:00Z"));
+        assertTrue(parent.childSummaries().getFirst().contains("partial"));
+        assertTrue(parent.childSummaries().getFirst().contains("child:day-a:0:0"));
+        assertEquals("订单模块", parent.sampledTitles().facts().getFirst().title());
+        assertEquals(java.util.List.of("day-a"), parent.statistics().get("sourceEntryIds"));
+        assertEquals(60, parent.activeSeconds());
+    }
+
     @TempDir
     Path tempDir;
 
@@ -55,7 +77,7 @@ class WikiFactBuilderTest {
                 assertTrue(prompt.contains("订单模块"));
                 assertFalse(prompt.contains("## 窗口标题样本"));
                 assertTrue(prompt.contains("不得相加"));
-                return "{\"summary\":\"相关开发\",\"primaryTask\":\"开发\",\"metrics\":{\"activeSeconds\":99999}}";
+                return WikiSummaryPipelineTest.groundedResponse(prompt).replaceFirst("\\{", "{\"metrics\":{\"activeSeconds\":99999},");
             });
             var summary = summarizer.summarize(complete, java.time.Duration.ofSeconds(30));
             assertEquals(1, calls.get());

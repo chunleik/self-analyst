@@ -233,6 +233,10 @@ final class RuntimeStorageCompatibility {
 
     private static void database(Path file, String kind) throws Exception {
         requireNoJournal(file);
+        if (kind.equals("memory") && file.getFileName().toString().equals("wiki-generation.db")) {
+            com.selfanalyst.wiki.WikiGenerationStore.verifyReadOnly(file);
+            return;
+        }
         try (Connection connection = readOnly(file); var statement = connection.createStatement()) {
             verifyDatabase(connection, statement, file, kind);
         }

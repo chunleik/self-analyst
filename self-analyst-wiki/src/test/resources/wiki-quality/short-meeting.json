@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "short-meeting",
+  "description": "长期开发与晚间短会议共存时保留会议所在时间层。",
+  "budgetChars": 350,
+  "periodSeconds": 86400,
+  "windows": [
+    {
+      "offsetSeconds": 0,
+      "durationSeconds": 6000,
+      "app": "Editor",
+      "title": "订单模块开发"
+    },
+    {
+      "offsetSeconds": 7000,
+      "durationSeconds": 5000,
+      "app": "Browser",
+      "title": "构建工具参考"
+    },
+    {
+      "offsetSeconds": 13000,
+      "durationSeconds": 4500,
+      "app": "Terminal",
+      "title": "测试输出检查"
+    },
+    {
+      "offsetSeconds": 45000,
+      "durationSeconds": 60,
+      "app": "Teams",
+      "title": "客户需求评审会议"
+    }
+  ],
+  "contents": [],
+  "afk": [],
+  "expectations": {
+    "requiredTitles": [
+      "订单模块开发",
+      "客户需求评审会议"
+    ],
+    "minFacts": 2,
+    "maxFacts": 2,
+    "requiredTimeMask": 5,
+    "topics": [
+      {
+        "name": "订单模块开发",
+        "titleFragments": [
+          "订单模块开发"
+        ]
+      },
+      {
+        "name": "客户需求评审会议",
+        "titleFragments": [
+          "客户需求评审会议"
+        ]
+      }
+    ]
+  },
+  "manualReview": "标题仅支持活动观察；模型文案不得据此宣称任务完成、发布成功或问题解决。"
+}

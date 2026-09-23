@@ -94,7 +94,20 @@ public record WikiEntry(
             String summary,
             List<String> evidence,
             List<String> apps,
-            String confidence) {
+            String confidence,
+            List<String> evidenceFactIds,
+            String claimType) {
+        public TaskSegment {
+            evidence = evidence == null ? List.of() : List.copyOf(evidence);
+            apps = apps == null ? List.of() : List.copyOf(apps);
+            evidenceFactIds = evidenceFactIds == null ? List.of() : List.copyOf(evidenceFactIds);
+            claimType = claimType == null || claimType.isBlank() ? "legacy" : claimType;
+        }
+
+        public TaskSegment(String title, String summary, List<String> evidence,
+                           List<String> apps, String confidence) {
+            this(title, summary, evidence, apps, confidence, List.of(), "legacy");
+        }
     }
 
     public record WikiMetrics(

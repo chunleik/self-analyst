@@ -6,6 +6,9 @@ import com.selfanalyst.events.statistics.ActivityStatistics;
 import com.selfanalyst.events.store.EventStore;
 import com.selfanalyst.memory.GrowthProfile;
 import com.selfanalyst.memory.MemoryStore;
+import com.selfanalyst.wiki.WikiLevel;
+import com.selfanalyst.wiki.WikiPeriod;
+import com.selfanalyst.wiki.WikiTitleSampler;
 
 import java.net.InetAddress;
 import java.time.*;
@@ -26,6 +29,7 @@ public class SummaryService implements SummaryFactSource {
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_INSTANT;
     private static final ZoneId ZONE = ZoneId.systemDefault();
+    static final int TITLE_FACT_BUDGET_CHARS = 4000;
 
     private final com.selfanalyst.i18n.Lang lang;
     private String message(String key) { return com.selfanalyst.i18n.Messages.text(lang, key); }
@@ -34,6 +38,7 @@ public class SummaryService implements SummaryFactSource {
     private final MemoryStore memoryStore;
     private final String windowBucket;
     private final String afkBucket;
+    private final String contentBucket;
 
     public SummaryService(EventStore eventStore, MemoryStore memoryStore) { this(eventStore, memoryStore, com.selfanalyst.i18n.Lang.chinese()); }
     public SummaryService(EventStore eventStore, MemoryStore memoryStore, com.selfanalyst.i18n.Lang lang) {
@@ -43,6 +48,7 @@ public class SummaryService implements SummaryFactSource {
         String host = getHostname();
         this.windowBucket = "watcher-window_" + host;
         this.afkBucket = "watcher-afk_" + host;
+        this.contentBucket = "watcher-content_" + host;
     }
 
     String windowBucket() {
@@ -51,6 +57,10 @@ public class SummaryService implements SummaryFactSource {
 
     String afkBucket() {
         return afkBucket;
+    }
+
+    String contentBucket() {
+        return contentBucket;
     }
 
     // ── Public API ───────────────────────────────────────────────
@@ -62,7 +72,7 @@ public class SummaryService implements SummaryFactSource {
 
     public LocalFacts getCurrentStatus(Instant now) {
         Instant twoHoursAgo = now.minus(Duration.ofHours(2));
-        return computeFacts(twoHoursAgo, now, message("period.now"));
+        return currentWindowFacts(twoHoursAgo, now, message("period.now"));
     }
 
     @Override
@@ -73,6 +83,11 @@ public class SummaryService implements SummaryFactSource {
     /** Local facts for an arbitrary period, without LLM enhancement. */
     public LocalFacts factsFor(Instant start, Instant end, String label) {
         return computeFacts(start, end, label);
+    }
+
+    @Override
+    public LocalFacts currentWindowFacts(Instant start, Instant end, String label) {
+        return computeFacts(start, end, label, true);
     }
 
     /** Timeline entries for multiple periods. */
@@ -200,8 +215,28 @@ public class SummaryService implements SummaryFactSource {
     // ── Compute helpers ──────────────────────────────────────────
 
     private LocalFacts computeFacts(Instant start, Instant end, String label) {
-        var ranges = queryRanges(start, end);
+        return computeFacts(start, end, label, false);
+    }
+
+    private LocalFacts computeFacts(Instant start, Instant end, String label, boolean includeTitles) {
+        var ranges = queryRanges(start, end, includeTitles);
         var statistics = statistics(ranges, start, end);
+        WikiTitleSampler.Selection titleFacts = includeTitles
+                ? WikiTitleSampler.sample(new WikiPeriod(WikiLevel.HOUR, start, end, ZONE.getId()),
+                        statistics.activeEvents(), ranges.get(windowBucket).events(),
+                        ranges.get(contentBucket).events(), TITLE_FACT_BUDGET_CHARS)
+                : emptyTitleFacts();
+        if (includeTitles) {
+            Map<String, Object> titleCoverage = new LinkedHashMap<>(titleFacts.coverage());
+            titleCoverage.put("contentStatus", ranges.get(contentBucket).status());
+            Map<String, Double> appSeconds = new LinkedHashMap<>();
+            statistics.apps().entrySet().stream()
+                    .sorted(Map.Entry.<String, Double>comparingByValue().reversed().thenComparing(Map.Entry.comparingByKey()))
+                    .limit(5).forEach(entry -> appSeconds.put(entry.getKey(), entry.getValue()));
+            titleCoverage.put("appSeconds", Collections.unmodifiableMap(appSeconds));
+            titleFacts = new WikiTitleSampler.Selection(titleFacts.facts(), titleFacts.jsonLines(),
+                    Collections.unmodifiableMap(titleCoverage));
+        }
         Map<String, Double> appDurations = statistics.apps();
         Map<String, Map<String, Double>> appTitleDurations = statistics.titles();
         double effectiveActive = statistics.activeSeconds();
@@ -277,16 +312,39 @@ public class SummaryService implements SummaryFactSource {
 
         return new LocalFacts(headline, evidence, topApps,
                 duration(effectiveActive), duration(afkTime),
-                statistics.switchCount(), goalContext, statistics.unknownSeconds(), coverage);
+                statistics.switchCount(), goalContext, statistics.unknownSeconds(), coverage, titleFacts);
     }
 
     private Map<String, EventStore.EventRange> queryRanges(Instant start, Instant end) {
+        return queryRanges(start, end, false);
+    }
+
+    private Map<String, EventStore.EventRange> queryRanges(Instant start, Instant end, boolean includeTitles) {
+        List<String> buckets = includeTitles ? List.of(windowBucket, "aw-" + windowBucket,
+                afkBucket, "aw-" + afkBucket, contentBucket, "aw-" + contentBucket)
+                : List.of(windowBucket, afkBucket);
         try {
-            return eventStore.queryIntersecting(List.of(windowBucket, afkBucket), start, end);
+            Map<String, EventStore.EventRange> ranges = eventStore.queryIntersecting(buckets, start, end);
+            if (!includeTitles) return ranges;
+            Map<String, EventStore.EventRange> selected = new LinkedHashMap<>();
+            for (String bucket : List.of(windowBucket, afkBucket, contentBucket)) {
+                EventStore.EventRange range = ranges.get(bucket);
+                // Match Wiki's source selection: an existing product bucket remains authoritative,
+                // including empty or failed reads. Imported buckets only replace a missing source.
+                if ("missing".equals(range.status())) range = ranges.get("aw-" + bucket);
+                selected.put(bucket, range);
+            }
+            return selected;
         } catch (Exception error) {
             var failed = new EventStore.EventRange(List.of(), "failed");
-            return Map.of(windowBucket, failed, afkBucket, failed);
+            Map<String, EventStore.EventRange> ranges = new LinkedHashMap<>();
+            buckets.forEach(bucket -> ranges.put(bucket, failed));
+            return ranges;
         }
+    }
+
+    private static WikiTitleSampler.Selection emptyTitleFacts() {
+        return new WikiTitleSampler.Selection(List.of(), "", Map.of());
     }
 
     private ActivityStatistics.Result statistics(Map<String, EventStore.EventRange> ranges, Instant start, Instant end) {
@@ -370,7 +428,19 @@ public class SummaryService implements SummaryFactSource {
             int switchCount,
             String goalContext,
             double unknownActivitySeconds,
-            String coverage) {
+            String coverage,
+            WikiTitleSampler.Selection titleFacts) {
+        public LocalFacts {
+            titleFacts = titleFacts == null ? emptyTitleFacts() : titleFacts;
+        }
+
+        public LocalFacts(String headline, List<String> evidence, List<String> topApps,
+                          String activeTime, String afkTime, int switchCount, String goalContext,
+                          double unknownActivitySeconds, String coverage) {
+            this(headline, evidence, topApps, activeTime, afkTime, switchCount, goalContext,
+                    unknownActivitySeconds, coverage, emptyTitleFacts());
+        }
+
         public LocalFacts(String headline, List<String> evidence, List<String> topApps,
                           String activeTime, String afkTime, int switchCount, String goalContext) {
             this(headline, evidence, topApps, activeTime, afkTime, switchCount, goalContext, 0, "complete");

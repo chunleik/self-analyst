@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,6 +20,101 @@ class SummaryServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void currentWindowsShareWikiTitleFactsWithoutDependingOnWikiBackground() throws Exception {
+        try (Database db = new Database(tempDir.resolve("current-titles"))) {
+            java.util.List<List<String>> queries = new java.util.ArrayList<>();
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT) {
+                @Override public Map<String, EventRange> queryIntersecting(List<String> ids, Instant start, Instant end) {
+                    queries.add(List.copyOf(ids));
+                    return super.queryIntersecting(ids, start, end);
+                }
+            };
+            SummaryService service = new SummaryService(events, null);
+            Instant start = Instant.parse("2026-09-14T20:00:00Z"), end = start.plusSeconds(60);
+            events.insertEvent(service.windowBucket(), new Event(start, 60,
+                    Map.of("app", "Chrome", "title", "Browser")));
+            events.insertEvent(service.afkBucket(), new Event(start, 20, Map.of("status", "afk")));
+            events.insertEvent(service.afkBucket(), new Event(start.plusSeconds(20), 40, Map.of("status", "not-afk")));
+            // Only this temporary legacy fixture bypasses today's title-only write policy.
+            try (var statement = db.bucketConnection(service.contentBucket()).prepareStatement("""
+                    INSERT INTO events (bucket_id, timestamp, duration, datastr, app)
+                    VALUES (?, ?, ?, ?, ?)
+                    """)) {
+                statement.setString(1, service.contentBucket());
+                statement.setString(2, start.toString());
+                statement.setDouble(3, 60);
+                statement.setString(4, """
+                        {"app":"Chrome","title":"Browser","context_title":"数据库索引分析",
+                         "context_kind":"article","text_content":"PRIVATE_BODY_MUST_NOT_LEAVE"}
+                        """);
+                statement.setString(5, "Chrome");
+                statement.executeUpdate();
+            }
+
+            var current = service.currentWindowFacts(start, end, "今天");
+            assertEquals(List.of(service.windowBucket(), "aw-" + service.windowBucket(),
+                    service.afkBucket(), "aw-" + service.afkBucket(), service.contentBucket(), "aw-" + service.contentBucket()),
+                    queries.getLast());
+            var wiki = new com.selfanalyst.wiki.WikiFactBuilder(events, SummaryService.TITLE_FACT_BUDGET_CHARS)
+                    .buildFacts(new com.selfanalyst.wiki.WikiPeriod(com.selfanalyst.wiki.WikiLevel.HOUR,
+                            start, end, java.time.ZoneId.systemDefault().getId()));
+            assertEquals(wiki.sampledTitles().facts(), current.titleFacts().facts());
+            assertEquals(wiki.sampledTitles().jsonLines(), current.titleFacts().jsonLines());
+            assertEquals(40.0, current.titleFacts().facts().stream().filter(f -> "content".equals(f.source()))
+                    .findFirst().orElseThrow().activeSeconds());
+            assertEquals(Map.of("Chrome", 40.0), current.titleFacts().coverage().get("appSeconds"));
+            assertTrue(current.titleFacts().jsonLines().contains("数据库索引分析"));
+            assertFalse(current.titleFacts().jsonLines().contains("PRIVATE_BODY"));
+            assertTrue(current.titleFacts().jsonLines().length() <= SummaryService.TITLE_FACT_BUDGET_CHARS);
+            assertFalse(service.getCurrentStatus(end).titleFacts().facts().isEmpty());
+
+            var history = service.factsFor(start, end, "昨天");
+            assertTrue(history.titleFacts().facts().isEmpty());
+            assertEquals(List.of(service.windowBucket(), service.afkBucket()), queries.getLast());
+            assertEquals(current.topApps(), history.topApps());
+            assertEquals(current.activeTime(), history.activeTime());
+            assertEquals(current.switchCount(), history.switchCount());
+        }
+    }
+
+    @Test
+    void currentTitleSourcesUseWikiCompatibleImportedBucketFallback() throws Exception {
+        try (Database db = new Database(tempDir.resolve("imported-current"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            SummaryService service = new SummaryService(events, null);
+            Instant start = Instant.parse("2026-09-14T20:00:00Z"), end = start.plusSeconds(60);
+            events.insertEvent("aw-" + service.windowBucket(), new Event(start, 60,
+                    Map.of("app", "Chrome", "title", "导入的数据库文档")));
+            events.insertEvent("aw-" + service.afkBucket(), new Event(start, 60, Map.of("status", "not-afk")));
+            events.insertEvent("aw-" + service.contentBucket(), new Event(start, 60,
+                    Map.of("app", "Chrome", "title", "导入的数据库文档", "context_title", "索引查询计划",
+                            "context_kind", "article", "title_source", "uia_context", "title_confidence", "high",
+                            "schema_version", 2, "uia_chars", 0, "ocr_chars", 0)));
+            var current = service.currentWindowFacts(start, end, "今天");
+            var wiki = new com.selfanalyst.wiki.WikiFactBuilder(events, SummaryService.TITLE_FACT_BUDGET_CHARS)
+                    .buildFacts(new com.selfanalyst.wiki.WikiPeriod(com.selfanalyst.wiki.WikiLevel.HOUR,
+                            start, end, java.time.ZoneId.systemDefault().getId()));
+            assertEquals(wiki.sampledTitles().facts(), current.titleFacts().facts());
+            assertEquals("complete", current.coverage());
+            assertTrue(current.titleFacts().jsonLines().contains("索引查询计划"));
+            assertEquals(2, current.titleFacts().facts().size());
+
+            // Product sources win independently of imported sources; no duplicate app time.
+            events.insertEvent(service.windowBucket(), new Event(start, 60,
+                    Map.of("app", "IDE", "title", "本地编辑器标题")));
+            events.insertEvent(service.afkBucket(), new Event(start, 60, Map.of("status", "not-afk")));
+            events.insertEvent(service.contentBucket(), new Event(start, 60,
+                    Map.of("app", "IDE", "title", "本地编辑器标题", "context_title", "本地连接配置",
+                            "context_kind", "document", "title_source", "uia_context", "title_confidence", "high",
+                            "schema_version", 2, "uia_chars", 0, "ocr_chars", 0)));
+            var product = service.currentWindowFacts(start, end, "今天");
+            assertTrue(product.titleFacts().jsonLines().contains("本地连接配置"));
+            assertFalse(product.titleFacts().jsonLines().contains("索引查询计划"));
+            assertEquals(List.of("IDE 1分钟"), product.topApps());
+        }
+    }
 
     @Test
     void wikiAndDesktopUseTheSameActivityFacts() throws Exception {

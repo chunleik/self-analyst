@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "id": "generic-window-context",
+  "description": "通用系统窗口提供额外标题语义；未知标题和历史正文不得成为证据。",
+  "budgetChars": 1000,
+  "periodSeconds": 86400,
+  "windows": [
+    {
+      "offsetSeconds": 0,
+      "durationSeconds": 1200,
+      "app": "Browser",
+      "title": "New Tab"
+    },
+    {
+      "offsetSeconds": 2000,
+      "durationSeconds": 3600,
+      "app": "Editor",
+      "title": "unknown"
+    }
+  ],
+  "contents": [
+    {
+      "offsetSeconds": 0,
+      "durationSeconds": 1200,
+      "app": "Browser",
+      "title": "New Tab",
+      "contextTitle": "项目方案讨论",
+      "contextKind": "chat",
+      "textContent": "SANITIZED_BODY_MUST_NOT_ESCAPE"
+    }
+  ],
+  "afk": [],
+  "expectations": {
+    "requiredTitles": [
+      "New Tab",
+      "项目方案讨论"
+    ],
+    "excludedTitles": [
+      "unknown"
+    ],
+    "forbiddenText": [
+      "SANITIZED_BODY_MUST_NOT_ESCAPE"
+    ],
+    "minFacts": 2,
+    "maxFacts": 2,
+    "requiredTimeMask": 1,
+    "topics": [
+      {
+        "name": "项目方案讨论",
+        "titleFragments": [
+          "项目方案讨论"
+        ]
+      }
+    ]
+  },
+  "manualReview": "标题仅支持活动观察；模型文案不得据此宣称任务完成、发布成功或问题解决。"
+}

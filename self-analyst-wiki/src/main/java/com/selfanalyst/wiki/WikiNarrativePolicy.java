@@ -8,7 +8,8 @@ import java.util.regex.Pattern;
 final class WikiNarrativePolicy {
 
     private static final String NUMBER = "(?:\\d+(?:[.,]\\d+)?|[零〇一二两三四五六七八九十百千万]+|半|数|几)";
-    private static final String DURATION = NUMBER + "\\s*(?:小时|钟头|分钟|秒钟|分|秒|天|"
+    // Atomic units prevent 分钟 -> 分 and 秒钟 -> 秒 backtracking around technical exceptions.
+    private static final String DURATION = NUMBER + "\\s*(?>小时|钟头|分钟|秒钟|分|秒|天|"
             + "hours?\\b|hrs?\\b|h\\b|minutes?\\b|mins?\\b|m\\b|seconds?\\b|secs?\\b|s\\b)";
     private static final String AFK = "(?<![a-z0-9_])afk(?![a-z0-9_])";
     private static final String SEPARATOR = "[\\s\"'`:=]*(?:(?:为|是|仅为|仍为|显示为|is|was|remains?)\\s*[\"'`]*)?";
@@ -53,8 +54,15 @@ final class WikiNarrativePolicy {
             pattern("(?<![a-z0-9_])(?:" + STATISTIC_FIELDS + ")(?![a-z0-9_])[\"'`]?\\s*"
                     + "(?::|=|为|是)\\s*\\S+"),
             pattern("[\"'`]coverage[\"'`]\\s*[:=]\\s*\\S+"),
-            pattern("\\bcoverage\\s*[:=]\\s*[\"'`]?(?:complete|partial|estimated|missing|unknown)\\b")
+            pattern("\\bcoverage\\s*[:=]\\s*[\"'`]?(?:complete|partial|estimated|missing|unknown)\\b"),
+            pattern("(?:窗口|应用|任务)(?:的)?切换(?:了|次数|数)?" + AMOUNT_PREFIX + NUMBER + "\\s*次"),
+            pattern("(?:排名|位居|排行)(?:为|是|第)?\\s*(?:" + NUMBER + "|first\\b|second\\b|third\\b)"),
+            pattern("(?:占比|占用比例|使用比例|时间比例)" + AMOUNT_PREFIX + NUMBER + "\\s*%"),
+            pattern("\\b(?:window|app|task)\\s+switch(?:es|ing)?\\s*[:=]?\\s*" + NUMBER),
+            pattern("\\b(?:rank(?:ed)?|usage share)\\s*(?:first|second|third|#?\\d+)(?:\\b|%)")
     );
+    private static final Pattern TECHNICAL_PREFIX = pattern(
+            "(?:调试|修复|排查|调查|测试|验证|实现|处理|debug(?:ging)?|fix(?:ing)?|investigat(?:e|ing)|test(?:ing)?)\\s*$");
 
     private WikiNarrativePolicy() {
     }
@@ -63,10 +71,19 @@ final class WikiNarrativePolicy {
         if (value == null || value.isBlank()) return;
         String normalized = Normalizer.normalize(value, Normalizer.Form.NFKC);
         for (Pattern report : REPORTS) {
-            if (report.matcher(normalized).find()) {
-                throw new IllegalArgumentException("WIKI_NARRATIVE_STATISTICS:" + field);
+            var matcher = report.matcher(normalized);
+            while (matcher.find()) {
+                if (!technicalSubject(normalized, matcher.start())) {
+                    throw new IllegalArgumentException("WIKI_NARRATIVE_STATISTICS:" + field);
+                }
             }
         }
+    }
+
+    private static boolean technicalSubject(String text, int start) {
+        // Only an immediately governing technical verb qualifies. A preceding sentence such as
+        // “调试了采集器，AFK覆盖缺失” must not exempt the independent statistics report.
+        return TECHNICAL_PREFIX.matcher(text.substring(Math.max(0, start - 40), start)).find();
     }
 
     private static Pattern pattern(String expression) {

@@ -11,5 +11,9 @@ public interface SummaryFactSource {
 
     SummaryService.LocalFacts factsFor(Instant start, Instant end, String label);
 
+    default SummaryService.LocalFacts currentWindowFacts(Instant start, Instant end, String label) {
+        return factsFor(start, end, label);
+    }
+
     SummaryService.BehaviorData behaviorData();
 }

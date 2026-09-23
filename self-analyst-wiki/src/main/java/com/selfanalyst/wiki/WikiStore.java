@@ -445,7 +445,7 @@ public class WikiStore implements AutoCloseable {
             UPDATE wiki_entries SET status=?, summary=?, primary_task=?,
             task_segments_json=?, metrics_json=?, source_entry_ids_json=?,
             model=?, prompt_version=?, updated_at=?, summarized_at=?,
-            fact_builder_version=?, projector_version=?, source_coverage_json=?
+            fact_builder_version=?, projector_version=?, source_coverage_json=?,next_retry_at=NULL,last_error=NULL
             WHERE id=?
             """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -499,6 +499,49 @@ public class WikiStore implements AutoCloseable {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to mark entry as skipped", e);
         }
+    }
+
+    /** One atomic update; budget/config waits do not increment the ordinary retry counter. */
+    public void markGenerationFailure(WikiEntry entry, WikiFactBuilder.WikiFacts facts,
+                                      Map<String, Object> progress, Instant nextRetry, boolean countFailure) {
+        WikiEntry.WikiMetrics prior = entry.metrics();
+        Map<String, Object> extra = new java.util.LinkedHashMap<>(facts != null ? facts.statistics()
+                : prior != null && prior.extra() != null ? prior.extra() : Map.of());
+        extra.put("generationProgress", progress);
+        var metrics = new WikiEntry.WikiMetrics(facts != null ? facts.activeSeconds() : prior != null ? prior.activeSeconds() : 0,
+                facts != null ? facts.afkSeconds() : prior != null ? prior.afkSeconds() : 0,
+                facts != null ? facts.switchCount() : prior != null ? prior.switchCount() : 0,
+                facts != null ? facts.topApps() : prior != null ? prior.topApps() : List.of(), extra);
+        String sql = "UPDATE wiki_entries SET status=?, retry_count=retry_count+?, next_retry_at=?, last_error=?, "
+                + "metrics_json=?,source_coverage_json=?,updated_at=? WHERE id=?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, countFailure ? WikiStatus.FAILED.name() : WikiStatus.PENDING.name());
+            ps.setInt(2, countFailure ? 1 : 0);
+            ps.setString(3, nextRetry == null ? null : nextRetry.toString());
+            ps.setString(4, String.valueOf(progress.get("reason")));
+            ps.setString(5, toJson(metrics));
+            ps.setString(6, toJson(facts != null ? facts.sourceCoverage() : entry.sourceCoverage()));
+            ps.setString(7, Instant.now().toString()); ps.setString(8, entry.id());
+            ps.executeUpdate();
+        } catch (SQLException error) { throw new IllegalStateException("WIKI_PROGRESS_WRITE_FAILED", error); }
+    }
+
+    public List<WikiEntry> findGenerationPaused() {
+        List<WikiEntry> result = new ArrayList<>();
+        String sql = "SELECT * FROM wiki_entries WHERE " + CURRENT
+                + " AND status IN ('PENDING','FAILED') AND json_valid(metrics_json)"
+                + " AND json_extract(metrics_json,'$.extra.generationProgress.state') IN ('period_budget','configuration','input')";
+        try (PreparedStatement statement = conn.prepareStatement(sql); ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) result.add(mapEntry(rows));
+        } catch (SQLException error) { throw new IllegalStateException("WIKI_PROGRESS_READ_FAILED", error); }
+        return result;
+    }
+
+    public void resumeGeneration(WikiEntry entry) {
+        Map<String, Object> progress = new java.util.LinkedHashMap<>(WikiGenerationProgress.raw(entry));
+        progress.put("state", "queued"); progress.put("reason", "WIKI_GENERATION_QUEUED");
+        progress.remove("nextRetryAt");
+        markGenerationFailure(entry, null, progress, null, false);
     }
 
     public List<WikiEntry> query(Instant start, Instant end, WikiLevel level) {
@@ -558,10 +601,18 @@ public class WikiStore implements AutoCloseable {
     }
 
     public List<WikiEntry> findPending(WikiLevel level, int limit) {
-        return findByStatusAndLevel(WikiStatus.PENDING, level, limit);
+        return findPending(level, limit, Instant.now());
+    }
+
+    public List<WikiEntry> findPending(WikiLevel level, int limit, Instant now) {
+        return findByStatusAndLevel(WikiStatus.PENDING, level, limit, now);
     }
 
     public List<WikiEntry> findRetryable(int limit) {
+        return findRetryable(limit, Instant.now());
+    }
+
+    public List<WikiEntry> findRetryable(int limit, Instant now) {
         List<WikiEntry> results = new ArrayList<>();
         String sql = """
             SELECT * FROM wiki_entries WHERE %s AND status = ?
@@ -570,7 +621,7 @@ public class WikiStore implements AutoCloseable {
             """.formatted(CURRENT);
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, WikiStatus.FAILED.name());
-            ps.setString(2, Instant.now().toString());
+            ps.setString(2, now.toString());
             ps.setInt(3, limit);
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
@@ -594,13 +645,15 @@ public class WikiStore implements AutoCloseable {
         }
     }
 
-    private List<WikiEntry> findByStatusAndLevel(WikiStatus status, WikiLevel level, int limit) {
+    private List<WikiEntry> findByStatusAndLevel(WikiStatus status, WikiLevel level, int limit, Instant now) {
         List<WikiEntry> results = new ArrayList<>();
-        String sql = "SELECT * FROM wiki_entries WHERE " + CURRENT + " AND status = ? AND level = ? ORDER BY period_start DESC LIMIT ?";
+        String sql = "SELECT * FROM wiki_entries WHERE " + CURRENT + " AND status = ? AND level = ?"
+                + " AND (next_retry_at IS NULL OR next_retry_at <= ?) ORDER BY period_start DESC LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, status.name());
             ps.setString(2, level.name());
-            ps.setInt(3, limit);
+            ps.setString(3, now.toString());
+            ps.setInt(4, limit);
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
                 results.add(mapEntry(rs));

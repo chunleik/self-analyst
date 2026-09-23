@@ -2,6 +2,8 @@ package com.selfanalyst.desktop.service;
 
 import com.selfanalyst.i18n.Lang;
 import com.selfanalyst.i18n.Messages;
+import com.selfanalyst.wiki.WikiEntry;
+import com.selfanalyst.wiki.WikiEvidencePolicy;
 
 import java.time.Duration;
 import java.util.*;
@@ -11,6 +13,9 @@ import java.util.*;
  * Falls back to raw local facts when the agent is null or LLM call fails.
  */
 public class SummaryPromptService {
+
+    public static final String PROMPT_VERSION = "desktop-derived-evidence-v3";
+    static final int MAX_PROMPT_CHARS = 8000;
 
     @FunctionalInterface
     public interface SummaryTextClient {
@@ -33,12 +38,13 @@ public class SummaryPromptService {
 
     /** Language-aware overload (SPEC-I18N-PROMPT-001): prompt + fallback follow {@code lang}. */
     public EnhancedSummary enhance(SummaryService.LocalFacts facts, SummaryTextClient client, Lang lang) {
-        if (client == null) {
+        if (client == null || facts.titleFacts().facts().isEmpty()) {
             return fromLocalOnly(facts, lang);
         }
 
         try {
             String prompt = buildPrompt(facts, lang);
+            if (prompt.length() > MAX_PROMPT_CHARS) return fromLocalOnly(facts, lang);
             String response = client.complete(prompt, Duration.ofSeconds(5));
             if (response == null || response.isBlank()) {
                 return fromLocalOnly(facts, lang);
@@ -120,37 +126,69 @@ public class SummaryPromptService {
     }
 
     static String buildPrompt(SummaryService.LocalFacts facts, Lang lang) {
-        String topApps = facts.topApps() != null ? String.join(", ", facts.topApps()) : Messages.text(lang, "common.none");
-        return Messages.text(lang, "summary.prompt").formatted(topApps, facts.activeTime(), facts.afkTime(), facts.switchCount(), facts.goalContext() != null ? facts.goalContext() : Messages.text(lang, "common.none"))
+        String goal = facts.goalContext() == null ? "" : facts.goalContext();
+        if (goal.length() > 512) goal = goal.substring(0, 512);
+        Map<String, Object> samplingCoverage = new LinkedHashMap<>(facts.titleFacts().coverage());
+        samplingCoverage.remove("appSeconds"); // Local cache metadata does not consume the title prompt budget.
+        return Messages.text(lang, "summary.prompt").formatted(facts.titleFacts().jsonLines(),
+                        samplingCoverage, goal)
                 + Messages.text(lang, "summary.statisticsContext").formatted(
                         facts.unknownActivitySeconds(), facts.coverage());
     }
 
     private static EnhancedSummary parseEnhanced(SummaryService.LocalFacts facts, String response, Lang lang) {
         try {
-            // Best-effort JSON extraction from LLM output
-            String json = response;
-            int braceStart = json.indexOf('{');
-            int braceEnd = json.lastIndexOf('}');
-            if (braceStart >= 0 && braceEnd > braceStart) {
-                json = json.substring(braceStart, braceEnd + 1);
-            }
+            if (response.length() > 12000) throw new IllegalArgumentException("Summary response too large");
+            String json = response.strip();
+            if (json.startsWith("```json") && json.endsWith("```")) json = json.substring(7, json.length() - 3).strip();
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            mapper.enable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
             @SuppressWarnings("unchecked")
             Map<String, Object> map = mapper.readValue(json, Map.class);
-
-            String headline = stringOr(map.get("headline"), facts.headline());
-            String insight = stringOr(map.get("insight"), null);
-            String suggestion = stringOr(map.get("suggestion"), null);
-            String confidence = stringOr(map.get("confidence"), "low");
+            String headline = narrative(map.get("headline"), "headline", 180, false);
+            String insight = narrative(map.get("insight"), "insight", 600, false);
+            String suggestion = narrative(map.get("suggestion"), "suggestion", 300, true);
+            if (!(map.get("confidence") instanceof String confidence)
+                    || !Set.of("high", "medium", "low").contains(confidence)) {
+                throw new IllegalArgumentException("Invalid summary confidence");
+            }
+            List<WikiEvidencePolicy.EvidenceFact> evidenceFacts = WikiEvidencePolicy.facts(facts.titleFacts());
+            List<WikiEntry.TaskSegment> segments = WikiEvidencePolicy.parseSegments(map.get("taskSegments"),
+                    evidenceFacts, !"complete".equals(facts.coverage()));
+            if (segments.isEmpty() || segments.size() > 4) throw new IllegalArgumentException("Invalid current task count");
+            Map<String, String> evidenceById = new HashMap<>();
+            for (var fact : evidenceFacts) {
+                String title = WikiEvidencePolicy.evidenceTitle(fact);
+                evidenceById.put(fact.id(), title == null ? Messages.text(lang, "summary.titleEvidenceUnavailable")
+                        : Messages.text(lang, "summary.titleEvidence").formatted(title));
+            }
+            segments = segments.stream().map(segment -> new WikiEntry.TaskSegment(segment.title(), segment.summary(),
+                    segment.evidenceFactIds().stream().map(evidenceById::get).toList(), segment.apps(),
+                    segment.confidence(), segment.evidenceFactIds(), segment.claimType())).toList();
+            for (WikiEntry.TaskSegment segment : segments) {
+                if (confidenceRank(segment.confidence()) < confidenceRank(confidence)) confidence = segment.confidence();
+            }
 
             return new EnhancedSummary(headline, insight, suggestion, confidence,
                     facts.evidence(), facts.topApps(),
                     facts.activeTime(), facts.afkTime(),
-                    facts.switchCount(), facts.goalContext());
+                    facts.switchCount(), facts.goalContext(), segments);
         } catch (Exception e) {
             return fromLocalOnly(facts, lang);
         }
+    }
+
+    private static String narrative(Object raw, String field, int maxLength, boolean optional) {
+        if (raw == null && optional) return null;
+        if (!(raw instanceof String value) || value.length() > maxLength || (!optional && value.isBlank())) {
+            throw new IllegalArgumentException("Invalid summary " + field);
+        }
+        WikiEvidencePolicy.validateNarrative(field, value);
+        return value;
+    }
+
+    private static int confidenceRank(String confidence) {
+        return "high".equals(confidence) ? 2 : "medium".equals(confidence) ? 1 : 0;
     }
 
     private static String stringOr(Object val, String fallback) {
@@ -206,6 +244,17 @@ public class SummaryPromptService {
             String activeTime,
             String afkTime,
             int switchCount,
-            String goalContext) {
+            String goalContext,
+            List<WikiEntry.TaskSegment> taskSegments) {
+        public EnhancedSummary {
+            taskSegments = taskSegments == null ? List.of() : List.copyOf(taskSegments);
+        }
+
+        public EnhancedSummary(String headline, String insight, String suggestion, String confidence,
+                               List<String> evidence, List<String> topApps, String activeTime, String afkTime,
+                               int switchCount, String goalContext) {
+            this(headline, insight, suggestion, confidence, evidence, topApps, activeTime, afkTime,
+                    switchCount, goalContext, List.of());
+        }
     }
 }

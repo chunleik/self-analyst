@@ -10,6 +10,8 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -39,6 +41,8 @@ public class WikiWorker {
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Instant enqueueCursor;
+    private volatile boolean recoverPaused;
+    private static final Instant PAUSED_UNTIL = Instant.parse("9999-12-31T00:00:00Z");
 
     public WikiWorker(WikiStore store, WikiFactBuilder factBuilder, WikiSummarizer summarizer,
                        ZoneId timezone, Duration timeout, int intervalSeconds, boolean backfillEnabled,
@@ -68,6 +72,7 @@ public class WikiWorker {
 
     public void start() {
         if (!running.compareAndSet(false, true)) return;
+        recoverPaused = true;
 
         Instant startedAt = nowSupplier.get();
         if (backfillEnabled) {
@@ -90,15 +95,13 @@ public class WikiWorker {
 
     public void shutdown() {
         running.set(false);
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
+        executor.shutdownNow();
+        boolean interrupted = false;
+        while (!executor.isTerminated()) {
+            try { executor.awaitTermination(1, TimeUnit.SECONDS); }
+            catch (InterruptedException ignored) { interrupted = true; }
         }
+        if (interrupted) Thread.currentThread().interrupt();
         log.info("WikiWorker shut down");
     }
 
@@ -120,9 +123,10 @@ public class WikiWorker {
         if (backfillEnabled) discoverOlderStatistics();
 
         try {
+            restorePausedGenerations();
             // Process in priority order: lower levels first
             for (WikiLevel level : PROCESS_ORDER) {
-                List<WikiEntry> pending = store.findPending(level, 1);
+                List<WikiEntry> pending = store.findPending(level, Integer.MAX_VALUE, nowSupplier.get());
                 for (WikiEntry entry : pending) {
                     if (canProcess(entry)) {
                         processEntry(entry);
@@ -132,7 +136,7 @@ public class WikiWorker {
             }
 
             // Retry failed entries
-            List<WikiEntry> retryable = store.findRetryable(Integer.MAX_VALUE);
+            List<WikiEntry> retryable = store.findRetryable(Integer.MAX_VALUE, nowSupplier.get());
             for (WikiLevel level : PROCESS_ORDER) {
                 for (WikiEntry entry : retryable) {
                     if (entry.level() == level && canProcess(entry)) {
@@ -240,15 +244,17 @@ public class WikiWorker {
 
     private void processEntry(WikiEntry entry) {
         String id = entry.id();
+        WikiPeriod period = new WikiPeriod(entry.level(), entry.periodStart(), entry.periodEnd(), entry.timezone());
+        WikiFactBuilder.WikiFacts facts = null;
+        boolean generated = false;
+        boolean published = false;
+        String attemptedConfiguration = "unavailable";
         try {
             log.debug("Processing wiki entry {} (level={})", id, entry.level());
 
-            WikiPeriod period = new WikiPeriod(entry.level(), entry.periodStart(),
-                    entry.periodEnd(), entry.timezone());
-
-            WikiFactBuilder.WikiFacts facts;
             if (needsRawEvents(entry.level())) {
-                facts = factBuilder.buildFacts(period);
+                facts = summarizer instanceof WikiSummaryPipeline
+                        ? factBuilder.buildCompleteFacts(period) : factBuilder.buildFacts(period);
             } else {
                 WikiLevel childLevel = childLevel(entry.level());
                 List<WikiEntry> children = completedExpectedChildren(entry, childLevel);
@@ -263,12 +269,19 @@ public class WikiWorker {
                 return;
             }
 
+            // Capture before acquiring the generation lease: a hot update during an old
+            // request must remain visible to the next pause-recovery scan.
+            if (summarizer instanceof WikiSummaryPipeline pipeline)
+                attemptedConfiguration = configurationStamp(pipeline);
             WikiSummarizer.SummaryResult result = summarizer.summarize(facts, timeout);
+            generated = true;
 
             store.updateStatus(id, WikiStatus.SUMMARIZED, result.summary(), result.primaryTask(),
                     result.taskSegments(), result.metrics(),
-                    List.of(), "llm", summarizer.promptVersion(),
+                    sourceEntries(facts), "llm", summarizer.promptVersion(),
                     facts.factBuilderVersion(), facts.projectorVersion(), facts.sourceCoverage());
+            published = true;
+            if (summarizer instanceof WikiSummaryPipeline pipeline) pipeline.markPublished(result);
 
             log.debug("Summarized wiki entry {}: {}", id, result.primaryTask());
 
@@ -278,20 +291,91 @@ public class WikiWorker {
                         .stream().filter(e -> e.id().equals(id)).findFirst();
                 summarized.ifPresent(embeddingWorker::enqueueEntry);
             }
-        } catch (com.selfanalyst.wiki.usage.BudgetExceededException | com.selfanalyst.wiki.usage.LlmUnavailableException be) {
-            // 达到每日 token 预算：保持 PENDING，下个周期/次日重试，不计入失败重试次数
-            log.debug("Wiki entry {} 因模型未就绪或预算暂停，保持 PENDING 稍后重试", id);
+        } catch (WikiPeriodBudgetException exhausted) {
+            recordFailure(entry, facts, period, "period_budget", "WIKI_PERIOD_BUDGET_EXHAUSTED", PAUSED_UNTIL, false, attemptedConfiguration);
+        } catch (WikiSummaryPipeline.CallFailure failure) {
+            String state = failure.kind().name().toLowerCase(java.util.Locale.ROOT);
+            Instant next = retryTime(entry);
+            if (failure.kind() == WikiSummaryPipeline.FailureKind.CONFIGURATION
+                    || failure.kind() == WikiSummaryPipeline.FailureKind.INPUT) next = PAUSED_UNTIL;
+            else if (failure.kind() == WikiSummaryPipeline.FailureKind.GLOBAL_BUDGET) next = nextBudgetDay();
+            else if (failure.kind() == WikiSummaryPipeline.FailureKind.PERIOD_BUDGET) next = PAUSED_UNTIL;
+            recordFailure(entry, facts, period, state, failure.code(), next, !failure.beforeSend(), attemptedConfiguration);
+        } catch (com.selfanalyst.wiki.usage.BudgetExceededException gate) {
+            recordFailure(entry, facts, period, "global_budget", "WIKI_GLOBAL_BUDGET", nextBudgetDay(), false, attemptedConfiguration);
+        } catch (com.selfanalyst.wiki.usage.LlmUnavailableException unavailable) {
+            recordFailure(entry, facts, period, "configuration", "WIKI_MODEL_UNAVAILABLE", PAUSED_UNTIL, false, attemptedConfiguration);
         } catch (Exception e) {
-            log.warn("Wiki entry {} failed: {}", id, e.getMessage());
-            int retryCount = entry.retryCount() + 1;
-            long delayMinutes = (long) Math.min(1440, Math.pow(2, retryCount));
-            Instant nextRetry = Instant.now().plus(Duration.ofMinutes(delayMinutes));
-            store.markFailed(id, truncate(e.getMessage(), 500), nextRetry);
+            String code = safeFailure(e);
+            log.warn("Wiki entry {} failed: {}", id, code);
+            if (published) return; // A checkpoint-cleanup/index failure cannot undo a committed summary.
+            String state = generated ? "publish_failed" : code.startsWith("WIKI_EVIDENCE_")
+                    || code.startsWith("WIKI_NARRATIVE_") || code.startsWith("WIKI_RESPONSE_") ? "quality" : "transport";
+            recordFailure(entry, facts, period, state, code, retryTime(entry), true, attemptedConfiguration);
         }
+    }
+
+    private void restorePausedGenerations() {
+        boolean startup = recoverPaused;
+        if (!(summarizer instanceof WikiSummaryPipeline pipeline)) return;
+        List<WikiEntry> paused = store.findGenerationPaused();
+        String configuration = paused.isEmpty() ? "unavailable" : configurationStamp(pipeline);
+        for (WikiEntry entry : paused) {
+            String state = WikiGenerationProgress.state(entry);
+            boolean resume = "period_budget".equals(state) ? startup && pipeline.canResume(period(entry))
+                    : startup || !configuration.equals(WikiGenerationProgress.raw(entry).get("configurationStamp"));
+            if (resume) store.resumeGeneration(entry);
+        }
+        recoverPaused = false;
+    }
+
+    private void recordFailure(WikiEntry entry, WikiFactBuilder.WikiFacts facts, WikiPeriod period,
+                               String state, String code, Instant next, boolean failure, String attemptedConfiguration) {
+        Map<String, Object> progress = new LinkedHashMap<>();
+        progress.put("state", state); progress.put("reason", code);
+        progress.put("nextRetryAt", next.toString());
+        if (summarizer instanceof WikiSummaryPipeline pipeline) {
+            var budget = pipeline.progress(period);
+            progress.put("calls", budget.calls()); progress.put("tokens", budget.tokens());
+            progress.put("unsettledCalls", budget.unsettledCalls());
+            progress.put("reservedTokens", budget.reservedTokens()); progress.put("estimatedCalls", budget.estimatedCalls());
+            progress.put("maxCalls", pipeline.budgetLimits().maxCalls()); progress.put("maxTokens", pipeline.budgetLimits().maxTokens());
+            progress.put("configurationStamp", attemptedConfiguration);
+        }
+        store.markGenerationFailure(entry, facts, progress, next, failure);
+    }
+
+    private Instant nextBudgetDay() {
+        return nowSupplier.get().atZone(timezone).toLocalDate().plusDays(1).atStartOfDay(timezone).toInstant();
+    }
+
+    private static String configurationStamp(WikiSummaryPipeline pipeline) {
+        try { return pipeline.configurationStamp(); }
+        catch (RuntimeException unavailable) { return "unavailable"; }
+    }
+
+    private Instant retryTime(WikiEntry entry) {
+        long minutes = (long) Math.min(1440, Math.pow(2, Math.min(20, entry.retryCount() + 1)));
+        return nowSupplier.get().plus(Duration.ofMinutes(minutes));
+    }
+
+    private static WikiPeriod period(WikiEntry entry) {
+        return new WikiPeriod(entry.level(), entry.periodStart(), entry.periodEnd(), entry.timezone());
+    }
+
+    private static String safeFailure(Exception error) {
+        String text = error.getMessage();
+        return text != null && text.matches("WIKI_[A-Z0-9_]+(?::[A-Za-z.]+)?") ? text : "WIKI_GENERATION_FAILED";
     }
 
     private static boolean needsRawEvents(WikiLevel level) {
         return level == WikiLevel.HOUR || level == WikiLevel.HALF_DAY || level == WikiLevel.DAY;
+    }
+
+    private static List<String> sourceEntries(WikiFactBuilder.WikiFacts facts) {
+        Object ids = facts.statistics().get("sourceEntryIds");
+        return ids instanceof List<?> list ? list.stream().filter(String.class::isInstance)
+                .map(String.class::cast).toList() : List.of();
     }
 
     private static WikiLevel childLevel(WikiLevel parent) {

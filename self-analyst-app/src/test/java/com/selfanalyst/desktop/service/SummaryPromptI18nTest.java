@@ -43,6 +43,14 @@ class SummaryPromptI18nTest {
     }
 
     @Test
+    void generatedTitleEvidenceFollowsRequestedLanguage() {
+        var result = new SummaryPromptService().enhance(SummaryPromptServiceTest.facts("Connection timeout", false),
+                (prompt, timeout) -> SummaryPromptServiceTest.validResponse(), Lang.english());
+        assertTrue(result.taskSegments().getFirst().evidence().getFirst().startsWith("Observed title:"));
+        assertFalse(result.taskSegments().getFirst().evidence().getFirst().contains("观察到"));
+    }
+
+    @Test
     void chatSummaryEnglishHasNoHardcodedChinese() { // TST-008, PROMPT-003b
         String en = ChatSummaryService.buildPrompt(session(), Lang.english());
         assertTrue(en.contains("one English sentence"), "english chat-summary instruction");

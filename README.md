@@ -210,6 +210,9 @@ restart the backend. For concurrent updates to the same field, the last committe
 | `events.export.maxRangeDays` | `EVENTS_EXPORT_MAX_RANGE_DAYS` | `31` |
 | `events.storage.lowDisk.warnBytes` | `EVENTS_STORAGE_LOW_DISK_WARN_BYTES` | `10737418240` |
 | `events.storage.lowDisk.blockBytes` | `EVENTS_STORAGE_LOW_DISK_BLOCK_BYTES` | `1073741824` |
+| `wiki.summary.periodMaxCalls` | `WIKI_SUMMARY_PERIOD_MAX_CALLS` | `12` |
+| `wiki.summary.periodMaxTokens` | `WIKI_SUMMARY_PERIOD_MAX_TOKENS` | `256000` |
+| `wiki.summary.outputTokenReserve` | `WIKI_SUMMARY_OUTPUT_TOKEN_RESERVE` | `4096` |
 
 Existing two-layer data is migrated to a verified compact database while legacy backups are retained.
 Settings show active and backup space separately; explicitly cleaning migration backups releases the
@@ -270,6 +273,36 @@ New Wiki summaries focus on tasks, projects, and technical topics. Activity dura
 coverage remain in structured statistics for internal prioritization and confidence assessment;
 they are not repeated in summary text or task evidence. Existing summaries and dashboard statistics
 remain available.
+
+New summaries link tasks to title evidence and distinguish observations from inferences; window
+titles cannot establish that a task was completed. Application names and displayed evidence are
+derived locally from validated references, so the model does not need to repeat them. The dashboard's
+current window and today use the same title facts, with a smaller budget and a five-second model timeout.
+
+Long Wiki inputs are organized into topic candidates and summarized within `wiki.summary.maxCalls`
+(default **6** per generation attempt) and `wiki.summary.maxRequestChars` (default **32,000**, including
+system instructions). Short inputs still use one call. Related topics can span applications and time
+periods; topic membership remains a model classification. Reports distinguish input omissions,
+unassigned facts, topic cards retained or omitted during merging, and the small set of displayed
+evidence references. These counts do not prove that every real task was captured correctly.
+
+Each logical Wiki period has a lifetime allowance of **12 calls** and **256,000 tokens** for admission across
+retries, restarts, date changes, and changes to the input or model. Before a request, the local ledger
+reserves the estimated input plus **4,096 output tokens**. This is an admission estimate, not a
+`max_tokens` parameter or a guarantee about the provider's final bill. Actual usage replaces the
+reservation when available; failed or interrupted calls with unknown usage retain a conservative
+token reservation. The existing global daily budget remains separate. When the period allowance is exhausted,
+generation pauses with a visible reason and usage; raising the relevant `wiki.summary.periodMaxCalls`
+or `wiki.summary.periodMaxTokens` setting and restarting can resume it without clearing past usage.
+Waiting until the next day does not reset the period allowance.
+
+Validated leaf, merge, and final results survive restarts in `{memory.dir}/wiki-generation.db`.
+Compatible retries reuse completed work; a final result awaiting publication can be saved to the
+Wiki without another model request. Input, model and generation versions isolate incompatible
+checkpoints. Published checkpoints become eligible for cleanup after **7 days**; unfinished work
+and cumulative usage remain available for recovery. Existing Wiki summaries are not automatically regenerated.
+See the [summary quality evaluation guide](docs/summary-quality-evaluation.md) for reproducible,
+synthetic-data comparisons and the limitations of automatic quality measurements.
 
 See the [activity statistics guide](docs/activity-statistics.md) for migration and recovery details.
 

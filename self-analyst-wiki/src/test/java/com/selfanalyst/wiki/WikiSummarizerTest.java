@@ -11,6 +11,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WikiSummarizerTest {
 
+    private static final String GROUNDED_JSON = """
+            {"summary":"查看数据库同步设计","primaryTask":"数据库同步相关活动",
+             "taskSegments":[{"title":"查看设计","summary":"涉及数据库同步",
+             "confidence":"high","evidenceFactIds":["f1"],"claimType":"inferred"}]}
+            """;
+
     private final ZoneId tz = ZoneId.systemDefault();
     private final Instant t1 = Instant.parse("2026-06-01T10:00:00Z");
     private final Instant t2 = Instant.parse("2026-06-01T11:00:00Z");
@@ -27,12 +33,135 @@ class WikiSummarizerTest {
         """;
 
     @Test
+    void structuredResponseKeepsTraceableReferencesAndOnlyLocalMetrics() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON.replace("\"taskSegments\":",
+                "\"metrics\":{\"invented\":\"PRIVATE_METRIC\"},\"taskSegments\":"));
+        var facts = structuredFacts();
+        var result = summarizer.summarize(facts, Duration.ofSeconds(3));
+        assertEquals("medium", result.taskSegments().getFirst().confidence());
+        assertEquals(List.of("f1"), result.taskSegments().getFirst().evidenceFactIds());
+        assertEquals(List.of("观察到标题：「数据库同步设计」"), result.taskSegments().getFirst().evidence());
+        assertEquals(facts.sampledTitles().facts(), result.metrics().extra().get("evidenceFacts"));
+        assertFalse(result.metrics().extra().containsKey("invented"));
+        assertEquals(3600, result.metrics().activeSeconds());
+        assertTrue(summarizer.buildPrompt(facts).contains("evidenceFactIds"));
+        assertTrue(summarizer.buildPrompt(facts).contains("引用存在仍不证明动作"));
+    }
+
+    @Test
+    void rejectsEmptyMalformedAndUnreferencedStructuredTasks() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON);
+        for (String response : List.of(
+                "{\"summary\":\"查看设计\",\"primaryTask\":\"数据库\",\"taskSegments\":[]}",
+                GROUNDED_JSON.replace("\"f1\"", "\"PRIVATE_UNKNOWN\""),
+                GROUNDED_JSON.replace("\"evidenceFactIds\":[\"f1\"],", ""),
+                GROUNDED_JSON.replace("\"title\":\"查看设计\"", "\"title\":42"))) {
+            var error = assertThrows(IllegalArgumentException.class,
+                    () -> summarizer.parseResponse(response, structuredFacts()));
+            assertFalse(error.getMessage().contains("PRIVATE"));
+            assertNull(error.getCause());
+        }
+    }
+
+    @Test
+    void structuredTasksIgnoreCompatibilityFieldsButRetainTheWholeResponseLimit() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON);
+        var expected = summarizer.parseResponse(GROUNDED_JSON, structuredFacts());
+        for (String extras : List.of(
+                "\"apps\":[\"Other\"],\"evidence\":[\"已完成迁移，AFK覆盖为partial\"],",
+                "\"apps\":null,\"evidence\":42,",
+                "\"apps\":{\"invented\":true},\"evidence\":\"自由文本\",")) {
+            String response = GROUNDED_JSON.replace("\"confidence\":", extras + "\"confidence\":");
+            assertEquals(expected, summarizer.parseResponse(response, structuredFacts()));
+            assertThrows(IllegalArgumentException.class, () -> summarizer.parseResponse(
+                    response.replace("\"f1\"", "\"unknown\""), structuredFacts()));
+        }
+        String oversized = GROUNDED_JSON.replace("\"confidence\":",
+                "\"apps\":\"" + "x".repeat(65536) + "\",\"confidence\":");
+        var error = assertThrows(IllegalArgumentException.class,
+                () -> summarizer.parseResponse(oversized, structuredFacts()));
+        assertEquals("WIKI_RESPONSE_STRUCTURE:response", error.getMessage());
+        assertEquals(List.of("IDE"), expected.taskSegments().getFirst().apps());
+    }
+
+    @Test
+    void promptRequestsOnlyTaskSemanticsAndRepresentativeReferencesAcrossApps() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON);
+        String prompt = summarizer.buildPrompt(structuredFacts());
+        String output = prompt.substring(prompt.indexOf("## 输出要求"));
+        assertFalse(output.contains("\"apps\":"));
+        assertFalse(output.contains("\"evidence\":"));
+        assertFalse(output.contains("apps必须"));
+        assertTrue(output.contains("1-3"));
+        assertTrue(output.contains("apps和evidence由本地"));
+        assertTrue(output.contains("跨应用"));
+        assertTrue(output.contains("不要按应用拆分"));
+        assertEquals("wiki-v8-derived-evidence", summarizer.promptVersion());
+    }
+
+    @Test
+    void titleWordingPassesAcrossNarrativeFieldsButLaterAssertionsStillFail() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON);
+        String titleObservation = "涉及协作程序中带添加群聊成员字样的窗口标题，仅反映该窗口观察。";
+        for (String original : List.of("查看数据库同步设计", "数据库同步相关活动", "查看设计", "涉及数据库同步")) {
+            assertDoesNotThrow(() -> summarizer.parseResponse(
+                    GROUNDED_JSON.replace(original, titleObservation), structuredFacts()));
+            for (String assertion : List.of("随后添加了群聊成员。", "已完成数据库迁移。")) {
+                var error = assertThrows(IllegalArgumentException.class, () -> summarizer.parseResponse(
+                        GROUNDED_JSON.replace(original, titleObservation + assertion), structuredFacts()));
+                assertTrue(error.getMessage().startsWith("WIKI_EVIDENCE_UNSUPPORTED_CLAIM:"));
+            }
+        }
+    }
+
+    @Test
+    void validatesGlobalAssertionsAndJsonWithoutLeakingResponse() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON);
+        for (String response : List.of(
+                GROUNDED_JSON.replace("查看数据库同步设计", "已完成迁移并成功发布"),
+                GROUNDED_JSON.replace("数据库同步相关活动", "已解决数据库故障"),
+                GROUNDED_JSON.replace("\"summary\":\"涉及数据库同步\"", "\"summary\":\"参与团队会议\""),
+                GROUNDED_JSON + " PRIVATE_TRAILING_JSON", "{\"PRIVATE_BROKEN_JSON\":", "[]",
+                GROUNDED_JSON.replace("\"summary\":\"查看数据库同步设计\"", "\"summary\":\"x\",\"summary\":\"y\""))) {
+            var error = assertThrows(IllegalArgumentException.class,
+                    () -> summarizer.parseResponse(response, structuredFacts()));
+            assertFalse(error.getMessage().contains("PRIVATE"));
+            assertNull(error.getCause());
+        }
+        assertDoesNotThrow(() -> summarizer.parseResponse(
+                GROUNDED_JSON.replace("查看数据库同步设计", "查看已完成订单列表"), structuredFacts()));
+    }
+
+    @Test
+    void onceBoundaryPropagatesRemainingTimeout() {
+        var timeout = Duration.ofMillis(1234);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var summarizer = new WikiSummarizer((prompt, actualTimeout) -> {
+            assertEquals(timeout, actualTimeout);
+            calls.incrementAndGet();
+            return GROUNDED_JSON;
+        });
+        summarizer.summarizeOnce(structuredFacts(), timeout);
+        assertEquals(1, calls.get());
+    }
+
+    private WikiFactBuilder.WikiFacts structuredFacts() {
+        var fact = new WikiTitleSampler.Fact("f1", "window", "IDE", "数据库同步设计", "window", 30.0, 1,
+                List.of(new WikiTitleSampler.Interval(t1.toString(), t2.toString(), true, List.of(7L), 0)), 0);
+        return new WikiFactBuilder.WikiFacts(new WikiPeriod(WikiLevel.HOUR, t1, t2, tz.getId()), 3600, 0, 0,
+                List.of(new WikiEntry.AppDuration("IDE", 3600)), List.of(), List.of(), List.of(),
+                WikiFactBuilder.FACT_BUILDER_VERSION, null,
+                java.util.Map.of("afk", new WikiEntry.SourceCoverage("complete", t1, t2, 0L)), java.util.Map.of(),
+                new WikiTitleSampler.Selection(List.of(fact), "{\"id\":\"f1\",\"title\":\"数据库同步设计\"}", java.util.Map.of()));
+    }
+
+    @Test
     void promptSeparatesInternalStatisticsFromAllNarrativeFields() {
         var calls = new java.util.concurrent.atomic.AtomicInteger();
         var summarizer = new WikiSummarizer(prompt -> {
             calls.incrementAndGet();
             assertTrue(prompt.contains("仅用于内部判断，不得复述"));
-            assertTrue(prompt.contains("taskSegments.title/summary/evidence"));
+            assertTrue(prompt.contains("taskSegments.title/summary"));
             assertTrue(prompt.contains("旧子摘要中的统计说明也不得复制"));
             String outputSection = prompt.substring(prompt.indexOf("## 输出要求"));
             assertFalse(outputSection.contains("\"metrics\":"), "the model should only generate narrative fields");

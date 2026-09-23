@@ -1,4 +1,12 @@
 {
+  "timeline.periodBudgetPaused": "Summary paused: this period's cumulative budget is exhausted. Increase the period limit in settings and restart to continue.",
+  "timeline.dailyBudgetPaused": "Summary generation is waiting for the daily model budget.",
+  "timeline.summaryNeedsConfiguration": "Summary is waiting for model configuration. Local activity is shown.",
+  "timeline.summaryInputPaused": "Summary input exceeds the current generation budget. Adjust settings to continue.",
+  "timeline.summaryRetrying": "Summary generation is incomplete and will resume from saved progress.",
+  "timeline.summaryBudgetUse": "Period total: {calls}/{maxCalls} calls; token admission accounting {tokens}/{maxTokens}.",
+  "timeline.summaryBudgetEstimate": "Accounting includes conservative reservations or estimates, not a provider bill.",
+  "timeline.summaryPartialInput": "Some records are not included in the final summary; this is not a complete activity review.",
   "config.rawLabel": "Configuration source",
   "llm.connectionSection": "Connection settings",
   "llm.generationSection": "Model and generation",

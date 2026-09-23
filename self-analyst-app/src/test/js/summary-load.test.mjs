@@ -90,6 +90,35 @@ test("loadAll keeps an existing snapshot instead of the loading placeholder", ()
   assert.doesNotMatch(sandbox.timeline.innerHTML, /加载中/);
 });
 
+test("budget pauses show a reason and accounting without clearing local facts", () => {
+  const sandbox = createSandbox({ timeline: [{ label: "昨天", headline: "本地活动", generationProgress: {
+    state: "period_budget", calls: 12, maxCalls: 12, tokens: 240000, maxTokens: 256000, reservedTokens: 4096,
+    reason: "PRIVATE_SHOULD_NOT_RENDER", configurationStamp: "PRIVATE_STAMP"
+  } }] });
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /本地活动/);
+  assert.match(sandbox.timeline.innerHTML, /timeline.periodBudgetPaused/);
+  assert.match(sandbox.timeline.innerHTML, /timeline.summaryBudgetUse/);
+  assert.match(sandbox.timeline.innerHTML, /timeline.summaryBudgetEstimate/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /PRIVATE_/);
+});
+
+test("omitted input is visible but representative citation counts do not imply missing topics", () => {
+  const sandbox = createSandbox({ timeline: [{ label: "昨天", headline: "主题摘要",
+    generationCoverage: { intermediateUnreferencedFacts: 99, finalUnreferencedFacts: 50 } }] });
+  sandbox.renderTimeline();
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /timeline.summaryPartialInput/);
+  sandbox.state.summary.timeline[0].generationCoverage.omittedFacts = 1;
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /timeline.summaryPartialInput/);
+  sandbox.state.summary.timeline[0].generationCoverage = { omittedTopicCards: 1 };
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /timeline.summaryPartialInput/);
+  sandbox.state.summary.timeline[0].generationCoverage = { unresolvedFacts: 1 };
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /timeline.summaryPartialInput/);
+});
+
 test("loadAll without a snapshot leaves the loading placeholder", () => {
   const sandbox = createSandbox(null);
   sandbox.loadAll();

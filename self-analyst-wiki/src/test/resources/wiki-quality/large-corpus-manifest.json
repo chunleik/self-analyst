@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "generatorVersion": "large-synthetic-v1",
+  "generator": "com.selfanalyst.wiki.WikiLargeQualityCorpus",
+  "seed": 20260923,
+  "sizes": [500, 750, 1000],
+  "goldTopicsPerCase": 16,
+  "longTopics": 13,
+  "appsPerLongTopic": 3,
+  "timeLayersPerLongTopic": 4,
+  "shortTopicSeconds": [15, 45, 90],
+  "sharedShortAndLongTimeLayer": 1,
+  "features": [
+    "跨应用及跨时段主题",
+    "同一应用的多个主题",
+    "与长任务同层的三个短主题，其中一个同应用",
+    "通用词相似但金标准不同的主题",
+    "长标题末尾区别",
+    "词面无共同锚点的同一测试侧主题",
+    "只有标题观察的主题",
+    "标题指令诱饵与来源信封中的正文诱饵"
+  ],
+  "goldBoundary": "主题映射只存在测试源码与测试内存；不得序列化为生产事实、统计或提示词字段。",
+  "scriptedMeaning": "oracle Session 只验证协议、引用、卡片传递和覆盖计数，不测量模型语义能力。",
+  "proxyMeaning": "主题词命中只读取摘要和任务文案，排除自动派生 evidence、apps 与引用；属于词面代理。",
+  "manualReview": "语义归并、遗漏的重要性与断言真实性仍需独立人工审阅；不输出自动语义质量通过率。",
+  "networkPolicy": "默认完全离线，不读取私人数据库，不调用模型或 embedding。"
+}

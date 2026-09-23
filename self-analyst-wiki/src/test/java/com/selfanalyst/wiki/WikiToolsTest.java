@@ -15,6 +15,22 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WikiToolsTest {
 
+    @Test
+    void pendingBudgetReasonAndCountersRemainVisibleWithoutPrivateConfiguration() throws Exception {
+        var entry = new WikiEntry("budget-entry", WikiLevel.HOUR, t1, t2, tz.getId(), WikiStatus.PENDING,
+                null, null, List.of(), new WikiEntry.WikiMetrics(0, 0, 0, List.of(), Map.of()), List.of(),
+                null, null, 0, null, null, t1, t1, null);
+        store.upsert(entry);
+        store.markGenerationFailure(entry, null, Map.of("state", "period_budget", "reason", "WIKI_PERIOD_BUDGET_EXHAUSTED",
+                "calls", 12, "maxCalls", 12, "tokens", 200000, "maxTokens", 256000,
+                "configurationStamp", "PRIVATE_CONFIG"), Instant.parse("9999-12-31T00:00:00Z"), false);
+        String result = tools.queryWiki(t1.toString(), t2.toString(), "HOUR");
+        assertTrue(result.contains("generationProgress")); assertTrue(result.contains("period_budget"));
+        assertFalse(result.contains("PRIVATE_CONFIG"));
+        var status = new com.fasterxml.jackson.databind.ObjectMapper().readTree(tools.wikiStatus(t1.toString(), t2.toString()));
+        assertEquals(1, status.path("HOUR").path("paused").asInt());
+    }
+
     @TempDir
     Path tempDir;
 

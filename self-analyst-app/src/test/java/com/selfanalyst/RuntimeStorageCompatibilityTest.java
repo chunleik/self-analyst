@@ -5,6 +5,7 @@ import com.selfanalyst.events.store.Database;
 import com.selfanalyst.file.FileWatchStore;
 import com.selfanalyst.memory.MemoryStore;
 import com.selfanalyst.wiki.WikiStore;
+import com.selfanalyst.wiki.WikiGenerationStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -40,6 +41,7 @@ class RuntimeStorageCompatibilityTest {
         MemoryStore.load(memory).save();
         try (var chat = new ChatSessionStore(memory);
              var wiki = new WikiStore(memory.resolve("llm-wiki.db"));
+             var generation = new WikiGenerationStore(memory.resolve("wiki-generation.db"));
              var file = new FileWatchStore(memory.resolve("file-watch.db"));
              var events = new Database(root.resolve("events"))) {
             var request = new ChatSessionStore.CreateRequest();
@@ -81,6 +83,24 @@ class RuntimeStorageCompatibilityTest {
         assertThrows(RuntimeStorageGuard.StorageException.class, () -> RuntimeStorageGuard.acquire(root));
         assertFalse(Files.exists(root.resolve("storage-format.json")));
         assertEquals("unknown", Files.readString(root.resolve("memory/unknown.bin")));
+    }
+
+    @Test void refusesUnknownOrCorruptGenerationStoreWithoutChangingBytes() throws Exception {
+        Path database = root.resolve("memory/wiki-generation.db");
+        try (var generation = new WikiGenerationStore(database)) { }
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            statement.execute("PRAGMA user_version=99");
+        }
+        byte[] unknown = Files.readAllBytes(database);
+        assertThrows(RuntimeStorageGuard.StorageException.class, () -> RuntimeStorageGuard.acquire(root));
+        assertArrayEquals(unknown, Files.readAllBytes(database));
+        assertFalse(Files.exists(root.resolve("storage-format.json")));
+        Files.writeString(database, "corrupt generation store");
+        byte[] corrupt = Files.readAllBytes(database);
+        assertThrows(RuntimeStorageGuard.StorageException.class, () -> RuntimeStorageGuard.acquire(root));
+        assertArrayEquals(corrupt, Files.readAllBytes(database));
+        assertFalse(Files.exists(root.resolve("storage-format.json")));
     }
 
     @Test void acceptsEmptyKnownLayoutAndRejectsCorruptConfiguration() throws Exception {

@@ -37,6 +37,11 @@ public record Config(
         boolean wikiBackfillEnabled,
         int wikiWorkerIntervalSeconds,
         int wikiPromptMaxContentChars,
+        int wikiSummaryMaxCalls,
+        int wikiSummaryMaxRequestChars,
+        int wikiSummaryPeriodMaxCalls,
+        long wikiSummaryPeriodMaxTokens,
+        int wikiSummaryOutputTokenReserve,
         int wikiTopAppsLimit,
         boolean wikiSemanticEnabled,
         Path wikiSemanticIndexDir,
@@ -155,6 +160,16 @@ public record Config(
         }
         int wikiTopAppsLimit = Integer.parseInt(
                 values.get("wiki.topApps.limit", "10"));
+        int wikiSummaryMaxCalls = parseIntOr(props, values.get("wiki.summary.maxCalls", "6"), 6);
+        if (wikiSummaryMaxCalls < 1 || wikiSummaryMaxCalls > 16) wikiSummaryMaxCalls = 6;
+        int wikiSummaryMaxRequestChars = parseIntOr(props, values.get("wiki.summary.maxRequestChars", "32000"), 32000);
+        if (wikiSummaryMaxRequestChars < 4000 || wikiSummaryMaxRequestChars > 200000) wikiSummaryMaxRequestChars = 32000;
+        int wikiSummaryPeriodMaxCalls = parseIntOr(props, values.get("wiki.summary.periodMaxCalls", "12"), 12);
+        if (wikiSummaryPeriodMaxCalls < 1 || wikiSummaryPeriodMaxCalls > 10000) wikiSummaryPeriodMaxCalls = 12;
+        long wikiSummaryPeriodMaxTokens = parseLongOr(values.get("wiki.summary.periodMaxTokens", "256000"), 256000L);
+        if (wikiSummaryPeriodMaxTokens < 1 || wikiSummaryPeriodMaxTokens > 1_000_000_000L) wikiSummaryPeriodMaxTokens = 256000L;
+        int wikiSummaryOutputTokenReserve = parseIntOr(props, values.get("wiki.summary.outputTokenReserve", "4096"), 4096);
+        if (wikiSummaryOutputTokenReserve < 1 || wikiSummaryOutputTokenReserve > 1_000_000) wikiSummaryOutputTokenReserve = 4096;
 
         boolean wikiSemanticEnabled = Boolean.parseBoolean(
                 values.get("wiki.semantic.enabled", "true"));
@@ -314,7 +329,8 @@ public record Config(
                 eventsRawLowDiskWarnBytes, eventsRawLowDiskBlockBytes,
                 eventsRawIntegrityStartupScope, eventsRawProjectorBatchSize,
                 wikiEnabled, wikiBackfillEnabled, wikiWorkerIntervalSeconds,
-                wikiPromptMaxContentChars, wikiTopAppsLimit,
+                wikiPromptMaxContentChars, wikiSummaryMaxCalls, wikiSummaryMaxRequestChars,
+                wikiSummaryPeriodMaxCalls, wikiSummaryPeriodMaxTokens, wikiSummaryOutputTokenReserve, wikiTopAppsLimit,
                 wikiSemanticEnabled, wikiSemanticIndexDir, wikiSemanticTopK,
                 embeddingEnabled, embeddingBaseUrl, embeddingApiKey,
                 embeddingModel, embeddingDimensions,
@@ -352,7 +368,7 @@ public record Config(
                 baseDir.resolve("events/raw"), 31, 1000,
                 10_737_418_240L, 1_073_741_824L,
                 RawIntegrityPolicy.LATEST, 1000,
-                false, false, 60, 24000, 10,
+                false, false, 60, 24000, 6, 32000, 12, 256000L, 4096, 10,
                 false, baseDir.resolve("wiki-semantic-index"), 8,
                 false, "", "", "", 1024, true, 500,
                 false, "https://search.parallel.ai/mcp", "",

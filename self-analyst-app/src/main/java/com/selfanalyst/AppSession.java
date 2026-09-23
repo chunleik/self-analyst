@@ -37,6 +37,8 @@ public class AppSession implements AutoCloseable {
     private ContentWatcher contentWatcher;
     private DesktopServer desktopServer;
     private WikiStore wikiStore;
+    private WikiGenerationStore wikiGenerationStore;
+    private WikiSummaryPipeline wikiSummaryPipeline;
     private WikiWorker wikiWorker;
     private WikiSummaryWatcher wikiSummaryWatcher;
     private WikiSemanticIndex wikiSemanticIndex;
@@ -228,10 +230,29 @@ public class AppSession implements AutoCloseable {
             if (wikiStore != null && a != null && eventServer != null
                     && contentPersistenceReady && eventServer.projectionReady()) {
                 try {
+                    wikiGenerationStore = new WikiGenerationStore(config.memoryDir().resolve("wiki-generation.db"));
                     WikiFactBuilder factBuilder = new WikiFactBuilder(
                             eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> 0L);
-                    WikiSummarizer summarizer = new WikiSummarizer(a.wikiLLMClient());
-                    wikiWorker = new WikiWorker(wikiStore, factBuilder, summarizer,
+                    SelfAnalystAgent summaryAgent = a;
+                    wikiSummaryPipeline = new WikiSummaryPipeline(() -> {
+                        SelfAnalystAgent.PlainTask task = summaryAgent.plainTask();
+                        return new WikiSummaryPipeline.Session() {
+                            public String complete(String prompt, Duration timeout) { return task.complete(prompt, timeout); }
+                            public WikiSummaryPipeline.Completion completeDetailed(String prompt, Duration timeout) {
+                                return task.completeDetailed(prompt, timeout);
+                            }
+                            public void preflight() { task.preflight(); }
+                            public String identity() { return task.cacheIdentity(); }
+                            public String configurationRevision() { return task.configurationRevision(); }
+                            public int overheadChars() { return task.requestOverheadChars(); }
+                            public long estimateInputTokens(String prompt) { return task.estimateInputTokens(prompt); }
+                            public void close() { task.close(); }
+                        };
+                    }, new WikiSummaryPipeline.Limits(config.wikiPromptMaxContentChars(),
+                            config.wikiSummaryMaxRequestChars(), config.wikiSummaryMaxCalls()),
+                            wikiGenerationStore, new WikiGenerationStore.BudgetLimits(config.wikiSummaryPeriodMaxCalls(),
+                                    config.wikiSummaryPeriodMaxTokens(), config.wikiSummaryOutputTokenReserve()));
+                    wikiWorker = new WikiWorker(wikiStore, factBuilder, wikiSummaryPipeline,
                             ZoneId.systemDefault(),
                             Duration.ofMinutes(3),
                             config.wikiWorkerIntervalSeconds(),
@@ -472,6 +493,7 @@ public class AppSession implements AutoCloseable {
             return;
         }
         if (agent != null) agent.beginShutdown();
+        boolean interrupted = Thread.interrupted();
         try {
             try {
                 if (agent != null) {
@@ -479,9 +501,6 @@ public class AppSession implements AutoCloseable {
                 }
             } catch (IOException e) {
                 log.warn("memory not saved: {}", e.getMessage());
-            }
-            if (usageMeter != null) {
-                usageMeter.flush();
             }
             synchronized (this) {
                 stopFileWatchWorkers();
@@ -495,8 +514,25 @@ public class AppSession implements AutoCloseable {
             if (wikiWorker != null) {
                 wikiWorker.shutdown();
             }
+            if (wikiSummaryPipeline != null) {
+                interrupted |= Thread.interrupted();
+                while (!wikiSummaryPipeline.awaitIdle(Duration.ofSeconds(5))) {
+                    interrupted |= Thread.interrupted();
+                    log.debug("等待 Wiki 已发出请求完成结算后关闭存储");
+                }
+            }
             if (wikiEmbeddingWorker != null) {
                 wikiEmbeddingWorker.shutdown();
+            }
+            // Workers settle their last call and checkpoint before any database or usage writer closes.
+            if (agent != null) {
+                agent.close();
+            }
+            if (usageMeter != null) {
+                usageMeter.flush();
+            }
+            if (wikiGenerationStore != null) {
+                wikiGenerationStore.close();
             }
             if (wikiSemanticIndex != null) {
                 wikiSemanticIndex.close();
@@ -512,6 +548,7 @@ public class AppSession implements AutoCloseable {
             if (agent != null) {
                 agent.close();
             }
+            if (interrupted) Thread.currentThread().interrupt();
         }
     }
 

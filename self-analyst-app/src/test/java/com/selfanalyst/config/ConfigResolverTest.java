@@ -150,9 +150,15 @@ class ConfigResolverTest {
         Properties user = new Properties();
         user.setProperty("embedding.dimensions", "2048");
         user.setProperty("llm.budget.mode", "invalid");
+        user.setProperty("wiki.summary.periodMaxCalls", "-1");
+        user.setProperty("wiki.summary.periodMaxTokens", "0");
+        user.setProperty("wiki.summary.outputTokenReserve", "invalid");
         var snapshot = ConfigResolver.resolve(user, Map.of());
         assertEquals("1024", snapshot.values().get("embedding.dimensions").value());
         assertEquals("warn", snapshot.values().get("llm.budget.mode").value());
+        assertEquals("12", snapshot.values().get("wiki.summary.periodMaxCalls").value());
+        assertEquals("256000", snapshot.values().get("wiki.summary.periodMaxTokens").value());
+        assertEquals("4096", snapshot.values().get("wiki.summary.outputTokenReserve").value());
     }
     @Test void policiesDistinguishHotAndStartupParameters() {
         ConfigPolicy.LLM.forEach(key -> assertFalse(ConfigPolicy.requiresRestart(key), key));

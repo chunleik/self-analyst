@@ -120,6 +120,18 @@ class ConfigTest {
     }
 
     @Test
+    void wikiGenerationBudgetsAreBoundedAndConfigurable(@TempDir Path dir) throws Exception {
+        assertEquals(6, Config.load(dir, java.util.Map.of()).wikiSummaryMaxCalls());
+        assertEquals(32000, Config.load(dir, java.util.Map.of()).wikiSummaryMaxRequestChars());
+        Files.writeString(dir.resolve("config.toml"), "[wiki.summary]\nmaxCalls=2\nmaxRequestChars=16000\n");
+        assertEquals(2, Config.load(dir, java.util.Map.of()).wikiSummaryMaxCalls());
+        assertEquals(16000, Config.load(dir, java.util.Map.of()).wikiSummaryMaxRequestChars());
+        Files.writeString(dir.resolve("config.toml"), "[wiki.summary]\nmaxCalls=100\nmaxRequestChars=1\n");
+        assertEquals(6, Config.load(dir, java.util.Map.of()).wikiSummaryMaxCalls());
+        assertEquals(32000, Config.load(dir, java.util.Map.of()).wikiSummaryMaxRequestChars());
+    }
+
+    @Test
     void wikiTitleBudgetKeepsExplicitOverridesAndFallsBackBelowMinimum(@TempDir Path dir) throws Exception {
         var environment = java.util.Map.of("WIKI_PROMPT_MAX_CONTENT_CHARS", "36000");
         assertEquals(36_000, Config.load(dir, environment).wikiPromptMaxContentChars());
@@ -133,6 +145,43 @@ class ConfigTest {
 
         Files.writeString(file, "[wiki]\nprompt.maxContentChars = 1000\n");
         assertEquals(1_000, Config.load(dir, environment).wikiPromptMaxContentChars());
+    }
+
+    @Test
+    void wikiPeriodBudgetsPreserveDefaultsOverridesAndRejectInvalidValues(@TempDir Path dir) throws Exception {
+        for (String key : java.util.List.of("periodMaxCalls", "periodMaxTokens", "outputTokenReserve")) {
+            assertEquals(SupportedKeys.defaults().get("wiki.summary." + key),
+                    Config.loadClasspathProps().getProperty("wiki.summary." + key));
+            assertTrue(ConfigPolicy.requiresRestart("wiki.summary." + key));
+        }
+        Config defaults = Config.load(dir, java.util.Map.of());
+        assertEquals(12, defaults.wikiSummaryPeriodMaxCalls());
+        assertEquals(256000L, defaults.wikiSummaryPeriodMaxTokens());
+        assertEquals(4096, Config.testDefaults(dir).wikiSummaryOutputTokenReserve());
+        var environment = java.util.Map.of("WIKI_SUMMARY_PERIOD_MAX_CALLS", "24",
+                "WIKI_SUMMARY_PERIOD_MAX_TOKENS", "512000", "WIKI_SUMMARY_OUTPUT_TOKEN_RESERVE", "8192");
+        Config configured = Config.load(dir, environment);
+        assertEquals(24, configured.wikiSummaryPeriodMaxCalls());
+        assertEquals(512000L, configured.wikiSummaryPeriodMaxTokens());
+        assertEquals(8192, configured.wikiSummaryOutputTokenReserve());
+        Files.writeString(dir.resolve("config.toml"), """
+                [wiki.summary]
+                periodMaxCalls = 18
+                periodMaxTokens = 400000
+                outputTokenReserve = 2048
+                """);
+        Config explicit = Config.load(dir, environment);
+        assertEquals(18, explicit.wikiSummaryPeriodMaxCalls());
+        assertEquals(400000L, explicit.wikiSummaryPeriodMaxTokens());
+        assertEquals(2048, explicit.wikiSummaryOutputTokenReserve());
+        for (String invalid : java.util.List.of("-1", "0", "1000000001", "\"invalid\"")) {
+            Files.writeString(dir.resolve("config.toml"), "[wiki.summary]\nperiodMaxCalls=" + invalid
+                    + "\nperiodMaxTokens=" + invalid + "\noutputTokenReserve=" + invalid + "\n");
+            Config fallback = Config.load(dir, java.util.Map.of());
+            assertEquals(12, fallback.wikiSummaryPeriodMaxCalls(), invalid);
+            assertEquals(256000L, fallback.wikiSummaryPeriodMaxTokens(), invalid);
+            assertEquals(4096, fallback.wikiSummaryOutputTokenReserve(), invalid);
+        }
     }
 
     @Test

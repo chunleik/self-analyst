@@ -173,6 +173,9 @@ language = "en" # auto、zh 或 en
 | `events.export.maxRangeDays` | `EVENTS_EXPORT_MAX_RANGE_DAYS` | `31` |
 | `events.storage.lowDisk.warnBytes` | `EVENTS_STORAGE_LOW_DISK_WARN_BYTES` | `10737418240` |
 | `events.storage.lowDisk.blockBytes` | `EVENTS_STORAGE_LOW_DISK_BLOCK_BYTES` | `1073741824` |
+| `wiki.summary.periodMaxCalls` | `WIKI_SUMMARY_PERIOD_MAX_CALLS` | `12` |
+| `wiki.summary.periodMaxTokens` | `WIKI_SUMMARY_PERIOD_MAX_TOKENS` | `256000` |
+| `wiki.summary.outputTokenReserve` | `WIKI_SUMMARY_OUTPUT_TOKEN_RESERVE` | `4096` |
 
 现有双层数据经过校验后迁移到紧凑事件库，旧库保留为备份。设置分别显示活动库和备份占用；显式清理迁移
 备份后才释放旧文件，同时失去逐心跳恢复和旧格式回退能力。提交身份的重试去重保证为 24 小时。
@@ -213,6 +216,28 @@ Wiki 结构化标题事实的默认预算为 **24000 字符**（`wiki.prompt.max
 不包含固定提示词和全量统计指标。显式合法配置继续优先，因此已有的 12000 字符预算仍然生效。
 新生成的 Wiki 文案聚焦任务、项目和技术主题，活动时长与 AFK 覆盖保留在结构化统计中，
 用于内部排序及置信度判断，不再在摘要正文或任务证据中复述。已有摘要与看板独立统计仍然可用。
+
+新摘要将任务关联到标题证据，并区分观察与推断；窗口标题不能证明任务已完成。应用名称和展示证据由
+校验后的引用在本地派生，不要求模型重复生成。看板“当前”和“今天”共用标题事实，使用较小输入预算
+和 5 秒模型超时。
+
+长 Wiki 输入先组织主题候选再汇总，受 `wiki.summary.maxCalls`（每次生成尝试默认 **6** 次）及
+`wiki.summary.maxRequestChars`（默认 **32000** 字符，含系统提示）限制；短输入仍调用一次模型。
+相关主题可跨应用和时间段，但主题成员归属仍是模型分类。报告区分输入省略、未归类事实、合并时保留
+或省略的主题卡片，以及少量展示证据引用；这些计数不能证明所有真实任务都已被正确识别。
+
+每个逻辑 Wiki 周期默认终身累计最多 **12 次调用、256000 tokens 准入额度**，跨重试、重启、执行日以及
+输入或模型变化都不清零。请求前，本地账本预留估计输入加 **4096 输出 tokens**；这只是准入估计，
+不是 `max_tokens` 参数，也不保证服务端最终账单绝不超额。可获得真实 usage 时据此结算；已发出的失败
+或中断请求若用量未知，保留保守扣额。既有全局每日预算独立生效。周期额度耗尽时暂停生成并展示原因和
+消耗；调高相应的 `wiki.summary.periodMaxCalls` 或 `wiki.summary.periodMaxTokens` 后重启，可在不清除
+历史用量的前提下继续。等到次日不会重置周期额度。
+
+已校验的叶块、归并和最终结果持久化在 `{memory.dir}/wiki-generation.db`，重启后兼容的重试复用已完成
+工作；最终结果已生成但尚未发布时，可不再调用模型而继续保存到 Wiki。不同输入、模型和生成版本的检查点
+相互隔离。正式发布满 **7 天**的检查点可在后续清理时回收，未完成工作及累计账本仍保留用于恢复。
+不会自动重算已有 Wiki 摘要。可重复的合成数据对比与自动指标局限见
+[摘要质量评测指南](docs/summary-quality-evaluation.md)。
 
 迁移与恢复细节见[活动统计说明](docs/activity-statistics.md)。
 

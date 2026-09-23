@@ -14,7 +14,9 @@ import java.util.*;
 public class WikiFactBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(WikiFactBuilder.class);
-    public static final String FACT_BUILDER_VERSION = "wiki-facts-topics-v4";
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+    public static final String FACT_BUILDER_VERSION = "wiki-facts-evidence-v5";
 
     private final EventStore eventStore;
     private final String hostname;
@@ -43,6 +45,15 @@ public class WikiFactBuilder {
     }
 
     public WikiFacts buildFacts(WikiPeriod period) {
+        return buildFacts(period, maxContentChars);
+    }
+
+    /** Full metadata facts for bounded multi-stage synthesis; do not truncate before partitioning. */
+    public WikiFacts buildCompleteFacts(WikiPeriod period) {
+        return buildFacts(period, Integer.MAX_VALUE);
+    }
+
+    private WikiFacts buildFacts(WikiPeriod period, int titleBudget) {
         List<String> buckets = new ArrayList<>();
         for (String kind : List.of("window", "afk", "content")) {
             buckets.add("watcher-" + kind + "_" + hostname);
@@ -64,7 +75,7 @@ public class WikiFactBuilder {
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(10)
                 .map(e -> new WikiEntry.AppDuration(e.getKey(), e.getValue().longValue())).toList();
         WikiTitleSampler.Selection sampled = WikiTitleSampler.sample(
-                period, stats.activeEvents(), windowEvents, contentEvents, maxContentChars);
+                period, stats.activeEvents(), windowEvents, contentEvents, titleBudget);
         List<String> titleSamples = sampled.facts().stream().filter(f -> "window".equals(f.source()))
                 .map(WikiTitleSampler.Fact::title).toList();
         List<String> contextTitleSamples = sampled.facts().stream().filter(f -> "content".equals(f.source()))
@@ -91,6 +102,7 @@ public class WikiFactBuilder {
         Map<String, Double> appTotals = new LinkedHashMap<>();
         Map<String, Object> totals = new LinkedHashMap<>();
         List<String> summaries = new ArrayList<>();
+        List<WikiTitleSampler.Fact> childFacts = new ArrayList<>();
 
         for (WikiEntry child : childEntries) {
             if (child.metrics() != null) {
@@ -111,12 +123,7 @@ public class WikiFactBuilder {
                     appTotals.merge(ad.app(), (double) ad.seconds(), Double::sum);
                 }
             }
-            if (child.summary() != null && !child.summary().isBlank()) {
-                summaries.add(child.summary());
-            }
-            if (child.primaryTask() != null && !child.primaryTask().isBlank()) {
-                summaries.add("主要任务: " + child.primaryTask());
-            }
+            if (child.status() == WikiStatus.SUMMARIZED) addChildFacts(child, childFacts, summaries);
         }
 
         List<WikiEntry.AppDuration> topApps = appTotals.entrySet().stream()
@@ -129,12 +136,53 @@ public class WikiFactBuilder {
         childEntries.forEach(child -> child.sourceCoverage().forEach((key, value) -> coverage.merge(key, value,
                 (a, b) -> "complete".equals(a.status()) ? b : a)));
         totals.put("appSecondsExact", appTotals);
+        totals.put("sourceEntryIds", childEntries.stream().map(WikiEntry::id).toList());
         activeSeconds = ((Number) totals.getOrDefault("activeSecondsExact", 0)).longValue();
         afkSeconds = ((Number) totals.getOrDefault("afkSecondsExact", 0)).longValue();
         return new WikiFacts(period, activeSeconds, afkSeconds, switchCount,
                 topApps, List.of(), List.of(), summaries, FACT_BUILDER_VERSION,
                 childEntries.stream().map(WikiEntry::projectorVersion)
-                        .filter(Objects::nonNull).findFirst().orElse(null), coverage, totals);
+                        .filter(Objects::nonNull).findFirst().orElse(null), coverage, totals,
+                WikiTitleSampler.fromFacts(period, childFacts, Map.of("candidateFacts", childFacts.size())));
+    }
+
+    private static void addChildFacts(WikiEntry child, List<WikiTitleSampler.Fact> facts, List<String> summaries) {
+        List<WikiEntry.TaskSegment> tasks = child.taskSegments();
+        if (tasks.isEmpty()) {
+            String app = child.metrics() != null && !child.metrics().topApps().isEmpty()
+                    ? child.metrics().topApps().getFirst().app() : "Wiki";
+            tasks = List.of(new WikiEntry.TaskSegment(
+                    child.primaryTask() == null ? "历史活动" : child.primaryTask(),
+                    child.summary() == null ? "" : child.summary(), List.of(), List.of(app), "low"));
+        }
+        int index = 0;
+        for (WikiEntry.TaskSegment task : tasks) {
+            List<String> refs = new ArrayList<>();
+            List<String> apps = task.apps().isEmpty() ? List.of("Wiki") : task.apps();
+            int appIndex = 0;
+            for (String app : apps) {
+                String id = "child:" + child.id() + ":" + index + ":" + appIndex++;
+                refs.add(id);
+                facts.add(new WikiTitleSampler.Fact(id, "wiki", app, task.title(), "inferred", null, 1,
+                        List.of(new WikiTitleSampler.Interval(child.periodStart().toString(), child.periodEnd().toString(),
+                                false, List.of(), 0)), 0));
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("entryId", child.id());
+            item.put("start", child.periodStart().toString());
+            item.put("end", child.periodEnd().toString());
+            item.put("timezone", child.timezone());
+            item.put("title", task.title());
+            item.put("summary", task.summary());
+            item.put("evidenceFactIds", refs);
+            item.put("confidence", task.confidence());
+            item.put("sourceCoverage", child.sourceCoverage());
+            try { summaries.add(JSON.writeValueAsString(item)); }
+            catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new IllegalStateException("WIKI_CHILD_FACT_SERIALIZATION");
+            }
+            index++;
+        }
     }
 
     private QueryResult select(Map<String, EventStore.EventRange> ranges, String kind) {
@@ -174,6 +222,14 @@ public class WikiFactBuilder {
             Map<String, WikiEntry.SourceCoverage> sourceCoverage,
             Map<String, Object> statistics,
             WikiTitleSampler.Selection sampledTitles) {
+
+        public WikiFacts withInput(WikiTitleSampler.Selection selection, List<String> children) {
+            Map<String, Object> extra = new LinkedHashMap<>(statistics);
+            extra.put("titleSampling", selection.coverage());
+            return new WikiFacts(period, activeSeconds, afkSeconds, switchCount, topApps,
+                    List.of(), List.of(), children, factBuilderVersion, projectorVersion,
+                    sourceCoverage, extra, selection);
+        }
 
         public WikiFacts(WikiPeriod period, long activeSeconds, long afkSeconds, int switchCount,
                          List<WikiEntry.AppDuration> topApps, List<String> titleSamples,

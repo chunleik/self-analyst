@@ -115,12 +115,11 @@ ConfigTools SHALL 展示 maxIters、summary timeline 限额和预算配置。
 - **THEN** 返回当前本地日期和 AGENT/SUMMARY/EMBEDDING 分类明细
 
 ### Requirement: SPEC-BUDGET-NON-001..004 预算功能边界
-预算系统 MUST NOT 声称提供货币成本、跨天/月滚动账单、导出或分布式多进程配额。Embedding 当前
-SHALL 仅计量、不执行 block gate；预算权威限于当前进程和当天本地 usage 文件。
+全局每日计量 MUST NOT 声称提供货币成本、跨天/月滚动账单、导出或分布式多进程配额。Embedding 当前 SHALL 仅计量、不执行 block gate；全局每日预算权威限于当前进程和当天本地 usage 文件。Wiki 同一逻辑周期的独立准入账本 SHALL 按周期累计，不改变全局每日计量的上述边界。
 
 #### Scenario: 两个独立进程
 - **WHEN** 两个进程使用同一或不同 memoryDir
-- **THEN** 当前规格不保证跨进程原子共享预算
+- **THEN** 全局每日计量不保证跨进程原子共享预算；共用同一本地 Wiki 周期账本的请求仍受该账本的原子周期准入约束
 
 ### Requirement: SPEC-BUDGET-LIVE-001 模型切换保留用量
 模型切换与首次配置恢复 MUST NOT 清零或重复载入覆盖当前进程的日用量。新旧模型并行期间的实际调用
@@ -134,3 +133,26 @@ SHALL 按现有 AGENT、SUMMARY 类别累计，保持真实 usage 优先、缺�
 #### Scenario: 已达到预算上限
 - **WHEN** 预算处于 block exceeded 且用户切换模型
 - **THEN** 预算仍然阻止后续受控调用，不通过切换模型重置预算
+
+### Requirement: SPEC-BUDGET-WIKI-001 周期预留与每日计量协作
+Wiki周期账本 SHALL 在请求前原子预留一次调用与估计token额度，成功/失败/取消均至多结算一次；优先结算真实usage，缺失或崩溃不确定时保守保留预留。已确认在发出请求前被模型配置或全局预算拦截的工作不得伪记模型调用。账本与全局按执行日期的类别计量 SHALL 分清职责，不声称两个存储具有跨库原子性。
+
+#### Scenario: 输出超过预留
+- **WHEN** 服务端真实token用量超过发起时的准入预留
+- **THEN** 记录完整实际用量并阻止后续超额调用，不截断计量或恢复输出上限参数
+
+#### Scenario: 未知结算
+- **WHEN** 请求发出后进程崩溃，无法知道模型是否完成
+- **THEN** 请求的调用数和预留仍占周期额度，重启不重复返还或重复结算
+
+#### Scenario: 供应商可重试错误
+- **WHEN** 单次正式摘要请求遭遇429、5xx或传输失败
+- **THEN** 不在同一次预留下隐式重复发送HTTP请求，后续尝试必须重新经过周期准入
+
+#### Scenario: 正式摘要配置
+- **WHEN** 普通摘要或本轮效果复验通过正式plain调用入口生成
+- **THEN** 保持temperature=0.2及不发送输出上限的现行行为，使用计量预留不等同于限制服务端输出
+
+#### Scenario: 被包装的供应商错误
+- **WHEN** 摘要SDK将HTTP失败包装在异常链中，或响应正文含有与真实状态不同的数字
+- **THEN** 优先使用结构化HTTP状态分类，不从正文猜测认证或重试原因，也不回显响应正文

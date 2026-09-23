@@ -30,6 +30,7 @@ function renderTimeline() {
     var insight = entry.insight;
     var suggestion = entry.suggestion;
     var localFacts = entry.local_facts;
+    var progress = entry.generationProgress;
 
     var isLlmAvailable = !!(headline && headline !== t("timeline.noSummary"));
 
@@ -57,7 +58,32 @@ function renderTimeline() {
       html += "</div>";
     }
 
+    if (progress && progress.state && progress.state !== "queued") {
+      var noticeKey = progress.state === "period_budget" ? "timeline.periodBudgetPaused"
+        : progress.state === "global_budget" ? "timeline.dailyBudgetPaused"
+        : progress.state === "configuration" ? "timeline.summaryNeedsConfiguration"
+        : progress.state === "input" ? "timeline.summaryInputPaused" : "timeline.summaryRetrying";
+      html += '<div class="timeline-entry-summary">' + escHtml(t(noticeKey)) + '</div>';
+    }
+
     html += '<div class="timeline-entry-detail">';
+
+    if (progress && Number.isFinite(progress.calls) && Number.isFinite(progress.maxCalls)) {
+      html += '<div class="timeline-detail-section">' + escHtml(t("timeline.summaryBudgetUse", {
+        calls: progress.calls, maxCalls: progress.maxCalls,
+        tokens: Number.isFinite(progress.tokens) ? progress.tokens : 0,
+        maxTokens: Number.isFinite(progress.maxTokens) ? progress.maxTokens : 0
+      })) + '</div>';
+      if (progress.reservedTokens > 0 || progress.estimatedCalls > 0) {
+        html += '<div class="timeline-detail-section">' + escHtml(t("timeline.summaryBudgetEstimate")) + '</div>';
+      }
+    }
+    var generationCoverage = entry.generationCoverage;
+    if (generationCoverage && (generationCoverage.omittedFacts > 0 || generationCoverage.mergeOmittedFacts > 0
+        || generationCoverage.omittedIntermediateSummaries > 0 || generationCoverage.omittedTopicCards > 0
+        || generationCoverage.unresolvedFacts > 0)) {
+      html += '<div class="timeline-detail-section">' + escHtml(t("timeline.summaryPartialInput")) + '</div>';
+    }
 
     if (!isLlmAvailable && localFacts) {
       html += '<div class="timeline-local-facts">';

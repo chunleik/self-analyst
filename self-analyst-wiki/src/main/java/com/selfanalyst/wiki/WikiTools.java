@@ -67,10 +67,16 @@ public class WikiTools {
             List<String> missing = new ArrayList<>();
             List<String> pending = new ArrayList<>();
             List<String> failed = new ArrayList<>();
+            List<Map<String, Object>> generation = new ArrayList<>();
 
             List<WikiEntry> results = store.query(startInstant, endInstant, wikiLevel);
 
             for (WikiEntry entry : results) {
+                Map<String, Object> progress = WikiGenerationProgress.from(entry);
+                if (!progress.isEmpty()) {
+                    progress.put("entryId", entry.id()); progress.put("periodStart", entry.periodStart().toString());
+                    progress.put("periodEnd", entry.periodEnd().toString()); generation.add(progress);
+                }
                 switch (entry.status()) {
                     case SUMMARIZED -> entries.add(formatEntry(entry));
                     case PENDING -> pending.add(entry.id());
@@ -92,6 +98,7 @@ public class WikiTools {
             if (!missing.isEmpty()) output.put("missing", missing);
             if (!pending.isEmpty()) output.put("pending", pending);
             if (!failed.isEmpty()) output.put("failed", failed);
+            if (!generation.isEmpty()) output.put("generationProgress", generation);
 
             return MAPPER.writeValueAsString(output);
         } catch (JsonProcessingException e) {
@@ -129,6 +136,7 @@ public class WikiTools {
                 levelStats.put("pending", pendingCount);
                 levelStats.put("failed", failedCount);
                 levelStats.put("skipped", skippedCount);
+                levelStats.put("paused", results.stream().filter(WikiGenerationProgress::paused).count());
                 stats.put(level.name(), levelStats);
             }
 

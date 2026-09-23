@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "missing-activity-coverage",
+  "description": "缺失 AFK 覆盖时保留本地估计；无窗口匹配的上下文仍只表示观察。",
+  "budgetChars": 1000,
+  "periodSeconds": 86400,
+  "windows": [
+    {
+      "offsetSeconds": 0,
+      "durationSeconds": 600,
+      "app": "Browser",
+      "title": "数据库查询参考"
+    }
+  ],
+  "contents": [
+    {
+      "offsetSeconds": 40000,
+      "durationSeconds": 3600,
+      "app": "Chat",
+      "title": "Chat",
+      "contextTitle": "项目讨论观察",
+      "contextKind": "chat"
+    }
+  ],
+  "afk": [],
+  "expectations": {
+    "requiredTitles": [
+      "数据库查询参考",
+      "项目讨论观察"
+    ],
+    "observationTitles": [
+      "项目讨论观察"
+    ],
+    "estimatedActivity": true,
+    "minFacts": 2,
+    "maxFacts": 2,
+    "requiredTimeMask": 3,
+    "topics": [
+      {
+        "name": "数据库查询参考",
+        "titleFragments": [
+          "数据库查询参考"
+        ]
+      },
+      {
+        "name": "项目讨论观察",
+        "titleFragments": [
+          "项目讨论观察"
+        ]
+      }
+    ]
+  },
+  "manualReview": "标题仅支持活动观察；模型文案不得据此宣称任务完成、发布成功或问题解决。"
+}

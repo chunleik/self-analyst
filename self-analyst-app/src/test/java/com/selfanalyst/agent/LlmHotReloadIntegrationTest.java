@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.selfanalyst.config.*;
 import com.selfanalyst.desktop.store.UserConfigStore;
 import com.selfanalyst.usage.UsageMeter;
+import com.selfanalyst.wiki.WikiSummaryPipeline;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -32,6 +33,7 @@ class LlmHotReloadIntegrationTest {
         final AtomicReference<java.util.function.Function<JsonNode, String>> answer = new AtomicReference<>();
         final AtomicBoolean failWrites = new AtomicBoolean();
         final AtomicInteger status = new AtomicInteger(200);
+        final AtomicBoolean omitUsage = new AtomicBoolean();
         Fixture(Path dir, String key) throws Exception { this(dir, key, Map.of()); }
         Fixture(Path dir, String key, Map<String, String> initialOverrides) throws Exception {
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -44,6 +46,11 @@ class LlmHotReloadIntegrationTest {
                     String text = answer.get() == null ? request.path("model").asText() : answer.get().apply(request);
                     boolean stream = request.path("stream").asBoolean();
                     String body = status.get() == 200 ? (text.startsWith("data: ") ? text : stream ? sse(text) : response(text)) : "{\"error\":\"unauthorized\"}";
+                    if (status.get() == 200 && omitUsage.get() && !stream) {
+                        var response = (com.fasterxml.jackson.databind.node.ObjectNode) JSON.readTree(body);
+                        response.remove("usage");
+                        body = response.toString();
+                    }
                     byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
                     exchange.getResponseHeaders().set("Content-Type", stream ? "text/event-stream" : "application/json");
                     exchange.sendResponseHeaders(status.get(), bytes.length);
@@ -176,11 +183,18 @@ class LlmHotReloadIntegrationTest {
     @Test void taskLeaseAndDeferredChatBindAtCorrectBoundary(@TempDir Path dir) throws Exception {
         try (Fixture f = new Fixture(dir, "key")) {
             var deferred = f.agent.chat(SESSION, "000000000003", "later");
+            String originalIdentity;
             try (var task = f.agent.plainTask()) {
+                originalIdentity = task.cacheIdentity();
+                assertTrue(task.requestOverheadChars() > 0);
                 assertEquals("old", task.complete("one", Duration.ofSeconds(5)));
                 f.config().update(Map.of("llm.model", "new"));
+                assertEquals(originalIdentity, task.cacheIdentity(), "one tree keeps a fixed model identity");
                 assertEquals("old", task.complete("two", Duration.ofSeconds(5)));
                 assertEquals("new", deferred.block(Duration.ofSeconds(10)));
+            }
+            try (var next = f.agent.plainTask()) {
+                assertNotEquals(originalIdentity, next.cacheIdentity(), "changed model invalidates intermediate summaries");
             }
             var application = (Map<?, ?>) f.config().effectivePayload().get("application");
             assertEquals("applied", ((Map<?, ?>) application.get("llm")).get("status"));
@@ -190,12 +204,109 @@ class LlmHotReloadIntegrationTest {
         try (Fixture f = new Fixture(dir, "key")) {
             f.config().update(Map.of("llm.model", "new", "llm.api-key", "invalid-key"));
             f.status.set(401);
-            assertThrows(RuntimeException.class, () -> f.agent.completePlain("no fallback", Duration.ofSeconds(5)));
+            var failure = assertThrows(WikiSummaryPipeline.CallFailure.class,
+                    () -> f.agent.completePlain("no fallback", Duration.ofSeconds(5)));
+            assertFalse(failure.beforeSend());
+            assertNull(failure.inputTokens());
+            assertNull(failure.outputTokens());
+            assertEquals(1L, summaryCalls(f.meter));
+            assertTrue(f.meter.totalTokens() >= 4096, "unknown output is conservatively accounted once");
             assertTrue(f.calls.stream().allMatch(call -> call.path("model").asText().equals("new")));
             assertTrue(f.keys.stream().allMatch(key -> key.equals("Bearer invalid-key")));
             f.agent.beginShutdown();
             assertThrows(IllegalStateException.class, () -> f.config().update(Map.of("llm.model", "closed")));
         }
+    }
+
+    @Test void missingPlainUsageIsEstimatedGloballyButReceiptRemainsUnknown(@TempDir Path dir) throws Exception {
+        try (Fixture f = new Fixture(dir, "key")) {
+            f.omitUsage.set(true);
+            try (var task = f.agent.plainTask()) {
+                var result = task.completeDetailed("synthetic input", Duration.ofSeconds(5));
+                assertEquals("old", result.text());
+                assertNull(result.inputTokens());
+                assertNull(result.outputTokens());
+            }
+            assertEquals(1L, summaryCalls(f.meter));
+            assertTrue(f.meter.totalTokens() > 0);
+        }
+    }
+
+    @Test void retryableProviderErrorsRequireAnotherOuterCallForAnotherHttpAttempt(@TempDir Path dir) throws Exception {
+        for (int status : new int[]{429, 500}) {
+            try (Fixture f = new Fixture(dir.resolve("status-" + status), "key");
+                 var task = f.agent.plainTask()) {
+                f.status.set(status);
+                var first = assertThrows(WikiSummaryPipeline.CallFailure.class,
+                        () -> task.completeDetailed("same synthetic request", Duration.ofSeconds(15)));
+                assertFalse(first.beforeSend());
+                assertEquals(WikiSummaryPipeline.FailureKind.TRANSPORT, first.kind());
+                assertEquals("WIKI_MODEL_HTTP_" + status, first.code());
+                assertEquals(1, f.calls.size(), "one outer call must not retry HTTP " + status);
+                assertEquals(1L, summaryCalls(f.meter));
+                long firstTokens = f.meter.totalTokens();
+                assertTrue(firstTokens >= 4096);
+
+                assertThrows(WikiSummaryPipeline.CallFailure.class,
+                        () -> task.completeDetailed("same synthetic request", Duration.ofSeconds(15)));
+                assertEquals(2, f.calls.size(), "only a new outer call may send another request");
+                assertEquals(2L, summaryCalls(f.meter));
+                assertEquals(firstTokens * 2, f.meter.totalTokens());
+                for (var request : f.calls) {
+                    assertEquals(.2, request.path("temperature").asDouble());
+                    assertFalse(request.has("max_tokens"));
+                    assertFalse(request.has("max_completion_tokens"));
+                    assertFalse(request.has("max_output_tokens"));
+                }
+            }
+        }
+    }
+
+    @Test void timedOutPlainRequestIsCountedOnceWithUnknownReceipt(@TempDir Path dir) throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (Fixture f = new Fixture(dir, "key")) {
+            f.answer.set(request -> {
+                entered.countDown();
+                try { release.await(5, TimeUnit.SECONDS); }
+                catch (InterruptedException error) { Thread.currentThread().interrupt(); }
+                return "late response";
+            });
+            try {
+                var failure = assertThrows(WikiSummaryPipeline.CallFailure.class,
+                        () -> f.agent.completePlain("timeout", Duration.ofMillis(300)));
+                assertEquals(WikiSummaryPipeline.FailureKind.TIMEOUT, failure.kind());
+                assertFalse(failure.beforeSend());
+                assertNull(failure.inputTokens());
+                assertNull(failure.outputTokens());
+                assertEquals(1L, summaryCalls(f.meter));
+                assertTrue(f.meter.totalTokens() >= 4096);
+            } finally { release.countDown(); }
+        }
+    }
+
+    @Test void credentialRotationKeepsCheckpointIdentityButChangesRecoveryStamp(@TempDir Path dir) throws Exception {
+        try (Fixture f = new Fixture(dir, "old-key")) {
+            String identity;
+            String revision;
+            try (var task = f.agent.plainTask()) {
+                identity = task.cacheIdentity();
+                revision = task.configurationRevision();
+            }
+            f.config().update(Map.of("llm.api-key", "replacement-key"));
+            try (var task = f.agent.plainTask()) {
+                assertEquals(identity, task.cacheIdentity());
+                assertNotEquals(revision, task.configurationRevision());
+                task.preflight();
+            }
+            assertTrue(f.calls.isEmpty());
+            assertEquals(0L, summaryCalls(f.meter));
+        }
+    }
+
+    private static long summaryCalls(UsageMeter meter) {
+        return ((Number) ((Map<?, ?>) ((Map<?, ?>) meter.snapshot().get("categories"))
+                .get("summary")).get("calls")).longValue();
     }
     @Test void configurationToolKeepsWholeTurnOnOldModelWithoutDeadlock(@TempDir Path dir) throws Exception {
         try (Fixture f = new Fixture(dir, "key")) {
@@ -306,11 +417,17 @@ class LlmHotReloadIntegrationTest {
         try (Fixture f = new Fixture(dir, "key", Map.of("llm.budget.mode", "block", "llm.budget.dailyTokens", "1"))) {
             assertEquals("old", f.agent.completePlain("use budget", Duration.ofSeconds(5)));
             assertTrue(f.agent.isBudgetBlocked());
+            try (var task = f.agent.plainTask()) {
+                assertThrows(com.selfanalyst.wiki.usage.BudgetExceededException.class, task::preflight);
+                assertThrows(com.selfanalyst.wiki.usage.BudgetExceededException.class,
+                        () -> task.completeDetailed("blocked", Duration.ofSeconds(5)));
+            }
             f.config().update(Map.of("llm.model", "new"));
             assertTrue(f.agent.isBudgetBlocked());
             f.agent.chat(SESSION, "000000000042", "blocked").block(Duration.ofSeconds(10));
             assertEquals(1, f.calls.size());
             assertEquals(7, f.meter.totalTokens());
+            assertEquals(1L, summaryCalls(f.meter));
         }
     }
 

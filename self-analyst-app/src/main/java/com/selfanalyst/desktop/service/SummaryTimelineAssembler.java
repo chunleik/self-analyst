@@ -123,10 +123,16 @@ public class SummaryTimelineAssembler {
                 : (entry.summary() != null ? entry.summary() : slot.label());
         map.put("headline", headline);
         map.put("insight", entry.summary() == null ? "" : entry.summary());
-        map.put("confidence", "high");
+        int confidence = entry.taskSegments().stream().mapToInt(task -> "high".equals(task.confidence()) ? 2
+                : "medium".equals(task.confidence()) ? 1 : 0).min().orElse(0);
+        if (entry.sourceCoverage().isEmpty() || entry.sourceCoverage().values().stream()
+                .anyMatch(value -> !"complete".equals(value.status()))) confidence = Math.min(confidence, 1);
+        map.put("confidence", confidence == 2 ? "high" : confidence == 1 ? "medium" : "low");
         map.put("source", source);
         map.put("incomplete", incomplete);
         if (entry.metrics() != null) {
+            Object generation = entry.metrics().extra() == null ? null : entry.metrics().extra().get("generation");
+            if (generation != null) map.put("generationCoverage", generation);
             map.put("unknownActivitySeconds", entry.metrics().extra() == null ? 0
                     : entry.metrics().extra().getOrDefault("unknownActivitySeconds", 0));
             map.put("coverage", entry.sourceCoverage().values().stream().allMatch(v -> "complete".equals(v.status()))
@@ -149,7 +155,24 @@ public class SummaryTimelineAssembler {
         Map<String, Object> map = fromEnhanced(slot.key(), slot.label(), enhanced, local);
         map.put("source", source);
         map.put("incomplete", wikiStore == null);
+        addGenerationProgress(slot, map);
         return map;
+    }
+
+    private void addGenerationProgress(SummaryWindowClassifier.Slot slot, Map<String, Object> map) {
+        if (wikiStore == null || slot.wikiLevel() == null) return;
+        try {
+            wikiStore.query(slot.start(), slot.end(), slot.wikiLevel()).stream()
+                    .filter(entry -> entry.periodStart().equals(slot.start()) && entry.periodEnd().equals(slot.end()))
+                    .filter(entry -> entry.timezone().equals(zone.getId()) && entry.status() != WikiStatus.SUMMARIZED)
+                    .findFirst().ifPresent(entry -> {
+                        Map<String, Object> progress = com.selfanalyst.wiki.WikiGenerationProgress.from(entry);
+                        if (!progress.isEmpty()) {
+                            map.put("generationProgress", progress);
+                            map.put("incomplete", true);
+                        }
+                    });
+        } catch (RuntimeException ignored) { /* Historical progress never blocks local facts. */ }
     }
 
     static Map<String, Object> fromEnhanced(String key, String label,
@@ -165,6 +188,7 @@ public class SummaryTimelineAssembler {
         map.put("afkTime", enhanced.afkTime());
         map.put("switchCount", enhanced.switchCount());
         map.put("evidence", enhanced.evidence());
+        map.put("taskSegments", enhanced.taskSegments());
         return map;
     }
 
@@ -180,6 +204,8 @@ public class SummaryTimelineAssembler {
             map.put("evidence", liveFacts.evidence());
             map.put("unknownActivitySeconds", liveFacts.unknownActivitySeconds());
             map.put("coverage", liveFacts.coverage());
+            map.put("titleFacts", liveFacts.titleFacts().facts());
+            map.put("titleCoverage", liveFacts.titleFacts().coverage());
         }
         return map;
     }

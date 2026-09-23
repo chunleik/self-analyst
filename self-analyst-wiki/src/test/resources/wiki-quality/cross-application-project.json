@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "cross-application-project",
+  "description": "同一项目在编辑器、浏览器和会议中的不同证据均可保留。",
+  "budgetChars": 1000,
+  "periodSeconds": 86400,
+  "windows": [
+    {
+      "offsetSeconds": 0,
+      "durationSeconds": 2400,
+      "app": "Browser",
+      "title": "订单平台接口设计"
+    },
+    {
+      "offsetSeconds": 3000,
+      "durationSeconds": 1800,
+      "app": "Editor",
+      "title": "订单平台接口实现"
+    },
+    {
+      "offsetSeconds": 23000,
+      "durationSeconds": 1200,
+      "app": "Teams",
+      "title": "订单平台接口评审"
+    }
+  ],
+  "contents": [],
+  "afk": [],
+  "expectations": {
+    "requiredTitles": [
+      "订单平台接口设计",
+      "订单平台接口实现",
+      "订单平台接口评审"
+    ],
+    "minFacts": 3,
+    "maxFacts": 3,
+    "requiredTimeMask": 3,
+    "topics": [
+      {
+        "name": "订单平台",
+        "titleFragments": [
+          "订单平台"
+        ]
+      }
+    ]
+  },
+  "manualReview": "标题仅支持活动观察；模型文案不得据此宣称任务完成、发布成功或问题解决。"
+}

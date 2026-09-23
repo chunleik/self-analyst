@@ -1,4 +1,12 @@
 {
+  "timeline.periodBudgetPaused": "该时段摘要已暂停：累计生成额度用尽。可在设置中提高周期额度并重启后继续。",
+  "timeline.dailyBudgetPaused": "摘要暂缓生成：今日模型预算已用尽。",
+  "timeline.summaryNeedsConfiguration": "摘要等待模型配置恢复，当前显示本地活动。",
+  "timeline.summaryInputPaused": "摘要输入超出当前生成预算，等待调整设置后继续。",
+  "timeline.summaryRetrying": "摘要生成未完成，将从已保存的进度重试。",
+  "timeline.summaryBudgetUse": "本时段累计调用 {calls}/{maxCalls} 次，token 准入计量 {tokens}/{maxTokens}。",
+  "timeline.summaryBudgetEstimate": "计量包含保守预留或估算，不等同于服务商账单。",
+  "timeline.summaryPartialInput": "部分记录尚未纳入最终摘要，不能视为完整活动复盘。",
   "config.rawLabel": "配置原文",
   "llm.connectionSection": "连接设置",
   "llm.generationSection": "模型与生成",

@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "id": "four-layer-budget",
+  "description": "早段高分长标题不能挤掉可放入预算的四时段组合。",
+  "budgetChars": 1006,
+  "periodSeconds": 86400,
+  "windows": [
+    {
+      "offsetSeconds": 0,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "offsetSeconds": 8000,
+      "durationSeconds": 1000,
+      "app": "Browser",
+      "title": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+    },
+    {
+      "offsetSeconds": 22000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    },
+    {
+      "offsetSeconds": 44000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+    },
+    {
+      "offsetSeconds": 66000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+    },
+    {
+      "offsetSeconds": 2000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "offsetSeconds": 10000,
+      "durationSeconds": 1000,
+      "app": "Browser",
+      "title": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+    },
+    {
+      "offsetSeconds": 25000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    },
+    {
+      "offsetSeconds": 47000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+    },
+    {
+      "offsetSeconds": 69000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+    },
+    {
+      "offsetSeconds": 4000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "offsetSeconds": 12000,
+      "durationSeconds": 1000,
+      "app": "Browser",
+      "title": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+    },
+    {
+      "offsetSeconds": 28000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    },
+    {
+      "offsetSeconds": 50000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+    },
+    {
+      "offsetSeconds": 72000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+    },
+    {
+      "offsetSeconds": 6000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    },
+    {
+      "offsetSeconds": 14000,
+      "durationSeconds": 1000,
+      "app": "Browser",
+      "title": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+    },
+    {
+      "offsetSeconds": 31000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+    },
+    {
+      "offsetSeconds": 53000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+    },
+    {
+      "offsetSeconds": 75000,
+      "durationSeconds": 1500,
+      "app": "Browser",
+      "title": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+    }
+  ],
+  "contents": [],
+  "afk": [],
+  "expectations": {
+    "requiredTitles": [
+      "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+      "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+    ],
+    "minFacts": 4,
+    "maxFacts": 4,
+    "requiredTimeMask": 15,
+    "topics": [
+      {
+        "name": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "titleFragments": [
+          "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        ]
+      },
+      {
+        "name": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "titleFragments": [
+          "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+        ]
+      },
+      {
+        "name": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+        "titleFragments": [
+          "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+        ]
+      },
+      {
+        "name": "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+        "titleFragments": [
+          "EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE"
+        ]
+      }
+    ]
+  },
+  "manualReview": "标题仅支持活动观察；模型文案不得据此宣称任务完成、发布成功或问题解决。"
+}

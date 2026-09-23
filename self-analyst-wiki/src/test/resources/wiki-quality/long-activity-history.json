@@ -1,0 +1,1225 @@
+{
+  "schemaVersion": 1,
+  "id": "long-activity-history",
+  "description": "大量脱敏独立标题跨四时段，供完整事实分块和预算对照复用。",
+  "budgetChars": 2400,
+  "periodSeconds": 86400,
+  "windows": [
+    {
+      "offsetSeconds": 0,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 001"
+    },
+    {
+      "offsetSeconds": 120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 002"
+    },
+    {
+      "offsetSeconds": 240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 003"
+    },
+    {
+      "offsetSeconds": 360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 004"
+    },
+    {
+      "offsetSeconds": 480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 005"
+    },
+    {
+      "offsetSeconds": 600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 006"
+    },
+    {
+      "offsetSeconds": 720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 007"
+    },
+    {
+      "offsetSeconds": 840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 008"
+    },
+    {
+      "offsetSeconds": 960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 009"
+    },
+    {
+      "offsetSeconds": 1080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 010"
+    },
+    {
+      "offsetSeconds": 1200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 011"
+    },
+    {
+      "offsetSeconds": 1320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 012"
+    },
+    {
+      "offsetSeconds": 1440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 013"
+    },
+    {
+      "offsetSeconds": 1560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 014"
+    },
+    {
+      "offsetSeconds": 1680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 015"
+    },
+    {
+      "offsetSeconds": 1800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 016"
+    },
+    {
+      "offsetSeconds": 1920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 017"
+    },
+    {
+      "offsetSeconds": 2040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 018"
+    },
+    {
+      "offsetSeconds": 2160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 019"
+    },
+    {
+      "offsetSeconds": 2280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 020"
+    },
+    {
+      "offsetSeconds": 2400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 021"
+    },
+    {
+      "offsetSeconds": 2520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 022"
+    },
+    {
+      "offsetSeconds": 2640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 023"
+    },
+    {
+      "offsetSeconds": 2760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 024"
+    },
+    {
+      "offsetSeconds": 2880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 025"
+    },
+    {
+      "offsetSeconds": 3000,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 026"
+    },
+    {
+      "offsetSeconds": 3120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 027"
+    },
+    {
+      "offsetSeconds": 3240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 028"
+    },
+    {
+      "offsetSeconds": 3360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 029"
+    },
+    {
+      "offsetSeconds": 3480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 030"
+    },
+    {
+      "offsetSeconds": 3600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 031"
+    },
+    {
+      "offsetSeconds": 3720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 032"
+    },
+    {
+      "offsetSeconds": 3840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 033"
+    },
+    {
+      "offsetSeconds": 3960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 034"
+    },
+    {
+      "offsetSeconds": 4080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 035"
+    },
+    {
+      "offsetSeconds": 4200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 036"
+    },
+    {
+      "offsetSeconds": 4320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 037"
+    },
+    {
+      "offsetSeconds": 4440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 038"
+    },
+    {
+      "offsetSeconds": 4560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 039"
+    },
+    {
+      "offsetSeconds": 4680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 040"
+    },
+    {
+      "offsetSeconds": 4800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 041"
+    },
+    {
+      "offsetSeconds": 4920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 042"
+    },
+    {
+      "offsetSeconds": 5040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 043"
+    },
+    {
+      "offsetSeconds": 5160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 044"
+    },
+    {
+      "offsetSeconds": 5280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 045"
+    },
+    {
+      "offsetSeconds": 5400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 046"
+    },
+    {
+      "offsetSeconds": 5520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 047"
+    },
+    {
+      "offsetSeconds": 5640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 048"
+    },
+    {
+      "offsetSeconds": 5760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 049"
+    },
+    {
+      "offsetSeconds": 5880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 050"
+    },
+    {
+      "offsetSeconds": 21600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 051"
+    },
+    {
+      "offsetSeconds": 21720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 052"
+    },
+    {
+      "offsetSeconds": 21840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 053"
+    },
+    {
+      "offsetSeconds": 21960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 054"
+    },
+    {
+      "offsetSeconds": 22080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 055"
+    },
+    {
+      "offsetSeconds": 22200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 056"
+    },
+    {
+      "offsetSeconds": 22320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 057"
+    },
+    {
+      "offsetSeconds": 22440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 058"
+    },
+    {
+      "offsetSeconds": 22560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 059"
+    },
+    {
+      "offsetSeconds": 22680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 060"
+    },
+    {
+      "offsetSeconds": 22800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 061"
+    },
+    {
+      "offsetSeconds": 22920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 062"
+    },
+    {
+      "offsetSeconds": 23040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 063"
+    },
+    {
+      "offsetSeconds": 23160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 064"
+    },
+    {
+      "offsetSeconds": 23280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 065"
+    },
+    {
+      "offsetSeconds": 23400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 066"
+    },
+    {
+      "offsetSeconds": 23520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 067"
+    },
+    {
+      "offsetSeconds": 23640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 068"
+    },
+    {
+      "offsetSeconds": 23760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 069"
+    },
+    {
+      "offsetSeconds": 23880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 070"
+    },
+    {
+      "offsetSeconds": 24000,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 071"
+    },
+    {
+      "offsetSeconds": 24120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 072"
+    },
+    {
+      "offsetSeconds": 24240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 073"
+    },
+    {
+      "offsetSeconds": 24360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 074"
+    },
+    {
+      "offsetSeconds": 24480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 075"
+    },
+    {
+      "offsetSeconds": 24600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 076"
+    },
+    {
+      "offsetSeconds": 24720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 077"
+    },
+    {
+      "offsetSeconds": 24840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 078"
+    },
+    {
+      "offsetSeconds": 24960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 079"
+    },
+    {
+      "offsetSeconds": 25080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 080"
+    },
+    {
+      "offsetSeconds": 25200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 081"
+    },
+    {
+      "offsetSeconds": 25320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 082"
+    },
+    {
+      "offsetSeconds": 25440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 083"
+    },
+    {
+      "offsetSeconds": 25560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 084"
+    },
+    {
+      "offsetSeconds": 25680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 085"
+    },
+    {
+      "offsetSeconds": 25800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 086"
+    },
+    {
+      "offsetSeconds": 25920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 087"
+    },
+    {
+      "offsetSeconds": 26040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 088"
+    },
+    {
+      "offsetSeconds": 26160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 089"
+    },
+    {
+      "offsetSeconds": 26280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 090"
+    },
+    {
+      "offsetSeconds": 26400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 091"
+    },
+    {
+      "offsetSeconds": 26520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 092"
+    },
+    {
+      "offsetSeconds": 26640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 093"
+    },
+    {
+      "offsetSeconds": 26760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 094"
+    },
+    {
+      "offsetSeconds": 26880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 095"
+    },
+    {
+      "offsetSeconds": 27000,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 096"
+    },
+    {
+      "offsetSeconds": 27120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 097"
+    },
+    {
+      "offsetSeconds": 27240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 098"
+    },
+    {
+      "offsetSeconds": 27360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 099"
+    },
+    {
+      "offsetSeconds": 27480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 100"
+    },
+    {
+      "offsetSeconds": 43200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 101"
+    },
+    {
+      "offsetSeconds": 43320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 102"
+    },
+    {
+      "offsetSeconds": 43440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 103"
+    },
+    {
+      "offsetSeconds": 43560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 104"
+    },
+    {
+      "offsetSeconds": 43680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 105"
+    },
+    {
+      "offsetSeconds": 43800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 106"
+    },
+    {
+      "offsetSeconds": 43920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 107"
+    },
+    {
+      "offsetSeconds": 44040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 108"
+    },
+    {
+      "offsetSeconds": 44160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 109"
+    },
+    {
+      "offsetSeconds": 44280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 110"
+    },
+    {
+      "offsetSeconds": 44400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 111"
+    },
+    {
+      "offsetSeconds": 44520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 112"
+    },
+    {
+      "offsetSeconds": 44640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 113"
+    },
+    {
+      "offsetSeconds": 44760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 114"
+    },
+    {
+      "offsetSeconds": 44880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 115"
+    },
+    {
+      "offsetSeconds": 45000,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 116"
+    },
+    {
+      "offsetSeconds": 45120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 117"
+    },
+    {
+      "offsetSeconds": 45240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 118"
+    },
+    {
+      "offsetSeconds": 45360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 119"
+    },
+    {
+      "offsetSeconds": 45480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 120"
+    },
+    {
+      "offsetSeconds": 45600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 121"
+    },
+    {
+      "offsetSeconds": 45720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 122"
+    },
+    {
+      "offsetSeconds": 45840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 123"
+    },
+    {
+      "offsetSeconds": 45960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 124"
+    },
+    {
+      "offsetSeconds": 46080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 125"
+    },
+    {
+      "offsetSeconds": 46200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 126"
+    },
+    {
+      "offsetSeconds": 46320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 127"
+    },
+    {
+      "offsetSeconds": 46440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 128"
+    },
+    {
+      "offsetSeconds": 46560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 129"
+    },
+    {
+      "offsetSeconds": 46680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 130"
+    },
+    {
+      "offsetSeconds": 46800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 131"
+    },
+    {
+      "offsetSeconds": 46920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 132"
+    },
+    {
+      "offsetSeconds": 47040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 133"
+    },
+    {
+      "offsetSeconds": 47160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 134"
+    },
+    {
+      "offsetSeconds": 47280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 135"
+    },
+    {
+      "offsetSeconds": 47400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 136"
+    },
+    {
+      "offsetSeconds": 47520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 137"
+    },
+    {
+      "offsetSeconds": 47640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 138"
+    },
+    {
+      "offsetSeconds": 47760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 139"
+    },
+    {
+      "offsetSeconds": 47880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 140"
+    },
+    {
+      "offsetSeconds": 48000,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 141"
+    },
+    {
+      "offsetSeconds": 48120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 142"
+    },
+    {
+      "offsetSeconds": 48240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 143"
+    },
+    {
+      "offsetSeconds": 48360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 144"
+    },
+    {
+      "offsetSeconds": 48480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 145"
+    },
+    {
+      "offsetSeconds": 48600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 146"
+    },
+    {
+      "offsetSeconds": 48720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 147"
+    },
+    {
+      "offsetSeconds": 48840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 148"
+    },
+    {
+      "offsetSeconds": 48960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 149"
+    },
+    {
+      "offsetSeconds": 49080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 150"
+    },
+    {
+      "offsetSeconds": 64800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 151"
+    },
+    {
+      "offsetSeconds": 64920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 152"
+    },
+    {
+      "offsetSeconds": 65040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 153"
+    },
+    {
+      "offsetSeconds": 65160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 154"
+    },
+    {
+      "offsetSeconds": 65280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 155"
+    },
+    {
+      "offsetSeconds": 65400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 156"
+    },
+    {
+      "offsetSeconds": 65520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 157"
+    },
+    {
+      "offsetSeconds": 65640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 158"
+    },
+    {
+      "offsetSeconds": 65760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 159"
+    },
+    {
+      "offsetSeconds": 65880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 160"
+    },
+    {
+      "offsetSeconds": 66000,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 161"
+    },
+    {
+      "offsetSeconds": 66120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 162"
+    },
+    {
+      "offsetSeconds": 66240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 163"
+    },
+    {
+      "offsetSeconds": 66360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 164"
+    },
+    {
+      "offsetSeconds": 66480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 165"
+    },
+    {
+      "offsetSeconds": 66600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 166"
+    },
+    {
+      "offsetSeconds": 66720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 167"
+    },
+    {
+      "offsetSeconds": 66840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 168"
+    },
+    {
+      "offsetSeconds": 66960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 169"
+    },
+    {
+      "offsetSeconds": 67080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 170"
+    },
+    {
+      "offsetSeconds": 67200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 171"
+    },
+    {
+      "offsetSeconds": 67320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 172"
+    },
+    {
+      "offsetSeconds": 67440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 173"
+    },
+    {
+      "offsetSeconds": 67560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 174"
+    },
+    {
+      "offsetSeconds": 67680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 175"
+    },
+    {
+      "offsetSeconds": 67800,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 176"
+    },
+    {
+      "offsetSeconds": 67920,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 177"
+    },
+    {
+      "offsetSeconds": 68040,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 178"
+    },
+    {
+      "offsetSeconds": 68160,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 179"
+    },
+    {
+      "offsetSeconds": 68280,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 180"
+    },
+    {
+      "offsetSeconds": 68400,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 181"
+    },
+    {
+      "offsetSeconds": 68520,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 182"
+    },
+    {
+      "offsetSeconds": 68640,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 183"
+    },
+    {
+      "offsetSeconds": 68760,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 184"
+    },
+    {
+      "offsetSeconds": 68880,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 185"
+    },
+    {
+      "offsetSeconds": 69000,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 186"
+    },
+    {
+      "offsetSeconds": 69120,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 187"
+    },
+    {
+      "offsetSeconds": 69240,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 188"
+    },
+    {
+      "offsetSeconds": 69360,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 189"
+    },
+    {
+      "offsetSeconds": 69480,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 190"
+    },
+    {
+      "offsetSeconds": 69600,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 191"
+    },
+    {
+      "offsetSeconds": 69720,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 192"
+    },
+    {
+      "offsetSeconds": 69840,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 193"
+    },
+    {
+      "offsetSeconds": 69960,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 194"
+    },
+    {
+      "offsetSeconds": 70080,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 195"
+    },
+    {
+      "offsetSeconds": 70200,
+      "durationSeconds": 60,
+      "app": "Editor",
+      "title": "开发任务 196"
+    },
+    {
+      "offsetSeconds": 70320,
+      "durationSeconds": 65,
+      "app": "Editor",
+      "title": "开发任务 197"
+    },
+    {
+      "offsetSeconds": 70440,
+      "durationSeconds": 70,
+      "app": "Editor",
+      "title": "开发任务 198"
+    },
+    {
+      "offsetSeconds": 70560,
+      "durationSeconds": 75,
+      "app": "Editor",
+      "title": "开发任务 199"
+    },
+    {
+      "offsetSeconds": 70680,
+      "durationSeconds": 80,
+      "app": "Editor",
+      "title": "开发任务 200"
+    }
+  ],
+  "contents": [],
+  "afk": [],
+  "expectations": {
+    "minFacts": 8,
+    "maxFacts": 30,
+    "requiredTimeMask": 15,
+    "topics": [
+      {
+        "name": "开发任务",
+        "titleFragments": [
+          "开发任务"
+        ]
+      }
+    ]
+  },
+  "manualReview": "标题仅支持活动观察；模型文案不得据此宣称任务完成、发布成功或问题解决。"
+}

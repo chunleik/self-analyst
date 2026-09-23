@@ -58,22 +58,28 @@ public class DesktopSummaryAssembler {
                 .filter(slot -> "today".equals(slot.key()))
                 .findFirst()
                 .orElseThrow();
-        SummaryService.LocalFacts todayFacts = facts.factsFor(todaySlot.start(), todaySlot.end(), todaySlot.label());
+        SummaryService.LocalFacts todayFacts = facts.currentWindowFacts(todaySlot.start(), todaySlot.end(), todaySlot.label());
+        Map<String, Object> priorCurrent = snapshot.map(SummarySnapshot::current).orElse(null);
+        Map<String, Object> priorToday = snapshotEntry(snapshot.orElse(null), "today");
+        String priorAssembledAt = snapshot.map(SummarySnapshot::assembledAt).orElse(null);
+        String currentTextAt = textGeneratedAt(priorCurrent, priorAssembledAt);
+        String todayTextAt = textGeneratedAt(priorToday, priorAssembledAt);
         String fingerprint = SummaryFactFingerprint.of(currentFacts, todayFacts)
-                + "|day=" + todaySlot.start() + "|zone=" + clock.getZone().getId();
+                + "|day=" + todaySlot.start() + "|zone=" + clock.getZone().getId() + "|lang=" + lang.code();
         boolean refreshOpen = SummaryFactFingerprint.needsRefresh(
                 snapshot.map(SummarySnapshot::currentWindowFingerprint).orElse(null),
-                snapshot.map(SummarySnapshot::assembledAt).orElse(null),
+                currentTextAt,
                 fingerprint,
-                now);
+                now) || !SummaryFactFingerprint.isFresh(todayTextAt, now);
 
         AtomicInteger llmUsed = new AtomicInteger();
         int llmCap = Math.max(0, request.maxTimelineLlm());
         boolean canLlm = request.llmAvailable() && request.client() != null && llmCap > 0;
 
         Map<String, Object> currentMap = openWindowMap(
-                "current", com.selfanalyst.i18n.Messages.text(lang, "period.now"), currentFacts, snapshot.map(SummarySnapshot::current).orElse(null),
-                refreshOpen, canLlm, request.client(), lang, llmUsed, llmCap);
+                "current", com.selfanalyst.i18n.Messages.text(lang, "period.now"), currentFacts, priorCurrent,
+                refreshOpen, canLlm, request.client(), lang, llmUsed, llmCap,
+                refreshOpen ? now.toString() : currentTextAt);
 
         List<Map<String, Object>> timelineList = new ArrayList<>();
         for (SummaryWindowClassifier.Slot slot : windows.slots(now, lang)) {
@@ -86,7 +92,8 @@ public class DesktopSummaryAssembler {
                 Map<String, Object> prior = snapshotEntry(snapshot.orElse(null), slot.key());
                 timelineList.add(openWindowMap(
                         slot.key(), slot.label(), todayFacts, prior,
-                        refreshOpen, canLlm, request.client(), lang, llmUsed, llmCap));
+                        refreshOpen, canLlm, request.client(), lang, llmUsed, llmCap,
+                        refreshOpen ? now.toString() : textGeneratedAt(prior, priorAssembledAt)));
             } else {
                 timelineList.add(timeline.assembleClosed(slot, lang));
             }
@@ -122,7 +129,8 @@ public class DesktopSummaryAssembler {
                                               SummaryPromptService.SummaryTextClient client,
                                               Lang lang,
                                               AtomicInteger llmUsed,
-                                              int llmCap) {
+                                              int llmCap,
+                                              String textGeneratedAt) {
         SummaryPromptService.EnhancedSummary enhanced;
         if (!refreshOpen && prior != null && prior.get("headline") != null) {
             enhanced = new SummaryPromptService.EnhancedSummary(
@@ -136,19 +144,34 @@ public class DesktopSummaryAssembler {
                     live.afkTime(),
                     live.switchCount(),
                     live.goalContext());
-        } else if (canLlm && llmUsed.get() < llmCap) {
+        } else if (canLlm && llmUsed.get() < llmCap && !live.titleFacts().facts().isEmpty()) {
             llmUsed.incrementAndGet();
             enhanced = prompts.enhance(live, client, lang);
         } else {
             enhanced = prompts.localOnly(live);
         }
         Map<String, Object> map = SummaryTimelineAssembler.fromEnhanced(key, label, enhanced, live);
+        if (!refreshOpen && prior != null) {
+            // Cached task IDs belong to the cached title projection. Local statistics still refresh.
+            for (String field : List.of("taskSegments", "titleFacts", "titleCoverage")) {
+                if (prior.containsKey(field)) map.put(field, prior.get(field));
+            }
+        }
         map.put("source", refreshOpen ? "live" : "snapshot");
+        // Includes local fallbacks and failed enhancement attempts: each can retry after the
+        // freshness window, while ordinary polling only updates the snapshot's assembledAt.
+        map.put("textGeneratedAt", textGeneratedAt);
         if ("current".equals(key)) {
             map.put("suggestion", enhanced.suggestion());
             map.put("goalContext", enhanced.goalContext());
         }
         return map;
+    }
+
+    private static String textGeneratedAt(Map<String, Object> prior, String legacyAssembledAt) {
+        if (prior == null || prior.get("headline") == null) return null;
+        Object timestamp = prior.get("textGeneratedAt");
+        return timestamp instanceof String value ? value : legacyAssembledAt;
     }
 
     @SuppressWarnings("unchecked")

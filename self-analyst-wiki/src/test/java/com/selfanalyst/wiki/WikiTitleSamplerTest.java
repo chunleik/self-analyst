@@ -15,6 +15,170 @@ class WikiTitleSamplerTest {
     private final WikiPeriod period = new WikiPeriod(WikiLevel.DAY, start, start.plusSeconds(86400), "UTC");
 
     @Test
+    void chineseNearDuplicatesLeaveRoomForAnIndependentTopic() {
+        var windows = List.of(window(1, 0, 600, "Browser", "订单系统安装说明"),
+                window(2, 700, 580, "Browser", "订单系统安装说明新版"),
+                window(3, 1400, 400, "Browser", "数据库权限配置指南"));
+        var full = sample(windows, List.of(), List.of(), Integer.MAX_VALUE);
+        int budget = full.jsonLines().lines().mapToInt(line -> line.length() + 1).sorted().skip(1).sum();
+        var limited = sample(windows, List.of(), List.of(), budget);
+        assertEquals(Set.of("订单系统安装说明", "数据库权限配置指南"),
+                new HashSet<>(limited.facts().stream().map(WikiTitleSampler.Fact::title).toList()));
+        assertEquals(3, full.facts().size(), "near duplicate scoring must not merge fact identities");
+    }
+
+    @Test
+    void cheapestFeasibleTimeCoveragePreventsLargeEarlyTitleFromExcludingTheEvening() {
+        List<Event> windows = coverageWindows(true);
+        var full = sample(windows, List.of(), List.of(), Integer.MAX_VALUE);
+        int budget = full.jsonLines().lines().filter(line -> !line.contains("A".repeat(96)))
+                .mapToInt(line -> line.length() + 1).sum();
+        assertTrue(budget >= 1000, "the counterexample also applies to a legal configured budget");
+        var selected = sample(windows, List.of(), List.of(), budget);
+        assertEquals(15, selected.coverage().get("selectedTimeMask"));
+        assertEquals(Set.of("B", "C", "D", "E"), new HashSet<>(selected.facts().stream()
+                .map(fact -> fact.title().substring(0, 1)).toList()));
+        assertEquals(budget, selected.jsonLines().length());
+        Collections.shuffle(windows, new Random(37));
+        assertEquals(selected, sample(windows, List.of(), List.of(), budget));
+    }
+
+    @Test
+    void globalCoverageSurvivesSeparateWindowAndContextReservations() {
+        List<Event> windows = coverageWindows(false);
+        List<Event> contexts = new ArrayList<>();
+        for (int layer = 2; layer < 4; layer++) {
+            for (int occurrence = 0; occurrence < 4; occurrence++) {
+                contexts.add(content(100 + layer * 10 + occurrence, layer * 22000 + occurrence * 3000,
+                        1500, "Browser", "Other", String.valueOf((char) ('B' + layer)).repeat(70)));
+            }
+        }
+        var full = sample(windows, List.of(), contexts, Integer.MAX_VALUE);
+        int budget = full.jsonLines().lines().filter(line -> !line.contains("A".repeat(96)))
+                .mapToInt(line -> line.length() + 1).sum();
+        var selected = sample(windows, List.of(), contexts, budget);
+        assertEquals(15, selected.coverage().get("selectedTimeMask"));
+        assertEquals(2L, selected.coverage().get("windowSelected"));
+        assertEquals(2L, selected.coverage().get("contextSelected"));
+        assertTrue(selected.jsonLines().length() <= budget);
+        Collections.shuffle(windows, new Random(19));
+        Collections.shuffle(contexts, new Random(29));
+        assertEquals(selected, sample(windows, List.of(), contexts, budget));
+    }
+
+    @Test
+    void longUnicodeTitlesPreserveBothTheirPrefixAndDistinctFileNames() throws Exception {
+        String prefix = "项目😀".repeat(60);
+        var windows = List.of(window(1, 0, 60, "Editor", prefix + "/订单安装说明.md"),
+                window(2, 100, 60, "Editor", prefix + "/数据库权限配置.md"));
+        var selected = sample(windows, List.of(), List.of(), Integer.MAX_VALUE);
+        assertEquals(2, selected.facts().size());
+        assertTrue(selected.facts().stream().allMatch(f -> f.title().startsWith("项目😀")));
+        assertTrue(selected.facts().stream().anyMatch(f -> f.title().endsWith("/订单安装说明.md")));
+        assertTrue(selected.facts().stream().anyMatch(f -> f.title().endsWith("/数据库权限配置.md")));
+        for (var fact : selected.facts()) {
+            assertEquals(160, fact.title().codePointCount(0, fact.title().length()));
+            assertFalse(fact.title().contains("\uFFFD"));
+        }
+        for (String line : selected.jsonLines().lines().toList()) assertNotNull(new ObjectMapper().readTree(line));
+        assertEquals(selected.jsonLines(), new String(selected.jsonLines().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void representativesRetainLongestActivityAndAllAvailableTimeLayers() {
+        List<Event> windows = new ArrayList<>();
+        for (int i = 0; i < 96; i++) windows.add(window(i + 1, i * 60, 10, "Editor", "Recurring"));
+        windows.add(window(97, 8000, 500, "Editor", "Recurring"));
+        windows.add(window(98, 25000, 20, "Editor", "Recurring"));
+        windows.add(window(99, 45000, 300, "Editor", "Recurring"));
+        windows.add(window(100, 80000, 10, "Editor", "Recurring"));
+        var fact = sample(windows, List.of(), List.of(), Integer.MAX_VALUE).facts().getFirst();
+        assertEquals(1790, fact.activeSeconds());
+        assertEquals(100, fact.occurrences());
+        assertEquals(96, fact.omittedIntervals());
+        assertTrue(fact.intervals().stream().anyMatch(i -> i.start().equals(start.plusSeconds(8000).toString())),
+                "the longest activity must survive, even when it shares the first layer with the first observation");
+        assertEquals(Set.of(0, 1, 2, 3), new HashSet<>(fact.intervals().stream()
+                .map(i -> (int) (java.time.Duration.between(start, Instant.parse(i.start())).toSeconds() / 21600)).toList()));
+    }
+
+    @Test
+    void representativesKeepAnActiveIntervalEvenWhenObservationsAreLonger() {
+        List<Event> contexts = new ArrayList<>();
+        for (int i = 0; i < 9; i++) contexts.add(content(i + 2, i * 9000, 1000, "Browser", "Window", "Topic"));
+        var selected = sample(List.of(window(1, 36000, 1, "Browser", "Window")), List.of(), contexts, Integer.MAX_VALUE);
+        var context = selected.facts().stream().filter(f -> f.source().equals("content")).findFirst().orElseThrow();
+        assertEquals(1, context.activeSeconds());
+        assertTrue(context.intervals().stream().anyMatch(WikiTitleSampler.Interval::activityMatched));
+        assertEquals(4, context.intervals().size());
+    }
+
+    @Test
+    void aLongObservationOnlyReservesItsStartLayerWithoutLosingItsOriginalInterval() {
+        var result = sample(List.of(), List.of(),
+                List.of(content(1, 100, 80000, "Browser", "Window", "Observed document")), Integer.MAX_VALUE);
+        assertEquals(1, result.coverage().get("candidateTimeMask"));
+        assertEquals(1, result.coverage().get("selectedTimeMask"));
+        var fact = result.facts().getFirst();
+        assertNull(fact.activeSeconds());
+        assertEquals(start.plusSeconds(80100).toString(), fact.intervals().getFirst().end());
+    }
+
+    @Test
+    void unboundedSamplingReturnsAllFactsWithoutChangingFullStatistics() {
+        List<Event> windows = new ArrayList<>();
+        for (int i = 0; i < 1000; i++) windows.add(window(i + 1, i * 80, 20.125, "Editor", "Topic " + i));
+        var afk = List.of(new Event(start.plusSeconds(5), 5, Map.of("status", "afk")));
+        var before = ActivityStatistics.compute(windows, afk, period.start(), period.end());
+        var full = WikiTitleSampler.sample(period, before.activeEvents(), windows, List.of(), Integer.MAX_VALUE);
+        var small = WikiTitleSampler.sample(period, before.activeEvents(), windows, List.of(), 1000);
+        assertEquals(1000, full.facts().size());
+        assertEquals(1000, full.coverage().get("candidateFacts"));
+        assertEquals(Integer.MAX_VALUE, full.coverage().get("budgetChars"));
+        assertEquals(full.jsonLines().length(), full.coverage().get("usedChars"));
+        assertTrue(full.jsonLines().length() > 0);
+        assertTrue(small.jsonLines().length() <= 1000);
+        assertEquals(before.activeSeconds(), full.facts().stream().mapToDouble(WikiTitleSampler.Fact::activeSeconds).sum(), 1e-8);
+        assertEquals(before, ActivityStatistics.compute(windows, afk, period.start(), period.end()));
+    }
+
+    @Test
+    void factProjectionPreservesIdsOrderReferencesAndCallerCoverage() throws Exception {
+        var all = sample(List.of(window(31, 0, 30, "Editor", "A"), window(32, 100, 20, "Editor", "B")),
+                List.of(), List.of(), Integer.MAX_VALUE);
+        var fact = all.facts().getLast();
+        Map<String, Object> coverage = new LinkedHashMap<>(all.coverage());
+        coverage.put("batch", "tail");
+        var projected = WikiTitleSampler.fromFacts(period, List.of(fact), coverage);
+        assertEquals(List.of(fact), projected.facts());
+        assertEquals(fact.id(), new ObjectMapper().readTree(projected.jsonLines()).get("id").asText());
+        assertEquals(List.of(32L), projected.facts().getFirst().intervals().getFirst().sourceEventIds());
+        assertEquals("tail", projected.coverage().get("batch"));
+        assertEquals(1, projected.coverage().get("selectedFacts"));
+        assertEquals(1, projected.coverage().get("omittedIntervals"));
+        assertEquals(1, projected.coverage().get("selectedTimeMask"));
+        assertEquals(projected.jsonLines().length(), projected.coverage().get("usedChars"));
+        assertEquals(2, coverage.get("selectedFacts"));
+        assertThrows(UnsupportedOperationException.class, () -> projected.coverage().put("batch", "changed"));
+        assertThrows(UnsupportedOperationException.class, () -> projected.facts().clear());
+    }
+
+    private List<Event> coverageWindows(boolean includeLaterWindows) {
+        List<Event> windows = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            windows.add(window(i + 1, i * 2000, 1500, "Browser", "A".repeat(160)));
+            windows.add(window(i + 5, 8000 + i * 2000, 1000, "Browser", "B".repeat(70)));
+            windows.add(window(i + 9, 22000 + i * 3000, 1500, "Browser", "C".repeat(70)));
+            if (includeLaterWindows) {
+                windows.add(window(i + 13, 44000 + i * 3000, 1500, "Browser", "D".repeat(70)));
+                windows.add(window(i + 17, 66000 + i * 3000, 1500, "Browser", "E".repeat(70)));
+            }
+        }
+        return windows;
+    }
+
+    @Test
     void removesOnlyCoveredFallbackContentAndKeepsUnmatchedEdges() {
         var windows = List.of(window(1, 20, 60, "Browser", "Page"));
         var exact = new Event(2, start.plusSeconds(20), 60, Map.of("app", "Browser", "title", "Page"));

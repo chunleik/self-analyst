@@ -22,6 +22,176 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class WikiWorkerTest {
 
+    @Test
+    void exhaustedPeriodDoesNotStarveAnotherPeriodAndRaisedLimitResumesWithoutReset(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db"));
+        awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-09-21T05:00:00Z");
+        var exhausted = entry("exhausted", WikiLevel.HOUR, now.minusSeconds(3600), now, WikiStatus.PENDING);
+        var ready = entry("ready", WikiLevel.HOUR, now.minusSeconds(7200), now.minusSeconds(3600), WikiStatus.PENDING);
+        store.upsert(exhausted); store.upsert(ready);
+        String bucket = "watcher-window_" + java.net.InetAddress.getLocalHost().getHostName();
+        events.insertEvent(bucket, new com.selfanalyst.events.model.Event(now.minusSeconds(1800), 60, Map.of("app", "Editor", "title", "Order module")));
+        events.insertEvent(bucket, new com.selfanalyst.events.model.Event(now.minusSeconds(5400), 60, Map.of("app", "Editor", "title", "Order docs")));
+        var period = new WikiPeriod(WikiLevel.HOUR, exhausted.periodStart(), exhausted.periodEnd(), "UTC");
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var ledger = new WikiGenerationStore(dir.resolve("generation.db"))) {
+            var limits = new WikiGenerationStore.BudgetLimits(1, 1_000_000);
+            var reservation = ledger.reserve(WikiGenerationStore.periodKey(period), "a".repeat(64), "b".repeat(64), 1, limits);
+            ledger.settle(reservation.callId(), 1L, 1L);
+            var pipeline = workerPipeline(ledger, limits, calls);
+            worker = new WikiWorker(store, new WikiFactBuilder(events, 24000), pipeline, ZoneId.of("UTC"),
+                    Duration.ofSeconds(5), 3600, false, null, () -> now);
+            worker.start(); worker.processOneRound();
+            var paused = store.query(exhausted.periodStart(), now, WikiLevel.HOUR).getFirst();
+            assertEquals("period_budget", WikiGenerationProgress.state(paused));
+            assertEquals(0, paused.retryCount()); assertEquals(0, calls.get());
+            worker.processOneRound();
+            assertEquals(WikiStatus.SUMMARIZED, store.query(ready.periodStart(), ready.periodEnd(), WikiLevel.HOUR).getFirst().status());
+            assertEquals(1, calls.get());
+            worker.shutdown();
+            pipeline = workerPipeline(ledger, new WikiGenerationStore.BudgetLimits(2, 1_000_000), calls);
+            worker = new WikiWorker(store, new WikiFactBuilder(events, 24000), pipeline, ZoneId.of("UTC"),
+                    Duration.ofSeconds(5), 3600, false, null, () -> now);
+            worker.start(); worker.processOneRound();
+            assertEquals(WikiStatus.SUMMARIZED, store.query(exhausted.periodStart(), now, WikiLevel.HOUR).getFirst().status());
+            assertEquals(2, ledger.snapshot(WikiGenerationStore.periodKey(period)).calls());
+        }
+    }
+
+    @Test
+    void configurationPauseWaitsForRevisionRatherThanRepeatedPaidCalls(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db")); awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-09-21T05:00:00Z");
+        String bucket = "watcher-window_" + java.net.InetAddress.getLocalHost().getHostName();
+        events.insertEvent(bucket, new com.selfanalyst.events.model.Event(now.minusSeconds(1800), 60, Map.of("app", "Editor", "title", "Order module")));
+        var revision = new java.util.concurrent.atomic.AtomicInteger();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var ledger = new WikiGenerationStore(dir.resolve("generation.db"))) {
+            var pipeline = new WikiSummaryPipeline(() -> new WikiSummaryPipeline.Session() {
+                public String identity() { return "stable-model"; }
+                public String configurationRevision() { return revision.toString(); }
+                public void preflight() { if (revision.get() == 0) throw new WikiSummaryPipeline.CallFailure(
+                        WikiSummaryPipeline.FailureKind.CONFIGURATION, "WIKI_MODEL_UNAVAILABLE", true); }
+                public String complete(String prompt, Duration timeout) { calls.incrementAndGet(); return WikiSummaryPipelineTest.groundedResponse(prompt); }
+            }, new WikiSummaryPipeline.Limits(24000, 32000, 6), ledger, WikiGenerationStore.BudgetLimits.defaults());
+            worker = new WikiWorker(store, new WikiFactBuilder(events, 24000), pipeline, ZoneId.of("UTC"),
+                    Duration.ofSeconds(5), 3600, false, null, () -> now);
+            worker.start(); worker.processOneRound(); worker.processOneRound();
+            assertEquals(0, calls.get());
+            assertEquals("configuration", WikiGenerationProgress.state(store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst()));
+            revision.incrementAndGet(); worker.processOneRound();
+            assertEquals(1, calls.get());
+            assertEquals(WikiStatus.SUMMARIZED, store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst().status());
+        }
+    }
+
+    @Test
+    void configurationChangedDuringFailingRequestStillWakesPause(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db")); awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-09-21T05:00:00Z");
+        events.insertEvent("watcher-window_" + java.net.InetAddress.getLocalHost().getHostName(),
+                new com.selfanalyst.events.model.Event(now.minusSeconds(1800), 60, Map.of("app", "Editor", "title", "Order module")));
+        var revision = new java.util.concurrent.atomic.AtomicInteger();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var ledger = new WikiGenerationStore(dir.resolve("generation.db"))) {
+            var pipeline = new WikiSummaryPipeline(() -> new WikiSummaryPipeline.Session() {
+                final int leaseRevision = revision.get();
+                public String identity() { return "stable-model"; }
+                public String configurationRevision() { return Integer.toString(leaseRevision); }
+                public String complete(String prompt, Duration timeout) {
+                    calls.incrementAndGet();
+                    if (leaseRevision == 0) {
+                        revision.incrementAndGet(); // User fixes authentication before the old response arrives.
+                        throw new WikiSummaryPipeline.CallFailure(WikiSummaryPipeline.FailureKind.CONFIGURATION,
+                                "WIKI_AUTHENTICATION", false);
+                    }
+                    return WikiSummaryPipelineTest.groundedResponse(prompt);
+                }
+            }, new WikiSummaryPipeline.Limits(24000, 32000, 6), ledger, WikiGenerationStore.BudgetLimits.defaults());
+            worker = new WikiWorker(store, new WikiFactBuilder(events, 24000), pipeline, ZoneId.of("UTC"),
+                    Duration.ofSeconds(5), 3600, false, null, () -> now);
+            worker.start(); worker.processOneRound();
+            assertEquals("configuration", WikiGenerationProgress.state(store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst()));
+            worker.processOneRound();
+            assertEquals(2, calls.get());
+            assertEquals(WikiStatus.SUMMARIZED, store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst().status());
+        }
+    }
+
+    @Test
+    void transientPauseScanFailureDoesNotConsumeStartupRecovery(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db")) {
+            boolean first = true;
+            @Override public List<WikiEntry> findGenerationPaused() {
+                if (first) { first = false; throw new IllegalStateException("transient pause scan"); }
+                return super.findGenerationPaused();
+            }
+        };
+        awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-09-21T05:00:00Z");
+        var paused = entry("paused", WikiLevel.HOUR, now.minusSeconds(3600), now, WikiStatus.PENDING);
+        store.upsert(paused);
+        store.markGenerationFailure(paused, null, Map.of("state", "period_budget"),
+                Instant.parse("9999-12-31T00:00:00Z"), false);
+        events.insertEvent("watcher-window_" + java.net.InetAddress.getLocalHost().getHostName(),
+                new com.selfanalyst.events.model.Event(now.minusSeconds(1800), 60, Map.of("app", "Editor", "title", "Order module")));
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var ledger = new WikiGenerationStore(dir.resolve("generation.db"))) {
+            worker = new WikiWorker(store, new WikiFactBuilder(events, 24000),
+                    workerPipeline(ledger, WikiGenerationStore.BudgetLimits.defaults(), calls), ZoneId.of("UTC"),
+                    Duration.ofSeconds(5), 3600, false, null, () -> now);
+            worker.start(); worker.processOneRound();
+            assertEquals(0, calls.get());
+            worker.processOneRound();
+            assertEquals(1, calls.get());
+            assertEquals(WikiStatus.SUMMARIZED, store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst().status());
+        }
+    }
+
+    @Test
+    void finalCheckpointRecoversARealPublicationFailureWithoutAnotherModelCall(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db")) {
+            boolean fail = true;
+            @Override public void updateStatus(String id, WikiStatus status, String summary, String task,
+                    List<WikiEntry.TaskSegment> segments, WikiEntry.WikiMetrics metrics, List<String> sources,
+                    String model, String prompt, String factsVersion, String projector, Map<String, WikiEntry.SourceCoverage> coverage) {
+                if (fail) { fail = false; throw new IllegalStateException("publication failure"); }
+                super.updateStatus(id, status, summary, task, segments, metrics, sources, model, prompt, factsVersion, projector, coverage);
+            }
+        };
+        awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant now = Instant.parse("2026-09-21T05:00:00Z");
+        events.insertEvent("watcher-window_" + java.net.InetAddress.getLocalHost().getHostName(),
+                new com.selfanalyst.events.model.Event(now.minusSeconds(1800), 60, Map.of("app", "Editor", "title", "Order module")));
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var clock = new AtomicReference<>(now);
+        try (var ledger = new WikiGenerationStore(dir.resolve("generation.db"))) {
+            worker = new WikiWorker(store, new WikiFactBuilder(events, 24000),
+                    workerPipeline(ledger, new WikiGenerationStore.BudgetLimits(1, 1_000_000), calls), ZoneId.of("UTC"),
+                    Duration.ofSeconds(5), 3600, false, null, clock::get);
+            worker.start(); worker.processOneRound();
+            assertEquals("publish_failed", WikiGenerationProgress.state(store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst()));
+            clock.set(now.plusSeconds(121)); worker.processOneRound();
+            var recovered = store.query(now.minusSeconds(3600), now, WikiLevel.HOUR).getFirst();
+            assertEquals(WikiStatus.SUMMARIZED, recovered.status()); assertEquals(1, calls.get());
+            org.junit.jupiter.api.Assertions.assertNull(recovered.lastError());
+        }
+    }
+
+    private static WikiSummaryPipeline workerPipeline(WikiGenerationStore ledger, WikiGenerationStore.BudgetLimits limits,
+                                                     java.util.concurrent.atomic.AtomicInteger calls) {
+        return new WikiSummaryPipeline(() -> new WikiSummaryPipeline.Session() {
+            public String identity() { return "worker-test-model"; }
+            public String complete(String prompt, Duration timeout) { calls.incrementAndGet(); return WikiSummaryPipelineTest.groundedResponse(prompt); }
+        }, new WikiSummaryPipeline.Limits(24000, 32000, 6), ledger, limits);
+    }
+
     private WikiWorker worker;
     private WikiStore store;
     private Database awDatabase;
@@ -64,7 +234,7 @@ class WikiWorkerTest {
         worker = new WikiWorker(store, new WikiFactBuilder(events, 20), new WikiSummarizer(prompt -> {
             calls.incrementAndGet();
             org.junit.jupiter.api.Assertions.assertTrue(prompt.contains("selectedFacts=0"));
-            return "{\"summary\":\"标题证据未纳入预算，无法判断任务\",\"primaryTask\":\"信息不足\"}";
+            return "{\"summary\":\"标题证据未纳入预算，无法判断任务\",\"primaryTask\":\"信息不足\",\"taskSegments\":[]}";
         }), ZoneId.of("UTC"), Duration.ofSeconds(5), 3600, false, null, () -> now);
         worker.start();
         worker.processOneRound();
@@ -224,8 +394,7 @@ class WikiWorkerTest {
         AtomicReference<String> capturedPrompt = new AtomicReference<>();
         WikiSummarizer summarizer = new WikiSummarizer(prompt -> {
             capturedPrompt.set(prompt);
-            return "{\"summary\":\"week\",\"primaryTask\":\"task\","
-                    + "\"taskSegments\":[],\"metrics\":{}}";
+            return WikiSummaryPipelineTest.groundedResponse(prompt);
         });
         worker = new WikiWorker(store, new WikiFactBuilder(eventStore, 12_000),
                 summarizer, ZoneId.of("UTC"), Duration.ofSeconds(5), 3_600,
@@ -255,6 +424,9 @@ class WikiWorkerTest {
                 "parent metrics must aggregate only the seven exact UTC children");
         assertEquals(summarizer.promptVersion(), summarizedWeek.promptVersion(),
                 "persisted provenance must use the title-only summarizer prompt version");
+        assertEquals(7, summarizedWeek.sourceEntryIds().size());
+        org.junit.jupiter.api.Assertions.assertTrue(capturedPrompt.get().contains("2026-08-10T04:00:00Z"));
+        org.junit.jupiter.api.Assertions.assertTrue(capturedPrompt.get().contains("child:utc-day-0:0:0"));
     }
 
     @Test
@@ -304,7 +476,7 @@ class WikiWorkerTest {
                 new WikiFactBuilder(new EventStore(awDatabase, PulseTimeConfig.DEFAULT), 12_000),
                 new WikiSummarizer(prompt -> {
                     if (!ready.get()) throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
-                    return "{\"summary\":\"recovered\",\"primaryTask\":\"task\",\"taskSegments\":[],\"metrics\":{}}";
+                    return WikiSummaryPipelineTest.groundedResponse(prompt);
                 }), ZoneId.of("UTC"), Duration.ofSeconds(5), 3_600, false, null);
         Instant start = Instant.parse("2026-08-10T04:00:00Z");
         WikiEntry week = entry("waiting-week", WikiLevel.WEEK, start, start.plus(7, ChronoUnit.DAYS), WikiStatus.PENDING);

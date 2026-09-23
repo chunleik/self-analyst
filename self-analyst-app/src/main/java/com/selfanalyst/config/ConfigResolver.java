@@ -27,6 +27,11 @@ public final class ConfigResolver {
             Map.entry("wiki.backfill.enabled", "WIKI_BACKFILL_ENABLED"),
             Map.entry("wiki.worker.intervalSeconds", "WIKI_WORKER_INTERVAL_SECONDS"),
             Map.entry("wiki.prompt.maxContentChars", "WIKI_PROMPT_MAX_CONTENT_CHARS"),
+            Map.entry("wiki.summary.maxCalls", "WIKI_SUMMARY_MAX_CALLS"),
+            Map.entry("wiki.summary.maxRequestChars", "WIKI_SUMMARY_MAX_REQUEST_CHARS"),
+            Map.entry("wiki.summary.periodMaxCalls", "WIKI_SUMMARY_PERIOD_MAX_CALLS"),
+            Map.entry("wiki.summary.periodMaxTokens", "WIKI_SUMMARY_PERIOD_MAX_TOKENS"),
+            Map.entry("wiki.summary.outputTokenReserve", "WIKI_SUMMARY_OUTPUT_TOKEN_RESERVE"),
             Map.entry("wiki.topApps.limit", "WIKI_TOP_APPS_LIMIT"),
             Map.entry("wiki.semantic.enabled", "WIKI_SEMANTIC_ENABLED"),
             Map.entry("wiki.semantic.index-dir", "WIKI_SEMANTIC_INDEX_DIR"),
@@ -144,6 +149,11 @@ public final class ConfigResolver {
         effective("wiki.worker.intervalSeconds", String.valueOf(config.wikiWorkerIntervalSeconds()));
         effective("wiki.prompt.maxContentChars", String.valueOf(config.wikiPromptMaxContentChars()));
         effective("wiki.topApps.limit", String.valueOf(config.wikiTopAppsLimit()));
+        effective("wiki.summary.maxCalls", String.valueOf(config.wikiSummaryMaxCalls()));
+        effective("wiki.summary.maxRequestChars", String.valueOf(config.wikiSummaryMaxRequestChars()));
+        effective("wiki.summary.periodMaxCalls", String.valueOf(config.wikiSummaryPeriodMaxCalls()));
+        effective("wiki.summary.periodMaxTokens", String.valueOf(config.wikiSummaryPeriodMaxTokens()));
+        effective("wiki.summary.outputTokenReserve", String.valueOf(config.wikiSummaryOutputTokenReserve()));
         effective("wiki.semantic.enabled", String.valueOf(config.wikiSemanticEnabled()));
         effective("wiki.semantic.index-dir", String.valueOf(config.wikiSemanticIndexDir()));
         effective("wiki.semantic.topK", String.valueOf(config.wikiSemanticTopK()));

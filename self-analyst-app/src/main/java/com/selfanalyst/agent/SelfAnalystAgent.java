@@ -12,6 +12,9 @@ import com.selfanalyst.tools.ConfigTools;
 import com.selfanalyst.usage.UsageMeter;
 import com.selfanalyst.wiki.WikiStore;
 import com.selfanalyst.wiki.WikiTools;
+import com.selfanalyst.wiki.WikiSummaryPipeline.CallFailure;
+import com.selfanalyst.wiki.WikiSummaryPipeline.Completion;
+import com.selfanalyst.wiki.WikiSummaryPipeline.FailureKind;
 import com.selfanalyst.file.FileTools;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
@@ -28,6 +31,8 @@ import io.agentscope.core.model.ChatResponse;
 import io.agentscope.core.model.ChatUsage;
 import io.agentscope.core.model.ExecutionConfig;
 import io.agentscope.core.model.GenerateOptions;
+import io.agentscope.core.model.ModelHttpException;
+import io.agentscope.core.model.transport.HttpTransportException;
 import io.agentscope.core.state.AgentState;
 import io.agentscope.core.state.AgentStateStore;
 import io.agentscope.core.state.JsonFileAgentStateStore;
@@ -47,8 +52,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -174,6 +182,10 @@ public class SelfAnalystAgent implements AutoCloseable {
 
             GenerateOptions.Builder plainOpts = GenerateOptions.builder()
                     .temperature(0.2)
+                    // Each outer reservation covers one HTTP attempt. Keep the SDK's timeout
+                    // and other execution defaults, but let the durable caller own retries.
+                    .executionConfig(ExecutionConfig.mergeConfigs(
+                            ExecutionConfig.builder().maxAttempts(1).build(), ExecutionConfig.MODEL_DEFAULTS))
                     .stream(false);
             builtPlainModel = OpenAIChatModel.builder()
                     .apiKey((settings.available() ? settings.apiKey() : "UNCONFIGURED"))
@@ -936,11 +948,45 @@ public class SelfAnalystAgent implements AutoCloseable {
     public final class PlainTask implements AutoCloseable {
         private final LlmRuntimeManager<AgentRuntime>.Lease lease = runtimes.acquire();
         public String complete(String input, Duration timeout) {
+            return completeDetailed(input, timeout).text();
+        }
+        public void preflight() {
             if (!lease.settings().available()) throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
-            return completePlain(lease.resource().plain(), input, timeout);
+            if (usageMeter != null) usageMeter.enforce(UsageMeter.Category.SUMMARY);
+        }
+        public Completion completeDetailed(String input, Duration timeout) {
+            preflight();
+            return completePlainDetailed(lease.resource().plain(), input, timeout);
         }
         public boolean available() { return lease.settings().available(); }
+        public String cacheIdentity() { return plainCacheIdentity(lease.settings(), lang.code(), AgentPrompts.plainCompletionPrompt(lang)); }
+        public String configurationRevision() { return Long.toString(lease.revision()); }
+        public int requestOverheadChars() { return AgentPrompts.plainCompletionPrompt(lang).length() + 128; }
+        public long estimateInputTokens(String input) {
+            return estimateTokens(AgentPrompts.plainCompletionPrompt(lang)) + estimateTokens(input) + 32;
+        }
         @Override public void close() { lease.close(); }
+    }
+
+    /** Stable across process restarts and credential rotation; contains no plaintext configuration. */
+    static String plainCacheIdentity(LlmSettings settings, String language, String systemPrompt) {
+        try {
+            java.net.URI uri = java.net.URI.create(settings.baseUrl()).normalize();
+            String scheme = uri.getScheme().toLowerCase(java.util.Locale.ROOT);
+            String host = uri.getHost().toLowerCase(java.util.Locale.ROOT);
+            int port = uri.getPort();
+            if ((scheme.equals("https") && port == 443) || (scheme.equals("http") && port == 80)) port = -1;
+            String path = uri.getPath() == null ? "" : uri.getPath().replaceAll("/+$", "");
+            String endpoint = new java.net.URI(scheme, null, host, port, path, uri.getQuery(), null).toASCIIString();
+            String source = endpoint.length() + ":" + endpoint + settings.model().length() + ":" + settings.model()
+                    + ":plain-v1:0.2:" + language.length() + ":" + language
+                    + ":" + systemPrompt.length() + ":" + systemPrompt;
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return "plain-sha256-" + java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.GeneralSecurityException | java.net.URISyntaxException error) {
+            throw new IllegalStateException("WIKI_MODEL_IDENTITY_INVALID");
+        }
     }
 
     public PlainTask plainTask() { return new PlainTask(); }
@@ -949,10 +995,9 @@ public class SelfAnalystAgent implements AutoCloseable {
         try (PlainTask task = plainTask()) { return task.complete(userInput, timeout); }
     }
 
-    private String completePlain(OpenAIChatModel plainModel, String userInput, Duration timeout) {
-        if (usageMeter != null) {
-            usageMeter.enforce(UsageMeter.Category.SUMMARY);
-        }
+    private Completion completePlainDetailed(OpenAIChatModel plainModel, String userInput, Duration timeout) {
+        if (timeout == null || timeout.isZero() || timeout.isNegative())
+            throw new CallFailure(FailureKind.INPUT, "WIKI_TIMEOUT_INVALID", true);
         String plainSystemPrompt = AgentPrompts.plainCompletionPrompt(lang);
         List<Msg> messages = List.of(
                 Msg.builder()
@@ -966,43 +1011,73 @@ public class SelfAnalystAgent implements AutoCloseable {
                         .textContent(userInput)
                         .build());
 
+        AtomicReference<ChatUsage> receivedUsage = new AtomicReference<>();
+        StringBuffer receivedText = new StringBuffer();
+        java.util.concurrent.CompletableFuture<List<ChatResponse>> request = null;
+        boolean completed = false;
         try {
-            List<ChatResponse> responses = plainModel.stream(messages, List.of(), null)
-                    .collectList()
-                    .toFuture()
-                    .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
-            StringBuilder sb = new StringBuilder();
-            ChatUsage usage = null;
-            for (ChatResponse r : responses) {
-                sb.append(chatResponseText(r));
-                if (r != null && r.getUsage() != null) {
-                    usage = r.getUsage();
-                }
-            }
-            String text = sb.toString().trim();
+            // Subscribe only after the caller's preflight. Once entered, a synchronous SDK error
+            // is conservatively treated as a possibly dispatched request as well.
+            request = plainModel.stream(messages, List.of(), null).doOnNext(response -> {
+                receivedText.append(chatResponseText(response));
+                if (response != null && response.getUsage() != null) receivedUsage.set(response.getUsage());
+            }).collectList().toFuture();
+            request.get(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
+            completed = true;
+            ChatUsage usage = receivedUsage.get();
+            return new Completion(receivedText.toString().trim(),
+                    usage == null ? null : (long) usage.getInputTokens(), usage == null ? null : (long) usage.getOutputTokens());
+        } catch (InterruptedException e) {
+            if (request != null) request.cancel(true);
+            Thread.currentThread().interrupt();
+            throw plainCallFailure(FailureKind.INTERRUPTED, "WIKI_MODEL_INTERRUPTED", receivedUsage.get());
+        } catch (TimeoutException e) {
+            if (request != null) request.cancel(true);
+            throw plainCallFailure(FailureKind.TIMEOUT, "WIKI_MODEL_TIMEOUT", receivedUsage.get());
+        } catch (ExecutionException e) {
+            throw plainTransportFailure(e.getCause(), receivedUsage.get());
+        } catch (RuntimeException e) {
+            throw plainTransportFailure(e, receivedUsage.get());
+        } finally {
             if (usageMeter != null) {
+                ChatUsage usage = receivedUsage.get();
                 if (usage != null) {
-                    usageMeter.record(UsageMeter.Category.SUMMARY,
-                            usage.getInputTokens(), usage.getOutputTokens());
+                    usageMeter.record(UsageMeter.Category.SUMMARY, usage.getInputTokens(), usage.getOutputTokens());
                 } else {
-                    // 供应商/SDK 未在流式响应中返回 usage：退回长度估算，避免预算被静默架空
-                    long inEst = estimateTokens(plainSystemPrompt) + estimateTokens(userInput);
-                    usageMeter.record(UsageMeter.Category.SUMMARY, inEst, estimateTokens(text));
+                    long output = estimateTokens(receivedText.toString());
+                    if (!completed) output = Math.max(output, startupConfig.wikiSummaryOutputTokenReserve());
+                    usageMeter.record(UsageMeter.Category.SUMMARY,
+                            estimateTokens(plainSystemPrompt) + estimateTokens(userInput) + 32, output);
                     if (!usageMissingLogged) {
                         usageMissingLogged = true;
-                        log.warn("LLM 响应未返回 usage，摘要 token 改用长度估算计量（仅首次提示）");
+                        log.warn("LLM 响应未返回 usage，摘要 token 使用估算；未知失败保留输出预留（仅首次提示）");
                     }
                 }
             }
-            return text;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("LLM call interrupted", e);
-        } catch (TimeoutException e) {
-            throw new RuntimeException("LLM call timed out after " + timeout, e);
-        } catch (ExecutionException e) {
-            throw safeModelFailure(e.getCause());
         }
+    }
+
+    private static CallFailure plainCallFailure(FailureKind kind, String code, ChatUsage usage) {
+        return new CallFailure(kind, code, false,
+                usage == null ? null : (long) usage.getInputTokens(), usage == null ? null : (long) usage.getOutputTokens());
+    }
+
+    private static CallFailure plainTransportFailure(Throwable failure, ChatUsage usage) {
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable current = failure;
+        for (int depth = 0; depth < 16 && current != null && visited.add(current); depth++) {
+            // SDK messages can include response bodies. Only typed status codes may influence
+            // classification, including when ModelException or Reactor wraps the provider error.
+            Integer status = current instanceof ModelHttpException http ? http.getStatusCode()
+                    : current instanceof HttpTransportException transport ? transport.getStatusCode() : null;
+            if (status != null && status >= 100 && status <= 599) {
+                FailureKind kind = Set.of(400, 401, 402, 403, 404, 422).contains(status)
+                        ? FailureKind.CONFIGURATION : FailureKind.TRANSPORT;
+                return plainCallFailure(kind, "WIKI_MODEL_HTTP_" + status, usage);
+            }
+            current = current.getCause();
+        }
+        return plainCallFailure(FailureKind.TRANSPORT, "WIKI_MODEL_FAILURE", usage);
     }
 
     static RuntimeException safeModelFailure(Throwable failure) {

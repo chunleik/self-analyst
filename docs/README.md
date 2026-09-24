@@ -65,6 +65,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 | `user-configuration` | [spec](../openspec/specs/user-configuration/spec.md) | [配置旧文档](archive/legacy-specs/config-toml.md)、[核心旧文档](archive/legacy-specs/core.md) |
 | `user-profile-memory` | [spec](../openspec/specs/user-profile-memory/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `web-search` | [spec](../openspec/specs/web-search/spec.md) | [旧文档](archive/legacy-specs/web-search.md) |
+| `windows-release` | [spec](../openspec/specs/windows-release/spec.md) | Git 历史 |
 
 新增、删除或重命名 OpenSpec capability 时，必须同步更新本索引。现行契约只在对应
 `openspec/specs/<capability>/spec.md` 维护；一次性实施步骤不进入主规格，必要历史背景应写入

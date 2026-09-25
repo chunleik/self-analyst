@@ -31,6 +31,12 @@ public final class WikiTitleSampler {
 
     public static Selection sample(WikiPeriod period, List<Event> active,
                                    List<Event> windows, List<Event> contents, int maxChars) {
+        return sample(period, active, windows, contents, maxChars, WikiPrivacyPolicy.none());
+    }
+
+    public static Selection sample(WikiPeriod period, List<Event> active,
+                                   List<Event> windows, List<Event> contents, int maxChars,
+                                   WikiPrivacyPolicy privacy) {
         Map<Key, List<Span>> groups = new HashMap<>();
         Map<String, EventIndex> originals = byIdentity(windows);
         Map<String, EventIndex> effective = byIdentity(active);
@@ -38,6 +44,7 @@ public final class WikiTitleSampler {
         for (Event event : active) {
             String app = text(event, "app"), title = text(event, "title");
             if (ActivityStatistics.unknown(title) || ActivityStatistics.unknown(app)) continue;
+            if (Boolean.TRUE.equals(event.data().get("private_browsing"))) continue;
             SortedSet<Long> ids = new TreeSet<>();
             for (Event original : intersections(originals, app, title, event.timestamp(), ActivityStatistics.end(event))) {
                 if (original.id() > 0) ids.add(original.id());
@@ -46,7 +53,7 @@ public final class WikiTitleSampler {
                     event.timestamp(), ActivityStatistics.end(event), ids, true);
         }
         for (Event event : contents) {
-            if (!valid(event)) continue;
+            if (!valid(event) || Boolean.TRUE.equals(event.data().get("private_browsing"))) continue;
             String app = text(event, "app"), windowTitle = text(event, "title");
             String context = text(event, "context_title");
             String title = context.isBlank() ? windowTitle : context;
@@ -96,7 +103,9 @@ public final class WikiTitleSampler {
             List<Interval> intervals = representatives(period, spans).stream().map(s -> new Interval(
                     s.start().toString(), s.end().toString(), s.active(), s.ids().stream().limit(REPRESENTATIVES).toList(),
                     Math.max(0, s.ids().size() - REPRESENTATIVES))).toList();
-            Fact fact = new Fact("f" + nextId++, key.source(), bounded(key.app()), bounded(key.title()), key.kind(),
+            String shownTitle = privacy.redact(bounded(key.title()));
+            if (privacy.excluded(key.app(), shownTitle)) continue;
+            Fact fact = new Fact("f" + nextId++, key.source(), bounded(key.app()), shownTitle, key.kind(),
                     activeSeconds, spans.size(), intervals, spans.size() - intervals.size());
             candidates.add(new Candidate(key, fact, spans.getFirst().start(), timeMask(period, spans),
                     tokens(key.title()), compactJson(fact, period)));

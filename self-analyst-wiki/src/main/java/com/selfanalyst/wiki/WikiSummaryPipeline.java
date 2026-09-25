@@ -18,7 +18,7 @@ import java.util.function.LongSupplier;
 public final class WikiSummaryPipeline extends WikiSummarizer {
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules()
             .enable(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
-    private static final String VERSION = "wiki-tree-v5-focus";
+    private static final String VERSION = "wiki-tree-v6-abstract";
     private static final int CHECKPOINT_SCHEMA = 2;
 
     /** Null usage means that the durable reservation must be retained conservatively. */

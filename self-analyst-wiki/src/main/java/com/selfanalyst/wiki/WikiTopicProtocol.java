@@ -23,6 +23,7 @@ public final class WikiTopicProtocol {
             用查看、涉及、相关等有限描述直接写主题。不要在文案里说明证据边界。
             文案不播报时长、AFK、覆盖率、排名和切换次数；连接超时参数、AFK采集器等技术主题可正常描述。
             同一主题可跨应用和时间，同一应用可有多个主题，短独立主题不能因时长较少而被忽略。
+            输入含已完成子摘要时，只写一句主线，最多3个主题，不要逐条复述子时段标题。
             词面候选组只帮助组织，不是语义结论；可拆开错误候选组，也可合并不同候选组。
             claimType为observed或inferred，confidence为low/medium/high；推断最多medium，只有观察证据最多low。
             summary最多1200字符，primaryTask最多160字符；topicCards最多24项，每项title最多80字符，summary最多500字符。
@@ -83,7 +84,7 @@ public final class WikiTopicProtocol {
         return "周期=" + facts.period().level() + " " + facts.period().start() + ".." + facts.period().end()
                 + " " + facts.period().timezone() + "\n本地统计仅用于优先级，不写进文案：activeSeconds="
                 + facts.activeSeconds() + ",afkSeconds=" + facts.afkSeconds() + ",switchCount=" + facts.switchCount()
-                + ",taskConfidenceCeiling=" + (uncertain(facts) ? "medium" : "high") + "\n";
+                + "。置信度只反映证据类型：只有标题观察为 low，推断最高 medium。覆盖完整性不降低置信度。\n";
     }
 
     private static String children(WikiFacts facts) {

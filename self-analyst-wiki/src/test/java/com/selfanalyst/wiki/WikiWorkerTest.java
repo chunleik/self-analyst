@@ -383,6 +383,27 @@ class WikiWorkerTest {
     }
 
     @Test
+    void halfDayWaitsForHoursAndDoesNotReadRawTitles(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db"));
+        awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant start = Instant.parse("2026-09-21T04:00:00Z");
+        Instant noon = start.plusSeconds(8 * 3600);
+        String host = java.net.InetAddress.getLocalHost().getHostName();
+        events.insertEvent("watcher-window_" + host, new com.selfanalyst.events.model.Event(
+                start.plusSeconds(60), 120, Map.of("app", "idea64.exe", "title", "订单模块")));
+        store.upsert(entry("half", WikiLevel.HALF_DAY, start, noon, WikiStatus.PENDING));
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        worker = new WikiWorker(store, new WikiFactBuilder(events, 24000),
+                new WikiSummarizer(prompt -> { calls.incrementAndGet(); return "{\"summary\":\"x\",\"primaryTask\":\"x\"}"; }),
+                ZoneId.of("UTC"), Duration.ofSeconds(5), 3600, false, null, () -> noon);
+        worker.start();
+        worker.processOneRound();
+        assertEquals(WikiStatus.PENDING, store.query(start, noon, WikiLevel.HALF_DAY).getFirst().status());
+        assertEquals(0, calls.get());
+    }
+
+    @Test
     void parentWaitsUntilEveryExpectedChildPeriodExists(@TempDir Path dir) throws Exception {
         store = new WikiStore(dir.resolve("llm-wiki.db"));
         awDatabase = new Database(dir.resolve("events"));
@@ -496,8 +517,8 @@ class WikiWorkerTest {
         Instant weekStart = Instant.parse("2026-08-10T04:00:00Z");
         store.upsert(failedEntry("failed-week", WikiLevel.WEEK, weekStart,
                 weekStart.plus(7, ChronoUnit.DAYS), 0));
-        store.upsert(failedEntry("failed-day", WikiLevel.DAY, weekStart,
-                weekStart.plus(1, ChronoUnit.DAYS), 1));
+        store.upsert(failedEntry("failed-hour", WikiLevel.HOUR, weekStart,
+                weekStart.plus(1, ChronoUnit.HOURS), 1));
         for (int day = 1; day < 7; day++) {
             Instant start = weekStart.plus(day, ChronoUnit.DAYS);
             store.upsert(summarizedEntry("day-" + day, start,
@@ -507,9 +528,9 @@ class WikiWorkerTest {
         worker.start();
         worker.processOneRound();
 
-        WikiEntry child = store.query(weekStart, weekStart.plus(1, ChronoUnit.DAYS),
-                        WikiLevel.DAY).stream()
-                .filter(candidate -> candidate.id().equals("failed-day"))
+        WikiEntry child = store.query(weekStart, weekStart.plus(1, ChronoUnit.HOURS),
+                        WikiLevel.HOUR).stream()
+                .filter(candidate -> candidate.id().equals("failed-hour"))
                 .findFirst().orElseThrow();
         assertEquals(WikiStatus.SKIPPED, child.status(),
                 "a retryable child must run even when an incomplete failed parent sorts first");

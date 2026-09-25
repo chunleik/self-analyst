@@ -128,7 +128,7 @@ class WikiEvidencePolicyTest {
     @Test
     void confidenceDependsOnCitedEvidenceAndClaimStrength() {
         Map<String, Object> segment = segment();
-        assertEquals("medium", WikiEvidencePolicy.parseSegments(List.of(segment), facts, true).getFirst().confidence());
+        assertEquals("high", WikiEvidencePolicy.parseSegments(List.of(segment), facts, true).getFirst().confidence());
         segment.put("claimType", "inferred");
         assertEquals("medium", WikiEvidencePolicy.parseSegments(List.of(segment), facts, false).getFirst().confidence());
         segment.put("evidenceFactIds", List.of("f2"));

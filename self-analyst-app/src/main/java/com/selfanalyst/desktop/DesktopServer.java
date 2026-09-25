@@ -172,7 +172,8 @@ public class DesktopServer {
             throw recoveryFailure;
         }
         this.chatSessionStore = chatSessionStore;
-        SummaryService summaryService = new SummaryService(eventStore, memoryStore, config.effectiveLanguage());
+        SummaryService summaryService = new SummaryService(eventStore, memoryStore, config.effectiveLanguage(),
+                com.selfanalyst.wiki.WikiPrivacyPolicy.of(config.wikiExcludeApps(), config.wikiExcludeSites()));
         BehaviorAdviceService adviceService = new BehaviorAdviceService(config.effectiveLanguage());
         LongTermMemoryService longTermMemoryService = memoryStore != null
                 ? new LongTermMemoryService(memoryStore)

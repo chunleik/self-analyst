@@ -376,7 +376,7 @@ public class WikiWorker {
     }
 
     private static boolean needsRawEvents(WikiLevel level) {
-        return level == WikiLevel.HOUR || level == WikiLevel.HALF_DAY || level == WikiLevel.DAY;
+        return level == WikiLevel.HOUR;
     }
 
     private static List<String> sourceEntries(WikiFactBuilder.WikiFacts facts) {
@@ -387,10 +387,12 @@ public class WikiWorker {
 
     private static WikiLevel childLevel(WikiLevel parent) {
         return switch (parent) {
+            case HALF_DAY -> WikiLevel.HOUR;
+            case DAY -> WikiLevel.HALF_DAY;
             case WEEK -> WikiLevel.DAY;
             case BIWEEK -> WikiLevel.WEEK;
             case MONTH -> WikiLevel.DAY;
-            default -> null;
+            case HOUR -> null;
         };
     }
 

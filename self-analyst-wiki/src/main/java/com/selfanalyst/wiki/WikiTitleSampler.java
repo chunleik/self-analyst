@@ -102,6 +102,13 @@ public final class WikiTitleSampler {
                     tokens(key.title()), compactJson(fact, period)));
         }
         candidates = removeCommonTokens(candidates);
+        int noiseOmittedFacts = 0;
+        List<Candidate> kept = new ArrayList<>();
+        for (Candidate candidate : candidates) {
+            if (WikiNoisePolicy.excluded(candidate.key().app(), candidate.key().title())) noiseOmittedFacts++;
+            else kept.add(candidate);
+        }
+        candidates = kept;
         List<Candidate> windowCandidates = candidates.stream().filter(c -> c.key().source().equals("window")).toList();
         List<Candidate> contextCandidates = candidates.stream().filter(c -> c.key().source().equals("content")).toList();
         List<Candidate> semanticCandidates = contextCandidates.stream().filter(c -> !c.key().kind().equals("window")).toList();
@@ -127,6 +134,7 @@ public final class WikiTitleSampler {
         selected.forEach(c -> lines.append(c.json()).append('\n'));
         Map<String, Object> coverage = new LinkedHashMap<>();
         coverage.put("candidateFacts", candidates.size());
+        coverage.put("noiseOmittedFacts", noiseOmittedFacts);
         coverage.put("selectedFacts", selected.size());
         coverage.put("windowCandidates", windowCandidates.size());
         coverage.put("windowSelected", selected.stream().filter(c -> c.key().source().equals("window")).count());

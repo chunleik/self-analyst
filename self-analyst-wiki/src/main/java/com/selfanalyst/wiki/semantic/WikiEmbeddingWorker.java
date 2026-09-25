@@ -129,6 +129,7 @@ public class WikiEmbeddingWorker {
 
     public void enqueueEntry(WikiEntry entry) {
         if (!entry.currentStatistics() || !store.isCurrentEntry(entry.id())) return;
+        if ("local".equals(entry.model())) return;
         ZoneId tz = ZoneId.of(entry.timezone());
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 

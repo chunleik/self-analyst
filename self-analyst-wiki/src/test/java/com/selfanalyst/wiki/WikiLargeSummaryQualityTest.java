@@ -98,11 +98,13 @@ class WikiLargeSummaryQualityTest {
         assertEquals(0, number(generation, "omittedTopicCards"));
         assertEquals(number(generation, "topicCardsCreated"), number(generation, "topicCardsPresented"));
         assertEquals(run.session().topicRowsSeen, number(generation, "topicCardsPresented"));
-        assertEquals(16, run.result().taskSegments().size(), "oracle 主题应跨应用/叶归并成16项，而非按应用拆开");
+        assertEquals(6, run.result().taskSegments().size(), "最终展示最多5个主题加1个零散活动");
+        assertEquals(11, number(generation, "foldedTopicCards"));
         assertEquals(fixture.goldTopicByFactId().keySet(), cardMembers(run.result()));
         assertTrue(run.session().stages.contains("FINAL"), "规模案例必须实际走根汇总协议");
         assertTrue(run.session().seenTopics.size() > 16, "根必须处理跨叶重复主题卡片");
         for (var task : run.result().taskSegments()) {
+            if ("其他零散活动".equals(task.title())) continue;
             var topic = fixture.goldTopics().values().stream().filter(t -> t.name().equals(task.title())).findFirst().orElseThrow();
             assertTrue(fixture.goldTopicByFactId().keySet().containsAll(task.evidenceFactIds()));
             if (!topic.shortTopic()) assertEquals(Set.copyOf(WikiLargeQualityCorpus.APPS), Set.copyOf(task.apps()));

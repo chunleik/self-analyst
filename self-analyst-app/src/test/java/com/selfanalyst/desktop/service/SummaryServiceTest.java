@@ -80,6 +80,26 @@ class SummaryServiceTest {
     }
 
     @Test
+    void currentWindowSharesWikiNoiseExclusionWithoutChangingStatistics() throws Exception {
+        try (Database db = new Database(tempDir.resolve("current-noise"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            SummaryService service = new SummaryService(events, null);
+            Instant start = Instant.parse("2026-09-14T20:00:00Z"), end = start.plusSeconds(120);
+            events.insertEvent(service.windowBucket(), new Event(start, 40,
+                    Map.of("app", "LockApp.exe", "title", "Windows 默认锁屏界面")));
+            events.insertEvent(service.windowBucket(), new Event(start.plusSeconds(40), 80,
+                    Map.of("app", "IDE", "title", "订单模块开发")));
+            events.insertEvent(service.afkBucket(), new Event(start, 120, Map.of("status", "not-afk")));
+            var current = service.currentWindowFacts(start, end, "今天");
+            assertEquals(List.of("订单模块开发"), current.titleFacts().facts().stream()
+                    .map(com.selfanalyst.wiki.WikiTitleSampler.Fact::title).toList());
+            assertEquals(1, current.titleFacts().coverage().get("noiseOmittedFacts"));
+            assertEquals(service.factsFor(start, end, "昨天").topApps(), current.topApps());
+            assertTrue(current.topApps().stream().anyMatch(app -> app.startsWith("LockApp.exe")));
+        }
+    }
+
+    @Test
     void currentTitleSourcesUseWikiCompatibleImportedBucketFallback() throws Exception {
         try (Database db = new Database(tempDir.resolve("imported-current"))) {
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);

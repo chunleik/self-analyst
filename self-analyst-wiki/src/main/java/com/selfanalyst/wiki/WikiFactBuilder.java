@@ -16,7 +16,7 @@ public class WikiFactBuilder {
     private static final Logger log = LoggerFactory.getLogger(WikiFactBuilder.class);
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
             new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
-    public static final String FACT_BUILDER_VERSION = "wiki-facts-evidence-v5";
+    public static final String FACT_BUILDER_VERSION = "wiki-facts-evidence-v6";
 
     private final EventStore eventStore;
     private final String hostname;
@@ -123,7 +123,7 @@ public class WikiFactBuilder {
                     appTotals.merge(ad.app(), (double) ad.seconds(), Double::sum);
                 }
             }
-            if (child.status() == WikiStatus.SUMMARIZED) addChildFacts(child, childFacts, summaries);
+            if (child.status() == WikiStatus.SUMMARIZED && !localEmpty(child)) addChildFacts(child, childFacts, summaries);
         }
 
         List<WikiEntry.AppDuration> topApps = appTotals.entrySet().stream()
@@ -144,6 +144,12 @@ public class WikiFactBuilder {
                 childEntries.stream().map(WikiEntry::projectorVersion)
                         .filter(Objects::nonNull).findFirst().orElse(null), coverage, totals,
                 WikiTitleSampler.fromFacts(period, childFacts, Map.of("candidateFacts", childFacts.size())));
+    }
+
+    private static boolean localEmpty(WikiEntry child) {
+        Object generation = child.metrics() == null || child.metrics().extra() == null
+                ? null : child.metrics().extra().get("generation");
+        return generation instanceof Map<?, ?> map && "local_empty".equals(map.get("mode"));
     }
 
     private static void addChildFacts(WikiEntry child, List<WikiTitleSampler.Fact> facts, List<String> summaries) {

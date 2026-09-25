@@ -64,6 +64,28 @@ class WikiEmbeddingWorkerTest {
     }
 
     @Test
+    void localEmptyEntriesAreNeitherIndexedNorLeftBlockingDiscovery() {
+        WikiEntry empty = new WikiEntry("local-empty", WikiLevel.HOUR, t1, t2, tz.getId(),
+                WikiStatus.SUMMARIZED, "该时段没有可归纳的活跃活动。", "无活跃活动", List.of(),
+                new WikiEntry.WikiMetrics(0, 3600, 0, List.of(),
+                        Map.of("generation", Map.of("mode", "local_empty", "calls", 0))),
+                List.of(), "local", "wiki-v9-focus", 0, null, null,
+                Instant.now(), Instant.now(), Instant.now());
+        WikiEntry real = new WikiEntry("real", WikiLevel.HOUR, t2, t2.plusSeconds(3600), tz.getId(),
+                WikiStatus.SUMMARIZED, "写了Java代码", "SelfAnalyst开发", List.of(),
+                new WikiEntry.WikiMetrics(3600, 0, 5, List.of(), Map.of()),
+                List.of(), "llm", "wiki-v9-focus", 0, null, null,
+                Instant.now(), Instant.now(), Instant.now());
+        store.upsert(empty);
+        store.upsert(real);
+        WikiEmbeddingWorker worker = new WikiEmbeddingWorker(store, null, null,
+                "text-embedding-3-small", 1536, 60);
+        worker.enqueueEntry(empty);
+        assertTrue(store.findPendingSemanticDocs(10).isEmpty());
+        assertEquals(List.of("real"), store.findSummarizedWithoutSemanticDocs(1).stream().map(WikiEntry::id).toList());
+    }
+
+    @Test
     void shouldBuildEntryIndexText() {
         WikiEntry entry = new WikiEntry("e1", WikiLevel.DAY, t1, t2, "Asia/Shanghai",
                 WikiStatus.SUMMARIZED, "整体写代码", "开发功能",

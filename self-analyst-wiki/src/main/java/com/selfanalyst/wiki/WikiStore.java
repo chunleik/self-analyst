@@ -337,6 +337,7 @@ public class WikiStore implements AutoCloseable {
         List<WikiEntry> results = new ArrayList<>();
         String sql = """
             SELECT * FROM wiki_entries w WHERE %s AND w.status = ?
+            AND COALESCE(w.model, '') <> 'local'
             AND NOT EXISTS (
               SELECT 1 FROM wiki_semantic_documents s
               WHERE s.entry_id = w.id AND s.status IN (?, ?)

@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WikiWorkerTest {
 
@@ -218,6 +219,53 @@ class WikiWorkerTest {
         assertEquals("WIKI_NARRATIVE_STATISTICS:summary", entry.lastError());
         org.junit.jupiter.api.Assertions.assertNull(entry.summary());
         org.junit.jupiter.api.Assertions.assertNotNull(entry.nextRetryAt());
+    }
+
+    @Test
+    void afkOnlyAndNoiseOnlyHoursCompleteLocallyWithoutAModelCall(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db"));
+        awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant emptyStart = Instant.parse("2026-09-21T03:00:00Z");
+        Instant afkStart = emptyStart.plusSeconds(3600);
+        Instant noiseStart = afkStart.plusSeconds(3600);
+        Instant now = noiseStart.plusSeconds(3600);
+        String host = java.net.InetAddress.getLocalHost().getHostName();
+        events.insertEvent("watcher-afk_" + host, new com.selfanalyst.events.model.Event(
+                afkStart.plusSeconds(30), 3000, Map.of("status", "afk")));
+        events.insertEvent("watcher-window_" + host, new com.selfanalyst.events.model.Event(
+                noiseStart.plusSeconds(20), 180, Map.of("app", "LockApp.exe", "title", "Windows 默认锁屏界面")));
+        store.upsert(entry("empty", WikiLevel.HOUR, emptyStart, afkStart, WikiStatus.PENDING));
+        store.upsert(entry("afk", WikiLevel.HOUR, afkStart, noiseStart, WikiStatus.PENDING));
+        store.upsert(entry("noise", WikiLevel.HOUR, noiseStart, now, WikiStatus.PENDING));
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        try (var ledger = new WikiGenerationStore(dir.resolve("generation.db"))) {
+            var pipeline = workerPipeline(ledger, WikiGenerationStore.BudgetLimits.defaults(), calls);
+            worker = new WikiWorker(store, new WikiFactBuilder(events, 24000), pipeline, ZoneId.of("UTC"),
+                    Duration.ofSeconds(5), 3600, false, null, () -> now);
+            worker.start();
+            for (int round = 0; round < 6; round++) worker.processOneRound();
+            WikiEntry skipped = store.query(emptyStart, afkStart, WikiLevel.HOUR).getFirst();
+            WikiEntry afk = store.query(afkStart, noiseStart, WikiLevel.HOUR).getFirst();
+            WikiEntry noise = store.query(noiseStart, now, WikiLevel.HOUR).getFirst();
+            assertEquals(WikiStatus.SKIPPED, skipped.status());
+            assertEquals("No events in period", skipped.lastError());
+            assertEquals(WikiStatus.SUMMARIZED, afk.status());
+            assertEquals("local", afk.model());
+            assertEquals("local_empty", ((Map<?, ?>) afk.metrics().extra().get("generation")).get("mode"));
+            assertEquals(0, ((Number) ((Map<?, ?>) afk.metrics().extra().get("generation")).get("calls")).intValue());
+            assertTrue(afk.metrics().afkSeconds() > 0);
+            assertEquals(0, afk.taskSegments().size());
+            assertEquals(WikiStatus.SUMMARIZED, noise.status());
+            assertEquals("local", noise.model());
+            assertTrue(noise.metrics().activeSeconds() > 0);
+            assertEquals(0, noise.taskSegments().size());
+            assertEquals(0, calls.get());
+            assertEquals(0, ledger.snapshot(WikiGenerationStore.periodKey(
+                    new WikiPeriod(WikiLevel.HOUR, afkStart, noiseStart, "UTC"))).calls());
+            assertEquals(0, ledger.snapshot(WikiGenerationStore.periodKey(
+                    new WikiPeriod(WikiLevel.HOUR, noiseStart, now, "UTC"))).calls());
+        }
     }
 
     @Test

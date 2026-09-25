@@ -254,6 +254,111 @@ class WikiSummaryPipelineTest {
         assertEquals(1, calls.get());
     }
 
+    @Test void finalTopicsFollowLocalWeightAndFoldTheTail() throws Exception {
+        var period = new WikiPeriod(WikiLevel.HOUR, START, START.plusSeconds(3600), "UTC");
+        List<WikiTitleSampler.Fact> rows = new ArrayList<>();
+        double[] seconds = {500, 40, 30, 20, 15, 1, 1, 1, 1, 1, 1, 1};
+        String[] apps = {"WXWork.exe", "chrome.exe", "chrome.exe", "chrome.exe", "chrome.exe",
+                "chrome.exe", "chrome.exe", "chrome.exe", "chrome.exe", "chrome.exe", "chrome.exe", "chrome.exe"};
+        for (int i = 0; i < seconds.length; i++) {
+            rows.add(new WikiTitleSampler.Fact("f" + i, "window", apps[i], i == 0 ? "企业微信沟通" : "页面" + i,
+                    "window", seconds[i], 1, List.of(new WikiTitleSampler.Interval(START.plusSeconds(i * 60L).toString(),
+                    START.plusSeconds(i * 60L + 10).toString(), true, List.of((long) i + 1), 0)), 0));
+        }
+        var input = new WikiFactBuilder.WikiFacts(period, 613, 0, 3, List.of(), List.of(), List.of(), List.of(),
+                "facts-test", "events-v2", Map.of("afk", new WikiEntry.SourceCoverage("complete", START, period.end(), null)),
+                Map.of(), WikiTitleSampler.fromFacts(period, rows, Map.of("candidateFacts", rows.size())));
+        AtomicInteger calls = new AtomicInteger();
+        var pipeline = pipeline(24000, 6, calls, new AtomicReference<>("model"), prompt -> separateCards(prompt, 5));
+        var result = pipeline.summarize(input, Duration.ofSeconds(5));
+        assertEquals(1, calls.get());
+        assertEquals("企业微信沟通", result.primaryTask());
+        assertEquals(6, result.taskSegments().size());
+        assertEquals("其他零散活动", result.taskSegments().getLast().title());
+        assertEquals("inferred", result.taskSegments().getLast().claimType());
+        assertEquals("low", result.taskSegments().getLast().confidence());
+        assertEquals(7, generation(result).get("foldedTopicCards"));
+        Set<String> ids = rows.stream().map(WikiTitleSampler.Fact::id).collect(java.util.stream.Collectors.toSet());
+        assertTrue(ids.containsAll(result.taskSegments().getLast().evidenceFactIds()));
+        assertFalse(result.taskSegments().getLast().evidenceFactIds().isEmpty());
+        var again = pipeline.summarize(input, Duration.ofSeconds(5));
+        assertEquals(result.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList(),
+                again.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList());
+    }
+
+    @Test void fiveOrFewerTopicsAreOrderedWithoutATail() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        var pipeline = pipeline(24000, 6, calls, new AtomicReference<>("model"), prompt -> separateCards(prompt, -1));
+        var result = pipeline.summarize(facts(3), Duration.ofSeconds(5));
+        assertEquals(3, result.taskSegments().size());
+        assertTrue(result.taskSegments().stream().noneMatch(segment -> segment.title().equals("其他零散活动")));
+        assertEquals(0, generation(result).get("foldedTopicCards"));
+    }
+
+    @Test void ignoredModelPrimaryTaskCannotFailTheResponse() {
+        AtomicInteger calls = new AtomicInteger();
+        var pipeline = pipeline(24000, 6, calls, new AtomicReference<>("model"), prompt ->
+                groundedResponse(prompt).replace("\"primaryTask\":\"项目资料查看\"", "\"primaryTask\":\"AFK覆盖为partial\""));
+        var result = pipeline.summarize(facts(1), Duration.ofSeconds(5));
+        assertEquals(1, calls.get());
+        assertEquals("项目资料查看", result.primaryTask());
+    }
+
+    @Test void oversizedSummaryIsReplacedLocallyWithoutAnotherCall() {
+        AtomicInteger calls = new AtomicInteger();
+        var pipeline = pipeline(24000, 6, calls, new AtomicReference<>("model"), prompt ->
+                groundedResponse(prompt).replace("涉及项目资料查看。", "查".repeat(301)));
+        var result = pipeline.summarize(facts(1), Duration.ofSeconds(5));
+        assertEquals(1, calls.get());
+        assertTrue(result.summary().startsWith("主要涉及"));
+        assertTrue(result.summary().length() <= 300);
+    }
+
+    @Test void parentTopicsUseMemberCountAndStayDeterministic() throws Exception {
+        var period = new WikiPeriod(WikiLevel.WEEK, START, START.plusSeconds(604800), "UTC");
+        List<WikiTitleSampler.Fact> rows = new ArrayList<>();
+        for (int i = 0; i < 4; i++) rows.add(new WikiTitleSampler.Fact("f" + i, "wiki", "Editor", "子任务" + i,
+                "inferred", null, 1, List.of(new WikiTitleSampler.Interval(START.toString(),
+                START.plusSeconds(3600).toString(), false, List.of(), 0)), 0));
+        var input = new WikiFactBuilder.WikiFacts(period, 60, 0, 1, List.of(), List.of(), List.of(), List.of("child"),
+                "facts-test", "events-v2", Map.of("afk", new WikiEntry.SourceCoverage("complete", START, period.end(), null)),
+                Map.of(), WikiTitleSampler.fromFacts(period, rows, Map.of("candidateFacts", rows.size())));
+        String response = JSON.writeValueAsString(Map.of("summary", "涉及两项主题。", "primaryTask", "浏览网页", "topicCards", List.of(
+                Map.of("title", "浏览网页", "summary", "涉及浏览。", "memberInputIds", List.of("f3"),
+                        "representativeFactIds", List.of("f3"), "claimType", "observed", "confidence", "low"),
+                Map.of("title", "企业微信沟通", "summary", "涉及沟通。", "memberInputIds", List.of("f0", "f1", "f2"),
+                        "representativeFactIds", List.of("f0"), "claimType", "inferred", "confidence", "medium"))));
+        AtomicInteger calls = new AtomicInteger();
+        var pipeline = pipeline(24000, 6, calls, new AtomicReference<>("model"), prompt -> response);
+        var first = pipeline.summarize(input, Duration.ofSeconds(5));
+        var second = pipeline.summarize(input, Duration.ofSeconds(5));
+        assertEquals("企业微信沟通", first.primaryTask());
+        assertEquals(List.of("企业微信沟通", "浏览网页"), first.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList());
+        assertEquals(first.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList(),
+                second.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static String separateCards(String prompt, int inferredFrom) {
+        try {
+            List<Map<String, Object>> cards = new ArrayList<>();
+            for (String line : prompt.lines().toList()) {
+                if (!line.startsWith("{") || !line.contains("\"id\":")) continue;
+                Map<String, Object> row = JSON.readValue(line, Map.class);
+                if (!row.containsKey("id")) continue;
+                int index = cards.size();
+                cards.add(new LinkedHashMap<>(Map.of(
+                        "title", String.valueOf(row.getOrDefault("title", "主题" + index)),
+                        "summary", "涉及" + row.get("title") + "。",
+                        "memberInputIds", List.of(row.get("id")),
+                        "representativeFactIds", List.of(row.get("id")),
+                        "claimType", inferredFrom >= 0 && index >= inferredFrom ? "inferred" : "observed",
+                        "confidence", inferredFrom >= 0 && index >= inferredFrom ? "low" : "high")));
+            }
+            return JSON.writeValueAsString(Map.of("summary", "模型把浏览放在前面。", "primaryTask", "浏览网页", "topicCards", cards));
+        } catch (Exception error) { throw new AssertionError(error); }
+    }
+
     static WikiSummaryPipeline pipeline(int factChars, int maxCalls, AtomicInteger calls, AtomicReference<String> identity,
                                        java.util.function.Function<String, String> response) {
         return new WikiSummaryPipeline(() -> new WikiSummaryPipeline.Session() {

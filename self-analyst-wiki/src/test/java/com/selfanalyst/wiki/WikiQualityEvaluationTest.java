@@ -27,6 +27,16 @@ class WikiQualityEvaluationTest {
         assertEquals("offline-no-model", output.path("runs").get(0).path("status").asText());
     }
 
+    @Test void noisyFocusFixtureReportsExcludedNoiseAndABoundedOfflineSegmentCount(@TempDir Path root) throws Exception {
+        Path report = root.resolve("noisy-focus.json");
+        WikiQualityEvaluation.main(new String[]{"--case", "noisy-focus", "--repeat", "1", "--output", report.toString()});
+        var output = new ObjectMapper().readTree(Files.readString(report));
+        var run = output.path("runs").get(0);
+        assertTrue(run.path("inputSampling").path("noiseOmittedFacts").asInt() > 0);
+        assertTrue(run.path("offlineFocusSegmentCount").asInt() <= 6);
+        assertEquals(0, output.path("totalCalls").asInt());
+    }
+
     @Test void providerOutputLimitRequiresExplicitDiagnosticMode() throws Exception {
         Class<?> options = Class.forName(WikiQualityEvaluation.class.getName() + "$Options");
         var parse = options.getDeclaredMethod("parse", String[].class);

@@ -1,0 +1,4 @@
+{
+  "name": "SelfAnalyst",
+  "install": "bash .cursor/install.sh"
+}

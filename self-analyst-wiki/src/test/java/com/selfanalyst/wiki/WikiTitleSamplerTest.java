@@ -457,10 +457,11 @@ class WikiTitleSamplerTest {
                 window(3, 70, 15, "chrome.exe", "OpenAI 邮箱验证"),
                 window(4, 90, 40, "chrome.exe", "邮件 - InPrivate - Microsoft Edge"),
                 window(5, 140, 50, "Weixin.exe", "项目讨论"),
-                new Event(6, start.plusSeconds(200), 30, Map.of(
-                        "app", "chrome.exe", "title", "仍在无痕窗口中的页面", "private_browsing", true)));
+                window(6, 200, 30, "chrome.exe", "新标签页 - 隐身 - Google Chrome"),
+                window(7, 240, 30, "Zoom.exe", "Zoom Meeting ID 842-557-193"),
+                window(8, 280, 30, "chrome.exe", "Bilibili 视频 - Google Chrome"));
         var selected = sample(windows, List.of(), List.of(), Integer.MAX_VALUE,
-                WikiPrivacyPolicy.of("weixin.exe", "bilibili.com"));
+                WikiPrivacyPolicy.of("weixin.exe", "bilibili"));
         assertEquals(Set.of("远程桌面", "会议", "账号验证页面"),
                 new HashSet<>(selected.facts().stream().map(WikiTitleSampler.Fact::title).map(title ->
                         title.contains("内网地址") ? "远程桌面" : title.contains("已隐藏") ? "会议" : title).toList()));
@@ -470,7 +471,9 @@ class WikiTitleSamplerTest {
         assertFalse(selected.jsonLines().contains("361"));
         assertFalse(selected.jsonLines().contains("InPrivate"));
         assertFalse(selected.jsonLines().contains("项目讨论"));
-        assertFalse(selected.jsonLines().contains("无痕窗口"));
+        assertFalse(selected.jsonLines().contains("隐身"));
+        assertFalse(selected.jsonLines().contains("842"));
+        assertFalse(selected.jsonLines().contains("Bilibili"));
     }
 
     private WikiTitleSampler.Selection sample(List<Event> windows, List<Event> afk, List<Event> content, int budget) {

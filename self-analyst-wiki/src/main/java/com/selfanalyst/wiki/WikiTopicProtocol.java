@@ -151,7 +151,7 @@ public final class WikiTopicProtocol {
             segmentInput.put("evidenceFactIds", refs); segmentInput.put("claimType", row.get("claimType"));
             segmentInput.put("confidence", row.get("confidence"));
             WikiEntry.TaskSegment segment = WikiEvidencePolicy.parseSegments(List.of(segmentInput),
-                    WikiEvidencePolicy.facts(full.sampledTitles()), uncertain(full)).getFirst();
+                    WikiEvidencePolicy.facts(full.sampledTitles())).getFirst();
             String type = segment.claimType(); int confidence = rank(segment.confidence());
             for (String id : sourceIds) {
                 TopicCard parent = byTopic.get(id);
@@ -227,14 +227,6 @@ public final class WikiTopicProtocol {
         if (new HashSet<>(result).size() != result.size()) throw invalid("REFERENCES");
         return result;
     }
-
-    private static boolean uncertain(WikiFacts facts) {
-        WikiEntry.SourceCoverage afk = facts.sourceCoverage().get("afk");
-        return afk == null || !"complete".equals(afk.status())
-                || positive(facts.statistics().get("uncoveredSeconds")) || positive(facts.statistics().get("conflictSeconds"));
-    }
-
-    private static boolean positive(Object value) { return value instanceof Number number && number.doubleValue() > 0; }
 
     private static int rank(String confidence) { return "high".equals(confidence) ? 2 : "medium".equals(confidence) ? 1 : 0; }
     private static String childEntryId(String id) {

@@ -153,8 +153,7 @@ public class SummaryPromptService {
                 throw new IllegalArgumentException("Invalid summary confidence");
             }
             List<WikiEvidencePolicy.EvidenceFact> evidenceFacts = WikiEvidencePolicy.facts(facts.titleFacts());
-            List<WikiEntry.TaskSegment> segments = WikiEvidencePolicy.parseSegments(map.get("taskSegments"),
-                    evidenceFacts, !"complete".equals(facts.coverage()));
+            List<WikiEntry.TaskSegment> segments = WikiEvidencePolicy.parseSegments(map.get("taskSegments"), evidenceFacts);
             if (segments.isEmpty() || segments.size() > 4) throw new IllegalArgumentException("Invalid current task count");
             Map<String, String> evidenceById = new HashMap<>();
             for (var fact : evidenceFacts) {

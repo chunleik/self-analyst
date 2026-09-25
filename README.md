@@ -213,6 +213,8 @@ restart the backend. For concurrent updates to the same field, the last committe
 | `wiki.summary.periodMaxCalls` | `WIKI_SUMMARY_PERIOD_MAX_CALLS` | `12` |
 | `wiki.summary.periodMaxTokens` | `WIKI_SUMMARY_PERIOD_MAX_TOKENS` | `256000` |
 | `wiki.summary.outputTokenReserve` | `WIKI_SUMMARY_OUTPUT_TOKEN_RESERVE` | `4096` |
+| `wiki.privacy.excludeApps` | None (`config.toml` only) | Empty |
+| `wiki.privacy.excludeSites` | None (`config.toml` only) | Empty |
 
 Existing two-layer data is migrated to a verified compact database while legacy backups are retained.
 Settings show active and backup space separately; explicitly cleaning migration backups releases the
@@ -278,6 +280,17 @@ New summaries link tasks to title evidence and distinguish observations from inf
 titles cannot establish that a task was completed. Application names and displayed evidence are
 derived locally from validated references, so the model does not need to repeat them. The dashboard's
 current window and today use the same title facts, with a smaller budget and a five-second model timeout.
+
+Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages
+are masked. Titles marked as private browsing (for example Incognito or InPrivate) are skipped, as are
+applications listed in `wiki.privacy.excludeApps` (comma-separated executable names such as
+`weixin.exe`) and titles containing any keyword in `wiki.privacy.excludeSites`. Site keywords are
+matched against window titles because no URL is recorded, so use the name shown in the page title.
+Excluded applications are also left out of the application weights sent to the model, while local
+durations stay unchanged. A private window whose title carries no private-browsing marker cannot be
+detected; add sensitive sites to the exclusion list instead. Half-day and longer summaries apply the
+same rules to earlier child summaries, and are reduced to one sentence with at most three topics.
+Restart the backend after changing these settings.
 
 Long Wiki inputs are organized into topic candidates and summarized within `wiki.summary.maxCalls`
 (default **6** per generation attempt) and `wiki.summary.maxRequestChars` (default **32,000**, including

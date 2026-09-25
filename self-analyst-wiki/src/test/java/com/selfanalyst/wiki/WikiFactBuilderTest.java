@@ -66,6 +66,41 @@ class WikiFactBuilderTest {
         assertEquals(1, parent.childSummaries().size());
     }
 
+    @Test
+    void parentRedactsOldChildSummariesAndHidesExcludedApps() {
+        Instant start = Instant.parse("2026-09-01T04:00:00Z");
+        Instant end = start.plusSeconds(3600);
+        var metrics = new WikiEntry.WikiMetrics(60, 0, 1, java.util.List.of(
+                new WikiEntry.AppDuration("Weixin.exe", 40), new WikiEntry.AppDuration("Editor", 20)), Map.of());
+        var remote = new WikiEntry.TaskSegment("登录 10.2.3.4 管理后台", "参加会议号：361 881 114 的评审",
+                java.util.List.of(), java.util.List.of("Editor"), "medium", java.util.List.of("f1"), "inferred");
+        var chat = new WikiEntry.TaskSegment("私聊", "查看聊天", java.util.List.of(),
+                java.util.List.of("Weixin.exe"), "low", java.util.List.of("f2"), "observed");
+        var incognito = new WikiEntry.TaskSegment("无痕页面", "查看页面", java.util.List.of(),
+                java.util.List.of("chrome.exe"), "low", java.util.List.of("f3"), "observed");
+        var child = new WikiEntry("hour-a", WikiLevel.HOUR, start, end, "UTC", WikiStatus.SUMMARIZED,
+                "处理后台", "后台", java.util.List.of(chat, remote, incognito), metrics, java.util.List.of(), "model", "v9",
+                0, null, null, start, end, end, "facts-v6", "events-v2", Map.of());
+        var parent = new WikiFactBuilder(null, 24000, () -> null, WikiPrivacyPolicy.of("weixin.exe", ""))
+                .buildFactsFromChildren(java.util.List.of(child),
+                        new WikiPeriod(WikiLevel.HALF_DAY, start, start.plusSeconds(28800), "UTC"));
+
+        String children = String.join("\n", parent.childSummaries());
+        assertEquals(1, parent.childSummaries().size());
+        assertFalse(children.contains("10.2.3.4"));
+        assertFalse(children.contains("361"));
+        assertFalse(children.contains("私聊"));
+        assertFalse(children.contains("无痕"));
+        assertTrue(children.contains("[内网地址]"));
+        assertEquals(1, parent.sampledTitles().facts().size());
+        assertEquals(60d, parent.sampledTitles().facts().getFirst().activeSeconds());
+        assertEquals(java.util.List.of("Weixin.exe"), parent.statistics().get("privacyExcludedApps"));
+        assertTrue(parent.topApps().stream().anyMatch(app -> app.app().equals("Weixin.exe")));
+        String prompt = new WikiSummarizer(ignored -> "").buildPrompt(parent);
+        assertFalse(prompt.contains("Weixin.exe"));
+        assertTrue(prompt.contains("Editor"));
+    }
+
     @TempDir
     Path tempDir;
 

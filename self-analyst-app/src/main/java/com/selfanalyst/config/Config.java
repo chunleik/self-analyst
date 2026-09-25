@@ -84,7 +84,9 @@ public record Config(
         long budgetDailyTokens,
         double budgetWarnRatio,
         String appLanguage,
-        Lang effectiveLanguage) {
+        Lang effectiveLanguage,
+        String wikiExcludeApps,
+        String wikiExcludeSites) {
 
     private static final Logger log = LoggerFactory.getLogger(Config.class);
 
@@ -322,6 +324,8 @@ public record Config(
 
         // ── 应用语言 (SPEC-I18N-CFG-001) ──
         String appLanguage = values.get("app.language", "auto");
+        String wikiExcludeApps = values.get("wiki.privacy.excludeApps", "");
+        String wikiExcludeSites = values.get("wiki.privacy.excludeSites", "");
 
         return new Config(apiKey, baseUrl, model, eventsUrl, eventsTimeout,
                 Path.of(memDir), eventsEmbedded, eventsPort, eventsDataDir,
@@ -348,7 +352,8 @@ public record Config(
                 agentCompactionTriggerTokens, agentCompactionKeepMessages,
                 agentCompactionKeepTokens, desktopSummaryMaxTimelineLlm,
                 budgetMode, budgetDailyTokens, budgetWarnRatio,
-                appLanguage, LangResolver.resolve(appLanguage, Locale.getDefault()));
+                appLanguage, LangResolver.resolve(appLanguage, Locale.getDefault()),
+                wikiExcludeApps, wikiExcludeSites);
     }
 
     /**
@@ -378,7 +383,8 @@ public record Config(
                 baseDir.resolve("file-semantic-index"),
                 8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,
-                "auto", LangResolver.resolve("auto", Locale.getDefault()));
+                "auto", LangResolver.resolve("auto", Locale.getDefault()),
+                "", "");
     }
 
     /** Load the classpath {@code application.properties} defaults (empty if absent). */

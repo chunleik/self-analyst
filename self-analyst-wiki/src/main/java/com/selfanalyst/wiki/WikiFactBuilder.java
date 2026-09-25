@@ -22,6 +22,7 @@ public class WikiFactBuilder {
     private final String hostname;
     private final int maxContentChars;
     private final java.util.function.Supplier<Long> projectionLagSeconds;
+    private final WikiPrivacyPolicy privacy;
 
     public WikiFactBuilder(EventStore eventStore, int maxContentChars) {
         this(eventStore, maxContentChars, () -> null);
@@ -29,10 +30,17 @@ public class WikiFactBuilder {
 
     public WikiFactBuilder(EventStore eventStore, int maxContentChars,
                            java.util.function.Supplier<Long> projectionLagSeconds) {
+        this(eventStore, maxContentChars, projectionLagSeconds, WikiPrivacyPolicy.none());
+    }
+
+    public WikiFactBuilder(EventStore eventStore, int maxContentChars,
+                           java.util.function.Supplier<Long> projectionLagSeconds,
+                           WikiPrivacyPolicy privacy) {
         this.eventStore = eventStore;
         this.hostname = resolveHostname();
         this.maxContentChars = maxContentChars;
         this.projectionLagSeconds = projectionLagSeconds;
+        this.privacy = privacy == null ? WikiPrivacyPolicy.none() : privacy;
     }
 
     public java.util.Optional<Instant> earliestEvent() {
@@ -75,7 +83,7 @@ public class WikiFactBuilder {
                 .sorted(Map.Entry.<String, Double>comparingByValue().reversed()).limit(10)
                 .map(e -> new WikiEntry.AppDuration(e.getKey(), e.getValue().longValue())).toList();
         WikiTitleSampler.Selection sampled = WikiTitleSampler.sample(
-                period, stats.activeEvents(), windowEvents, contentEvents, titleBudget);
+                period, stats.activeEvents(), windowEvents, contentEvents, titleBudget, privacy);
         List<String> titleSamples = sampled.facts().stream().filter(f -> "window".equals(f.source()))
                 .map(WikiTitleSampler.Fact::title).toList();
         List<String> contextTitleSamples = sampled.facts().stream().filter(f -> "content".equals(f.source()))
@@ -169,7 +177,9 @@ public class WikiFactBuilder {
             for (String app : apps) {
                 String id = "child:" + child.id() + ":" + index + ":" + appIndex++;
                 refs.add(id);
-                facts.add(new WikiTitleSampler.Fact(id, "wiki", app, task.title(), "inferred", null, 1,
+                Double seconds = index == 0 && child.metrics() != null
+                        ? (double) child.metrics().activeSeconds() : 0d;
+                facts.add(new WikiTitleSampler.Fact(id, "wiki", app, task.title(), "inferred", seconds, 1,
                         List.of(new WikiTitleSampler.Interval(child.periodStart().toString(), child.periodEnd().toString(),
                                 false, List.of(), 0)), 0));
             }

@@ -90,7 +90,7 @@ public class WikiSummarizer {
         sb.append("- activeSeconds: ").append(facts.activeSeconds()).append("\n");
         sb.append("- afkSeconds: ").append(facts.afkSeconds()).append("\n");
         sb.append("- switchCount: ").append(facts.switchCount()).append("\n");
-        sb.append("- taskConfidenceCeiling: ").append(uncertainActivity(facts) ? "medium" : "high").append("\n");
+        sb.append("- taskConfidence: 只反映证据类型。只有标题观察为 low，推断最高 medium。覆盖完整性不降低置信度。\n");
         if (!facts.topApps().isEmpty()) {
             sb.append("- appWeightsSeconds (descending):\n");
             for (WikiEntry.AppDuration ad : facts.topApps()) {
@@ -302,8 +302,12 @@ public class WikiSummarizer {
         return value instanceof Number number && number.doubleValue() > 0;
     }
 
-    private static String confidence(String confidence, boolean uncertain) {
-        if ("high".equals(confidence)) return uncertain ? "medium" : "high";
+    /** Coverage uncertainty is reported separately and does not lower task confidence. */
+    private static String confidence(String confidence, boolean coverageUncertain) {
+        if (coverageUncertain) {
+            // Intentionally ignored. sourceCoverage remains the place that records incompleteness.
+        }
+        if ("high".equals(confidence)) return "high";
         return "medium".equals(confidence) ? "medium" : "low";
     }
 

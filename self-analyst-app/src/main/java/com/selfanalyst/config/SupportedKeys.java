@@ -89,6 +89,8 @@ public final class SupportedKeys {
         put("events.collection.title.pollMs", "500", KeyType.INTEGER);
 
         put("wiki.enabled", "false", KeyType.BOOLEAN);
+        put("wiki.privacy.excludeApps", "", KeyType.STRING);
+        put("wiki.privacy.excludeSites", "", KeyType.STRING);
         put("wiki.backfill.enabled", "false", KeyType.BOOLEAN);
         put("wiki.worker.intervalSeconds", "60", KeyType.INTEGER);
         put("wiki.prompt.maxContentChars", "24000", KeyType.INTEGER);
@@ -170,6 +172,8 @@ public final class SupportedKeys {
         describe("events.collection.title.pollMs", "前台窗口元数据检查与上下文标题心跳间隔（毫秒）。", "Interval for foreground-window metadata checks and context-title heartbeats, in milliseconds.");
 
         describe("wiki.enabled", "是否启用个人 Wiki 摘要生成。", "Whether to enable personal wiki summary generation.");
+        describe("wiki.privacy.excludeApps", "不进入摘要的应用，逗号分隔可执行文件名。", "Applications excluded from summaries, as a comma-separated list of executable names.");
+        describe("wiki.privacy.excludeSites", "不进入摘要的网站，逗号分隔，按标题包含匹配。", "Websites excluded from summaries, as a comma-separated list matched against titles.");
         describe("wiki.backfill.enabled", "是否为历史活动补生成 Wiki 内容。", "Whether to backfill wiki content for historical activity.");
         describe("wiki.worker.intervalSeconds", "Wiki 后台任务运行间隔（秒）。", "Interval between wiki background runs, in seconds.");
         describe("wiki.summary.maxCalls", "每份摘要最多模型调用次数（1至16）。", "Maximum model calls per summary (1–16).");

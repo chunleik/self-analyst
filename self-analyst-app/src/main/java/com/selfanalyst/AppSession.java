@@ -232,7 +232,9 @@ public class AppSession implements AutoCloseable {
                 try {
                     wikiGenerationStore = new WikiGenerationStore(config.memoryDir().resolve("wiki-generation.db"));
                     WikiFactBuilder factBuilder = new WikiFactBuilder(
-                            eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> 0L);
+                            eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> 0L,
+                            com.selfanalyst.wiki.WikiPrivacyPolicy.of(
+                                    config.wikiExcludeApps(), config.wikiExcludeSites()));
                     SelfAnalystAgent summaryAgent = a;
                     wikiSummaryPipeline = new WikiSummaryPipeline(() -> {
                         SelfAnalystAgent.PlainTask task = summaryAgent.plainTask();

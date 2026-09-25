@@ -39,12 +39,19 @@ public class SummaryService implements SummaryFactSource {
     private final String windowBucket;
     private final String afkBucket;
     private final String contentBucket;
+    private final com.selfanalyst.wiki.WikiPrivacyPolicy privacy;
 
     public SummaryService(EventStore eventStore, MemoryStore memoryStore) { this(eventStore, memoryStore, com.selfanalyst.i18n.Lang.chinese()); }
     public SummaryService(EventStore eventStore, MemoryStore memoryStore, com.selfanalyst.i18n.Lang lang) {
+        this(eventStore, memoryStore, lang, com.selfanalyst.wiki.WikiPrivacyPolicy.none());
+    }
+
+    public SummaryService(EventStore eventStore, MemoryStore memoryStore, com.selfanalyst.i18n.Lang lang,
+                          com.selfanalyst.wiki.WikiPrivacyPolicy privacy) {
         this.lang = lang;
         this.eventStore = eventStore;
         this.memoryStore = memoryStore;
+        this.privacy = privacy == null ? com.selfanalyst.wiki.WikiPrivacyPolicy.none() : privacy;
         String host = getHostname();
         this.windowBucket = "watcher-window_" + host;
         this.afkBucket = "watcher-afk_" + host;
@@ -224,7 +231,7 @@ public class SummaryService implements SummaryFactSource {
         WikiTitleSampler.Selection titleFacts = includeTitles
                 ? WikiTitleSampler.sample(new WikiPeriod(WikiLevel.HOUR, start, end, ZONE.getId()),
                         statistics.activeEvents(), ranges.get(windowBucket).events(),
-                        ranges.get(contentBucket).events(), TITLE_FACT_BUDGET_CHARS)
+                        ranges.get(contentBucket).events(), TITLE_FACT_BUDGET_CHARS, privacy)
                 : emptyTitleFacts();
         if (includeTitles) {
             Map<String, Object> titleCoverage = new LinkedHashMap<>(titleFacts.coverage());

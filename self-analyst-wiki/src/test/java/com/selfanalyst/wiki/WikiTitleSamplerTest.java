@@ -416,7 +416,8 @@ class WikiTitleSamplerTest {
                         "chunleik/self-analyst Releases - Google Chrome",
                         "Untitled-1 - Visual Studio Code", "订单系统安装说明"),
                 new HashSet<>(selected.facts().stream().map(WikiTitleSampler.Fact::title).toList()));
-        assertEquals(11, selected.coverage().get("noiseOmittedFacts"));
+        assertEquals(10, selected.coverage().get("noiseOmittedFacts"));
+        assertFalse(selected.facts().stream().anyMatch(fact -> fact.title().contains("无痕")));
     }
 
     @Test
@@ -448,9 +449,38 @@ class WikiTitleSamplerTest {
         assertTrue(two.facts().stream().anyMatch(f -> f.app().equals("Browser")));
     }
 
+    @Test
+    void privacyRedactsSecretsAndDropsPrivateBrowsingAndExcludedSources() {
+        List<Event> windows = List.of(
+                window(1, 0, 30, "mstsc.exe", "10.1.39.115 远程桌面"),
+                window(2, 40, 20, "wwmapp.exe", "会议号：361 881 114"),
+                window(3, 70, 15, "chrome.exe", "OpenAI 邮箱验证"),
+                window(4, 90, 40, "chrome.exe", "邮件 - InPrivate - Microsoft Edge"),
+                window(5, 140, 50, "Weixin.exe", "项目讨论"),
+                new Event(6, start.plusSeconds(200), 30, Map.of(
+                        "app", "chrome.exe", "title", "仍在无痕窗口中的页面", "private_browsing", true)));
+        var selected = sample(windows, List.of(), List.of(), Integer.MAX_VALUE,
+                WikiPrivacyPolicy.of("weixin.exe", "bilibili.com"));
+        assertEquals(Set.of("远程桌面", "会议", "账号验证页面"),
+                new HashSet<>(selected.facts().stream().map(WikiTitleSampler.Fact::title).map(title ->
+                        title.contains("内网地址") ? "远程桌面" : title.contains("已隐藏") ? "会议" : title).toList()));
+        assertTrue(selected.jsonLines().contains("[内网地址]"));
+        assertTrue(selected.jsonLines().contains("会议号：[已隐藏]"));
+        assertFalse(selected.jsonLines().contains("10.1.39.115"));
+        assertFalse(selected.jsonLines().contains("361"));
+        assertFalse(selected.jsonLines().contains("InPrivate"));
+        assertFalse(selected.jsonLines().contains("项目讨论"));
+        assertFalse(selected.jsonLines().contains("无痕窗口"));
+    }
+
     private WikiTitleSampler.Selection sample(List<Event> windows, List<Event> afk, List<Event> content, int budget) {
+        return sample(windows, afk, content, budget, WikiPrivacyPolicy.none());
+    }
+
+    private WikiTitleSampler.Selection sample(List<Event> windows, List<Event> afk, List<Event> content, int budget,
+                                              WikiPrivacyPolicy privacy) {
         var stats = ActivityStatistics.compute(windows, afk, period.start(), period.end());
-        return WikiTitleSampler.sample(period, stats.activeEvents(), windows, content, budget);
+        return WikiTitleSampler.sample(period, stats.activeEvents(), windows, content, budget, privacy);
     }
 
     private Event window(long id, long offset, double duration, String app, String title) {

@@ -242,7 +242,7 @@ public final class WikiEvidencePolicy {
             List<String> apps = List.copyOf(citedApps);
             boolean observationsOnly = cited.stream().allMatch(EvidenceFact::observationOnly);
             if (observationsOnly) confidence = "low";
-            else if ((uncertain || "inferred".equals(claimType)) && "high".equals(confidence)) confidence = "medium";
+            else if ("inferred".equals(claimType) && "high".equals(confidence)) confidence = "medium";
             List<String> evidence = cited.stream().map(WikiEvidencePolicy::evidenceText).toList();
             result.add(new WikiEntry.TaskSegment(title, summary, evidence, apps, confidence, ids, claimType));
         }

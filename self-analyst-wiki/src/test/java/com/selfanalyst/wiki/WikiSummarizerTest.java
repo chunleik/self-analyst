@@ -212,18 +212,18 @@ class WikiSummarizerTest {
     }
 
     @Test
-    void incompleteCoverageCapsConfidenceWithoutAddingStatisticsToText() {
+    void incompleteCoverageDoesNotCapConfidenceOrEnterNarrative() {
         var summarizer = new WikiSummarizer(prompt -> SAMPLE_VALID_JSON);
         for (String status : List.of("missing", "partial", "failed", "lagging")) {
             var result = summarizer.summarize(factsWithCoverage(status, java.util.Map.of()), Duration.ofSeconds(30));
-            assertEquals("medium", result.taskSegments().getFirst().confidence(), status);
+            assertEquals("high", result.taskSegments().getFirst().confidence(), status);
             assertEquals("主要在进行Java后端开发", result.summary());
             assertEquals(List.of("IDE可见"), result.taskSegments().getFirst().evidence());
         }
         var certain = summarizer.summarize(factsWithCoverage("complete", java.util.Map.of()), Duration.ofSeconds(30));
         assertEquals("high", certain.taskSegments().getFirst().confidence());
         var conflict = summarizer.summarize(factsWithCoverage("complete", java.util.Map.of("conflictSeconds", 1.5)), Duration.ofSeconds(30));
-        assertEquals("medium", conflict.taskSegments().getFirst().confidence());
+        assertEquals("high", conflict.taskSegments().getFirst().confidence());
     }
 
     @Test

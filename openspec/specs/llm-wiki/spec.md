@@ -8,14 +8,14 @@
 
 ### Requirement: SPEC-WIKI-GOAL-001..008 多级摘要与检索目标
 系统 SHALL 支持 HOUR、HALF_DAY、DAY、WEEK、BIWEEK 和 MONTH 层级，并默认永久保存已生成摘要。
-HOUR/HALF_DAY/DAY SHALL 从原始窗口、AFK 和内容标题事实生成；WEEK/BIWEEK/MONTH SHALL 从已完成
-的下级摘要生成。Agent SHALL 能按时间范围查询摘要；可选语义检索 SHALL 能按模糊主题检索摘要与
+HOUR SHALL 从原始窗口、AFK 和内容标题事实生成；HALF_DAY 及以上 SHALL 从已完成的下级摘要生成。
+Agent SHALL 能按时间范围查询摘要；可选语义检索 SHALL 能按模糊主题检索摘要与
 任务片段。后台发现和补算 MUST NOT 阻塞应用启动。LLM 不可用时 MUST 保留可重试状态，不写规则兜底
 伪摘要。Wiki 数据 MUST NOT 长期保存完整 OCR/UIA 正文。
 
 #### Scenario: 低层级生成
-- **WHEN** 已结束小时、半天或统计日具有可用标题事实
-- **THEN** 系统从该范围原始事实生成对应层级摘要
+- **WHEN** 已结束小时具有可用标题事实
+- **THEN** 系统从该范围原始事实生成小时摘要
 
 #### Scenario: 高层级生成
 - **WHEN** 周、双周或统计月的预期下级摘要全部完成
@@ -40,14 +40,15 @@ WikiTools 查询，不直接访问数据库或向量索引。摘要生成失败 
 - **THEN** 主服务继续启动，Wiki worker 和工具不可用并记录受限错误
 
 ### Requirement: SPEC-WIKI-FLOW-001..004、SPEC-WIKI-GEN-001..009 层级输入依赖
-HOUR、HALF_DAY 和 DAY SHALL 直接聚合其时间范围内的原始事实，不得由小时或半天摘要拼接。
-WEEK SHALL 只聚合该周 SUMMARIZED DAY；BIWEEK SHALL 聚合两个连续 SUMMARIZED WEEK；MONTH SHALL
-聚合同一统计月 SUMMARIZED DAY。预期子时间块未全部达到 SUMMARIZED 或 SKIPPED 时，父级 SHALL
-保持 PENDING。
+HOUR SHALL 直接聚合其时间范围内的原始事实。HALF_DAY SHALL 只聚合该半天内已完成的 HOUR。DAY SHALL 只聚合该日已完成的 HALF_DAY。WEEK SHALL 只聚合该周 SUMMARIZED DAY；BIWEEK SHALL 聚合两个连续 SUMMARIZED WEEK；MONTH SHALL 聚合同一统计月 SUMMARIZED DAY。预期子时间块未全部达到 SUMMARIZED 或 SKIPPED 时，父级 SHALL 保持 PENDING。
 
-#### Scenario: DAY 不拼接下级摘要
-- **WHEN** 同一天已存在 HOUR 或 HALF_DAY 摘要
-- **THEN** DAY 仍从该日原始事实构建，不拼接这些摘要
+#### Scenario: 半天等待小时
+- **WHEN** 一个已结束半天内仍有小时不存在、PENDING 或 FAILED
+- **THEN** 该半天保持 PENDING，不读取原始标题生成摘要
+
+#### Scenario: 日等待半天
+- **WHEN** 同一天的两个半天尚未全部 SUMMARIZED 或 SKIPPED
+- **THEN** DAY 保持 PENDING，不从原始事实拼接
 
 #### Scenario: 父级等待依赖
 - **WHEN** 周期内任一预期子时间块不存在、PENDING 或 FAILED
@@ -620,3 +621,40 @@ Wiki SHALL 区分事实统计和周期边界版本。旧版或缺少版本的条
 #### Scenario: 技术主题与成果断言
 - **WHEN** 文案描述“排查连接不返回数据的问题”，或声称“已完成发布”
 - **THEN** 前者不被当作声明删除；后者仍按既有断言强度规则被拒绝
+
+### Requirement: SPEC-WIKI-GEN-028 上层摘要抽象
+HALF_DAY、DAY、WEEK、BIWEEK 和 MONTH 的新生成摘要 SHALL 用一句主线描述该周期，最终主题 MUST 不超过 3 个。超出的主题 SHALL 在本地合并为“其余活动”，其描述不得逐条列出被合并的标题。每个子片段进入上层时 SHALL 带有该子周期的有效秒数，上层排序 MUST 使用这些秒数。已有摘要 MUST NOT 因本次调整自动重算。
+
+#### Scenario: 半天不复述每个小时
+- **WHEN** 一个半天的小时摘要包含 6 个不同主题
+- **THEN** 半天摘要最多 3 个主题加一条“其余活动”，主线不是这些小时标题的清单
+
+#### Scenario: 用时决定上层顺序
+- **WHEN** 一个子小时的有效秒数高于其他子小时
+- **THEN** 该小时的首个主题在上层排序中权重更高
+
+### Requirement: SPEC-WIKI-PRV-020 摘要输入脱敏与排除
+新生成摘要在形成标题事实之前 SHALL 脱敏内网 IP、会议号和账号验证页标题。标题包含无痕、InPrivate、Incognito 或隐私浏览，或事件标记为私人浏览时，该活动 MUST NOT 成为标题事实。配置的排除应用和排除网站 MUST NOT 成为标题事实。活跃时长、AFK 和应用耗时 MUST 保持不变。看板当前窗 SHALL 使用同一策略。
+
+#### Scenario: 敏感标题被替换
+- **WHEN** 窗口标题包含内网 IP、会议号或账号验证页
+- **THEN** 模型输入不再包含原 IP、会议号或验证页标题
+
+#### Scenario: 无痕活动不进入摘要
+- **WHEN** 窗口标题标明无痕或 InPrivate，或事件带有私人浏览标记
+- **THEN** 这些标题不进入模型输入
+
+#### Scenario: 按应用和网站排除
+- **WHEN** 用户配置排除了某个应用或网站
+- **THEN** 匹配的标题不进入模型输入，该应用的耗时仍保留在本地统计中
+
+### Requirement: SPEC-WIKI-GEN-029 置信度不跟随覆盖完整性
+新生成任务的 confidence SHALL 只反映证据类型。只有标题观察的任务 MUST 为 low。推断任务 MUST NOT 为 high。AFK、覆盖缺口或冲突秒数 MUST NOT 降低任务置信度；这些状态 SHALL 继续只出现在 sourceCoverage 和内部统计中。
+
+#### Scenario: 覆盖不完整仍保留证据置信度
+- **WHEN** AFK 覆盖为 partial、missing、failed 或 lagging，且模型给出的任务证据不是纯观察
+- **THEN** 任务置信度保持模型给出的 high 或 medium，覆盖状态仍可在 sourceCoverage 中读取
+
+#### Scenario: 只有观察
+- **WHEN** 任务引用的事实都是未匹配有效窗口的标题观察
+- **THEN** 该任务置信度为 low

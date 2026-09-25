@@ -18,12 +18,13 @@ final class WikiSummaryFocus {
         Map<String, Fact> byId = WikiTopicProtocol.catalog(facts.sampledTitles().facts());
         boolean parent = cards.stream().flatMap(card -> card.memberInputIds().stream()).map(byId::get)
                 .filter(Objects::nonNull).allMatch(fact -> "wiki".equals(fact.source()));
+        int topicLimit = parent ? 3 : MAX_TOPICS;
         cards.sort(Comparator.comparingDouble((WikiTopicProtocol.TopicCard card) -> weight(card, byId, parent)).reversed()
                 .thenComparing(card -> earliest(card))
                 .thenComparing(WikiTopicProtocol.TopicCard::id));
-        int folded = Math.max(0, cards.size() - MAX_TOPICS);
-        List<WikiTopicProtocol.TopicCard> kept = new ArrayList<>(cards.subList(0, Math.min(MAX_TOPICS, cards.size())));
-        if (folded > 0) kept.add(fold(cards.subList(MAX_TOPICS, cards.size()), byId));
+        int folded = Math.max(0, cards.size() - topicLimit);
+        List<WikiTopicProtocol.TopicCard> kept = new ArrayList<>(cards.subList(0, Math.min(topicLimit, cards.size())));
+        if (folded > 0) kept.add(fold(cards.subList(topicLimit, cards.size()), byId, parent));
         List<WikiEntry.TaskSegment> segments = kept.stream().map(card -> segment(card, facts, byId)).toList();
         String primary = kept.getFirst().title();
         String summary = result.summary() != null && result.summary().length() > SUMMARY_LIMIT
@@ -36,7 +37,8 @@ final class WikiSummaryFocus {
                         result.metrics().switchCount(), result.metrics().topApps(), extra));
     }
 
-    private static WikiTopicProtocol.TopicCard fold(List<WikiTopicProtocol.TopicCard> rest, Map<String, Fact> byId) {
+    private static WikiTopicProtocol.TopicCard fold(List<WikiTopicProtocol.TopicCard> rest, Map<String, Fact> byId,
+                                                      boolean parent) {
         List<String> members = rest.stream().flatMap(card -> card.memberInputIds().stream()).distinct().toList();
         List<String> refs = new ArrayList<>();
         for (WikiTopicProtocol.TopicCard card : rest) {
@@ -47,7 +49,9 @@ final class WikiSummaryFocus {
         boolean inferred = rest.stream().anyMatch(card -> "inferred".equals(card.claimType()));
         int confidence = rest.stream().mapToInt(card -> rank(card.confidence())).min().orElse(0);
         if (inferred) confidence = Math.min(confidence, 1);
-        return new WikiTopicProtocol.TopicCard("t-other", "其他零散活动", otherSummary(rest), members, refs, List.of(),
+        String title = parent ? "其余活动" : "其他零散活动";
+        String summary = parent ? "其余活动不再展开。" : otherSummary(rest);
+        return new WikiTopicProtocol.TopicCard("t-other", title, summary, members, refs, List.of(),
                 inferred ? "inferred" : "observed", List.of("low", "medium", "high").get(confidence));
     }
 
@@ -63,7 +67,7 @@ final class WikiSummaryFocus {
 
     private static String composedSummary(List<WikiTopicProtocol.TopicCard> kept) {
         List<String> titles = kept.stream().map(WikiTopicProtocol.TopicCard::title)
-                .filter(title -> !"其他零散活动".equals(title)).limit(3).toList();
+                .filter(title -> !title.equals("其他零散活动") && !title.equals("其余活动")).limit(3).toList();
         if (titles.isEmpty()) return "该时段没有可归纳的主要主题。";
         if (titles.size() == 1) return "主要涉及" + titles.getFirst() + "。";
         if (titles.size() == 2) return "主要涉及" + titles.get(0) + "和" + titles.get(1) + "。";
@@ -86,7 +90,9 @@ final class WikiSummaryFocus {
     }
 
     private static double weight(WikiTopicProtocol.TopicCard card, Map<String, Fact> byId, boolean parent) {
-        if (parent) return card.memberInputIds().size();
+        boolean timed = card.memberInputIds().stream().map(byId::get).filter(Objects::nonNull)
+                .anyMatch(fact -> fact.activeSeconds() != null);
+        if (parent && !timed) return card.memberInputIds().size();
         return card.memberInputIds().stream().map(byId::get).filter(Objects::nonNull)
                 .mapToDouble(fact -> fact.activeSeconds() == null ? 0 : fact.activeSeconds()).sum();
     }

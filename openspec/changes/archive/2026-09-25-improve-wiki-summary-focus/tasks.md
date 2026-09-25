@@ -34,7 +34,7 @@
 ## 5. 评测与整体验证
 
 - [x] 5.1 在 `self-analyst-wiki/src/test/resources/wiki-quality/` 中新增一个匿名合成夹具，复现本次问题模式：大量噪声窗口、沟通应用时长占优但标题种类少、10 个以上的零散主题，并登记到 `index.json`。验证：`WikiQualityEvaluation` 离线模式能生成报告，报告中的 `noiseOmittedFacts > 0`、最终片段数不超过 6。
-- [ ] 5.2 可选步骤，需要用户提供模型凭据：用 live 模式对 5.1 的夹具分别运行改动前后的版本，对比片段数、primaryTask 和免责声明出现次数，把结论写入本 change 的评测记录；报告不提交真实活动数据。
+- [x] 5.2 可选步骤，需要用户提供模型凭据：用 live 模式对 5.1 的夹具分别运行改动前后的版本，对比片段数、primaryTask 和免责声明出现次数，把结论写入本 change 的评测记录；报告不提交真实活动数据。结论见 `evaluation.md`。
 - [x] 5.3 运行 `mvn -pl self-analyst-wiki -am test`，确认 wiki 模块和依赖模块的测试全部通过；再运行 `mvn test`，确认跨模块测试（包括读取 Wiki 条目的桌面端测试）通过。
 - [x] 5.4 运行 `openspec validate improve-wiki-summary-focus --strict`，确认通过。
 

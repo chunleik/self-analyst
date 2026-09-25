@@ -393,6 +393,47 @@ class WikiTitleSamplerTest {
     }
 
     @Test
+    void noiseWindowsAreExcludedWhileInstallersProjectPagesAndEditorDraftsRemain() {
+        List<Event> windows = List.of(
+                window(1, 0, 30, "LockApp.exe", "Windows 默认锁屏界面"),
+                window(2, 40, 20, "SearchHost.exe", "搜索"),
+                window(3, 70, 15, "explorer.exe", "系统托盘溢出窗口"),
+                window(4, 90, 10, "explorer.exe", "Program Manager"),
+                window(5, 110, 25, "chrome.exe", "新标签页 - Google Chrome"),
+                window(6, 140, 20, "msedge.exe", "New Tab - Microsoft Edge"),
+                window(7, 170, 15, "firefox.exe", "翻译此页？ - Mozilla Firefox"),
+                window(8, 200, 12, "chrome.exe", "新的无痕式标签页"),
+                window(9, 220, 40, "SelfAnalyst.exe", "SelfAnalyst"),
+                window(10, 300, 80, "SelfAnalyst_0.5.0-beta.1_x64-setup.exe", "SelfAnalyst Setup"),
+                window(11, 400, 40, "uninstall.exe", "SelfAnalyst Uninstall"),
+                window(12, 460, 120, "chrome.exe", "chunleik/self-analyst Releases - Google Chrome"),
+                window(13, 600, 90, "Code.exe", "Untitled-1 - Visual Studio Code"),
+                window(14, 700, 200, "idea64.exe", "订单系统安装说明"),
+                window(15, 950, 10, "explorer.exe", "System tray overflow window."),
+                window(16, 970, 10, "chrome.exe", "Translate this page? - Google Chrome"));
+        var selected = sample(windows, List.of(), List.of(), Integer.MAX_VALUE);
+        assertEquals(Set.of("SelfAnalyst Setup", "SelfAnalyst Uninstall",
+                        "chunleik/self-analyst Releases - Google Chrome",
+                        "Untitled-1 - Visual Studio Code", "订单系统安装说明"),
+                new HashSet<>(selected.facts().stream().map(WikiTitleSampler.Fact::title).toList()));
+        assertEquals(11, selected.coverage().get("noiseOmittedFacts"));
+    }
+
+    @Test
+    void excludedNoiseReleasesBudgetForThemedFacts() {
+        var themed = List.of(window(1, 0, 600, "idea64.exe", "订单".repeat(40)));
+        int themedCost = sample(themed, List.of(), List.of(), Integer.MAX_VALUE).jsonLines().length();
+        List<Event> windows = new ArrayList<>(themed);
+        for (int i = 0; i < 8; i++) {
+            windows.add(window(10 + i, 8000 + i * 4000, 5, "LockApp.exe", "锁屏" + i));
+        }
+        var selected = sample(windows, List.of(), List.of(), themedCost);
+        assertEquals(List.of("订单".repeat(40)), selected.facts().stream().map(WikiTitleSampler.Fact::title).toList());
+        assertEquals(8, selected.coverage().get("noiseOmittedFacts"));
+        assertTrue(selected.jsonLines().length() <= themedCost);
+    }
+
+    @Test
     void skipsOversizedCandidateInsteadOfStoppingAndPrefersDifferentApps() {
         List<Event> windows = List.of(window(1, 0, 600, "IDE", "A".repeat(160)),
                 window(2, 700, 400, "IDE", "short"), window(3, 1200, 300, "Browser", "docs"));

@@ -11,6 +11,8 @@ import java.time.Duration;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -23,16 +25,15 @@ public class WikiSummarizer {
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-    private static final String PROMPT_VERSION = "wiki-v8-derived-evidence";
+    private static final String PROMPT_VERSION = "wiki-v9-focus";
     private static final int MAX_RESPONSE_CHARS = 65536;
     private static final String NARRATIVE_RULES = """
             面向用户的 summary、primaryTask、taskSegments.title/summary 只描述活动、项目和技术主题。
-            不复述 AFK/覆盖情况、覆盖率、活跃/离开/应用使用时长、排名数字、切换次数或采样统计；不要附加这类免责声明。
+            不复述 AFK/覆盖情况、覆盖率、活跃/离开/应用使用时长、排名数字、切换次数或采样统计。
             内部数据仅用于任务优先级和置信度判断，旧子摘要中的统计说明也不得复制。
             证据不足时使用“涉及”“查看”“相关开发”等有限描述并降低confidence，不把标题观察写成已完成成果。
             技术主题中的 AFK 采集器、30秒连接超时等名称或参数可以正常描述，它们不是活动统计。
-            会议或聊天窗口标题不证明参加会议、发起群聊或发送消息，项目标题不证明运行、配置或交付项目。
-            归纳主题时使用“涉及”“查看”“围绕…的活动”；事实引用存在仍不证明动作或成果。
+            用查看、涉及、相关等有限描述直接写主题。不要在文案里说明证据边界。
             """;
 
     private final BiFunction<String, Duration, String> llmClient;
@@ -187,14 +188,22 @@ public class WikiSummarizer {
 
             String summary = WikiEvidencePolicy.text(map.get("summary"), "summary", 1200);
             String primaryTask = WikiEvidencePolicy.text(map.get("primaryTask"), "primaryTask", 160);
-
-            WikiEvidencePolicy.validateNarrative("summary", summary);
-            WikiEvidencePolicy.validateNarrative("primaryTask", primaryTask);
             boolean structured = facts.sampledTitles() != null;
+            int[] removed = {0};
+            WikiDisclaimer.Result summaryClean = WikiDisclaimer.clean(summary);
+            removed[0] += summaryClean.removed();
+            summary = summaryClean.text();
+            if (!summary.isBlank()) WikiEvidencePolicy.validateNarrative("summary", summary);
+            Object segmentsInput = cleanSegmentSummaries(map.get("taskSegments"), removed);
             List<WikiEntry.TaskSegment> segments = structured
-                    ? WikiEvidencePolicy.parseSegments(map.get("taskSegments"),
+                    ? WikiEvidencePolicy.parseSegments(segmentsInput,
                             WikiEvidencePolicy.facts(facts.sampledTitles()), uncertainActivity(facts))
-                    : parseSegments(map.get("taskSegments"), uncertainActivity(facts));
+                    : parseSegments(segmentsInput, uncertainActivity(facts));
+            if (summary.isBlank()) {
+                summary = fallbackSummary(segments);
+                WikiEvidencePolicy.validateNarrative("summary", summary);
+            }
+            WikiEvidencePolicy.validateNarrative("primaryTask", primaryTask);
 
             Map<String, Object> llmMetrics = safeGetMap(map, "metrics");
             Map<String, Object> extra = Map.of();
@@ -207,6 +216,7 @@ public class WikiSummarizer {
 
             extra = new java.util.LinkedHashMap<>(extra);
             extra.putAll(facts.statistics());
+            if (removed[0] > 0) extra.put("disclaimerClausesRemoved", removed[0]);
             if (structured) {
                 var referenced = segments.stream().flatMap(segment -> segment.evidenceFactIds().stream())
                         .collect(Collectors.toSet());
@@ -222,6 +232,31 @@ public class WikiSummarizer {
             // Jackson messages can embed response fragments. Do not persist the cause or message.
             throw new IllegalArgumentException("WIKI_RESPONSE_JSON:response");
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object cleanSegmentSummaries(Object segmentsObj, int[] removed) {
+        if (!(segmentsObj instanceof List<?> list)) return segmentsObj;
+        List<Object> cleaned = new ArrayList<>();
+        for (Object value : list) {
+            if (!(value instanceof Map<?, ?> row)) { cleaned.add(value); continue; }
+            Map<String, Object> copy = new LinkedHashMap<>();
+            row.forEach((key, item) -> copy.put(String.valueOf(key), item));
+            if (copy.get("summary") instanceof String summary) {
+                WikiDisclaimer.Result result = WikiDisclaimer.clean(summary);
+                removed[0] += result.removed();
+                String title = copy.get("title") instanceof String text ? text : "相关活动";
+                copy.put("summary", result.text().isBlank() ? "涉及" + title + "。" : result.text());
+            }
+            cleaned.add(copy);
+        }
+        return cleaned;
+    }
+
+    private static String fallbackSummary(List<WikiEntry.TaskSegment> segments) {
+        if (segments.isEmpty() || segments.getFirst().title() == null || segments.getFirst().title().isBlank())
+            return "该时段没有可归纳的主要主题。";
+        return "主要涉及" + segments.getFirst().title() + "。";
     }
 
     @SuppressWarnings("unchecked")

@@ -113,6 +113,21 @@ public final class WikiQualityEvaluation {
         return report;
     }
 
+    /** One card per retained fact, then the production display cap. No model call. */
+    private static int offlineFocusSegmentCount(WikiFacts facts) {
+        if (facts.sampledTitles() == null || facts.sampledTitles().facts().isEmpty()) return 0;
+        List<WikiTopicProtocol.TopicCard> cards = new ArrayList<>();
+        for (Fact fact : facts.sampledTitles().facts()) {
+            String title = fact.title().length() > 80 ? fact.title().substring(0, 80) : fact.title();
+            cards.add(new WikiTopicProtocol.TopicCard("preview-" + fact.id(), title, "涉及" + title + "。",
+                    List.of(fact.id()), List.of(fact.id()), List.of(), "observed", "low"));
+        }
+        var seed = new WikiSummarizer.SummaryResult("涉及多项活动。", cards.getFirst().title(), List.of(),
+                new WikiEntry.WikiMetrics(facts.activeSeconds(), facts.afkSeconds(), facts.switchCount(),
+                        facts.topApps(), Map.of("topicCards", List.copyOf(cards))));
+        return WikiSummaryFocus.apply(seed, facts).taskSegments().size();
+    }
+
     private static Map<String, Object> run(Options options, Api api, AtomicInteger totalCalls,
                                            JsonNode fixture, WikiFacts facts, String strategy, int budget, int repeat) {
         Map<String, Object> row = new LinkedHashMap<>();
@@ -142,6 +157,7 @@ public final class WikiQualityEvaluation {
         row.put("candidateCounts", null);
         if (!options.live) {
             row.put("status", "offline-no-model");
+            row.put("offlineFocusSegmentCount", offlineFocusSegmentCount(facts));
             row.put("calls", 0);
             row.put("elapsedMillis", 0);
             row.put("inputTokens", null);

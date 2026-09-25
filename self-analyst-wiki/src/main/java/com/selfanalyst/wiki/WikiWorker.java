@@ -269,19 +269,26 @@ public class WikiWorker {
                 return;
             }
 
-            // Capture before acquiring the generation lease: a hot update during an old
-            // request must remain visible to the next pause-recovery scan.
-            if (summarizer instanceof WikiSummaryPipeline pipeline)
-                attemptedConfiguration = configurationStamp(pipeline);
-            WikiSummarizer.SummaryResult result = summarizer.summarize(facts, timeout);
-            generated = true;
+            WikiSummarizer.SummaryResult result;
+            String model = "llm";
+            if (locallyEmpty(facts)) {
+                result = localEmptyResult(facts);
+                model = "local";
+            } else {
+                // Capture before acquiring the generation lease: a hot update during an old
+                // request must remain visible to the next pause-recovery scan.
+                if (summarizer instanceof WikiSummaryPipeline pipeline)
+                    attemptedConfiguration = configurationStamp(pipeline);
+                result = summarizer.summarize(facts, timeout);
+                generated = true;
+            }
 
             store.updateStatus(id, WikiStatus.SUMMARIZED, result.summary(), result.primaryTask(),
                     result.taskSegments(), result.metrics(),
-                    sourceEntries(facts), "llm", summarizer.promptVersion(),
+                    sourceEntries(facts), model, summarizer.promptVersion(),
                     facts.factBuilderVersion(), facts.projectorVersion(), facts.sourceCoverage());
             published = true;
-            if (summarizer instanceof WikiSummaryPipeline pipeline) pipeline.markPublished(result);
+            if (generated && summarizer instanceof WikiSummaryPipeline pipeline) pipeline.markPublished(result);
 
             log.debug("Summarized wiki entry {}: {}", id, result.primaryTask());
 
@@ -385,6 +392,22 @@ public class WikiWorker {
             case MONTH -> WikiLevel.DAY;
             default -> null;
         };
+    }
+
+    /** No task evidence remains after noise exclusion. Budget omission is not emptiness. */
+    private static boolean locallyEmpty(WikiFactBuilder.WikiFacts facts) {
+        if (!facts.childSummaries().isEmpty() || facts.sampledTitles() == null) return false;
+        Object candidates = facts.sampledTitles().coverage().get("candidateFacts");
+        return candidates instanceof Number number && number.intValue() == 0;
+    }
+
+    private static WikiSummarizer.SummaryResult localEmptyResult(WikiFactBuilder.WikiFacts facts) {
+        Map<String, Object> extra = new LinkedHashMap<>(facts.statistics());
+        extra.put("generation", Map.of("mode", "local_empty", "calls", 0));
+        extra.put("localEmpty", true);
+        return new WikiSummarizer.SummaryResult("该时段没有可归纳的活跃活动。", "无活跃活动", List.of(),
+                new WikiEntry.WikiMetrics(facts.activeSeconds(), facts.afkSeconds(), facts.switchCount(),
+                        facts.topApps(), extra));
     }
 
     private boolean isEmpty(WikiFactBuilder.WikiFacts facts) {

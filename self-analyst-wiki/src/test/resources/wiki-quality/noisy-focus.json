@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "noisy-focus",
+  "description": "匿名合成：噪声窗口、沟通时长占优但标题种类少，以及十个以上零散浏览主题。",
+  "budgetChars": 12000,
+  "periodSeconds": 86400,
+  "windows": [
+    {"offsetSeconds": 0, "durationSeconds": 20, "app": "LockApp.exe", "title": "Windows 默认锁屏界面"},
+    {"offsetSeconds": 30, "durationSeconds": 10, "app": "SearchHost.exe", "title": "搜索"},
+    {"offsetSeconds": 50, "durationSeconds": 15, "app": "chrome.exe", "title": "新标签页 - Google Chrome"},
+    {"offsetSeconds": 70, "durationSeconds": 15, "app": "SelfAnalyst.exe", "title": "SelfAnalyst"},
+    {"offsetSeconds": 100, "durationSeconds": 4000, "app": "WXWork.exe", "title": "企业微信沟通"},
+    {"offsetSeconds": 5000, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题一"},
+    {"offsetSeconds": 5200, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题二"},
+    {"offsetSeconds": 5400, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题三"},
+    {"offsetSeconds": 5600, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题四"},
+    {"offsetSeconds": 5800, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题五"},
+    {"offsetSeconds": 20000, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题六"},
+    {"offsetSeconds": 20200, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题七"},
+    {"offsetSeconds": 20400, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题八"},
+    {"offsetSeconds": 43000, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题九"},
+    {"offsetSeconds": 43200, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题十"},
+    {"offsetSeconds": 65000, "durationSeconds": 40, "app": "chrome.exe", "title": "页面主题十一"}
+  ],
+  "contents": [],
+  "afk": [],
+  "expectations": {
+    "requiredTitles": ["企业微信沟通", "页面主题一", "页面主题十一"],
+    "excludedTitles": ["Windows 默认锁屏界面", "搜索", "新标签页 - Google Chrome", "SelfAnalyst"],
+    "minFacts": 12,
+    "maxFacts": 12,
+    "topics": [
+      {"name": "沟通", "titleFragments": ["企业微信沟通"]},
+      {"name": "浏览", "titleFragments": ["页面主题"]}
+    ]
+  },
+  "manualReview": "噪声不得进入模型输入；沟通主题的有效时长高于单个浏览标题。"
+}

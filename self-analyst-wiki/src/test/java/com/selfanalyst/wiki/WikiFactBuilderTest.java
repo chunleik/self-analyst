@@ -41,6 +41,31 @@ class WikiFactBuilderTest {
         assertEquals(60, parent.activeSeconds());
     }
 
+    @Test
+    void parentKeepsLocalEmptyMetricsWithoutUsingThemAsTopics() {
+        Instant start = Instant.parse("2026-09-01T04:00:00Z");
+        Instant end = start.plusSeconds(86400);
+        var task = new WikiEntry.TaskSegment("订单模块", "查看订单模块资料", java.util.List.of("标题观察"),
+                java.util.List.of("Editor"), "medium", java.util.List.of("f7"), "inferred");
+        var active = new WikiEntry.WikiMetrics(60, 0, 1,
+                java.util.List.of(new WikiEntry.AppDuration("Editor", 60)), Map.of());
+        var idle = new WikiEntry.WikiMetrics(0, 90, 0, java.util.List.of(),
+                Map.of("generation", Map.of("mode", "local_empty", "calls", 0)));
+        var child = new WikiEntry("day-a", WikiLevel.DAY, start, end, "UTC", WikiStatus.SUMMARIZED,
+                "查看项目资料", "订单模块", java.util.List.of(task), active, java.util.List.of(), "model", "v9",
+                0, null, null, start, end, end, "facts-v6", "events-v2", Map.of());
+        var empty = new WikiEntry("day-b", WikiLevel.DAY, end, end.plusSeconds(86400), "UTC", WikiStatus.SUMMARIZED,
+                "该时段没有可归纳的活跃活动。", "无活跃活动", java.util.List.of(), idle, java.util.List.of(), "local", "v9",
+                0, null, null, end, end, end, "facts-v6", "events-v2", Map.of());
+        var parent = new WikiFactBuilder(null, 24000).buildFactsFromChildren(java.util.List.of(child, empty),
+                new WikiPeriod(WikiLevel.WEEK, start, start.plusSeconds(604800), "UTC"));
+        assertEquals(60, parent.activeSeconds());
+        assertEquals(90, parent.afkSeconds());
+        assertTrue(parent.sampledTitles().facts().stream().noneMatch(fact -> fact.title().contains("无活跃活动")));
+        assertEquals("订单模块", parent.sampledTitles().facts().getFirst().title());
+        assertEquals(1, parent.childSummaries().size());
+    }
+
     @TempDir
     Path tempDir;
 
@@ -182,6 +207,36 @@ class WikiFactBuilderTest {
                     + bounded.contextTitleSamples().stream().mapToInt(String::length).sum();
             assertTrue(sampleChars <= 20,
                     "window and context title samples must share one character budget");
+        }
+    }
+
+    @Test
+    void noiseExclusionKeepsCompleteLocalMetrics() throws Exception {
+        try (Database db = new Database(tempDir.resolve("noise-metrics"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            String host = java.net.InetAddress.getLocalHost().getHostName();
+            Instant start = Instant.parse("2026-09-24T03:00:00Z");
+            String window = "watcher-window_" + host;
+            events.insertEvent(window, new Event(start, 120, Map.of("app", "LockApp.exe", "title", "Windows 默认锁屏界面")));
+            events.insertEvent(window, new Event(start.plusSeconds(130), 80, Map.of("app", "chrome.exe", "title", "新标签页 - Google Chrome")));
+            events.insertEvent(window, new Event(start.plusSeconds(220), 200, Map.of("app", "idea64.exe", "title", "订单系统安装说明")));
+            events.insertEvent("watcher-afk_" + host, new Event(start.plusSeconds(500), 40, Map.of("status", "afk")));
+
+            var facts = new WikiFactBuilder(events, 12_000).buildFacts(
+                    new WikiPeriod(WikiLevel.HOUR, start, start.plusSeconds(3600), "UTC"));
+
+            assertEquals(java.util.List.of("订单系统安装说明"), facts.sampledTitles().facts().stream()
+                    .map(WikiTitleSampler.Fact::title).toList());
+            assertEquals(2, facts.sampledTitles().coverage().get("noiseOmittedFacts"));
+            assertEquals(400.0, ((Number) facts.statistics().get("activeSecondsExact")).doubleValue(), 1e-9);
+            assertEquals(40.0, ((Number) facts.statistics().get("afkSecondsExact")).doubleValue(), 1e-9);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> apps = (Map<String, Object>) facts.statistics().get("appSecondsExact");
+            assertEquals(120.0, ((Number) apps.get("LockApp.exe")).doubleValue(), 1e-9);
+            assertEquals(80.0, ((Number) apps.get("chrome.exe")).doubleValue(), 1e-9);
+            assertEquals("complete", facts.sourceCoverage().get("window").status());
+            assertEquals("partial", facts.sourceCoverage().get("afk").status());
+            assertEquals("wiki-facts-evidence-v6", facts.factBuilderVersion());
         }
     }
 

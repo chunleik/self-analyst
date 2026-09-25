@@ -18,7 +18,7 @@ import java.util.function.LongSupplier;
 public final class WikiSummaryPipeline extends WikiSummarizer {
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules()
             .enable(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
-    private static final String VERSION = "wiki-tree-v4-topics";
+    private static final String VERSION = "wiki-tree-v5-focus";
     private static final int CHECKPOINT_SCHEMA = 2;
 
     /** Null usage means that the durable reservation must be retained conservatively. */
@@ -544,7 +544,10 @@ public final class WikiSummaryPipeline extends WikiSummarizer {
     private SummaryResult decorate(SummaryResult result, WikiFacts full, WikiFacts finalInput,
                                    Run run, int omitted, int mergeOmitted) {
         run.checkDeadline();
+        result = WikiSummaryFocus.apply(result, full);
         Map<String, Object> extra = new LinkedHashMap<>(result.metrics().extra());
+        Object folded = extra.remove("foldedTopicCards");
+        Object disclaimers = extra.remove("disclaimerClausesRemoved");
         int inputCount = full.sampledTitles() == null ? 0 : full.sampledTitles().facts().size();
         int availableCount = finalInput.sampledTitles() == null ? 0 : finalInput.sampledTitles().facts().size();
         long referenced = result.taskSegments().stream().flatMap(task -> task.evidenceFactIds().stream()).distinct().count();
@@ -568,6 +571,8 @@ public final class WikiSummaryPipeline extends WikiSummarizer {
         generation.put("omittedTopicCards", run.omittedCards.size());
         generation.put("unresolvedTopicCards", run.unresolvedCards.size());
         generation.put("finalTopicCards", finalCards.size());
+        generation.put("foldedTopicCards", folded instanceof Number number ? number.intValue() : 0);
+        generation.put("disclaimerClausesRemoved", disclaimers instanceof Number count ? count.intValue() : 0);
         generation.put("candidateGroups", run.plan == null ? 0 : run.plan.candidateGroups());
         generation.put("planFingerprint", run.plan == null ? "legacy" : run.plan.fingerprint());
         generation.put("reservedMergeCalls", run.plan == null ? 0 : run.plan.reservedMergeCalls());

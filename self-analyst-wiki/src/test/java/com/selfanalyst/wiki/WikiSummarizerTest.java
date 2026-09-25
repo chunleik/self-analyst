@@ -45,7 +45,8 @@ class WikiSummarizerTest {
         assertFalse(result.metrics().extra().containsKey("invented"));
         assertEquals(3600, result.metrics().activeSeconds());
         assertTrue(summarizer.buildPrompt(facts).contains("evidenceFactIds"));
-        assertTrue(summarizer.buildPrompt(facts).contains("引用存在仍不证明动作"));
+        assertFalse(summarizer.buildPrompt(facts).contains("不证明"));
+        assertTrue(summarizer.buildPrompt(facts).contains("不要在文案里说明证据边界"));
     }
 
     @Test
@@ -96,7 +97,44 @@ class WikiSummarizerTest {
         assertTrue(output.contains("apps和evidence由本地"));
         assertTrue(output.contains("跨应用"));
         assertTrue(output.contains("不要按应用拆分"));
-        assertEquals("wiki-v8-derived-evidence", summarizer.promptVersion());
+        assertEquals("wiki-v9-focus", summarizer.promptVersion());
+    }
+
+    @Test
+    void evidenceBoundaryDisclaimersAreRemovedWithoutHidingOutcomes() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON);
+        String response = GROUNDED_JSON
+                .replace("查看数据库同步设计", "查看数据库同步设计。以上仅为查看或窗口标题，不证明项目运行、配置、交付或消息发送。")
+                .replace("涉及数据库同步", "涉及企业微信与 WorkBuddy 窗口；不表明发送消息或参会。");
+        var result = summarizer.parseResponse(response, structuredFacts());
+        assertEquals("查看数据库同步设计。", result.summary());
+        assertEquals("涉及企业微信与 WorkBuddy 窗口。", result.taskSegments().getFirst().summary());
+        assertEquals(2, result.metrics().extra().get("disclaimerClausesRemoved"));
+        String onlyDisclaimer = GROUNDED_JSON.replace("涉及数据库同步", "不表明发送消息或参会。");
+        assertEquals("涉及查看设计。", summarizer.parseResponse(onlyDisclaimer, structuredFacts())
+                .taskSegments().getFirst().summary());
+        assertDoesNotThrow(() -> summarizer.parseResponse(
+                GROUNDED_JSON.replace("涉及数据库同步", "排查连接不返回数据的问题。"), structuredFacts()));
+        var rejected = assertThrows(IllegalArgumentException.class, () -> summarizer.parseResponse(
+                GROUNDED_JSON.replace("查看数据库同步设计", "已完成发布"), structuredFacts()));
+        assertTrue(rejected.getMessage().startsWith("WIKI_EVIDENCE_UNSUPPORTED_CLAIM:"));
+        assertFalse(WikiTopicProtocol.factPrompt(structuredFacts(), "DIRECT", "{\"id\":\"f1\"}").contains("不证明"));
+    }
+
+    @Test
+    void negatedOutcomeWordsAreStillDisclaimersButContrastedOutcomesAreRejected() {
+        var summarizer = new WikiSummarizer(prompt -> GROUNDED_JSON);
+        var negated = summarizer.parseResponse(GROUNDED_JSON.replace("查看数据库同步设计",
+                "查看数据库同步设计。标题仅表明相关开发活动被观察，不证明具体任务已完成或交付。"), structuredFacts());
+        assertEquals("查看数据库同步设计。", negated.summary());
+        var joined = summarizer.parseResponse(GROUNDED_JSON.replace("涉及数据库同步",
+                "涉及数据库同步，不证明已交付"), structuredFacts());
+        assertEquals("涉及数据库同步。", joined.taskSegments().getFirst().summary());
+        for (String contrasted : List.of("不证明实际参加会议，但已解决问题", "不证明参会但已解决问题")) {
+            var error = assertThrows(IllegalArgumentException.class, () -> summarizer.parseResponse(
+                    GROUNDED_JSON.replace("查看数据库同步设计", contrasted), structuredFacts()), contrasted);
+            assertTrue(error.getMessage().startsWith("WIKI_EVIDENCE_UNSUPPORTED_CLAIM:"), contrasted);
+        }
     }
 
     @Test

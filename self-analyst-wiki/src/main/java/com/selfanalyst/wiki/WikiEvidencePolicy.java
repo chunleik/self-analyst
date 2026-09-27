@@ -202,8 +202,7 @@ public final class WikiEvidencePolicy {
         return end;
     }
 
-    public static List<WikiEntry.TaskSegment> parseSegments(
-            Object raw, List<EvidenceFact> facts, boolean uncertain) {
+    public static List<WikiEntry.TaskSegment> parseSegments(Object raw, List<EvidenceFact> facts) {
         Map<String, EvidenceFact> byId = new LinkedHashMap<>();
         for (EvidenceFact fact : facts) {
             if (fact.id() == null || byId.putIfAbsent(fact.id(), fact) != null) {

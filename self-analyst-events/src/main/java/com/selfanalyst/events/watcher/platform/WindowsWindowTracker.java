@@ -45,24 +45,4 @@ public class WindowsWindowTracker implements WindowTracker {
             return "unknown";
         }
     }
-
-    @Override
-    public boolean privateBrowsing() {
-        try {
-            HWND hwnd = User32.INSTANCE.GetForegroundWindow();
-            if (hwnd == null) return false;
-            IntByReference pidRef = new IntByReference();
-            User32.INSTANCE.GetWindowThreadProcessId(hwnd, pidRef);
-            return ProcessHandle.of(pidRef.getValue())
-                    .flatMap(process -> process.info().commandLine())
-                    .map(line -> {
-                        String lower = line.toLowerCase();
-                        return lower.contains("--incognito") || lower.contains("--inprivate")
-                                || lower.contains("-private-window");
-                    })
-                    .orElse(false);
-        } catch (Exception e) {
-            return false;
-        }
-    }
 }

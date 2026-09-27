@@ -9,7 +9,6 @@ import com.selfanalyst.events.watcher.platform.WindowsWindowTracker;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class WindowWatcher extends Watcher {
@@ -56,19 +55,16 @@ public class WindowWatcher extends Watcher {
             long durationMs = Math.max(0, Duration.between(lastChangeTime, now).toMillis());
             double duration = durationMs / 1000.0;
 
-            Map<String, Object> data = new LinkedHashMap<>();
-            data.put("app", app);
-            data.put("title", title);
-            if (tracker.privateBrowsing()) data.put("private_browsing", true);
             Event event;
             if (!app.equals(lastApp) || !title.equals(lastTitle)) {
                 lastChangeTime = now;
                 lastApp = app;
                 lastTitle = title;
-                event = new Event(now, 0, data);
+                event = new Event(now, 0, Map.of("app", (Object) app, "title", (Object) title));
             } else {
                 // Same state - emit heartbeat for current state
-                event = new Event(lastChangeTime, duration, data);
+                event = new Event(lastChangeTime, duration,
+                    Map.of("app", (Object) app, "title", (Object) title));
             }
             return event;
         } catch (Exception e) {

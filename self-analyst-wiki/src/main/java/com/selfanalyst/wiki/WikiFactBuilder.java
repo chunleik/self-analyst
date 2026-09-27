@@ -100,7 +100,8 @@ public class WikiFactBuilder {
                 Map.of("unknownActivitySeconds", stats.unknownSeconds(), "uncoveredSeconds", stats.uncoveredSeconds(),
                         "conflictSeconds", stats.conflictSeconds(), "activeSecondsExact", stats.activeSeconds(),
                         "afkSecondsExact", stats.afkSeconds(), "appSecondsExact", stats.apps(),
-                        "titleSampling", sampled.coverage()), sampled);
+                        "titleSampling", sampled.coverage(),
+                        "privacyExcludedApps", excludedApps(stats.apps().keySet())), sampled);
     }
 
     public WikiFacts buildFactsFromChildren(List<WikiEntry> childEntries, WikiPeriod period) {
@@ -144,6 +145,7 @@ public class WikiFactBuilder {
         childEntries.forEach(child -> child.sourceCoverage().forEach((key, value) -> coverage.merge(key, value,
                 (a, b) -> "complete".equals(a.status()) ? b : a)));
         totals.put("appSecondsExact", appTotals);
+        totals.put("privacyExcludedApps", excludedApps(appTotals.keySet()));
         totals.put("sourceEntryIds", childEntries.stream().map(WikiEntry::id).toList());
         activeSeconds = ((Number) totals.getOrDefault("activeSecondsExact", 0)).longValue();
         afkSeconds = ((Number) totals.getOrDefault("afkSecondsExact", 0)).longValue();
@@ -154,32 +156,40 @@ public class WikiFactBuilder {
                 WikiTitleSampler.fromFacts(period, childFacts, Map.of("candidateFacts", childFacts.size())));
     }
 
+    private List<String> excludedApps(Collection<String> apps) {
+        return apps.stream().filter(privacy::excludedApp).sorted().toList();
+    }
+
     private static boolean localEmpty(WikiEntry child) {
         Object generation = child.metrics() == null || child.metrics().extra() == null
                 ? null : child.metrics().extra().get("generation");
         return generation instanceof Map<?, ?> map && "local_empty".equals(map.get("mode"));
     }
 
-    private static void addChildFacts(WikiEntry child, List<WikiTitleSampler.Fact> facts, List<String> summaries) {
+    private void addChildFacts(WikiEntry child, List<WikiTitleSampler.Fact> facts, List<String> summaries) {
         List<WikiEntry.TaskSegment> tasks = child.taskSegments();
         if (tasks.isEmpty()) {
-            String app = child.metrics() != null && !child.metrics().topApps().isEmpty()
-                    ? child.metrics().topApps().getFirst().app() : "Wiki";
+            String app = child.metrics() == null ? "Wiki" : child.metrics().topApps().stream()
+                    .map(WikiEntry.AppDuration::app).filter(name -> !privacy.excludedApp(name))
+                    .findFirst().orElse("Wiki");
             tasks = List.of(new WikiEntry.TaskSegment(
                     child.primaryTask() == null ? "历史活动" : child.primaryTask(),
                     child.summary() == null ? "" : child.summary(), List.of(), List.of(app), "low"));
         }
         int index = 0;
         for (WikiEntry.TaskSegment task : tasks) {
+            String title = privacy.redactText(task.title());
+            List<String> apps = task.apps().isEmpty() ? List.of("Wiki")
+                    : task.apps().stream().filter(app -> !privacy.excludedApp(app)).toList();
+            if (apps.isEmpty() || privacy.excludedTitle(title)) continue;
             List<String> refs = new ArrayList<>();
-            List<String> apps = task.apps().isEmpty() ? List.of("Wiki") : task.apps();
             int appIndex = 0;
             for (String app : apps) {
                 String id = "child:" + child.id() + ":" + index + ":" + appIndex++;
                 refs.add(id);
                 Double seconds = index == 0 && child.metrics() != null
                         ? (double) child.metrics().activeSeconds() : 0d;
-                facts.add(new WikiTitleSampler.Fact(id, "wiki", app, task.title(), "inferred", seconds, 1,
+                facts.add(new WikiTitleSampler.Fact(id, "wiki", app, title, "inferred", seconds, 1,
                         List.of(new WikiTitleSampler.Interval(child.periodStart().toString(), child.periodEnd().toString(),
                                 false, List.of(), 0)), 0));
             }
@@ -188,8 +198,8 @@ public class WikiFactBuilder {
             item.put("start", child.periodStart().toString());
             item.put("end", child.periodEnd().toString());
             item.put("timezone", child.timezone());
-            item.put("title", task.title());
-            item.put("summary", task.summary());
+            item.put("title", title);
+            item.put("summary", privacy.redactText(task.summary()));
             item.put("evidenceFactIds", refs);
             item.put("confidence", task.confidence());
             item.put("sourceCoverage", child.sourceCoverage());

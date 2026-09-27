@@ -4,11 +4,14 @@ import com.selfanalyst.wiki.WikiFactBuilder.WikiFacts;
 import com.selfanalyst.wiki.WikiTitleSampler.Fact;
 
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Local ordering and truncation after a validated model response. */
 final class WikiSummaryFocus {
     static final int MAX_TOPICS = 5;
     static final int SUMMARY_LIMIT = 300;
+    private static final Pattern SENTENCE_END = Pattern.compile("[。！？!?]");
 
     private WikiSummaryFocus() {}
 
@@ -29,6 +32,7 @@ final class WikiSummaryFocus {
         String primary = kept.getFirst().title();
         String summary = result.summary() != null && result.summary().length() > SUMMARY_LIMIT
                 ? composedSummary(kept) : result.summary();
+        if (parent) summary = firstSentence(summary, kept);
         Map<String, Object> extra = new LinkedHashMap<>(result.metrics().extra());
         extra.put("topicCards", List.copyOf(kept));
         extra.put("foldedTopicCards", folded);
@@ -82,7 +86,7 @@ final class WikiSummaryFocus {
         input.put("claimType", card.claimType());
         input.put("confidence", card.confidence());
         WikiEntry.TaskSegment parsed = WikiEvidencePolicy.parseSegments(List.of(input),
-                WikiEvidencePolicy.facts(facts.sampledTitles()), uncertain(facts)).getFirst();
+                WikiEvidencePolicy.facts(facts.sampledTitles())).getFirst();
         List<String> apps = card.memberInputIds().stream().map(byId::get).filter(Objects::nonNull)
                 .map(Fact::app).distinct().sorted().toList();
         return new WikiEntry.TaskSegment(parsed.title(), parsed.summary(), parsed.evidence(), apps,
@@ -105,14 +109,11 @@ final class WikiSummaryFocus {
         return "high".equals(confidence) ? 2 : "medium".equals(confidence) ? 1 : 0;
     }
 
-    private static boolean uncertain(WikiFacts facts) {
-        WikiEntry.SourceCoverage afk = facts.sourceCoverage().get("afk");
-        return afk == null || !"complete".equals(afk.status())
-                || positive(facts.statistics().get("uncoveredSeconds"))
-                || positive(facts.statistics().get("conflictSeconds"));
-    }
-
-    private static boolean positive(Object value) {
-        return value instanceof Number number && number.doubleValue() > 0;
+    private static String firstSentence(String summary, List<WikiTopicProtocol.TopicCard> kept) {
+        String text = summary == null ? "" : summary.strip();
+        Matcher end = SENTENCE_END.matcher(text);
+        if (end.find()) text = text.substring(0, end.end()).strip();
+        else if (!text.isEmpty()) text = text + "。";
+        return text.length() <= 1 ? composedSummary(kept) : text;
     }
 }

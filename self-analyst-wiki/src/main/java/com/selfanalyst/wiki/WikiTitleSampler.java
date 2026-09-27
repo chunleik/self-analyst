@@ -44,7 +44,6 @@ public final class WikiTitleSampler {
         for (Event event : active) {
             String app = text(event, "app"), title = text(event, "title");
             if (ActivityStatistics.unknown(title) || ActivityStatistics.unknown(app)) continue;
-            if (Boolean.TRUE.equals(event.data().get("private_browsing"))) continue;
             SortedSet<Long> ids = new TreeSet<>();
             for (Event original : intersections(originals, app, title, event.timestamp(), ActivityStatistics.end(event))) {
                 if (original.id() > 0) ids.add(original.id());
@@ -53,7 +52,7 @@ public final class WikiTitleSampler {
                     event.timestamp(), ActivityStatistics.end(event), ids, true);
         }
         for (Event event : contents) {
-            if (!valid(event) || Boolean.TRUE.equals(event.data().get("private_browsing"))) continue;
+            if (!valid(event)) continue;
             String app = text(event, "app"), windowTitle = text(event, "title");
             String context = text(event, "context_title");
             String title = context.isBlank() ? windowTitle : context;

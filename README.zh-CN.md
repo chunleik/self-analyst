@@ -176,6 +176,8 @@ language = "en" # auto、zh 或 en
 | `wiki.summary.periodMaxCalls` | `WIKI_SUMMARY_PERIOD_MAX_CALLS` | `12` |
 | `wiki.summary.periodMaxTokens` | `WIKI_SUMMARY_PERIOD_MAX_TOKENS` | `256000` |
 | `wiki.summary.outputTokenReserve` | `WIKI_SUMMARY_OUTPUT_TOKEN_RESERVE` | `4096` |
+| `wiki.privacy.excludeApps` | —（仅 `config.toml`） | 空 |
+| `wiki.privacy.excludeSites` | —（仅 `config.toml`） | 空 |
 
 现有双层数据经过校验后迁移到紧凑事件库，旧库保留为备份。设置分别显示活动库和备份占用；显式清理迁移
 备份后才释放旧文件，同时失去逐心跳恢复和旧格式回退能力。提交身份的重试去重保证为 24 小时。
@@ -220,6 +222,13 @@ Wiki 结构化标题事实的默认预算为 **24000 字符**（`wiki.prompt.max
 新摘要将任务关联到标题证据，并区分观察与推断；窗口标题不能证明任务已完成。应用名称和展示证据由
 校验后的引用在本地派生，不要求模型重复生成。看板“当前”和“今天”共用标题事实，使用较小输入预算
 和 5 秒模型超时。
+
+标题送入模型前，会隐藏内网 IPv4 地址、会议号和账号验证页。标题带有无痕、隐身、InPrivate 等私人浏览标记的
+活动不会进入摘要；`wiki.privacy.excludeApps` 中的应用（逗号分隔的可执行文件名，如 `weixin.exe`），以及标题
+包含 `wiki.privacy.excludeSites` 任一关键词的活动也会被排除。系统不记录网址，网站关键词按窗口标题匹配，请填写
+页面标题中出现的名称。被排除的应用同样不出现在发给模型的应用权重中，本地时长统计不变。标题里没有私人浏览
+标记的无痕窗口无法识别，请把敏感网站加入排除列表。半天及以上的摘要对已有子摘要执行同样的规则，并收敛为
+一句话、最多三个主题。修改这些配置后需重启后端。
 
 长 Wiki 输入先组织主题候选再汇总，受 `wiki.summary.maxCalls`（每次生成尝试默认 **6** 次）及
 `wiki.summary.maxRequestChars`（默认 **32000** 字符，含系统提示）限制；短输入仍调用一次模型。

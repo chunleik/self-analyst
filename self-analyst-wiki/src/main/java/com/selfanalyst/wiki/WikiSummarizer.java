@@ -91,9 +91,12 @@ public class WikiSummarizer {
         sb.append("- afkSeconds: ").append(facts.afkSeconds()).append("\n");
         sb.append("- switchCount: ").append(facts.switchCount()).append("\n");
         sb.append("- taskConfidence: 只反映证据类型。只有标题观察为 low，推断最高 medium。覆盖完整性不降低置信度。\n");
-        if (!facts.topApps().isEmpty()) {
+        List<?> hiddenApps = facts.statistics().get("privacyExcludedApps") instanceof List<?> list ? list : List.of();
+        List<WikiEntry.AppDuration> promptApps = facts.topApps().stream()
+                .filter(ad -> !hiddenApps.contains(ad.app())).toList();
+        if (!promptApps.isEmpty()) {
             sb.append("- appWeightsSeconds (descending):\n");
-            for (WikiEntry.AppDuration ad : facts.topApps()) {
+            for (WikiEntry.AppDuration ad : promptApps) {
                 sb.append("  - ").append(ad.app()).append(": ")
                         .append(ad.seconds()).append("\n");
             }
@@ -196,9 +199,8 @@ public class WikiSummarizer {
             if (!summary.isBlank()) WikiEvidencePolicy.validateNarrative("summary", summary);
             Object segmentsInput = cleanSegmentSummaries(map.get("taskSegments"), removed);
             List<WikiEntry.TaskSegment> segments = structured
-                    ? WikiEvidencePolicy.parseSegments(segmentsInput,
-                            WikiEvidencePolicy.facts(facts.sampledTitles()), uncertainActivity(facts))
-                    : parseSegments(segmentsInput, uncertainActivity(facts));
+                    ? WikiEvidencePolicy.parseSegments(segmentsInput, WikiEvidencePolicy.facts(facts.sampledTitles()))
+                    : parseSegments(segmentsInput);
             if (summary.isBlank()) {
                 summary = fallbackSummary(segments);
                 WikiEvidencePolicy.validateNarrative("summary", summary);
@@ -260,7 +262,7 @@ public class WikiSummarizer {
     }
 
     @SuppressWarnings("unchecked")
-    private List<WikiEntry.TaskSegment> parseSegments(Object segmentsObj, boolean uncertain) {
+    private List<WikiEntry.TaskSegment> parseSegments(Object segmentsObj) {
         if (!(segmentsObj instanceof List<?> list)) return List.of();
         return list.stream()
                 .filter(Map.class::isInstance)
@@ -270,7 +272,7 @@ public class WikiSummarizer {
                         (String) s.getOrDefault("summary", ""),
                         safeGetStringList(s, "evidence"),
                         safeGetStringList(s, "apps"),
-                        confidence((String) s.getOrDefault("confidence", "low"), uncertain)))
+                        confidence((String) s.getOrDefault("confidence", "low"))))
                 .peek(segment -> {
                     WikiNarrativePolicy.validate("taskSegments.title", segment.title());
                     WikiNarrativePolicy.validate("taskSegments.summary", segment.summary());
@@ -291,22 +293,8 @@ public class WikiSummarizer {
         return v instanceof List ? (List<String>) v : List.of();
     }
 
-    private static boolean uncertainActivity(WikiFactBuilder.WikiFacts facts) {
-        WikiEntry.SourceCoverage afk = facts.sourceCoverage().get("afk");
-        return afk == null || !"complete".equals(afk.status())
-                || positive(facts.statistics().get("uncoveredSeconds"))
-                || positive(facts.statistics().get("conflictSeconds"));
-    }
-
-    private static boolean positive(Object value) {
-        return value instanceof Number number && number.doubleValue() > 0;
-    }
-
-    /** Coverage uncertainty is reported separately and does not lower task confidence. */
-    private static String confidence(String confidence, boolean coverageUncertain) {
-        if (coverageUncertain) {
-            // Intentionally ignored. sourceCoverage remains the place that records incompleteness.
-        }
+    /** Coverage gaps stay in sourceCoverage and never lower task confidence. */
+    private static String confidence(String confidence) {
         if ("high".equals(confidence)) return "high";
         return "medium".equals(confidence) ? "medium" : "low";
     }

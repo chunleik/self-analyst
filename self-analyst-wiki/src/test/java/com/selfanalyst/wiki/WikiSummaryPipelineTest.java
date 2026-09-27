@@ -314,6 +314,14 @@ class WikiSummaryPipelineTest {
         assertTrue(result.summary().length() <= 300);
     }
 
+    @Test void hourSummaryKeepsEverySentence() {
+        AtomicInteger calls = new AtomicInteger();
+        var pipeline = pipeline(24000, 6, calls, new AtomicReference<>("model"), prompt ->
+                groundedResponse(prompt).replace("涉及项目资料查看。", "涉及项目资料查看。随后整理笔记。"));
+        var result = pipeline.summarize(facts(1), Duration.ofSeconds(5));
+        assertEquals("涉及项目资料查看。随后整理笔记。", result.summary());
+    }
+
     @Test void parentTopicsUseMemberCountAndStayDeterministic() throws Exception {
         var period = new WikiPeriod(WikiLevel.WEEK, START, START.plusSeconds(604800), "UTC");
         List<WikiTitleSampler.Fact> rows = new ArrayList<>();
@@ -323,7 +331,7 @@ class WikiSummaryPipelineTest {
         var input = new WikiFactBuilder.WikiFacts(period, 60, 0, 1, List.of(), List.of(), List.of(), List.of("child"),
                 "facts-test", "events-v2", Map.of("afk", new WikiEntry.SourceCoverage("complete", START, period.end(), null)),
                 Map.of(), WikiTitleSampler.fromFacts(period, rows, Map.of("candidateFacts", rows.size())));
-        String response = JSON.writeValueAsString(Map.of("summary", "涉及两项主题。", "primaryTask", "浏览网页", "topicCards", List.of(
+        String response = JSON.writeValueAsString(Map.of("summary", "涉及两项主题。其中沟通较多！", "primaryTask", "浏览网页", "topicCards", List.of(
                 Map.of("title", "浏览网页", "summary", "涉及浏览。", "memberInputIds", List.of("f3"),
                         "representativeFactIds", List.of("f3"), "claimType", "observed", "confidence", "low"),
                 Map.of("title", "企业微信沟通", "summary", "涉及沟通。", "memberInputIds", List.of("f0", "f1", "f2"),
@@ -333,6 +341,7 @@ class WikiSummaryPipelineTest {
         var first = pipeline.summarize(input, Duration.ofSeconds(5));
         var second = pipeline.summarize(input, Duration.ofSeconds(5));
         assertEquals("企业微信沟通", first.primaryTask());
+        assertEquals("涉及两项主题。", first.summary());
         assertEquals(List.of("企业微信沟通", "浏览网页"), first.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList());
         assertEquals(first.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList(),
                 second.taskSegments().stream().map(WikiEntry.TaskSegment::title).toList());

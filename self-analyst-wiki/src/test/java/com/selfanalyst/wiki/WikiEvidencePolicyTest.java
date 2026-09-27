@@ -56,7 +56,7 @@ class WikiEvidencePolicyTest {
         var segment = segment();
         segment.put("apps", List.of("模型自行编写的应用"));
         segment.put("evidence", List.of("模型自行编写的证据"));
-        var result = WikiEvidencePolicy.parseSegments(List.of(segment), facts, false).getFirst();
+        var result = WikiEvidencePolicy.parseSegments(List.of(segment), facts).getFirst();
         assertEquals(List.of("f1"), result.evidenceFactIds());
         assertEquals(List.of("IDE"), result.apps());
         assertEquals("observed", result.claimType());
@@ -67,7 +67,7 @@ class WikiEvidencePolicyTest {
 
     @Test
     void redundantModelFieldsCanBeOmittedOrMalformedWithoutAffectingDerivedOutput() {
-        var omitted = WikiEvidencePolicy.parseSegments(List.of(segment()), facts, false).getFirst();
+        var omitted = WikiEvidencePolicy.parseSegments(List.of(segment()), facts).getFirst();
         assertEquals(List.of("IDE"), omitted.apps());
         assertEquals(List.of("观察到标题：「数据库同步设计」"), omitted.evidence());
         for (String field : List.of("apps", "evidence")) {
@@ -76,7 +76,7 @@ class WikiEvidencePolicyTest {
                     java.util.Collections.nCopies(17, "重复值"))) {
                 var supplied = segment();
                 supplied.put(field, ignored);
-                assertEquals(omitted, WikiEvidencePolicy.parseSegments(List.of(supplied), facts, false).getFirst(), field);
+                assertEquals(omitted, WikiEvidencePolicy.parseSegments(List.of(supplied), facts).getFirst(), field);
             }
         }
     }
@@ -90,7 +90,7 @@ class WikiEvidencePolicyTest {
         var install = segment();
         install.put("evidenceFactIds", List.of("main", "setup", "design"));
         install.put("apps", List.of("FlowTool"));
-        var result = WikiEvidencePolicy.parseSegments(List.of(install), installerFacts, false).getFirst();
+        var result = WikiEvidencePolicy.parseSegments(List.of(install), installerFacts).getFirst();
         assertEquals(List.of("FlowTool.exe", "FlowTool Setup.exe"), result.apps());
         assertEquals(List.of("观察到标题：「FlowTool 配置说明」", "观察到标题：「FlowTool 安装」",
                 "观察到标题：「FlowTool 设计」"), result.evidence());
@@ -101,7 +101,7 @@ class WikiEvidencePolicyTest {
         var collaboration = segment();
         collaboration.put("evidenceFactIds", List.of("chat", "mail"));
         collaboration.put("apps", List.of("企业微信"));
-        var shared = WikiEvidencePolicy.parseSegments(List.of(collaboration), collaborationFacts, false).getFirst();
+        var shared = WikiEvidencePolicy.parseSegments(List.of(collaboration), collaborationFacts).getFirst();
         assertEquals(List.of("WXWork.exe", "OUTLOOK.EXE"), shared.apps());
         assertEquals(List.of("chat", "mail"), shared.evidenceFactIds());
         assertEquals(List.of("观察到标题：「项目评审讨论」", "观察到标题：「项目评审邮件」"), shared.evidence());
@@ -114,26 +114,26 @@ class WikiEvidencePolicyTest {
                 .mapToObj(index -> new WikiEvidencePolicy.EvidenceFact("f" + index, "IDE", "任务标题", false)).toList();
         segment.put("evidenceFactIds", manyFacts.stream().map(WikiEvidencePolicy.EvidenceFact::id).toList());
         var tooMany = assertThrows(IllegalArgumentException.class,
-                () -> WikiEvidencePolicy.parseSegments(List.of(segment), manyFacts, false));
+                () -> WikiEvidencePolicy.parseSegments(List.of(segment), manyFacts));
         assertEquals("WIKI_EVIDENCE_STRUCTURE:taskSegments.evidenceFactIds", tooMany.getMessage());
         segment.put("evidenceFactIds", List.of("f1"));
         for (String required : List.of("title", "summary", "evidenceFactIds", "claimType", "confidence")) {
             var missing = new LinkedHashMap<>(segment);
             missing.remove(required);
             assertThrows(IllegalArgumentException.class,
-                    () -> WikiEvidencePolicy.parseSegments(List.of(missing), facts, false), required);
+                    () -> WikiEvidencePolicy.parseSegments(List.of(missing), facts), required);
         }
     }
 
     @Test
     void confidenceDependsOnCitedEvidenceAndClaimStrength() {
         Map<String, Object> segment = segment();
-        assertEquals("high", WikiEvidencePolicy.parseSegments(List.of(segment), facts, true).getFirst().confidence());
+        assertEquals("high", WikiEvidencePolicy.parseSegments(List.of(segment), facts).getFirst().confidence());
         segment.put("claimType", "inferred");
-        assertEquals("medium", WikiEvidencePolicy.parseSegments(List.of(segment), facts, false).getFirst().confidence());
+        assertEquals("medium", WikiEvidencePolicy.parseSegments(List.of(segment), facts).getFirst().confidence());
         segment.put("evidenceFactIds", List.of("f2"));
         segment.put("apps", List.of("Chat"));
-        assertEquals("low", WikiEvidencePolicy.parseSegments(List.of(segment), facts, false).getFirst().confidence());
+        assertEquals("low", WikiEvidencePolicy.parseSegments(List.of(segment), facts).getFirst().confidence());
     }
 
     @Test
@@ -144,7 +144,7 @@ class WikiEvidencePolicyTest {
             var segment = segment();
             segment.put(mutation.getKey(), mutation.getValue());
             var error = assertThrows(IllegalArgumentException.class,
-                    () -> WikiEvidencePolicy.parseSegments(List.of(segment), facts, false));
+                    () -> WikiEvidencePolicy.parseSegments(List.of(segment), facts));
             assertTrue(error.getMessage().startsWith("WIKI_EVIDENCE_"));
             assertFalse(error.getMessage().contains("PRIVATE"));
             assertNull(error.getCause());
@@ -154,7 +154,7 @@ class WikiEvidencePolicyTest {
     @Test
     void rejectsInvalidShapesEmptyTasksAndUnboundedFields() {
         for (Object raw : List.of(Map.of(), List.of(), List.of("bad"))) {
-            assertThrows(IllegalArgumentException.class, () -> WikiEvidencePolicy.parseSegments(raw, facts, false));
+            assertThrows(IllegalArgumentException.class, () -> WikiEvidencePolicy.parseSegments(raw, facts));
         }
         for (Map.Entry<String, Object> mutation : List.<Map.Entry<String, Object>>of(
                 Map.entry("title", 42), Map.entry("summary", ""), Map.entry("title", "x".repeat(81)),
@@ -164,14 +164,14 @@ class WikiEvidencePolicyTest {
             var segment = segment();
             segment.put(mutation.getKey(), mutation.getValue());
             assertThrows(IllegalArgumentException.class,
-                    () -> WikiEvidencePolicy.parseSegments(List.of(segment), facts, false), mutation.getKey());
+                    () -> WikiEvidencePolicy.parseSegments(List.of(segment), facts), mutation.getKey());
         }
         var missing = segment();
         missing.remove("evidenceFactIds");
-        assertThrows(IllegalArgumentException.class, () -> WikiEvidencePolicy.parseSegments(List.of(missing), facts, false));
+        assertThrows(IllegalArgumentException.class, () -> WikiEvidencePolicy.parseSegments(List.of(missing), facts));
         var tooMany = new ArrayList<Object>();
         for (int i = 0; i <= WikiEvidencePolicy.MAX_SEGMENTS; i++) tooMany.add(segment());
-        assertThrows(IllegalArgumentException.class, () -> WikiEvidencePolicy.parseSegments(tooMany, facts, false));
+        assertThrows(IllegalArgumentException.class, () -> WikiEvidencePolicy.parseSegments(tooMany, facts));
     }
 
     @Test
@@ -181,7 +181,7 @@ class WikiEvidencePolicyTest {
             var segment = segment();
             segment.put("summary", claim);
             assertThrows(IllegalArgumentException.class,
-                    () -> WikiEvidencePolicy.parseSegments(List.of(segment), facts, false), claim);
+                    () -> WikiEvidencePolicy.parseSegments(List.of(segment), facts), claim);
         }
         for (String observation : List.of("查看已完成订单列表", "查看已发布页面", "阅读「已完成迁移」文档",
                 "查看运行项目的配置文档", "查看会议相关页面", "涉及数据库同步相关开发")) {
@@ -362,7 +362,7 @@ class WikiEvidencePolicyTest {
     @Test
     void sourceTitleStatisticsStayOutOfEvidenceNarrative() {
         var result = WikiEvidencePolicy.parseSegments(List.of(segment()), List.of(
-                new WikiEvidencePolicy.EvidenceFact("f1", "IDE", "AFK覆盖为partial", false)), false);
+                new WikiEvidencePolicy.EvidenceFact("f1", "IDE", "AFK覆盖为partial", false)));
         assertEquals(List.of("观察到相关应用的标题线索。"), result.getFirst().evidence());
     }
 

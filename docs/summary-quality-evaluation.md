@@ -17,7 +17,8 @@
 | `cross-application-project` | 同一项目跨应用的不同证据保留 |
 | `generic-window-context` | 通用窗口的额外上下文、未知标题及正文隔离 |
 | `missing-activity-coverage` | 观察与有效活动区分，缺失覆盖不伪装完整 |
-| `long-activity-history` | 大量标题、四时段及有界输入 |
+| `noisy-focus` | 噪声窗口与时长占优沟通主题 |
+| `parent-abstract-privacy` | 上层子摘要脱敏、主题上限与一句主线 |
 
 使用 JDK 21，在仓库根目录运行：
 

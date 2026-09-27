@@ -44,6 +44,8 @@ public final class WikiTitleSampler {
         for (Event event : active) {
             String app = text(event, "app"), title = text(event, "title");
             if (ActivityStatistics.unknown(title) || ActivityStatistics.unknown(app)) continue;
+            PrivacyHint hint = privacyHint(event, contents);
+            if (privacy.excluded(app, title, hint.urlHost(), hint.privateBrowsing())) continue;
             SortedSet<Long> ids = new TreeSet<>();
             for (Event original : intersections(originals, app, title, event.timestamp(), ActivityStatistics.end(event))) {
                 if (original.id() > 0) ids.add(original.id());
@@ -57,6 +59,8 @@ public final class WikiTitleSampler {
             String context = text(event, "context_title");
             String title = context.isBlank() ? windowTitle : context;
             if (ActivityStatistics.unknown(title) || ActivityStatistics.unknown(app)) continue;
+            PrivacyHint hint = privacyHint(event, List.of());
+            if (privacy.excluded(app, title, hint.urlHost(), hint.privateBrowsing())) continue;
             String kind = context.isBlank() ? "window" : text(event, "context_kind");
             if (!Set.of("chat", "article", "document", "page", "window").contains(kind)) kind = "unknown";
             Instant start = max(period.start(), event.timestamp());
@@ -103,7 +107,7 @@ public final class WikiTitleSampler {
                     s.start().toString(), s.end().toString(), s.active(), s.ids().stream().limit(REPRESENTATIVES).toList(),
                     Math.max(0, s.ids().size() - REPRESENTATIVES))).toList();
             String shownTitle = privacy.redact(bounded(key.title()));
-            if (privacy.excluded(key.app(), shownTitle)) continue;
+            if (privacy.excludedTitle(shownTitle)) continue;
             Fact fact = new Fact("f" + nextId++, key.source(), bounded(key.app()), shownTitle, key.kind(),
                     activeSeconds, spans.size(), intervals, spans.size() - intervals.size());
             candidates.add(new Candidate(key, fact, spans.getFirst().start(), timeMask(period, spans),
@@ -491,6 +495,29 @@ public final class WikiTitleSampler {
     private static void add(Map<Key, List<Span>> groups, Key key, Instant start, Instant end,
                             SortedSet<Long> ids, boolean active) {
         groups.computeIfAbsent(key, k -> new ArrayList<>()).add(new Span(start, end, ids, active));
+    }
+
+    private record PrivacyHint(String urlHost, boolean privateBrowsing) {}
+
+    private static PrivacyHint privacyHint(Event event, List<Event> contents) {
+        boolean privateBrowsing = Boolean.TRUE.equals(event.data().get("private_browsing"));
+        String host = text(event, "url_host");
+        if (host.isBlank()) host = null;
+        Instant start = event.timestamp();
+        Instant end = ActivityStatistics.end(event);
+        String app = text(event, "app");
+        for (Event content : contents) {
+            if (!valid(content) || !app.equalsIgnoreCase(text(content, "app"))) continue;
+            Instant contentStart = content.timestamp();
+            Instant contentEnd = ActivityStatistics.end(content);
+            if (!contentStart.isBefore(end) || !start.isBefore(contentEnd)) continue;
+            if (Boolean.TRUE.equals(content.data().get("private_browsing"))) privateBrowsing = true;
+            if (host == null) {
+                String candidate = text(content, "url_host");
+                if (!candidate.isBlank()) host = candidate;
+            }
+        }
+        return new PrivacyHint(host, privateBrowsing);
     }
 
     private static boolean valid(Event event) {

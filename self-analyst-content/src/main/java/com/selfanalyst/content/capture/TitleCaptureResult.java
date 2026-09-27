@@ -6,4 +6,12 @@ public record TitleCaptureResult(
         String contextKind,
         String titleSource,
         String titleConfidence,
-        int uiaChars) {}
+        int uiaChars,
+        String urlHost,
+        Boolean privateBrowsing) {
+
+    public TitleCaptureResult(String contextTitle, String contextKind, String titleSource,
+                              String titleConfidence, int uiaChars) {
+        this(contextTitle, contextKind, titleSource, titleConfidence, uiaChars, null, null);
+    }
+}

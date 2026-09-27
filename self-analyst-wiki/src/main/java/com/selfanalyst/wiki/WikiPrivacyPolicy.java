@@ -45,7 +45,12 @@ public final class WikiPrivacyPolicy {
     }
 
     public boolean excluded(String app, String title) {
-        return excludedApp(app) || excludedTitle(title);
+        return excluded(app, title, null, false);
+    }
+
+    public boolean excluded(String app, String title, String urlHost, boolean privateBrowsing) {
+        if (privateBrowsing) return true;
+        return excludedApp(app) || excludedTitle(title) || excludedHost(urlHost);
     }
 
     public boolean excludedApp(String app) {
@@ -58,6 +63,12 @@ public final class WikiPrivacyPolicy {
         if (sites.isEmpty()) return false;
         String lower = title.toLowerCase(Locale.ROOT);
         return sites.stream().anyMatch(lower::contains);
+    }
+
+    public boolean excludedHost(String urlHost) {
+        if (urlHost == null || urlHost.isBlank() || sites.isEmpty()) return false;
+        String host = urlHost.toLowerCase(Locale.ROOT);
+        return sites.stream().anyMatch(site -> host.equals(site) || host.endsWith("." + site) || host.contains(site));
     }
 
     private static String redactFragments(String text) {

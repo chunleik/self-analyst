@@ -476,6 +476,24 @@ class WikiTitleSamplerTest {
         assertFalse(selected.jsonLines().contains("Bilibili"));
     }
 
+    @Test
+    void privacyUsesUrlHostAndPrivateBrowsingFlagFromContentEvents() {
+        List<Event> windows = List.of(window(1, 0, 40, "chrome.exe", "Pull requests · team"));
+        List<Event> contents = List.of(new Event(2, start.plusSeconds(0), 40, Map.of(
+                "schema_version", 2, "app", "chrome.exe", "title", "Pull requests · team",
+                "title_source", "window", "uia_chars", 0, "url_host", "github.com")));
+        var blocked = sample(windows, List.of(), contents, Integer.MAX_VALUE,
+                WikiPrivacyPolicy.of("", "github.com"));
+        assertTrue(blocked.facts().isEmpty());
+
+        List<Event> privateWindow = List.of(window(3, 0, 40, "chrome.exe", "普通标题"));
+        List<Event> privateContent = List.of(new Event(4, start.plusSeconds(0), 40, Map.of(
+                "schema_version", 2, "app", "chrome.exe", "title", "普通标题",
+                "title_source", "window", "uia_chars", 0, "private_browsing", true)));
+        var hidden = sample(privateWindow, List.of(), privateContent, Integer.MAX_VALUE);
+        assertTrue(hidden.facts().isEmpty());
+    }
+
     private WikiTitleSampler.Selection sample(List<Event> windows, List<Event> afk, List<Event> content, int budget) {
         return sample(windows, afk, content, budget, WikiPrivacyPolicy.none());
     }

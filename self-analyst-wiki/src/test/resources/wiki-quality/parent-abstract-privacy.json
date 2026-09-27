@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "parent-abstract-privacy",
+  "description": "匿名合成：半天汇总多个小时子摘要，含敏感片段、排除应用与多余主题，用于上层抽象与隐私。",
+  "budgetChars": 24000,
+  "periodSeconds": 28800,
+  "level": "HALF_DAY",
+  "windows": [],
+  "contents": [],
+  "afk": [],
+  "privacy": {
+    "excludeApps": "weixin.exe",
+    "excludeSites": ""
+  },
+  "children": [
+    {
+      "id": "hour-order",
+      "offsetSeconds": 0,
+      "durationSeconds": 3600,
+      "summary": "查看订单模块资料并登录 10.2.3.4 管理后台。",
+      "primaryTask": "订单模块",
+      "activeSeconds": 3200,
+      "afkSeconds": 100,
+      "switchCount": 3,
+      "apps": [{"app": "Editor.exe", "seconds": 2200}, {"app": "chrome.exe", "seconds": 1000}],
+      "tasks": [
+        {"title": "订单模块", "summary": "查看订单模块资料并登录 10.2.3.4 管理后台", "apps": ["Editor.exe"], "confidence": "medium", "claimType": "inferred"},
+        {"title": "后台登录", "summary": "打开管理后台", "apps": ["chrome.exe"], "confidence": "low", "claimType": "observed"}
+      ]
+    },
+    {
+      "id": "hour-review",
+      "offsetSeconds": 3600,
+      "durationSeconds": 3600,
+      "summary": "参加会议号：361 881 114 的设计评审。",
+      "primaryTask": "设计评审",
+      "activeSeconds": 3000,
+      "afkSeconds": 200,
+      "switchCount": 2,
+      "apps": [{"app": "Teams.exe", "seconds": 3000}],
+      "tasks": [
+        {"title": "设计评审", "summary": "参加会议号：361 881 114 的设计评审", "apps": ["Teams.exe"], "confidence": "high", "claimType": "inferred"}
+      ]
+    },
+    {
+      "id": "hour-docs",
+      "offsetSeconds": 7200,
+      "durationSeconds": 3600,
+      "summary": "整理接口文档与发布说明。",
+      "primaryTask": "接口文档",
+      "activeSeconds": 2800,
+      "afkSeconds": 150,
+      "switchCount": 2,
+      "apps": [{"app": "Editor.exe", "seconds": 2800}],
+      "tasks": [
+        {"title": "接口文档", "summary": "整理接口文档与发布说明", "apps": ["Editor.exe"], "confidence": "medium", "claimType": "inferred"}
+      ]
+    },
+    {
+      "id": "hour-chat",
+      "offsetSeconds": 10800,
+      "durationSeconds": 3600,
+      "summary": "处理即时沟通。",
+      "primaryTask": "私聊",
+      "activeSeconds": 2400,
+      "afkSeconds": 0,
+      "switchCount": 4,
+      "apps": [{"app": "Weixin.exe", "seconds": 2400}],
+      "tasks": [
+        {"title": "私聊", "summary": "查看聊天记录", "apps": ["Weixin.exe"], "confidence": "low", "claimType": "observed"}
+      ]
+    },
+    {
+      "id": "hour-browse",
+      "offsetSeconds": 14400,
+      "durationSeconds": 3600,
+      "summary": "浏览多个零散页面。",
+      "primaryTask": "零散浏览",
+      "activeSeconds": 2000,
+      "afkSeconds": 300,
+      "switchCount": 8,
+      "apps": [{"app": "chrome.exe", "seconds": 2000}],
+      "tasks": [
+        {"title": "无痕页面", "summary": "查看无痕标签页", "apps": ["chrome.exe"], "confidence": "low", "claimType": "observed"},
+        {"title": "页面主题甲", "summary": "浏览页面主题甲", "apps": ["chrome.exe"], "confidence": "low", "claimType": "observed"},
+        {"title": "页面主题乙", "summary": "浏览页面主题乙", "apps": ["chrome.exe"], "confidence": "low", "claimType": "observed"},
+        {"title": "页面主题丙", "summary": "浏览页面主题丙", "apps": ["chrome.exe"], "confidence": "low", "claimType": "observed"}
+      ]
+    },
+    {
+      "id": "hour-ops",
+      "offsetSeconds": 18000,
+      "durationSeconds": 3600,
+      "summary": "排查发布流水线告警。",
+      "primaryTask": "发布流水线",
+      "activeSeconds": 2600,
+      "afkSeconds": 100,
+      "switchCount": 3,
+      "apps": [{"app": "Terminal.exe", "seconds": 2600}],
+      "tasks": [
+        {"title": "发布流水线", "summary": "排查发布流水线告警", "apps": ["Terminal.exe"], "confidence": "medium", "claimType": "inferred"}
+      ]
+    },
+    {
+      "id": "hour-mail",
+      "offsetSeconds": 21600,
+      "durationSeconds": 3600,
+      "summary": "回复客户邮件。",
+      "primaryTask": "客户邮件",
+      "activeSeconds": 1800,
+      "afkSeconds": 400,
+      "switchCount": 2,
+      "apps": [{"app": "OUTLOOK.EXE", "seconds": 1800}],
+      "tasks": [
+        {"title": "客户邮件", "summary": "回复客户邮件", "apps": ["OUTLOOK.EXE"], "confidence": "medium", "claimType": "inferred"}
+      ]
+    },
+    {
+      "id": "hour-notes",
+      "offsetSeconds": 25200,
+      "durationSeconds": 3600,
+      "summary": "整理会议纪要草稿。",
+      "primaryTask": "会议纪要",
+      "activeSeconds": 1500,
+      "afkSeconds": 200,
+      "switchCount": 1,
+      "apps": [{"app": "Editor.exe", "seconds": 1500}],
+      "tasks": [
+        {"title": "会议纪要", "summary": "整理会议纪要草稿", "apps": ["Editor.exe"], "confidence": "low", "claimType": "inferred"}
+      ]
+    }
+  ],
+  "expectations": {
+    "requiredTitles": ["订单模块", "设计评审", "接口文档"],
+    "excludedTitles": ["私聊", "无痕页面"],
+    "excludedFragments": ["10.2.3.4", "361 881", "361", "私聊", "无痕"],
+    "minFacts": 5,
+    "maxFacts": 20,
+    "maxTaskSegments": 4,
+    "topics": [
+      {"name": "订单", "titleFragments": ["订单"]},
+      {"name": "评审", "titleFragments": ["评审"]},
+      {"name": "文档", "titleFragments": ["文档"]}
+    ]
+  },
+  "manualReview": "模型输入不得含内网地址、会议号、私聊与无痕；输出最多三个主题加其余活动，主线一句。"
+}

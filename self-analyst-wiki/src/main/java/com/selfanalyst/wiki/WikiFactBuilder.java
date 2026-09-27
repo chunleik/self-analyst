@@ -43,6 +43,8 @@ public class WikiFactBuilder {
         this.privacy = privacy == null ? WikiPrivacyPolicy.none() : privacy;
     }
 
+    public WikiPrivacyPolicy privacy() { return privacy; }
+
     public java.util.Optional<Instant> earliestEvent() {
         List<String> buckets = new ArrayList<>();
         for (String kind : List.of("window", "afk", "content")) {

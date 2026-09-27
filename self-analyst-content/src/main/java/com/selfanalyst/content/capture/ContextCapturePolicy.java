@@ -12,7 +12,6 @@ public final class ContextCapturePolicy {
 
     private static final Set<String> EXCLUDED_APPS = Set.of(
             "idea64", "idea", "navicat", "explorer", "notepad", "code",
-            "chrome", "msedge", "firefox", "opera", "brave", "vivaldi",
             "1password", "keepass", "bitwarden", "dashlane", "enpass", "roboform",
             "credentialuibroker", "consent");
     private static final Set<String> EXCLUDED_TITLE_PATTERNS = Set.of(

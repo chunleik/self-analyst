@@ -16,6 +16,12 @@ public final class TitleCapture {
     }
 
     public TitleCaptureResult capture(String app, UiaNode root, String uiaText) {
+        if (BrowserChromeProbe.supports(app)) {
+            BrowserChromeProbe.Projection chrome = BrowserChromeProbe.probe(root, uiaText);
+            return new TitleCaptureResult(null, null, "window", null, 0,
+                    chrome == null ? null : chrome.urlHost(),
+                    chrome != null && chrome.privateBrowsing() ? Boolean.TRUE : null);
+        }
         String text = uiaText != null ? uiaText : "";
         ContextTitleCandidate candidate = ContextTitleExtractor.extractCandidate(app, text);
         if (candidate == null

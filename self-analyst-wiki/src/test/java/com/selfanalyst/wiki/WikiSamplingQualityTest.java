@@ -26,6 +26,7 @@ class WikiSamplingQualityTest {
         List<Executable> assertions = new ArrayList<>();
         for (JsonNode file : resource("index.json")) {
             JsonNode fixture = resource(file.asText());
+            if (fixture.path("children").isArray() && !fixture.path("children").isEmpty()) continue;
             String id = fixture.get("id").asText();
             WikiPeriod period = new WikiPeriod(WikiLevel.DAY, START,
                     START.plusSeconds(fixture.get("periodSeconds").asLong()), "UTC");

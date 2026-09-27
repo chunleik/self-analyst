@@ -37,6 +37,7 @@ public class WikiWorker {
     private final boolean backfillEnabled;
     private final WikiEmbeddingWorker embeddingWorker;
     private final Supplier<Instant> nowSupplier;
+    private final WikiPrivacyPolicy privacy;
 
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -63,6 +64,7 @@ public class WikiWorker {
         this.backfillEnabled = backfillEnabled;
         this.embeddingWorker = embeddingWorker;
         this.nowSupplier = nowSupplier;
+        this.privacy = factBuilder == null ? WikiPrivacyPolicy.none() : factBuilder.privacy();
         this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "wiki-worker");
             t.setDaemon(true);
@@ -121,6 +123,8 @@ public class WikiWorker {
 
         reconcileNewPeriods();
         if (backfillEnabled) discoverOlderStatistics();
+        try { store.redactPrivacy(privacy, 20); }
+        catch (Exception e) { log.warn("Wiki privacy redaction failed: {}", e.getClass().getSimpleName()); }
 
         try {
             restorePausedGenerations();

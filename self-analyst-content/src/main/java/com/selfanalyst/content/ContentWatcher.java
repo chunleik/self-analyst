@@ -277,6 +277,12 @@ public class ContentWatcher extends Thread {
         data.put("title_source", result != null && result.titleSource() != null
                 ? result.titleSource() : "window");
         data.put("uia_chars", result != null ? result.uiaChars() : 0);
+        if (result != null && result.urlHost() != null && !result.urlHost().isBlank()) {
+            data.put("url_host", result.urlHost());
+        }
+        if (result != null && Boolean.TRUE.equals(result.privateBrowsing())) {
+            data.put("private_browsing", true);
+        }
         return data;
     }
 

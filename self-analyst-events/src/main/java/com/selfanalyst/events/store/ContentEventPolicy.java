@@ -23,7 +23,11 @@ public final class ContentEventPolicy {
             "title_source",
             "title_confidence",
             "uia_chars",
-            "ocr_chars");
+            "ocr_chars",
+            "url_host",
+            "private_browsing");
+    private static final Pattern HOST_NAME = Pattern.compile(
+            "(?i)^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$");
     private static final Set<String> KNOWN_FORBIDDEN_FIELDS = Set.of(
             "text_content", "uia_text", "ocr_text", "raw_text", "raw_tree",
             "content", "body", "sample_id", "screenshot", "image");
@@ -105,6 +109,28 @@ public final class ContentEventPolicy {
 
         requireNonNegativeNumber(data, "uia_chars");
         requireNonNegativeNumber(data, "ocr_chars");
+        requireUrlHost(data);
+        requirePrivateBrowsing(data);
+    }
+
+    private static void requireUrlHost(Map<String, Object> data) {
+        if (!data.containsKey("url_host")) return;
+        String host = optionalString(data, "url_host");
+        if (host.codePointCount(0, host.length()) > 253
+                || !host.equals(host.toLowerCase(Locale.ROOT))
+                || host.contains("/") || host.contains("?") || host.contains("#")
+                || host.contains("@") || host.contains(":")
+                || !HOST_NAME.matcher(host).matches()) {
+            throw violation("url_host", "url_host must be a lowercase hostname");
+        }
+    }
+
+    private static void requirePrivateBrowsing(Map<String, Object> data) {
+        if (!data.containsKey("private_browsing")) return;
+        Object value = data.get("private_browsing");
+        if (!(value instanceof Boolean flag) || !flag) {
+            throw violation("private_browsing", "private_browsing must be boolean true when present");
+        }
     }
 
     private static String requireString(Map<String, Object> data, String key, boolean allowEmpty) {

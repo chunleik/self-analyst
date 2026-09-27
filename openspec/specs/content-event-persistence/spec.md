@@ -53,8 +53,8 @@ Wiki 从合并内容事件构造事实时 SHALL 只读取窗口标题、上下�
 
 ### Requirement: SPEC-CTP-011 内容事件 v2 字段集合与值约束
 内容事件 data SHALL 只允许 `schema_version`、`app`、`title`、`context_title`、`context_kind`、
-`title_source`、`title_confidence`、`uia_chars` 和 `ocr_chars`。系统 SHALL 按以下 Scenario 中的
-基础、上下文和诊断字段契约校验值；任何其他字段 MUST 被拒绝。
+`title_source`、`title_confidence`、`uia_chars`、`ocr_chars`、`url_host` 和 `private_browsing`。系统 SHALL 按以下 Scenario 中的
+基础、上下文、诊断和浏览器探测字段契约校验值；任何其他字段 MUST 被拒绝。
 
 #### Scenario: 合法标题事件被接受
 - **WHEN** 内容事件包含必需字段和合法可选上下文字段
@@ -75,6 +75,11 @@ Wiki 从合并内容事件构造事实时 SHALL 只读取窗口标题、上下�
 #### Scenario: 诊断计数字段契约
 - **WHEN** 内容事件包含 `uia_chars` 或 `ocr_chars`
 - **THEN** 诊断计数必须为数值，且其 64 位整数转换结果非负
+
+#### Scenario: 浏览器探测字段契约
+- **WHEN** 内容事件包含 `url_host` 或 `private_browsing`
+- **THEN** `url_host` 若存在必须为非空白小写主机名，最多 253 code point，不含用户信息、路径、查询或片段
+- **THEN** `private_browsing` 若存在必须为布尔 `true`；为 false 时 MUST 省略该字段
 
 #### Scenario: 正文键或未知键被拒绝
 - **WHEN** 内容事件包含正文键或任意不在允许集合中的字段

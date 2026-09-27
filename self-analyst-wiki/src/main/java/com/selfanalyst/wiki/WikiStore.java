@@ -12,8 +12,10 @@ import java.nio.file.Path;
 import java.sql.*;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 public class WikiStore implements AutoCloseable {
 
@@ -500,6 +502,71 @@ public class WikiStore implements AutoCloseable {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to mark entry as skipped", e);
         }
+    }
+
+    /** Local privacy rewrite for already summarized text. Does not call a model or change status. */
+    public int redactPrivacy(WikiPrivacyPolicy privacy, int limit) {
+        if (privacy == null || limit <= 0) return 0;
+        List<WikiEntry> candidates = new ArrayList<>();
+        String sql = "SELECT * FROM wiki_entries WHERE " + CURRENT
+                + " AND status=? ORDER BY updated_at ASC LIMIT ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, WikiStatus.SUMMARIZED.name());
+            ps.setInt(2, Math.max(limit * 4, limit));
+            ResultSet rs = ps.executeQuery();
+            while (rs.next() && candidates.size() < limit) {
+                WikiEntry entry = mapEntry(rs);
+                if (entry.metrics() != null && entry.metrics().extra() != null
+                        && entry.metrics().extra().containsKey("privacyRedactedAt")) continue;
+                candidates.add(entry);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to find summaries for privacy redaction", e);
+        }
+        int changed = 0;
+        for (WikiEntry entry : candidates) {
+            if (rewritePrivacy(entry, privacy)) changed++;
+        }
+        return changed;
+    }
+
+    private boolean rewritePrivacy(WikiEntry entry, WikiPrivacyPolicy privacy) {
+        String summary = privacy.redactText(entry.summary());
+        String primary = privacy.redactText(entry.primaryTask());
+        List<WikiEntry.TaskSegment> segments = entry.taskSegments().stream()
+                .map(segment -> new WikiEntry.TaskSegment(
+                        privacy.redactText(segment.title()),
+                        privacy.redactText(segment.summary()),
+                        segment.evidence(), segment.apps(), segment.confidence(),
+                        segment.evidenceFactIds(), segment.claimType()))
+                .toList();
+        boolean same = Objects.equals(summary, entry.summary())
+                && Objects.equals(primary, entry.primaryTask())
+                && segments.equals(entry.taskSegments());
+        Map<String, Object> extra = new LinkedHashMap<>(
+                entry.metrics() == null || entry.metrics().extra() == null
+                        ? Map.of() : entry.metrics().extra());
+        extra.put("privacyRedactedAt", Instant.now().toString());
+        WikiEntry.WikiMetrics metrics = entry.metrics() == null
+                ? new WikiEntry.WikiMetrics(0, 0, 0, List.of(), extra)
+                : new WikiEntry.WikiMetrics(entry.metrics().activeSeconds(), entry.metrics().afkSeconds(),
+                        entry.metrics().switchCount(), entry.metrics().topApps(), extra);
+        String sql = """
+            UPDATE wiki_entries SET summary=?, primary_task=?, task_segments_json=?,
+            metrics_json=?, updated_at=? WHERE id=?
+            """;
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, summary);
+            ps.setString(2, primary);
+            ps.setString(3, toJson(segments));
+            ps.setString(4, toJson(metrics));
+            ps.setString(5, Instant.now().toString());
+            ps.setString(6, entry.id());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to redact wiki privacy", e);
+        }
+        return !same;
     }
 
     /** One atomic update; budget/config waits do not increment the ordinary retry counter. */

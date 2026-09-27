@@ -115,6 +115,26 @@ class ContentEventPolicyTest {
         }
     }
 
+    @Test
+    void acceptsBrowserPrivacyProjectionFields() {
+        Map<String, Object> data = validTitleData();
+        data.remove("context_title");
+        data.remove("context_kind");
+        data.remove("title_confidence");
+        data.put("title_source", "window");
+        data.put("url_host", "github.com");
+        data.put("private_browsing", true);
+        assertDoesNotThrow(() -> ContentEventPolicy.validate(
+                "watcher-content_test", "watcher-content", data));
+        data.put("url_host", "https://github.com/path");
+        assertThrows(ContentEventPolicyViolationException.class,
+                () -> ContentEventPolicy.validate("watcher-content_test", "watcher-content", data));
+        data.put("url_host", "github.com");
+        data.put("private_browsing", false);
+        assertThrows(ContentEventPolicyViolationException.class,
+                () -> ContentEventPolicy.validate("watcher-content_test", "watcher-content", data));
+    }
+
     private static Map<String, Object> validTitleData() {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("schema_version", 2);

@@ -284,12 +284,15 @@ current window and today use the same title facts, with a smaller budget and a f
 Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages
 are masked. Titles marked as private browsing (for example Incognito or InPrivate) are skipped, as are
 applications listed in `wiki.privacy.excludeApps` (comma-separated executable names such as
-`weixin.exe`) and titles containing any keyword in `wiki.privacy.excludeSites`. Site keywords are
-matched against window titles because no URL is recorded, so use the name shown in the page title.
-Excluded applications are also left out of the application weights sent to the model, while local
-durations stay unchanged. A private window whose title carries no private-browsing marker cannot be
-detected; add sensitive sites to the exclusion list instead. Half-day and longer summaries apply the
-same rules to earlier child summaries, and are reduced to one sentence with at most three topics.
+`weixin.exe`) and sites listed in `wiki.privacy.excludeSites`. Site keywords match window titles or,
+when a content event carries `url_host`, the lowercase hostname from the browser address bar (no full
+URL is stored). Content events may also set `private_browsing=true` when accessibility exposes an
+Incognito/InPrivate/无痕 marker even if the window title does not. Excluded applications are left out
+of the application weights sent to the model, while local durations stay unchanged. Already-saved
+summaries are redacted locally for the same IP and meeting-number patterns without calling the model.
+A private window that exposes neither a title marker nor a chrome probe signal still cannot be
+detected; add sensitive sites to the exclusion list. Half-day and longer summaries apply the same
+rules to earlier child summaries, and are reduced to one sentence with at most three topics.
 Restart the backend after changing these settings.
 
 Long Wiki inputs are organized into topic candidates and summarized within `wiki.summary.maxCalls`

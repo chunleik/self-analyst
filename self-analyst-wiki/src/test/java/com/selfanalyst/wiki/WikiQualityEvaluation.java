@@ -70,10 +70,12 @@ public final class WikiQualityEvaluation {
                     : fixture.get("budgetChars").asInt()) : options.budgets;
             for (int budget : budgets) {
                 for (String strategy : options.strategies()) {
-                    Selection selection = "baseline".equals(strategy) ? prefix(input, budget)
-                            : options.fullHistory ? input.complete() : WikiTitleSampler.sample(input.period(), input.statistics().activeEvents(),
-                            input.windows(), input.contents(), budget);
-                    WikiFacts facts = input.facts(selection);
+                    WikiFacts facts = input.parent()
+                            ? input.parentFacts(budget, strategy, options.fullHistory)
+                            : input.facts("baseline".equals(strategy) ? prefix(input, budget)
+                            : options.fullHistory ? input.complete()
+                            : WikiTitleSampler.sample(input.period(), input.statistics().activeEvents(),
+                            input.windows(), input.contents(), budget));
                     for (int repeat = 1; repeat <= options.repeat; repeat++) {
                         runs.add(run(options, api, totalCalls, fixture, facts, strategy, budget, repeat));
                     }
@@ -155,6 +157,8 @@ public final class WikiQualityEvaluation {
         row.put("validationField", null);
         row.put("unvalidatedCandidate", null);
         row.put("candidateCounts", null);
+        row.put("childSummaries", facts.childSummaries().size());
+        row.put("privacyInputOk", privacyInputOk(fixture, facts));
         if (!options.live) {
             row.put("status", "offline-no-model");
             row.put("offlineFocusSegmentCount", offlineFocusSegmentCount(facts));
@@ -230,6 +234,18 @@ public final class WikiQualityEvaluation {
                 "meaning", "lexical-proxy-only");
     }
 
+    private static boolean privacyInputOk(JsonNode fixture, WikiFacts facts) {
+        JsonNode excluded = fixture.path("expectations").path("excludedFragments");
+        if (!excluded.isArray() || excluded.isEmpty()) return true;
+        String titles = facts.sampledTitles() == null ? ""
+                : facts.sampledTitles().facts().stream().map(Fact::title).toList().toString();
+        String blob = String.join("\n", facts.childSummaries()) + "\n" + titles;
+        for (JsonNode fragment : excluded) {
+            if (blob.contains(fragment.asText())) return false;
+        }
+        return true;
+    }
+
     private static Selection prefix(Fixture input, int budget) {
         List<Fact> retained = new ArrayList<>();
         int used = 0;
@@ -244,14 +260,41 @@ public final class WikiQualityEvaluation {
         return WikiTitleSampler.fromFacts(input.period(), retained, coverage);
     }
 
+    private static Selection prefixFacts(WikiPeriod period, Selection complete, int budget) {
+        List<Fact> retained = new ArrayList<>();
+        int used = 0;
+        for (Fact fact : complete.facts()) {
+            int cost = WikiTitleSampler.fromFacts(period, List.of(fact), Map.of()).jsonLines().length();
+            if (cost > budget - used) break;
+            retained.add(fact);
+            used += cost;
+        }
+        Map<String, Object> coverage = new LinkedHashMap<>(complete.coverage());
+        coverage.put("budgetChars", budget);
+        return WikiTitleSampler.fromFacts(period, retained, coverage);
+    }
+
     private record Fixture(WikiPeriod period, List<Event> windows, List<Event> contents,
-                           ActivityStatistics.Result statistics, Selection complete) {
+                           ActivityStatistics.Result statistics, Selection complete,
+                           List<WikiEntry> children, WikiPrivacyPolicy privacy) {
+        private boolean parent() { return children != null && !children.isEmpty(); }
+
         private static Fixture read(JsonNode json) {
-            WikiPeriod period = new WikiPeriod(WikiLevel.DAY, START, START.plusSeconds(json.get("periodSeconds").asLong()), "UTC");
-            List<Event> windows = events(json.get("windows"), 1), contents = events(json.get("contents"), 10001);
-            var statistics = ActivityStatistics.compute(windows, events(json.get("afk"), 20001), period.start(), period.end());
-            return new Fixture(period, windows, contents, statistics,
-                    WikiTitleSampler.sample(period, statistics.activeEvents(), windows, contents, Integer.MAX_VALUE));
+            WikiLevel level = json.has("level") ? WikiLevel.valueOf(json.get("level").asText()) : WikiLevel.DAY;
+            WikiPeriod period = new WikiPeriod(level, START, START.plusSeconds(json.get("periodSeconds").asLong()), "UTC");
+            List<Event> windows = events(json.path("windows"), 1), contents = events(json.path("contents"), 10001);
+            var statistics = ActivityStatistics.compute(windows, events(json.path("afk"), 20001), period.start(), period.end());
+            WikiPrivacyPolicy privacy = WikiPrivacyPolicy.none();
+            if (json.path("privacy").isObject()) {
+                privacy = WikiPrivacyPolicy.of(textOrEmpty(json.path("privacy"), "excludeApps"),
+                        textOrEmpty(json.path("privacy"), "excludeSites"));
+            }
+            List<WikiEntry> children = readChildren(json.path("children"), period);
+            Selection complete = children.isEmpty()
+                    ? WikiTitleSampler.sample(period, statistics.activeEvents(), windows, contents, Integer.MAX_VALUE)
+                    : new WikiFactBuilder(null, Integer.MAX_VALUE, () -> null, privacy)
+                    .buildFactsFromChildren(children, period).sampledTitles();
+            return new Fixture(period, windows, contents, statistics, complete, children, privacy);
         }
 
         private WikiFacts facts(Selection selection) {
@@ -274,10 +317,99 @@ public final class WikiQualityEvaluation {
                     statistics.switchCount(), apps, List.of(), List.of(), List.of(), WikiFactBuilder.FACT_BUILDER_VERSION,
                     "synthetic-evaluation-v1", coverage, extra, selection);
         }
+
+        private WikiFacts parentFacts(int budget, String strategy, boolean fullHistory) {
+            WikiFacts base = new WikiFactBuilder(null, Math.max(1000, budget), () -> null, privacy)
+                    .buildFactsFromChildren(children, period);
+            Selection selection = "baseline".equals(strategy) ? prefixFacts(period, base.sampledTitles(), budget)
+                    : fullHistory || budget >= Integer.MAX_VALUE / 4 ? base.sampledTitles()
+                    : WikiTitleSampler.fromFacts(period, trimFacts(base.sampledTitles().facts(), budget),
+                    Map.of("budgetChars", budget, "candidateFacts", base.sampledTitles().facts().size()));
+            return base.withInput(selection, base.childSummaries());
+        }
+
+        private static List<Fact> trimFacts(List<Fact> facts, int budget) {
+            List<Fact> retained = new ArrayList<>();
+            int used = 0;
+            for (Fact fact : facts) {
+                int cost = WikiTitleSampler.fromFacts(
+                        new WikiPeriod(WikiLevel.HOUR, START, START.plusSeconds(3600), "UTC"),
+                        List.of(fact), Map.of()).jsonLines().length();
+                if (cost > budget - used) break;
+                retained.add(fact);
+                used += cost;
+            }
+            return retained;
+        }
+    }
+
+    private static String textOrEmpty(JsonNode node, String field) {
+        return node.has(field) ? node.get(field).asText("") : "";
+    }
+
+    private static List<WikiEntry> readChildren(JsonNode rows, WikiPeriod parent) {
+        if (rows == null || !rows.isArray() || rows.isEmpty()) return List.of();
+        List<WikiEntry> result = new ArrayList<>();
+        for (JsonNode row : rows) {
+            Instant start = START.plusSeconds(row.get("offsetSeconds").asLong());
+            Instant end = start.plusSeconds(row.get("durationSeconds").asLong());
+            List<WikiEntry.AppDuration> apps = new ArrayList<>();
+            for (JsonNode app : row.path("apps")) {
+                apps.add(new WikiEntry.AppDuration(app.get("app").asText(), app.get("seconds").asLong()));
+            }
+            List<WikiEntry.TaskSegment> tasks = new ArrayList<>();
+            for (JsonNode task : row.path("tasks")) {
+                List<String> taskApps = new ArrayList<>();
+                for (JsonNode app : task.path("apps")) taskApps.add(app.asText());
+                tasks.add(new WikiEntry.TaskSegment(
+                        task.get("title").asText(),
+                        task.path("summary").asText(""),
+                        List.of(),
+                        taskApps,
+                        task.path("confidence").asText("low"),
+                        List.of(),
+                        task.path("claimType").asText("inferred")));
+            }
+            var metrics = new WikiEntry.WikiMetrics(
+                    row.path("activeSeconds").asLong(0),
+                    row.path("afkSeconds").asLong(0),
+                    row.path("switchCount").asInt(0),
+                    apps,
+                    Map.of("activeSecondsExact", row.path("activeSeconds").asLong(0),
+                            "afkSecondsExact", row.path("afkSeconds").asLong(0),
+                            "appSecondsExact", apps.stream().collect(
+                                    java.util.stream.Collectors.toMap(WikiEntry.AppDuration::app,
+                                            app -> (double) app.seconds(), (a, b) -> a, LinkedHashMap::new))));
+            result.add(new WikiEntry(
+                    row.get("id").asText(),
+                    WikiLevel.HOUR,
+                    start,
+                    end,
+                    parent.timezone(),
+                    WikiStatus.SUMMARIZED,
+                    row.path("summary").asText(""),
+                    row.path("primaryTask").asText(""),
+                    tasks,
+                    metrics,
+                    List.of(),
+                    "synthetic",
+                    "eval-v1",
+                    0,
+                    null,
+                    null,
+                    start,
+                    end,
+                    end,
+                    WikiFactBuilder.FACT_BUILDER_VERSION,
+                    "synthetic-evaluation-v1",
+                    Map.of("window", new WikiEntry.SourceCoverage("complete", start, end, 0L))));
+        }
+        return result;
     }
 
     private static List<Event> events(JsonNode rows, long nextId) {
         List<Event> result = new ArrayList<>();
+        if (rows == null || !rows.isArray()) return result;
         for (JsonNode row : rows) {
             Map<String, Object> data = new LinkedHashMap<>();
             for (String key : List.of("app", "title", "status")) if (row.has(key)) data.put(key, row.get(key).asText());

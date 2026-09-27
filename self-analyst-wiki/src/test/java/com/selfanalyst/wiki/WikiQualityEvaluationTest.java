@@ -37,6 +37,18 @@ class WikiQualityEvaluationTest {
         assertEquals(0, output.path("totalCalls").asInt());
     }
 
+    @Test void parentAbstractPrivacyFixtureRedactsChildrenAndBoundsOfflineSegments(@TempDir Path root) throws Exception {
+        Path report = root.resolve("parent-abstract-privacy.json");
+        WikiQualityEvaluation.main(new String[]{"--case", "parent-abstract-privacy", "--repeat", "1",
+                "--output", report.toString()});
+        var output = new ObjectMapper().readTree(Files.readString(report));
+        var run = output.path("runs").get(0);
+        assertTrue(run.path("privacyInputOk").asBoolean());
+        assertTrue(run.path("childSummaries").asInt() >= 5);
+        assertTrue(run.path("offlineFocusSegmentCount").asInt() <= 4);
+        assertEquals(0, output.path("totalCalls").asInt());
+    }
+
     @Test void providerOutputLimitRequiresExplicitDiagnosticMode() throws Exception {
         Class<?> options = Class.forName(WikiQualityEvaluation.class.getName() + "$Options");
         var parse = options.getDeclaredMethod("parse", String[].class);

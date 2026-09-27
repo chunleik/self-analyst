@@ -7,5 +7,6 @@
   "generic-window-context.json",
   "missing-activity-coverage.json",
   "long-activity-history.json",
-  "noisy-focus.json"
+  "noisy-focus.json",
+  "parent-abstract-privacy.json"
 ]

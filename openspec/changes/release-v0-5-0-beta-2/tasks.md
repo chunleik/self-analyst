@@ -7,7 +7,7 @@
 
 ## 2. 外部交付
 
-- [ ] 2.1 提交并推送发布分支，创建 PR，关联 `release-v0-5-0-beta-2` 和验证结果。验证：PR URL 可访问。
+- [x] 2.1 提交并推送发布分支，创建 PR，关联 `release-v0-5-0-beta-2` 和验证结果。验证：PR URL 可访问。
 - [ ] 2.2 等待该 PR 最新提交的必需检查通过，包括 Windows 全量验证，再合并 main。验证：合并后 `main` 含版本提交。
 - [ ] 2.3 在合并提交上创建并推送 `v0.5.0-beta.2`，等待 Windows Release 成功。验证：Actions Release 工作流成功。
 - [ ] 2.4 确认 GitHub Release 为 Pre-release，含便携 ZIP、NSIS 安装包和 SHA-256，且最新稳定版仍是 `v0.4.0`。验证：`gh release view v0.5.0-beta.2` 与 `gh release view v0.4.0`。

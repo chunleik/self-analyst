@@ -63,6 +63,31 @@
   --chat-width: 420px;
 }
 
+/* Session deletion stays centered in the viewport, independent of list scroll. */
+#session-delete-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 24px;
+  overflow: auto;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+#session-delete-dialog::backdrop { background: var(--bg-overlay); }
+#session-delete-dialog h2 { margin-bottom: 12px; font-size: 20px; }
+#session-delete-dialog p { color: var(--text-secondary); overflow-wrap: anywhere; }
+.session-delete-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.session-delete-actions .btn { min-width: 76px; }
+#session-delete-confirm { background: var(--red); color: var(--text-inverse); border-color: var(--red); }
+#session-delete-confirm:hover { filter: brightness(0.9); }
+
 /* ----- Reset / Base ----- */
 *, *::before, *::after {
   box-sizing: border-box;
@@ -1145,7 +1170,7 @@ input:checked + .toggle-switch::after {
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  display: none;
+  opacity: 0;
   padding: 2px;
   border: none;
   background: none;
@@ -1158,8 +1183,9 @@ input:checked + .toggle-switch::after {
   color: var(--red);
   background: var(--red-dim);
 }
-.chat-session-item:hover .session-delete-btn {
-  display: block;
+.chat-session-item:hover .session-delete-btn,
+.chat-session-item:focus-within .session-delete-btn {
+  opacity: 1;
 }
 .chat-session-empty {
   padding: 20px 14px;

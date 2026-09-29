@@ -65,6 +65,13 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: 缓存 Rust 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            self-analyst-desktop/src-tauri -> target
+            self-analyst-axsidecar -> target
+
       - name: 安装 OpenSpec CLI
         shell: pwsh
         run: npm install --global @fission-ai/openspec@1.11.0

@@ -30,6 +30,29 @@ class ContentEventV2MigrationTest {
     Path tempDir;
 
     @Test
+    void discardsRemovedRecognitionMetadataAndFallsBackToWindowTitle() throws Exception {
+        try (Database db = new Database(tempDir)) {
+            String bucketId = "watcher-content_test";
+            new BucketStore(db).create(Bucket.create(
+                    bucketId, "Content", "listening", "watcher-content", "test"));
+            insertLegacy(db, bucketId, """
+                    {"schema_version":2,"app":"notes.exe","title":"设计文档",
+                     "context_title":"旧识别标题","context_kind":"document",
+                     "title_source":"ocr_title","title_confidence":"high","ocr_chars":100}
+                    """);
+
+            assertEquals(1, ContentEventV2Migration.migrate(db).sanitized());
+            Map<String, Object> data = new EventStore(db, PulseTimeConfig.DEFAULT)
+                    .queryAllEvents(bucketId).getFirst().data();
+            assertEquals("设计文档", data.get("title"));
+            assertEquals("window", data.get("title_source"));
+            assertFalse(data.containsKey("context_title"));
+            assertFalse(data.containsKey("ocr_chars"));
+            assertEquals(0, ContentEventV2Migration.migrate(db).scanned());
+        }
+    }
+
+    @Test
     void sanitizesLegacyRowsExtractsTitleAndPhysicallyRemovesBody() throws Exception {
         Path dataDir = tempDir.resolve("events");
         Path dbPath = dataDir.resolve("events.db");

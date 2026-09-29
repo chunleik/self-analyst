@@ -230,13 +230,11 @@ public class DesktopConfigController {
                     "mode", "mode",
                     "port", "port",
                     "dataDir", "data-dir");
-            case "collection" -> "ocrEngine".equals(rawKey)
-                    ? "aw.ocr.engine"
-                    : mapKey(rawKey, prefix,
-                            "window", "window",
-                            "afk", "afk",
-                            "title.enabled", "title.enabled",
-                            "title.pollMs", "title.pollMs");
+            case "collection" -> mapKey(rawKey, prefix,
+                    "window", "window",
+                    "afk", "afk",
+                    "title.enabled", "title.enabled",
+                    "title.pollMs", "title.pollMs");
             case "agent" -> mapKey(rawKey, prefix,
                     "summaryRefreshMinutes", "summaryRefreshMinutes",
                     "refresh_interval", "summaryRefreshMinutes",

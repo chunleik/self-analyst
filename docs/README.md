@@ -75,6 +75,5 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 
 - [archive/design-proposals/](archive/design-proposals/) — 已被正式规格取代、但仍保留背景价值的历史设计提案，包括[原始事件永久保留设计](archive/design-proposals/2026-08-30-raw-event-permanent-retention-design.md)
 - [archive/legacy-specs/](archive/legacy-specs/) — 未逐项纳入主规格的旧实施决策、测试条目和稳定 ID
-- [archive/removed-features/](archive/removed-features/) — 已移除功能的恢复基线索引
 
 旧 `raw-event-retention` 能力已退役，原 Purpose 与 SPEC-RAW-001～013 的背景保留在 [历史变更](../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md) 和 Git 历史中。

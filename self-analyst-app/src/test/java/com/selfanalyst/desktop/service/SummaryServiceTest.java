@@ -111,7 +111,7 @@ class SummaryServiceTest {
             events.insertEvent("aw-" + service.contentBucket(), new Event(start, 60,
                     Map.of("app", "Chrome", "title", "导入的数据库文档", "context_title", "索引查询计划",
                             "context_kind", "article", "title_source", "uia_context", "title_confidence", "high",
-                            "schema_version", 2, "uia_chars", 0, "ocr_chars", 0)));
+                            "schema_version", 2, "uia_chars", 0)));
             var current = service.currentWindowFacts(start, end, "今天");
             var wiki = new com.selfanalyst.wiki.WikiFactBuilder(events, SummaryService.TITLE_FACT_BUDGET_CHARS)
                     .buildFacts(new com.selfanalyst.wiki.WikiPeriod(com.selfanalyst.wiki.WikiLevel.HOUR,
@@ -128,7 +128,7 @@ class SummaryServiceTest {
             events.insertEvent(service.contentBucket(), new Event(start, 60,
                     Map.of("app", "IDE", "title", "本地编辑器标题", "context_title", "本地连接配置",
                             "context_kind", "document", "title_source", "uia_context", "title_confidence", "high",
-                            "schema_version", 2, "uia_chars", 0, "ocr_chars", 0)));
+                            "schema_version", 2, "uia_chars", 0)));
             var product = service.currentWindowFacts(start, end, "今天");
             assertTrue(product.titleFacts().jsonLines().contains("本地连接配置"));
             assertFalse(product.titleFacts().jsonLines().contains("索引查询计划"));

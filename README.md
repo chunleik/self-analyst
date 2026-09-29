@@ -235,7 +235,6 @@ The following documents are maintained in Simplified Chinese:
 - [Testing and integration verification](docs/testing.md)
 - [Context-title collection specification](openspec/specs/title-capture/spec.md)
 - [Title-minimized persistence specification](openspec/specs/content-event-persistence/spec.md)
-- [Temporary removal of OCR and audio modules](docs/archive/removed-features/removed-ocr-audio.md)
 - [Privacy](PRIVACY.md)
 
 ## Long-term memory and clarification in chat

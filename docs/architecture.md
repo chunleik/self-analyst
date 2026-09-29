@@ -17,9 +17,6 @@ Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2
                                       └─> 24 小时重试回执（到期回收）
 ```
 
-OCR、屏幕截图和声音/语音链路当前不存在。恢复背景见
-[archive/removed-features/removed-ocr-audio.md](archive/removed-features/removed-ocr-audio.md)。
-
 ## 国际化资源与语言生效
 
 `self-analyst-app/src/main/resources/i18n/languages.json` 注册正式语言及日期 Locale。后端启动时解析有效语言并固定在 Config 中，经桌面状态通道返回语言元数据；普通模型配置热更新不应用待重启语言。原生壳嵌入同一注册表和原生消息资源，使用本次受管端口及 token 读取后端语言后建立正常桌面入口。
@@ -145,12 +142,10 @@ Windows 登录自启动由 Tauri 壳管理当前用户 Run 入口 `SelfAnalystDe
 单实例 mutex 与固定窗口唤起事件按当前用户、登录会话隔离，手动第二实例请求恢复已有窗口，自动第二实例
 静默退出；窗口尚未就绪的唤起请求会保留到创建完成。系统注册状态不进入 Java 用户配置。
 
-不存在声音 watcher、声音控制器或 OCR 引擎生命周期。
-
 ## 6. 配置兼容
 
-`SupportedKeys` 是现行配置白名单。`DeprecatedKeys` 保存已移除 OCR/声音键的墓碑：旧文件加载时
-静默忽略，桌面配置响应不暴露，结构化保存不写回。此兼容层不创建旧模块依赖。
+`SupportedKeys` 是现行配置白名单。`DeprecatedKeys` 仅记录仍需忽略的退役设置。
+其他未知键加载时不生效，raw 保存报告 `unknownKeys`，结构化保存忽略未知字段且不写入。
 
 配置解析区分用户覆盖、环境变量兜底和当前运行快照。ConfigApplicationService 统一协调应用内的
 raw、结构化及 Agent 工具保存；候选模型准备和写盘成功后发布新版本，失败则保留旧文件与运行实例。

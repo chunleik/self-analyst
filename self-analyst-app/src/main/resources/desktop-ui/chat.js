@@ -530,6 +530,45 @@ function deleteChatSession(id) {
   });
 }
 
+var chatSessionDeletePending = false;
+
+function restoreChatSessionDeleteFocus(id, trigger) {
+  if (trigger && trigger.isConnected) {
+    trigger.focus();
+    return;
+  }
+  var rows = state.dom.chatSessionList.querySelectorAll(".chat-session-item");
+  var fallback = null;
+  for (var i = 0; i < rows.length; i++) {
+    var button = rows[i].querySelector("[data-action='delete-session']");
+    if (rows[i].dataset.sid === id && button) {
+      button.focus();
+      return;
+    }
+    if (rows[i].dataset.sid === state.activeChatSessionId) fallback = button;
+  }
+  var target = fallback || document.getElementById("new-chat-session-btn");
+  if (target) target.focus();
+}
+
+function requestChatSessionDeletion(id, trigger) {
+  if (chatSessionDeletePending) return Promise.resolve();
+  chatSessionDeletePending = true;
+  function restoreFocus() { restoreChatSessionDeleteFocus(id, trigger); }
+  return confirmSessionDeletion(restoreFocus).then(function (confirmed) {
+    if (!confirmed) return;
+    return deleteChatSession(id).then(function () {
+      renderChatTab();
+      restoreFocus();
+    });
+  }).catch(function (err) {
+    alert(t("chat.deleteSessionFailed", { msg: err.message }));
+    restoreFocus();
+  }).finally(function () {
+    chatSessionDeletePending = false;
+  });
+}
+
 // ---- Message Formatting ----
 
 function formatChatMessageContent(content) {
@@ -697,11 +736,7 @@ function renderChatSessionList() {
       e.stopPropagation();
       var item = deleteBtn.closest(".chat-session-item");
       var sid = item ? item.dataset.sid : null;
-      if (sid && confirm(t("chat.confirmDeleteSession"))) {
-        deleteChatSession(sid).then(renderChatTab).catch(function (err) {
-          alert(t("chat.deleteSessionFailed", { msg: err.message }));
-        });
-      }
+      if (sid) requestChatSessionDeletion(sid, deleteBtn);
       return;
     }
     var item = e.target.closest(".chat-session-item");

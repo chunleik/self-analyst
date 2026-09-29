@@ -57,6 +57,15 @@
   <div class="help-separator" role="separator"></div>
   <button type="button" role="menuitem" tabindex="-1" data-help-action="about" data-i18n="help.about">About SelfAnalyst</button>
 </div>
+<dialog id="session-delete-dialog" aria-labelledby="session-delete-title" aria-describedby="session-delete-description">
+  <h2 id="session-delete-title" data-i18n="chat.deleteDialogTitle">Delete chat?</h2>
+  <p id="session-delete-description" data-i18n="chat.confirmDeleteSession">This chat and all its messages will be deleted. This cannot be undone.</p>
+  <div class="session-delete-actions">
+    <button id="session-delete-cancel" type="button" class="btn btn-outline" data-i18n="action.cancel" autofocus>Cancel</button>
+    <button id="session-delete-confirm" type="button" class="btn btn-danger" data-i18n="chat.deleteConfirm">Delete</button>
+  </div>
+</dialog>
+
 <dialog id="help-dialog" aria-labelledby="help-dialog-title">
   <h2 id="help-dialog-title"></h2><p id="help-dialog-body" role="status" aria-live="polite"></p>
   <a id="help-dialog-link" target="_blank" rel="noopener noreferrer" hidden></a>
@@ -261,6 +270,7 @@
 <script src="agent.js"></script>
 <script src="deep-chat-adapter.js"></script>
 <script src="chat-images.js"></script>
+<script src="session-delete-dialog.js"></script>
 <script src="chat.js"></script>
 <script src="documents.js"></script>
 <script src="chat-drawer.js"></script>

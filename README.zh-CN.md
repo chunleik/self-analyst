@@ -207,7 +207,6 @@ language = "en" # auto、zh 或 en
 - [测试与集成验证](docs/testing.md)
 - [上下文标题采集规格](openspec/specs/title-capture/spec.md)
 - [标题最小化持久化规格](openspec/specs/content-event-persistence/spec.md)
-- [OCR 与声音模块暂时移除说明](docs/archive/removed-features/removed-ocr-audio.md)
 - [隐私说明](PRIVACY.md)
 
 ## 长期记忆与会话澄清

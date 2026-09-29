@@ -23,7 +23,6 @@ public final class ContentEventPolicy {
             "title_source",
             "title_confidence",
             "uia_chars",
-            "ocr_chars",
             "url_host",
             "private_browsing");
     private static final Pattern HOST_NAME = Pattern.compile(
@@ -32,7 +31,7 @@ public final class ContentEventPolicy {
             "text_content", "uia_text", "ocr_text", "raw_text", "raw_tree",
             "content", "body", "sample_id", "screenshot", "image");
     private static final Set<String> TITLE_SOURCES = Set.of(
-            "window", "uia_document", "uia_context", "ocr_title");
+            "window", "uia_document", "uia_context");
     private static final Set<String> CONTEXT_KINDS = Set.of(
             "chat", "article", "document", "page", "unknown");
     private static final Set<String> CONFIDENCES = Set.of("high", "medium", "low");
@@ -108,7 +107,6 @@ public final class ContentEventPolicy {
         }
 
         requireNonNegativeNumber(data, "uia_chars");
-        requireNonNegativeNumber(data, "ocr_chars");
         requireUrlHost(data);
         requirePrivateBrowsing(data);
     }

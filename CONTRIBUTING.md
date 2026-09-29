@@ -82,10 +82,8 @@ Java 代码位于各模块的 `src/main/java` 与 `src/test/java`。桌面 UI �
   内容事件只允许 v2 标题白名单字段，不允许 `text_content`、`uia_text`、`raw_tree`、正文或截图。
 - **文件模块只采集元数据。** 只允许文件名、路径、大小和创建/修改时间。除安全解析
   `.gitignore` 外不读取普通文件正文，不计算内容哈希，不生成摘要、主题或向量。
-- **不引入 OCR、截图、麦克风或系统声音采集。** 这些能力已被显式移除，背景见
-  [移除说明](docs/archive/removed-features/removed-ocr-audio.md)。要重新引入，必须从
-  `archive/pre-remove-ocr-audio` 标签开独立分支重新设计数据边界并先提出 OpenSpec 变更，
-  不要把旧实现直接合回主线。
+- **不引入 OCR、截图、麦克风或系统声音采集。** 数据采集边界以现行 OpenSpec 为准；
+  改变边界必须先提出 OpenSpec 变更。
 - **敏感应用跳过 UIA 查询**，UIA 失败时退回系统窗口标题，不使用截图/OCR 回退。
 - **密钥不得进入 UI、日志、聊天正文、AgentState 或上下文快照。**
 - **自动化测试不得读取真实前台窗口**，也不得访问用户真实数据目录或真实 LLM 服务。只有

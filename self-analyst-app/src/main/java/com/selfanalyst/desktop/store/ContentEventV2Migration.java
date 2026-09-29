@@ -31,7 +31,7 @@ public final class ContentEventV2Migration {
     private static final Set<String> CONTEXT_KINDS =
             Set.of("chat", "article", "document", "page", "unknown");
     private static final Set<String> TITLE_SOURCES =
-            Set.of("window", "uia_document", "uia_context", "ocr_title");
+            Set.of("window", "uia_document", "uia_context");
     private static final Set<String> CONFIDENCES = Set.of("high", "medium", "low");
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<Map<String, Object>> DATA_TYPE = new TypeReference<>() {};
@@ -173,7 +173,6 @@ public final class ContentEventV2Migration {
             clean.put("title_source", "window");
         }
         copyNonNegativeNumber(oldData, clean, "uia_chars");
-        copyNonNegativeNumber(oldData, clean, "ocr_chars");
         ContentEventPolicy.validate(row.bucketId(), ContentEventPolicy.CONTENT_CLIENT, clean);
         return MAPPER.writeValueAsString(clean);
     }

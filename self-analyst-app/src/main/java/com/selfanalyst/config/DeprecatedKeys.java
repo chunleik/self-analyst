@@ -7,20 +7,6 @@ public final class DeprecatedKeys {
 
     private static final Set<String> KEYS = Set.of(
             "llm.max-tokens",
-            "aw.ocr.engine",
-            "ocr.sample.enabled",
-            "ocr.sample.dir",
-            "ocr.excluded.apps",
-            "ocr.title-strip-height",
-            "ocr.stable-capture-interval-ms",
-            "ocr.force-refresh-ms",
-            "aw.audio.enabled",
-            "aw.audio.whisperPath",
-            "aw.audio.vadThreshold",
-            "aw.audio.source",
-            "aw.audio.engine",
-            "aw.audio.model",
-            "aw.audio.chunkSeconds",
             "file.watch.maxContentChars",
             "file.watch.minReindexIntervalMinutes",
             "file.watch.semantic.enabled",
@@ -29,7 +15,7 @@ public final class DeprecatedKeys {
     private DeprecatedKeys() {}
 
     public static boolean contains(String key) {
-        return key != null && (KEYS.contains(key) || key.startsWith("aw.audio."));
+        return key != null && KEYS.contains(key);
     }
 
     public static Set<String> all() {

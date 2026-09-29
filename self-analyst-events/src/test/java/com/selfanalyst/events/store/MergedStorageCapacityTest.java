@@ -18,24 +18,40 @@ class MergedStorageCapacityTest {
         Path compact = root.resolve("compact");
         try (Database db = new Database(compact); MergedEventStore store = new MergedEventStore(db, 5, clock)) {
             new BucketStore(db).create(Bucket.create("test", "test", "test", "test", "test"));
-            for (int i = 0; i < 100_000; i++) {
-                store.heartbeat("test", new Event(start.plusMillis(i * 500L), 2,
-                        Map.of("app", "editor", "title", "capacity fixture")), "sample-" + i, "session");
+            for (int batch = 0; batch < 100; batch++) {
+                int first = batch * 1000;
+                store.capacityFixtureBatch(() -> {
+                    for (int i = first; i < first + 1000; i++) {
+                        store.heartbeat("test", new Event(start.plusMillis(i * 500L), 2,
+                                Map.of("app", "editor", "title", "capacity fixture")), "sample-" + i, "session");
+                    }
+                });
+            }
+            // 从另一连接确认全部回执已经提交，再执行过期清理，保留真实文件高水位。
+            try (var s = db.metaConnection().createStatement(); var r = s.executeQuery("SELECT count(*) FROM event_receipts")) {
+                assertTrue(r.next()); assertEquals(100_000, r.getInt(1));
             }
             assertEquals(1, new EventStore(db, PulseTimeConfig.DEFAULT).countByBucket("test"));
+            checkpoint(db);
             clock.now = start.plus(Duration.ofHours(25)); store.pruneReceipts();
             try (var s = db.metaConnection().createStatement(); var r = s.executeQuery("SELECT count(*) FROM event_receipts")) {
                 assertTrue(r.next()); assertEquals(0, r.getInt(1));
             }
             for (int day = 2; day <= 3; day++) {
                 clock.now = start.plus(Duration.ofDays(day));
-                for (int i = 0; i < 1000; i++) store.heartbeat("test",
-                        new Event(clock.now.plusMillis(i * 500L), 2, Map.of("app", "editor", "title", "capacity fixture")),
-                        "day-" + day + "-" + i, "session");
+                int sampleDay = day;
+                store.capacityFixtureBatch(() -> {
+                    for (int i = 0; i < 1000; i++) store.heartbeat("test",
+                            new Event(clock.now.plusMillis(i * 500L), 2, Map.of("app", "editor", "title", "capacity fixture")),
+                            "day-" + sampleDay + "-" + i, "session");
+                });
             }
             clock.now = start.plus(Duration.ofDays(5)); store.pruneReceipts();
             assertEquals(3, new EventStore(db, PulseTimeConfig.DEFAULT).countByBucket("test"));
+            checkpoint(db);
         }
+        Path wal = compact.resolve("events.db-wal");
+        assertTrue(!Files.exists(wal) || Files.size(wal) == 0, "Capacity must not exclude WAL data");
         long compactBytes = Files.size(compact.resolve("events.db"));
         Path legacy = root.resolve("legacy");
         try (RawEventStore raw = new RawEventStore(legacy.resolve("raw")); Database projection = new Database(legacy)) {
@@ -71,5 +87,14 @@ class MergedStorageCapacityTest {
         System.out.printf("MERGED_CAPACITY samples=100000 compactBytes=%d legacyDualLayerBytes=%d ratio=%.4f%n",
                 compactBytes, rawBytes, compactBytes / (double) rawBytes);
         assertTrue(compactBytes <= rawBytes * 0.20, "compact=" + compactBytes + ", raw=" + rawBytes);
+    }
+
+    private static void checkpoint(Database db) throws Exception {
+        try (var s = db.metaConnection().createStatement();
+             var result = s.executeQuery("PRAGMA wal_checkpoint(TRUNCATE)")) {
+            assertTrue(result.next());
+            assertEquals(0, result.getInt(1), "Checkpoint must not be blocked");
+            assertEquals(0, result.getInt(2), "WAL must be fully checkpointed and truncated");
+        }
     }
 }

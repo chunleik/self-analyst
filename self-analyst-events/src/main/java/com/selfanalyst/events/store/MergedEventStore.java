@@ -67,6 +67,28 @@ public final class MergedEventStore implements AutoCloseable {
     public record Submission(Event event, String identity) {}
     private record Head(long id, String session) {}
 
+    /** 仅供同包容量测试构建临时样本；不保证崩溃耐久性，禁止生产调用。 */
+    synchronized void capacityFixtureBatch(Runnable heartbeats) throws SQLException {
+        if (!connection.getAutoCommit()) throw new IllegalStateException("Fixture transaction already active");
+        try (Statement s = connection.createStatement()) {
+            s.execute("PRAGMA synchronous=OFF");
+        }
+        Map<String, Head> previousHeads = new HashMap<>(heads);
+        connection.setAutoCommit(false);
+        try {
+            heartbeats.run();
+            connection.commit();
+        } catch (RuntimeException | Error | SQLException failure) {
+            try { connection.rollback(); }
+            catch (SQLException rollbackFailure) { failure.addSuppressed(rollbackFailure); }
+            heads.clear();
+            heads.putAll(previousHeads);
+            throw failure;
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
     public synchronized Event heartbeat(String bucket, Event event, String identity, String session) {
         return write(bucket, List.of(new Submission(event, identity)), true, session).getFirst();
     }

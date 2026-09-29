@@ -34,14 +34,16 @@
 }
 #config-modal .config-scroll-area { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px; scrollbar-gutter: stable; }
 #config-modal .config-action-bar {
-  position: static; display: flex; flex-shrink: 0; align-items: center; justify-content: space-between;
+  position: static; display: flex; flex-direction: row; flex-shrink: 0; align-items: center; justify-content: space-between;
   padding: 13px 24px; gap: 16px; margin: 0; border: 0; border-top: 1px solid var(--border-color);
   border-radius: 0; background: var(--bg-secondary); width: 100%;
 }
 #config-modal .config-action-meta { flex: 1; min-width: 0; gap: 3px; align-items: flex-start; flex-direction: column; }
 #config-modal .config-action-title { display: none; }
 #config-modal .config-action-status { font-size: 12px; font-weight: 500; }
-#config-modal .config-action-buttons { flex: 0 0 auto; gap: 8px; margin: 0; }
+#config-modal .config-action-buttons { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin: 0; }
+#config-modal .config-restart-status { font-size: 12px; overflow-wrap: anywhere; }
+#config-modal .config-restart-status:empty { display: none; }
 #config-modal .config-action-buttons .btn { font-size: 12px; }
 #config-modal #llm-error, #config-modal #llm-notice, #config-modal .config-save-result {
   display: block; max-height: 66px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 0;

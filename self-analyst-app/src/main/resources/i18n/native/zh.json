@@ -1,4 +1,6 @@
 {
+  "restartFailedTitle": "无法重启 SelfAnalyst",
+  "restartFailedBody": "应用已关闭，但未能重新启动。请重新打开 SelfAnalyst，已保存的设置仍然保留。",
   "show": "显示窗口",
   "web": "Web版桌面",
   "about": "关于",

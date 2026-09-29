@@ -1,4 +1,9 @@
 {
+  "config.restartFailed": "无法重启，请重试或退出后重新打开应用。",
+  "config.restartHint": "重启应用以应用新语言，正在执行的任务将被中断。",
+  "config.restarting": "正在重启…",
+  "config.restartNow": "立即重启",
+  "config.restartSaveFirst": "请先保存或放弃修改，再重启。",
   "timeline.periodBudgetPaused": "该时段摘要已暂停：累计生成额度用尽。可在设置中提高周期额度并重启后继续。",
   "timeline.dailyBudgetPaused": "摘要暂缓生成：今日模型预算已用尽。",
   "timeline.summaryNeedsConfiguration": "摘要等待模型配置恢复，当前显示本地活动。",

@@ -34,6 +34,7 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "save_document",
             "open_data_directory",
+            "restart_application",
             "titlebar_action",
             "titlebar_layout",
             "help_action",

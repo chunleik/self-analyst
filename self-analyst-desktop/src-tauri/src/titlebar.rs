@@ -395,7 +395,7 @@ pub fn run_titlebar_review() {
         .setup(move |app| {
             app.manage(super::JavaBackend {
                 child: Mutex::new(None),
-                job: 0,
+                job: 0.into(),
                 token: "review-only".into(),
                 port: Mutex::new(Some(port)),
                 port_file: std::env::temp_dir().join("sa-titlebar-review-no-port-file"),

@@ -279,6 +279,18 @@ final class RuntimeStorageCompatibility {
                     + (wikiVersion == 4 ? ",statistics_version,calendar_version" : ""));
             if (wikiVersion == 4) columns(connection, "wiki_statistics_progress", "version,history_before");
             columns(connection, "wiki_semantic_documents", "doc_id,entry_id,doc_type,level,period_start,period_end,text_hash,embedding_model,embedding_dimensions,status,retry_count,next_retry_at,last_error,created_at,updated_at,indexed_at");
+        } else if (kind.equals("memory") && name.equals("ontology.db")) {
+            scalar(connection, "PRAGMA user_version", "1");
+            columns(connection, "user_state", "id,body");
+            columns(connection, "projection", "id,body");
+            for (String table : java.util.List.of("user_state", "projection")) {
+                try (var row = statement.executeQuery("SELECT id,body FROM " + table)) {
+                    if (!row.next() || row.getInt(1) != 1) throw invalid("本体存储记录缺失");
+                    if (table.equals("user_state")) JSON.readValue(row.getString(2), com.selfanalyst.ontology.Ontology.UserState.class);
+                    else JSON.readValue(row.getString(2), com.selfanalyst.ontology.Ontology.Snapshot.class);
+                    if (row.next()) throw invalid("本体存储记录不唯一");
+                }
+            }
         } else if (kind.equals("memory") && name.equals("file-watch.db")) {
             scalar(connection, "PRAGMA user_version", "2");
             columns(connection, "file_metadata", "id,absolute_path,relative_path,watch_root,extension,size_bytes,file_created_at,last_modified,first_seen_at,last_collected_at,status,retry_count,next_retry_at,last_error,created_at,updated_at");

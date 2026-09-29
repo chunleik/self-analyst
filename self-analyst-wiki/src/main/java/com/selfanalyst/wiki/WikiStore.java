@@ -644,6 +644,21 @@ public class WikiStore implements AutoCloseable {
         return results;
     }
 
+    /** Read-only, consistent and bounded snapshot for local semantic projections. */
+    public List<WikiEntry> ontologySnapshot(int limit) {
+        if (limit < 1 || limit > 10001) throw new IllegalArgumentException("Invalid snapshot limit");
+        var properties = new java.util.Properties();
+        properties.setProperty("open_mode", "1");
+        try (var source = DriverManager.getConnection(conn.getMetaData().getURL(), properties);
+             var query = source.prepareStatement("SELECT * FROM wiki_entries WHERE " + CURRENT
+                     + " AND status='SUMMARIZED' ORDER BY period_start DESC,id LIMIT ?")) {
+            query.setInt(1, limit);
+            query.setQueryTimeout(15);
+            List<WikiEntry> entries = new ArrayList<>();
+            try (var rows = query.executeQuery()) { while (rows.next()) entries.add(mapEntry(rows)); }
+            return List.copyOf(entries);
+        } catch (SQLException e) { throw new IllegalStateException("Wiki ontology snapshot unavailable", e); }
+    }
     public void exportSnapshot(Instant start, Instant end, WikiLevel level, int maxRows,
                                java.util.function.Consumer<WikiEntry> consume, Runnable checkpoint) {
         if (start == null || end == null || !start.isBefore(end) || maxRows < 1 || maxRows > 100_000)

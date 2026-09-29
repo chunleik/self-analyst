@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.selfanalyst</groupId>
         <artifactId>self-analyst</artifactId>
-        <version>0.5.0-beta.2</version>
+        <version>0.6.0</version>
     </parent>
 
     <artifactId>self-analyst-app</artifactId>
@@ -17,6 +17,11 @@
     <description>SelfAnalyst app — embedded AW server, LLM agent, desktop UI API</description>
 
     <dependencies>
+        <dependency>
+            <groupId>com.selfanalyst</groupId>
+            <artifactId>self-analyst-ontology</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>

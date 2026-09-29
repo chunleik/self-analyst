@@ -6,6 +6,7 @@
 <title>SelfAnalyst</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="ontology.css">
 <link rel="stylesheet" href="llm-settings.css">
 <link rel="stylesheet" href="config-layout.css">
 <link rel="stylesheet" href="titlebar-help.css">
@@ -29,6 +30,7 @@
     <span class="brand">SelfAnalyst</span>
     <nav class="tabs">
       <button class="tab active" data-tab="agent" data-i18n="tab.agent">看板</button>
+      <button class="tab" data-tab="knowledge" data-i18n="ontology.title">知识</button>
       <button class="tab" data-tab="chat" data-i18n="tab.chat">会话</button>
       <button class="tab hidden" data-tab="files" data-i18n="tab.files">文件</button>
     </nav>
@@ -80,6 +82,7 @@
       </div>
     </div>
   </section>
+  <section id="tab-knowledge" class="tab-content"><div id="knowledge-root" class="knowledge-page"></div></section>
   <!-- ===== FILES TAB ===== -->
   <section id="tab-files" class="tab-content">
     <div class="file-page">
@@ -268,6 +271,7 @@
 <script src="runtime-storage.js"></script>
 <script src="llm-settings.js"></script>
 <script src="files.js"></script>
+<script src="ontology.js"></script>
 <script src="ui.js"></script>
 <script src="events.js"></script>
 <script src="titlebar-help.js"></script>

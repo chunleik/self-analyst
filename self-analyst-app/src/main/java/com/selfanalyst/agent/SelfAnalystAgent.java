@@ -358,6 +358,12 @@ public class SelfAnalystAgent implements AutoCloseable {
         if (agent != null && agent.getToolkit() != toolkit) agent.getToolkit().registerTool(tools);
     }
 
+    public void registerOntologyTools(com.selfanalyst.ontology.OntologyService service) {
+        var ontologyTools = new com.selfanalyst.ontology.OntologyTools(service);
+        toolkit.registerTool(ontologyTools);
+        if (agent != null && agent.getToolkit() != toolkit) agent.getToolkit().registerTool(ontologyTools);
+    }
+
     public void registerDocumentTools(com.selfanalyst.document.DocumentService service) {
         var documents = new com.selfanalyst.document.DocumentTools(service);
         toolkit.registerTool(documents);

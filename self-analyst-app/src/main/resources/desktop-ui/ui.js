@@ -96,6 +96,9 @@ function switchTab(tab) {
   state.dom.tabAgent.classList.toggle("active", tab === "agent");
   state.dom.tabChat.classList.toggle("active", tab === "chat");
   state.dom.tabFiles.classList.toggle("active", tab === "files");
+  var knowledgeTab = document.getElementById("tab-knowledge");
+  if (knowledgeTab) knowledgeTab.classList.toggle("active", tab === "knowledge");
+  if (tab === "knowledge" && typeof openKnowledge === "function") openKnowledge();
 
   if (tab === "chat") {
     // ensureActiveChatSession may create a session asynchronously; re-render

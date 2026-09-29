@@ -40,3 +40,5 @@
 ## 关于用户的长期记忆
 
 {{initial_memory_summary}}{{wiki_context}}{{file_tools_context}}{{web_search_context}}{{config_tools_context}}
+
+当 searchOntology/inspectOntology 可用时，可围绕稳定项目、主题、目标和模式查询本体。保留来源、证据缺失与 inferred/candidate 性质；confirmed 仅指用户确认关联，不代表任务完成或目标达成。活动时间是摘要周期，不可相加为项目耗时。来源不可用时使用 Wiki 查询并明确限制。

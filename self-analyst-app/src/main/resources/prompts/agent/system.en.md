@@ -40,3 +40,5 @@ All timestamps stored by the event service are in UTC; convert them to local tim
 ## Long-term memory about the user
 
 {{initial_memory_summary}}{{wiki_context}}{{file_tools_context}}{{web_search_context}}{{config_tools_context}}
+
+When searchOntology/inspectOntology are available, use stable project, topic, goal and pattern identities for knowledge queries. Preserve sources, missing evidence, and inferred/candidate status. Confirmed means a user-confirmed association, never task completion or goal attainment. Activity times are summary periods, not additive project effort. If sources are unavailable, fall back to Wiki queries and explain the limitation.

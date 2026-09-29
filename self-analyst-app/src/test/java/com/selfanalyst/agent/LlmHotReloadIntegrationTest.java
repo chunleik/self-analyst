@@ -98,6 +98,23 @@ class LlmHotReloadIntegrationTest {
             }
         }
     }
+    @Test void ontologyToolsRemainRegisteredAfterModelReplacement(@TempDir Path dir) throws Exception {
+        try (Fixture f = new Fixture(dir, "key");
+             var ontology = new com.selfanalyst.ontology.OntologyService(
+                     new com.selfanalyst.ontology.OntologyStore(dir.resolve("ontology.db")), com.selfanalyst.ontology.Ontology.Snapshot::empty)) {
+            f.agent.registerOntologyTools(ontology);
+            f.agent.chat(SESSION, "000000000001", "first").block(Duration.ofSeconds(10));
+            f.config().update(Map.of("llm.model", "replacement"));
+            f.agent.chat(SESSION, "000000000002", "second").block(Duration.ofSeconds(10));
+            assertEquals(2, f.calls.size());
+            for (JsonNode request : f.calls) {
+                Set<String> names = new HashSet<>();
+                request.path("tools").forEach(tool -> names.add(tool.path("function").path("name").asText()));
+                assertTrue(names.contains("searchOntology"));
+                assertTrue(names.contains("inspectOntology"));
+            }
+        }
+    }
     @Test void fixtureCloseFlushesUsageAndStopsBackgroundWork(@TempDir Path dir) throws Exception {
         Fixture f = new Fixture(dir, "key");
         try {

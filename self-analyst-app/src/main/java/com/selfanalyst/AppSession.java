@@ -526,6 +526,7 @@ public class AppSession implements AutoCloseable {
             if (wikiEmbeddingWorker != null) {
                 wikiEmbeddingWorker.shutdown();
             }
+            if (desktopServer != null) desktopServer.closeOntology();
             // Workers settle their last call and checkpoint before any database or usage writer closes.
             if (agent != null) {
                 agent.close();

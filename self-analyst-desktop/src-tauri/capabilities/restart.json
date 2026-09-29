@@ -1,0 +1,8 @@
+{
+  "identifier": "restart",
+  "description": "允许受管主页面重启应用，命令内校验当前后端端口及页面",
+  "windows": ["main"],
+  "local": false,
+  "remote": { "urls": ["http://localhost:*", "http://127.0.0.1:*"] },
+  "permissions": ["allow-restart-application"]
+}

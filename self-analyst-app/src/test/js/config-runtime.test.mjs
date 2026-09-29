@@ -10,12 +10,16 @@ function harness(responses = []) {
   const elements = new Map([
     ["config-runtime-status", { innerHTML: "" }],
     ["config-raw-editor", { value: "[llm]\nmodel='new'" }],
+    ["restart-config-btn", {}],
+    ["config-restart-status", {}],
+    ["save-all-config-btn", {}],
   ]);
   const state = { configOpen: true, configDirty: true, configRawBaseline: "old",
     configRawText: "new", configSaving: false, configLoadError: false,
     dom: { configGrid: { innerHTML: "" } } };
   const context = vm.createContext({
     state,
+    window: {},
     api: { getEffectiveConfig: () => Promise.resolve(responses.shift()) },
     document: { getElementById: key => elements.get(key) || null, querySelector: key => elements.get(key.slice(1)) || null },
     t: key => key,
@@ -40,6 +44,114 @@ test("runtime rendering shows saved and running values without replacing the edi
   assert.match(html, /old/);
   assert.match(html, /config.source.environment/);
   assert.equal(h.elements.get("config-raw-editor").value, "[llm]\nmodel='new'");
+});
+
+const languagePending = { application: { application: {
+  status: "restart_required", changedKeys: ["app.language"],
+} } };
+
+function restartHarness() {
+  const h = harness();
+  h.state.configDirty = false;
+  h.state.configRuntime = languagePending;
+  h.calls = [];
+  h.context.window.__TAURI__ = { core: { invoke: command => { h.calls.push(command); return Promise.resolve(); } } };
+  return h;
+}
+
+test("saved language enables restart on reopen; restoring runtime value removes it", async () => {
+  const h = restartHarness();
+  h.context.api.getEffectiveConfig = () => Promise.resolve(languagePending);
+  await h.context.refreshConfigRuntime();
+  const button = h.elements.get("restart-config-btn");
+  assert.equal(button.disabled, false);
+  assert.doesNotMatch(button.className, /hidden/);
+  h.context.api.getEffectiveConfig = () => Promise.resolve({ application: {
+    application: { status: "applied", changedKeys: [] },
+    embedding: { status: "restart_required", changedKeys: ["embedding.model"] },
+  } });
+  await h.context.refreshConfigRuntime();
+  assert.match(button.className, /hidden/);
+  assert.equal(button.disabled, true);
+});
+
+test("language save offers restart only after success and never invokes it automatically", async () => {
+  const h = restartHarness();
+  h.state.configRuntime = null;
+  h.state.configDirty = true;
+  let finish;
+  h.context.api.saveRawConfig = () => new Promise(resolve => { finish = resolve; });
+  h.context.api.getEffectiveConfig = () => Promise.resolve(languagePending);
+  const saving = h.context.saveAllConfig();
+  assert.equal(h.elements.get("restart-config-btn").disabled, true);
+  finish({ ...languagePending, restartRequired: ["app.language"] });
+  await saving;
+  assert.equal(h.elements.get("restart-config-btn").disabled, false);
+  assert.deepEqual(h.calls, []);
+});
+
+test("failed save and unsaved language selection do not enable restart", async () => {
+  const h = restartHarness();
+  h.state.configRuntime = null;
+  h.state.configDirty = true;
+  h.context.api.saveRawConfig = () => Promise.reject(new Error("disk full"));
+  await h.context.saveAllConfig();
+  await h.context.restartConfigApplication();
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.elements.get("restart-config-btn").disabled, true);
+  assert.equal(h.state.configDirty, true);
+});
+
+test("dirty, saving, load failures and model drafts block restart without losing edits", async () => {
+  for (const flag of ["configDirty", "configSaving", "configLoadError", "configRuntimeError"]) {
+    const h = restartHarness();
+    h.state[flag] = true;
+    h.context.updateConfigActionBar();
+    assert.equal(h.elements.get("restart-config-btn").disabled, true, flag);
+    await h.context.restartConfigApplication();
+    assert.deepEqual(h.calls, []);
+    assert.equal(h.state[flag], true);
+  }
+  const h = restartHarness();
+  h.state.llmSettingsView = { dirty: () => true, saving: () => false };
+  await h.context.restartConfigApplication();
+  assert.deepEqual(h.calls, []);
+});
+
+test("pending restart runs once, blocks saving, and permits retry after native failure", async () => {
+  const h = restartHarness();
+  let reject;
+  h.context.window.__TAURI__.core.invoke = command => {
+    h.calls.push(command);
+    return new Promise((_, fail) => { reject = fail; });
+  };
+  const pending = h.context.restartConfigApplication();
+  await Promise.resolve();
+  await h.context.restartConfigApplication();
+  h.state.configDirty = true;
+  h.context.api.saveRawConfig = () => { throw new Error("must not save during restart"); };
+  h.context.saveAllConfig();
+  assert.equal(h.elements.get("config-raw-editor").readOnly, true);
+  assert.deepEqual(h.calls, ["restart_application"]);
+  reject(new Error("native unavailable"));
+  await pending;
+  assert.equal(h.state.configRestarting, false);
+  assert.equal(h.elements.get("config-restart-status").textContent, "config.restartFailed");
+  h.state.configDirty = false;
+  h.context.window.__TAURI__.core.invoke = command => { h.calls.push(command); return Promise.resolve(); };
+  await h.context.restartConfigApplication();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.state.configRestarting, true);
+});
+
+test("ordinary browser explains manual restart and never offers native action", async () => {
+  const h = restartHarness();
+  h.context.window.__TAURI__ = undefined;
+  h.context.updateConfigActionBar();
+  assert.match(h.elements.get("restart-config-btn").className, /hidden/);
+  assert.equal(h.elements.get("config-restart-status").textContent, "config.languageRestart");
+  await h.context.restartConfigApplication();
+  assert.deepEqual(h.calls, []);
 });
 
 test("draining refresh stops after the final old task finishes", async () => {

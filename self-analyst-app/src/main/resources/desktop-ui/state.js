@@ -37,6 +37,8 @@ var state = {
   configLoadError: false,
   configSaveResult: null,
   configSaving: false,
+  configRestarting: false,
+  configRestartError: false,
   configOpen: false,
   configView: "llm",
   llmSettingsView: null,

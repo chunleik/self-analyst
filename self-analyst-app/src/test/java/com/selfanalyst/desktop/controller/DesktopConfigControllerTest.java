@@ -306,7 +306,7 @@ class DesktopConfigControllerTest {
     }
 
     @Test
-    void configPayloadOmitsRemovedFeatureSectionsButAcceptsLegacyKeys(@TempDir Path dir)
+    void removedFeatureKeysFollowUnknownKeyRules(@TempDir Path dir)
             throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         store.saveRaw("""
@@ -323,7 +323,13 @@ class DesktopConfigControllerTest {
         assertFalse(collection.containsKey("ocrEngine"));
 
         var raw = controller(dir, store).applyRawSave(store.readRaw());
-        assertTrue(raw.unknownKeys().isEmpty());
+        assertEquals(java.util.Set.of("aw.ocr.engine", "aw.audio.enabled", "aw.audio.legacyOption"),
+                new java.util.HashSet<>(raw.unknownKeys()));
+        store.saveRaw("");
+        controller(dir, store).applyStructuredSave(Map.of(
+                "collection", Map.of("ocrEngine", "paddle"), "audio", Map.of("enabled", true)));
+        assertFalse(store.readRaw().contains("ocr"));
+        assertFalse(store.readRaw().contains("audio"));
     }
 
     @Test
@@ -504,7 +510,7 @@ class DesktopConfigControllerTest {
                 engine = "paddle"
                 """);
         assertFalse(r4.restartRequired().contains("aw.ocr.engine"));
-        assertTrue(r4.unknownKeys().isEmpty());
+        assertEquals(java.util.List.of("aw.ocr.engine"), r4.unknownKeys());
 
         var r5 = ctrl.applyRawSave("""
                 [file.watch]

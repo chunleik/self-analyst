@@ -88,14 +88,26 @@ class ContentEventPolicyTest {
     }
 
     @Test
-    void eventStoreEnforcesPolicyByPrefixAndClientButLeavesAudioUntouched() throws Exception {
+    void rejectsRemovedRecognitionFieldsAndSources() {
+        Map<String, Object> withCount = validTitleData();
+        withCount.put("ocr_chars", 0);
+        assertThrows(ContentEventPolicyViolationException.class,
+                () -> ContentEventPolicy.validate("watcher-content_test", "watcher-content", withCount));
+        Map<String, Object> withSource = validTitleData();
+        withSource.put("title_source", "ocr_title");
+        assertThrows(ContentEventPolicyViolationException.class,
+                () -> ContentEventPolicy.validate("watcher-content_test", "watcher-content", withSource));
+    }
+
+    @Test
+    void eventStoreEnforcesPolicyByPrefixAndClientButLeavesOtherBucketsUntouched() throws Exception {
         try (Database db = new Database(tempDir)) {
             BucketStore buckets = new BucketStore(db);
             EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
             buckets.create(Bucket.create(
                     "custom-content", "Custom", "listening", "aw-watcher-content", "test"));
             buckets.create(Bucket.create(
-                    "aw-watcher-audio_test", "Audio", "audio", "audio", "test"));
+                    "custom-notes_test", "Notes", "notes", "notes", "test"));
 
             Map<String, Object> forbidden = validTitleData();
             forbidden.put("text_content", "secret");
@@ -107,11 +119,11 @@ class ContentEventPolicyTest {
                             new Event(Instant.now(), 1, forbidden)));
 
             assertDoesNotThrow(() -> events.insertEvent(
-                    "aw-watcher-audio_test",
-                    new Event(Instant.now(), 1, Map.of("text", "audio transcript"))));
+                    "custom-notes_test",
+                    new Event(Instant.now(), 1, Map.of("text", "custom note"))));
             assertEquals(0, events.countByBucket("watcher-content_test"));
             assertEquals(0, events.countByBucket("custom-content"));
-            assertEquals(1, events.countByBucket("aw-watcher-audio_test"));
+            assertEquals(1, events.countByBucket("custom-notes_test"));
         }
     }
 

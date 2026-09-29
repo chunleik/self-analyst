@@ -34,7 +34,7 @@
 | `build-portable.ps1` | 生成 Windows 免安装 ZIP 及 SHA-256 |
 | `build-installer.ps1` | 生成内含后端 JAR 与 jlink runtime 的 NSIS 安装包及 SHA-256 |
 
-OCR 与声音功能已暂时移除，因此构建脚本不下载或携带 PaddleOCR、Tesseract、Whisper 和语音模型。
+构建脚本仅打包当前模块依赖；更新 `dist/` 时会清理已知旧工具目录，避免残留工具混入发布产物。
 
 ## 验收检查
 

@@ -14,7 +14,7 @@
     <packaging>jar</packaging>
 
     <name>SelfAnalyst :: Content Capture</name>
-    <description>screenpipe-style three-layer content capture: UIA tree + OCR + hybrid</description>
+    <description>Title-only content capture using window metadata and transient UIA queries</description>
 
     <dependencies>
         <dependency>

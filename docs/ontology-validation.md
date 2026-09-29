@@ -40,3 +40,5 @@
 ## 交付检查
 
 远端检查以 PR 最新提交为准，本地成功不替代 Windows 全量验证。提交后在 PR 记录远端结果；合并与正式 tag/release 发布需遵循用户授权。
+
+实现提交 d763be4 的远端 CI 已全部通过，包括 Windows 全量验证及三平台数据守卫：[运行记录](https://github.com/chunleik/self-analyst/actions/runs/36504414653)。PR 为 [#76](https://github.com/chunleik/self-analyst/pull/76)。归档提交仍以 PR 最新检查为最终依据。

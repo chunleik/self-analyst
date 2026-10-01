@@ -96,19 +96,19 @@ public class DesktopAgentController {
         try {
             boolean llmAvailable = agent != null && agent.isLlmAvailable()
                     && !agent.isBudgetBlocked();
-            try (var task = llmAvailable ? agent.plainTask() : null) {
-            llmAvailable = task != null && task.available();
-            SummaryPromptService.SummaryTextClient summaryClient =
-                    llmAvailable ? task::complete : null;
             com.selfanalyst.i18n.Lang lang = config != null
                     ? config.effectiveLanguage() : com.selfanalyst.i18n.Lang.chinese();
             int llmCap = config != null ? config.desktopSummaryMaxTimelineLlm() : 0;
-            ctx.json(summaryAssembler.assemble(new DesktopSummaryAssembler.Request(
-                    llmAvailable, llmCap, lang, summaryClient)));
-            }
+            ctx.json(summaryAssembler.assemble(DesktopSummaryAssembler.Request.background(
+                    llmAvailable, llmCap, lang,
+                    llmAvailable ? agent::plainTask : null)));
         } catch (Exception e) {
             ctx.status(500).json(DesktopErrors.payload(ctx, "error.summary.generate", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
+    }
+
+    public void closeSummaryEnhancement() {
+        if (summaryAssembler != null) summaryAssembler.close();
     }
 
     /**

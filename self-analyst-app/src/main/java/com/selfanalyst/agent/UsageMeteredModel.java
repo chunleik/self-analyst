@@ -44,6 +44,7 @@ final class UsageMeteredModel implements Model {
         AtomicReference<ChatUsage> usage = new AtomicReference<>();
         StringBuilder generated = new StringBuilder();
         AtomicBoolean recorded = new AtomicBoolean();
+        AtomicBoolean completed = new AtomicBoolean();
         Runnable recordOnce = () -> {
             if (!recorded.compareAndSet(false, true)) return;
             ChatUsage actual = usage.get();
@@ -52,7 +53,8 @@ final class UsageMeteredModel implements Model {
                 return;
             }
             usageMeter.record(category, estimateInput(messages, tools),
-                    PlanMiddleware.estimateTokens(generated.toString()));
+                    PlanMiddleware.estimateTokens(generated.toString()),
+                    completed.get() ? UsageMeter.Source.ESTIMATED : UsageMeter.Source.RESERVED);
         };
 
         Flux<ChatResponse> responses;
@@ -64,7 +66,7 @@ final class UsageMeteredModel implements Model {
         }
         return responses
                 .doOnNext(response -> collect(response, generated, usage))
-                .doOnComplete(recordOnce)
+                .doOnComplete(() -> { completed.set(true); recordOnce.run(); })
                 .doOnError(ignored -> recordOnce.run())
                 .doOnCancel(recordOnce);
     }

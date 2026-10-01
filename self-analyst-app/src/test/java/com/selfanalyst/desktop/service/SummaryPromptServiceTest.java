@@ -14,13 +14,13 @@ import static org.junit.jupiter.api.Assertions.*;
 class SummaryPromptServiceTest {
 
     @Test
-    void enhancementUsesOneFiveSecondCallAndPreservesLocalStatistics() {
+    void enhancementUsesOneSixtySecondCallAndPreservesLocalStatistics() {
         SummaryPromptService service = new SummaryPromptService();
         SummaryService.LocalFacts facts = facts("连接超时参数调试", false);
         AtomicInteger calls = new AtomicInteger();
         var summary = service.enhance(facts, (prompt, timeout) -> {
             calls.incrementAndGet();
-            assertEquals(Duration.ofSeconds(5), timeout);
+            assertEquals(Duration.ofSeconds(60), timeout);
             assertTrue(prompt.contains("连接超时参数调试"));
             assertTrue(prompt.contains("evidenceFactIds"));
             assertTrue(prompt.length() <= SummaryPromptService.MAX_PROMPT_CHARS);
@@ -78,7 +78,7 @@ class SummaryPromptServiceTest {
         var service = new SummaryPromptService();
         var summary = service.enhance(facts, (prompt, timeout) -> {
             calls.incrementAndGet();
-            assertEquals(Duration.ofSeconds(5), timeout);
+            assertEquals(Duration.ofSeconds(60), timeout);
             throw new IllegalStateException("timeout");
         });
         assertEquals(1, calls.get());

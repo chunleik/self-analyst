@@ -229,6 +229,77 @@ class LlmHotReloadIntegrationTest {
             }
             assertEquals(1L, summaryCalls(f.meter));
             assertTrue(f.meter.totalTokens() > 0);
+            assertEquals(f.meter.totalTokens(), f.meter.snapshot().get("estimatedTokens"));
+            assertEquals(0L, f.meter.snapshot().get("actualTokens"));
+            assertEquals(0L, f.meter.snapshot().get("reservedTokens"));
+        }
+    }
+
+    @Test void dashboardReturnsImmediatelyAndCompletesARealHttpModelCallBeyondFiveSeconds(@TempDir Path dir) throws Exception {
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try (Fixture f = new Fixture(dir, "key")) {
+            String answer = """
+                    {"headline":"Inspecting connection settings","insight":"Reviewing connection documentation",
+                     "suggestion":null,"confidence":"high","taskSegments":[{"title":"Connection settings",
+                     "summary":"Reviewing documentation","evidenceFactIds":["f1"],"claimType":"observed",
+                     "confidence":"high"}]}
+                    """;
+            f.answer.set(request -> {
+                entered.countDown();
+                try { release.await(12, TimeUnit.SECONDS); }
+                catch (InterruptedException error) { Thread.currentThread().interrupt(); }
+                return answer;
+            });
+            var fact = new com.selfanalyst.wiki.WikiTitleSampler.Fact("f1", "content", "Chrome",
+                    "Connection documentation", "article", 60.0, 1, List.of(), 0);
+            var selection = new com.selfanalyst.wiki.WikiTitleSampler.Selection(List.of(fact),
+                    "{\"id\":\"f1\",\"app\":\"Chrome\",\"title\":\"Connection documentation\"}", Map.of());
+            var live = new com.selfanalyst.desktop.service.SummaryService.LocalFacts("Local facts", List.of(),
+                    List.of("Chrome"), "1 minute", "0 seconds", 1, "", 0, "complete", selection);
+            var facts = new com.selfanalyst.desktop.service.SummaryService(null, null) {
+                public LocalFacts getCurrentStatus(java.time.Instant now) { return live; }
+                public LocalFacts currentWindowFacts(java.time.Instant start, java.time.Instant end, String label) { return live; }
+                public LocalFacts factsFor(java.time.Instant start, java.time.Instant end, String label) { return live; }
+                public BehaviorData behaviorData() { return new BehaviorData(0,0,0,0,0,0,0,List.of()); }
+            };
+            Config config = Config.load(f.store.filePath().getParent());
+            var controller = new com.selfanalyst.desktop.controller.DesktopAgentController(facts,
+                    new com.selfanalyst.desktop.service.BehaviorAdviceService(), f.agent, null, config, null,
+                    new com.selfanalyst.desktop.service.SummarySnapshotStore(dir), null);
+            var app = io.javalin.Javalin.create();
+            app.get("/desktop/summary", controller::getSummary);
+            app.start(0);
+            try {
+                var client = java.net.http.HttpClient.newHttpClient();
+                var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:" + app.port() + "/desktop/summary"))
+                        .timeout(Duration.ofSeconds(2)).GET().build();
+                var response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, response.statusCode());
+                assertEquals("Local facts", JSON.readTree(response.body()).path("current").path("headline").asText());
+                assertTrue(entered.await(2, TimeUnit.SECONDS));
+                for (int i = 0; i < 4; i++) assertEquals(200, client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString()).statusCode());
+                Thread.sleep(5200);
+                assertEquals(1, f.calls.size(), "a slow request must still be the only in-flight model call");
+                assertEquals(0L, summaryCalls(f.meter), "the old five-second timeout must not cancel the request");
+                release.countDown();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                String headline = "";
+                while (System.nanoTime() < deadline && !"Inspecting connection settings".equals(headline)) {
+                    response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                    headline = JSON.readTree(response.body()).path("current").path("headline").asText();
+                    if (!"Inspecting connection settings".equals(headline)) Thread.sleep(20);
+                }
+                assertEquals("Inspecting connection settings", headline);
+                assertEquals(2, f.calls.size());
+                assertEquals(2L, summaryCalls(f.meter));
+                assertEquals(14L, f.meter.snapshot().get("actualTokens"));
+                assertEquals(0L, f.meter.snapshot().get("reservedTokens"));
+            } finally {
+                release.countDown();
+                controller.closeSummaryEnhancement();
+                app.stop();
+            }
         }
     }
 
@@ -246,6 +317,8 @@ class LlmHotReloadIntegrationTest {
                 assertEquals(1L, summaryCalls(f.meter));
                 long firstTokens = f.meter.totalTokens();
                 assertTrue(firstTokens >= 4096);
+                assertEquals(firstTokens, f.meter.snapshot().get("reservedTokens"));
+                assertEquals(0L, f.meter.snapshot().get("actualTokens"));
 
                 assertThrows(WikiSummaryPipeline.CallFailure.class,
                         () -> task.completeDetailed("same synthetic request", Duration.ofSeconds(15)));
@@ -281,6 +354,8 @@ class LlmHotReloadIntegrationTest {
                 assertNull(failure.outputTokens());
                 assertEquals(1L, summaryCalls(f.meter));
                 assertTrue(f.meter.totalTokens() >= 4096);
+                assertEquals(f.meter.totalTokens(), f.meter.snapshot().get("reservedTokens"));
+                assertEquals(0L, f.meter.snapshot().get("actualTokens"));
             } finally { release.countDown(); }
         }
     }

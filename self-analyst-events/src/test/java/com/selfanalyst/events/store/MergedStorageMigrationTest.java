@@ -28,15 +28,16 @@ class MergedStorageMigrationTest {
     }
 
     @Test void migratesHistoryWithoutChangingSourceRawAndCleansOnlyRegisteredBackups() throws Exception {
-        Instant time = Instant.parse("2026-09-16T00:00:00Z"); long eventId;
+        Instant time = Instant.parse("2026-09-16T00:00:00Z"); long eventId; Path partition;
         try (var db = new Database(root); var raw = new RawEventStore(root.resolve("raw"))) {
             var bucket = Bucket.create("test", "test", "test", "test", "host");
             new BucketStore(db).create(bucket);
             var service = new HeartbeatIngestionService(raw, new EventProjector(db, 120, 1000, "v1"));
-            eventId = service.ingest(bucket, new Event(time, 2, Map.of("app", "A")), "a").projectionEventId();
+            var receipt = service.ingest(bucket, new Event(time, 2, Map.of("app", "A")), "a");
+            eventId = receipt.projectionEventId();
+            partition = raw.partitionPath(java.time.YearMonth.from(receipt.rawEvent().receivedAt().atZone(java.time.ZoneOffset.UTC)));
             service.ingest(bucket, new Event(time.plusSeconds(1), 2, Map.of("app", "A")), "b");
         }
-        var partition = root.resolve("raw/2026/raw-events-2026-09.db");
         String hash = RawEventStore.fileSha256(partition);
         Path unrelated = root.resolve("keep.txt"); Files.writeString(unrelated, "keep");
         try (var migration = new MergedStorageMigration(root, root.resolve("raw")); var db = new Database(root)) {

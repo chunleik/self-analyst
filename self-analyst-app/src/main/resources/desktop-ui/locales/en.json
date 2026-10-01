@@ -1,4 +1,11 @@
 {
+  "usage.label": "Tokens",
+  "usage.accounted": "Today's budget accounting",
+  "usage.actual": "Provider-reported usage",
+  "usage.estimated": "Estimated completed usage",
+  "usage.reserved": "Uncertain failed-call reservations",
+  "usage.unclassified": "Unclassified historical accounting",
+  "usage.explanation": "The budget includes estimates and reservations. This total is not a provider bill.",
   "timeline.periodBudgetPaused": "Summary paused: this period's cumulative budget is exhausted. Increase the period limit in settings and restart to continue.",
   "timeline.dailyBudgetPaused": "Summary generation is waiting for the daily model budget.",
   "timeline.summaryNeedsConfiguration": "Summary is waiting for model configuration. Local activity is shown.",

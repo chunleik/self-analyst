@@ -22,6 +22,10 @@ public class SummaryPromptService {
         String complete(String prompt, Duration timeout);
     }
 
+    public interface SummaryTextSession extends SummaryTextClient, AutoCloseable {
+        @Override void close();
+    }
+
     /**
      * Enhance local facts using the LLM agent.
      * <p>
@@ -45,7 +49,7 @@ public class SummaryPromptService {
         try {
             String prompt = buildPrompt(facts, lang);
             if (prompt.length() > MAX_PROMPT_CHARS) return fromLocalOnly(facts, lang);
-            String response = client.complete(prompt, Duration.ofSeconds(5));
+            String response = client.complete(prompt, Duration.ofSeconds(60));
             if (response == null || response.isBlank()) {
                 return fromLocalOnly(facts, lang);
             }
@@ -89,7 +93,7 @@ public class SummaryPromptService {
 
         try {
             String prompt = buildAdvicePrompt(advice, lang);
-            String response = client.complete(prompt, Duration.ofSeconds(5));
+            String response = client.complete(prompt, Duration.ofSeconds(60));
             if (response == null || response.isBlank()) {
                 return advice;
             }

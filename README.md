@@ -278,7 +278,15 @@ remain available.
 New summaries link tasks to title evidence and distinguish observations from inferences; window
 titles cannot establish that a task was completed. Application names and displayed evidence are
 derived locally from validated references, so the model does not need to repeat them. The dashboard's
-current window and today use the same title facts, with a smaller budget and a five-second model timeout.
+current window and today use the same title facts, with a smaller input budget. Model enhancement runs
+in the background with a 60-second timeout per call; the page immediately shows local statistics or
+cached text. Enhancement batches are admitted at most once every five minutes, even when titles change.
+Failures stop the rest of the batch and retry after 5, 10, 20, 40, then at most 60 minutes. Admission
+and retry times survive restarts. Hidden dashboard pages stop polling; overlapping refreshes share one request.
+
+The **Tokens** menu in the status bar separates provider-reported usage, completed-call estimates,
+uncertain failed-call reservations, and unclassified historical accounting. The daily budget still
+uses their conservative total. Historical totals are retained, and the displayed accounting is not a provider bill.
 
 Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages
 are masked. Titles marked as private browsing (for example Incognito or InPrivate) are skipped, as are

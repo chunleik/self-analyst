@@ -5,6 +5,8 @@
 
 - [x] 1.3 修正 MergedStorageMigrationTest 固定月份路径，按写入回执的 receivedAt UTC 月份获取分区；运行该测试及全量 mvn test 验证。
 
+- [x] 1.4 将 feature 隔离的 titlebar-review 源码移出 src/bin 并更新 Cargo 显式路径；通过可选 target 编译及正式 NSIS 安装包构建验证。
+
 ## 2. 计量与前端
 
 - [x] 2.1 为 UsageMeter、plain/Agent/compaction 回退添加用量来源及旧文件兼容；通过 UsageMeterTest、PlanMiddlewareBudgetTest、UsageMeteredModelTest 和真实 HTTP 模型故障测试验证至多一次记账。

@@ -70,7 +70,7 @@
         <lucene.version>10.5.1</lucene.version>
         <jgit.version>7.7.1.202607240634-r</jgit.version>
         <commons-codec.version>1.18.0</commons-codec.version>
-        <commons-io.version>2.18.0</commons-io.version>
+        <commons-io.version>2.22.0</commons-io.version>
 
         <compiler-plugin.version>3.16.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.2</surefire-plugin.version>

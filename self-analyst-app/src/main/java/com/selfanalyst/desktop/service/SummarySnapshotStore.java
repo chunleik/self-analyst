@@ -47,9 +47,9 @@ public class SummarySnapshotStore {
         }
     }
 
-    public void save(SummarySnapshot snapshot) {
+    public boolean save(SummarySnapshot snapshot) {
         if (snapshot == null) {
-            return;
+            return false;
         }
         try {
             Files.createDirectories(file.getParent());
@@ -60,8 +60,10 @@ public class SummarySnapshotStore {
             } catch (IOException atomicFailure) {
                 Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (Exception e) {
             log.warn("摘要快照写入失败: {}", e.getMessage());
+            return false;
         }
     }
 

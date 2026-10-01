@@ -1986,6 +1986,12 @@ input:checked + .toggle-switch::after {
 
 .runtime-storage { margin-top: 20px; padding: 16px; border-top: 1px solid var(--border-color, #ddd); font-size: 13px; line-height: 1.7; }
 .runtime-storage .btn { margin-top: 8px; }
+.token-usage { position: relative; font-size: 11px; }
+.token-usage > summary { cursor: pointer; }
+.token-usage-detail { position: absolute; right: 0; top: 28px; z-index: 100; width: 270px; max-width: calc(100vw - 32px); padding: 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-card); box-shadow: 0 6px 24px rgba(0, 0, 0, .15); color: var(--text-primary); }
+.token-usage-detail dl { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin: 0; }
+.token-usage-detail dd { margin: 0; font-variant-numeric: tabular-nums; }
+.token-usage-detail p { margin: 12px 0 0; line-height: 1.5; color: var(--text-secondary); }
 .chat-image-composer { padding: 8px 12px; border-top: 1px solid var(--border-color); flex-shrink: 0; max-height: 220px; overflow: auto; }
 .chat-image-composer input[type=file] { display: block; max-width: 100%; font-size: 12px; }
 .chat-image-hint { display: block; font-size: 11px; color: var(--text-muted); margin: 4px 0; }

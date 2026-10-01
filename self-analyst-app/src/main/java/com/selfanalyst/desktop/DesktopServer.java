@@ -341,12 +341,17 @@ public class DesktopServer {
     }
 
     public void shutdown() {
+        stopSummaryEnhancement();
         if (pendingMemoryReview != null) pendingMemoryReview.close();
         try {
             if (statusCtrl != null) statusCtrl.close();
         } finally {
             chatSessionStore.close();
         }
+    }
+
+    public void stopSummaryEnhancement() {
+        if (agentCtrl != null) agentCtrl.closeSummaryEnhancement();
     }
 
     private com.selfanalyst.desktop.service.PendingMemoryReview pendingMemoryReview;

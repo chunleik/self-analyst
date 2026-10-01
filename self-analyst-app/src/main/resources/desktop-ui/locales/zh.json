@@ -1,4 +1,11 @@
 {
+  "usage.label": "Token 用量",
+  "usage.accounted": "今日预算记账",
+  "usage.actual": "供应商返回的用量",
+  "usage.estimated": "已完成调用的估算",
+  "usage.reserved": "失败调用的不确定预留",
+  "usage.unclassified": "历史未分类记账",
+  "usage.explanation": "预算包含估算和预留，记账总额不等于供应商账单。",
   "config.restartFailed": "无法重启，请重试或退出后重新打开应用。",
   "config.restartHint": "重启应用以应用新语言，正在执行的任务将被中断。",
   "config.restarting": "正在重启…",

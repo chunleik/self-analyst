@@ -494,6 +494,7 @@ public class AppSession implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        if (desktopServer != null) desktopServer.stopSummaryEnhancement();
         if (agent != null) agent.beginShutdown();
         boolean interrupted = Thread.interrupted();
         try {

@@ -69,6 +69,43 @@ class UsageMeterTest {
         assertEquals(0, m.totalTokens());
     }
 
+    @Test
+    void sourceTotalsPreserveConservativeBudgetAcrossRestartAndRollover() {
+        AtomicReference<LocalDate> day = new AtomicReference<>(LocalDate.of(2026, 9, 30));
+        UsageMeter meter = new UsageMeter(Mode.BLOCK, 500, .8, tempDir, day::get);
+        created.add(meter);
+        meter.record(Category.SUMMARY, 100, 50, UsageMeter.Source.ACTUAL);
+        meter.record(Category.SUMMARY, 20, 30, UsageMeter.Source.ESTIMATED);
+        meter.record(Category.SUMMARY, 100, 4096, UsageMeter.Source.RESERVED);
+        assertEquals(4396L, meter.snapshot().get("totalTokens"));
+        assertEquals(150L, meter.snapshot().get("actualTokens"));
+        assertEquals(50L, meter.snapshot().get("estimatedTokens"));
+        assertEquals(4196L, meter.snapshot().get("reservedTokens"));
+        assertEquals(0L, meter.snapshot().get("unclassifiedTokens"));
+        assertTrue(meter.isBlocked());
+        meter.flush();
+        UsageMeter reloaded = new UsageMeter(Mode.BLOCK, 500, .8, tempDir, day::get);
+        created.add(reloaded);
+        assertEquals(meter.snapshot().get("categories"), reloaded.snapshot().get("categories"));
+        day.set(day.get().plusDays(1));
+        assertEquals(0L, reloaded.snapshot().get("reservedTokens"));
+        assertEquals(0L, reloaded.totalTokens());
+    }
+
+    @Test
+    void oldFilesAreUnclassifiedAndNotReportedAsProviderUsage() throws Exception {
+        var dir = tempDir.resolve("usage");
+        java.nio.file.Files.createDirectories(dir);
+        java.nio.file.Files.writeString(dir.resolve("usage-" + LocalDate.now() + ".json"),
+                "{\"categories\":{\"summary\":{\"inputTokens\":100,\"outputTokens\":4096,\"calls\":1}}}");
+        UsageMeter meter = meter(Mode.BLOCK, 1000, .8);
+        meter.record(Category.SUMMARY, 3, 7);
+        assertEquals(4206L, meter.totalTokens());
+        assertEquals(10L, meter.snapshot().get("actualTokens"));
+        assertEquals(4196L, meter.snapshot().get("unclassifiedTokens"));
+        assertTrue(meter.isBlocked());
+    }
+
     // ── 状态判定 (SPEC-BUDGET-ENF-001) ──
 
     @Test

@@ -16,5 +16,5 @@
 ## 3. 验证与交付
 
 - [x] 3.1 同步双语 README、用户说明和相关主规格；运行针对性测试、全量 mvn test 及 OpenSpec 严格校验并记录结果。
-- [ ] 3.2 使用 openspec-sync-specs 与 openspec-archive-change 同步并归档；确认产物完整、任务完成及生产历史文件未被回写。
-- [ ] 3.3 构建可安装桌面程序，通过功能分支提交、推送和 PR 交付，确认最新提交的必需检查（包括 Windows 全量验证）通过；记录 PR 与构建位置。
+- [x] 3.2 使用 openspec-sync-specs 与 openspec-archive-change 同步并归档；确认产物完整、任务完成及生产历史文件未被回写。
+- [x] 3.3 构建可安装桌面程序，通过功能分支提交、推送和 PR 交付，确认最新提交的必需检查（包括 Windows 全量验证）通过；记录 PR 与构建位置。

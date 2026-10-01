@@ -61,9 +61,9 @@ Knowledge works locally without extra model or embedding calls. Chat can query i
 relationships through read-only tools when a model is configured. Ambiguous matches remain candidates;
 activity times describe summary periods, not precise task durations or proof of completion.
 See the [personal knowledge guide (Chinese)](docs/personal-ontology.md) for source coverage, corrections,
-backup and rebuilding. The current preview version is **0.6.0-beta.1**; release downloads remain on GitHub Releases.
+backup and rebuilding. The current stable version is **0.6.0**; download the installer or portable ZIP from GitHub Releases.
 
-[0.6.0-beta.1 release notes (Chinese)](docs/releases/0.6.0-beta.1.md)
+[0.6.0 release notes (Chinese)](docs/releases/v0.6.0.md)
 
 ## Development requirements
 

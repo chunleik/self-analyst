@@ -189,8 +189,8 @@ dist-portable/
 artifacts/
 ├── SelfAnalyst-portable.zip
 ├── SelfAnalyst-portable.zip.sha256
-├── SelfAnalyst_0.5.0-beta.2_x64-setup.exe
-└── SelfAnalyst_0.5.0-beta.2_x64-setup.exe.sha256
+├── SelfAnalyst_0.6.0-beta.1_x64-setup.exe
+└── SelfAnalyst_0.6.0-beta.1_x64-setup.exe.sha256
 ```
 
 NSIS 安装包把后端 JAR、jlink runtime 和安装布局标记作为 Tauri resource 安装。桌面壳识别该标记后，
@@ -234,3 +234,15 @@ WikiSummaryPipeline 的 `generation` 指标分别记录 `processedFacts/omittedF
 - NSIS 发布：`.\scripts\build-installer.ps1` 后运行 `.\scripts\check-installer.ps1`
 - 可执行 JAR：`.\scripts\check-packaged-jar.ps1`
 - 数据边界：内容策略、迁移、标题提取和配置墓碑的自动化测试
+
+## 10. 个人活动本体（0.6）
+
+`self-analyst-ontology` 提供类型化实体、关系白名单、用户决定、SQLite 持久化和有界查询。`ontology.db`
+以独立记录保存用户实体/别名/合并/纠错和可替换来源投影，事务写入并拒绝未知版本与损坏格式。
+`OntologySources` 在 app 内通过 Wiki 独立只读连接与受控记忆快照构建当前来源，不依赖 LLM、embedding
+或文件正文。查询前刷新来源，来源失效不再返回旧正文。细粒度优先与来源处理上限均返回覆盖说明。
+
+DesktopServer 创建本体服务，注册 `/desktop/ontology` 的受认证 API 和 Agent 只读工具；当前 toolkit
+与后续模型模板同步注册。AppSession 在关闭来源存储前关闭本体，初始化失败只禁用本体。桌面知识页
+提供项目/主题管理、关系纠错、证据查看和重建。活动周期不得当作任务持续时间或相加为项目耗时。
+本体用户决定属于备份内容，重建不能通过删除整个数据库实现。详见[个人知识指南](personal-ontology.md)。

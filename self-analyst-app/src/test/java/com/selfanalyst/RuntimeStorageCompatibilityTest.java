@@ -41,6 +41,7 @@ class RuntimeStorageCompatibilityTest {
         MemoryStore.load(memory).save();
         try (var chat = new ChatSessionStore(memory);
              var wiki = new WikiStore(memory.resolve("llm-wiki.db"));
+             var ontology = new com.selfanalyst.ontology.OntologyStore(memory.resolve("ontology.db"));
              var generation = new WikiGenerationStore(memory.resolve("wiki-generation.db"));
              var file = new FileWatchStore(memory.resolve("file-watch.db"));
              var events = new Database(root.resolve("events"))) {
@@ -77,6 +78,16 @@ class RuntimeStorageCompatibilityTest {
         before.forEach((name, bytes) -> assertArrayEquals(bytes, after.get(name), name));
     }
 
+    @Test void ontologyUnknownVersionIsRejectedWithoutWriting() throws Exception {
+        Path database = root.resolve("memory/ontology.db");
+        try (var store = new com.selfanalyst.ontology.OntologyStore(database)) { }
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) { statement.execute("PRAGMA user_version=99"); }
+        byte[] before = Files.readAllBytes(database);
+        assertThrows(RuntimeStorageGuard.StorageException.class, () -> RuntimeStorageGuard.acquire(root));
+        assertArrayEquals(before, Files.readAllBytes(database));
+        assertFalse(Files.exists(root.resolve("storage-format.json")));
+    }
     @Test void unknownMixedFileRefusesWithoutMarker() throws Exception {
         MemoryStore.load(root.resolve("memory")).save();
         Files.writeString(root.resolve("memory/unknown.bin"), "unknown");

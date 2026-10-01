@@ -30,7 +30,8 @@ $modules = @(
     "self-analyst-content",
     "self-analyst-events",
     "self-analyst-file",
-    "self-analyst-wiki"
+    "self-analyst-wiki",
+    "self-analyst-ontology"
 )
 
 function Read-PomVersion([string]$Path, [string]$Kind) {

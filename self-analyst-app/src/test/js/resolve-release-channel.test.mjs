@@ -14,6 +14,7 @@ const modules = [
   'self-analyst-events',
   'self-analyst-file',
   'self-analyst-wiki',
+  'self-analyst-ontology',
 ];
 
 function writeRepo(t, version, overrides = {}) {

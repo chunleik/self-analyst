@@ -29,7 +29,7 @@ Closing the window keeps the app running in the system tray; use the tray menu t
 The Help menu provides the user guide, issue reporting, and manual update checks.
 
 The desktop title bar places **Help** beside SelfAnalyst, with **User guide**, **Report an issue**,
-**Check for updates**, and **About SelfAnalyst**. The navigation row starts with Dashboard and Chat without repeating
+**Check for updates**, and **About SelfAnalyst**. The navigation row includes Dashboard, Knowledge and Chat without repeating
 the app name. Closing the desktop window keeps it running in the system tray.
 
 **Check for updates** compares your desktop version with the latest stable release and shows the result
@@ -49,6 +49,21 @@ Use Tab to focus Help, Enter to open it, arrow keys to select an item, and Esc t
 - **Images in chat**: Select or paste PNG/JPEG images for a model that supports image input. Each turn allows up to 4 images, each limited to 5 MiB and 20 megapixels. Images are stored with the conversation and sent to your configured model when submitted; this does not enable background screenshots.
 - **Generated files**: Ask for spreadsheets, documents, presentations, or HTML/SVG, then save or download them from file cards in chat.
 - **Long-term memory**: Automatically retain useful information and ask the assistant to correct or forget it in chat.
+
+## Personal knowledge in 0.6
+
+Open **Knowledge** to connect activity across days and apps to stable projects, topics and goals.
+Create a project or topic, add aliases, then inspect its activities, relationships and source evidence.
+Confirm, remove or correct associations; your decisions survive rebuilding and restarting. Existing
+active project memories, goals, patterns and improvement records appear as read-only source entities.
+
+Knowledge works locally without extra model or embedding calls. Chat can query its entities and
+relationships through read-only tools when a model is configured. Ambiguous matches remain candidates;
+activity times describe summary periods, not precise task durations or proof of completion.
+See the [personal knowledge guide (Chinese)](docs/personal-ontology.md) for source coverage, corrections,
+backup and rebuilding. The current preview version is **0.6.0-beta.1**; release downloads remain on GitHub Releases.
+
+[0.6.0-beta.1 release notes (Chinese)](docs/releases/0.6.0-beta.1.md)
 
 ## Development requirements
 
@@ -131,6 +146,7 @@ the system language.
 | `self-analyst-content` | Foreground windows, temporary UIA queries, and context-title extraction |
 | `self-analyst-file` | Filesystem metadata such as names, paths, sizes, and timestamps within user-configured folders |
 | `self-analyst-wiki` | Time-based aggregation, summaries, and indexing of title facts |
+| `self-analyst-ontology` | Typed entities, evidence-backed relationships, corrections, and local knowledge queries |
 | `self-analyst-app` | Startup orchestration, Agent, and desktop API/UI |
 | `self-analyst-axsidecar` | Windows UIAutomation Rust sidecar |
 | `self-analyst-desktop` | Tauri desktop shell |

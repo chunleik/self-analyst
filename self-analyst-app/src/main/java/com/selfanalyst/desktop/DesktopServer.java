@@ -61,6 +61,7 @@ public class DesktopServer {
     private final DesktopMemoryController memoryCtrl;
     private final ChatSessionStore chatSessionStore;
     private final DesktopDocumentController documentCtrl;
+    private com.selfanalyst.ontology.OntologyService ontology;
 
     /**
      * Create and register all desktop API routes.
@@ -182,6 +183,23 @@ public class DesktopServer {
                 ? new MemoryExtractionService(longTermMemoryService, config.effectiveLanguage())
                 : null;
 
+        try {
+            java.util.function.Supplier<com.selfanalyst.memory.GrowthProfile> memorySource = longTermMemoryService != null
+                    ? longTermMemoryService::ontologySnapshot
+                    : () -> {
+                        try { return MemoryStore.load(memoryDir).profile(); }
+                        catch (java.io.IOException failure) { throw new IllegalStateException("Memory unavailable", failure); }
+                    };
+            ontology = new com.selfanalyst.ontology.OntologyService(
+                    new com.selfanalyst.ontology.OntologyStore(memoryDir.resolve("ontology.db")),
+                    new com.selfanalyst.ontology.OntologySources(wikiStore, memorySource,
+                            com.selfanalyst.wiki.WikiPrivacyPolicy.of(config.wikiExcludeApps(), config.wikiExcludeSites())));
+            if (agent != null) agent.registerOntologyTools(ontology);
+        } catch (RuntimeException failure) {
+            if (ontology != null) ontology.close();
+            ontology = null;
+            log.warn("Ontology unavailable: {}", failure.getClass().getSimpleName());
+        }
         if (longTermMemoryService != null && agent != null) {
             agent.registerMemoryTools(longTermMemoryService);
             pendingMemoryReview = new com.selfanalyst.desktop.service.PendingMemoryReview(longTermMemoryService, config.effectiveLanguage());
@@ -222,6 +240,7 @@ public class DesktopServer {
      * Call this <b>before</b> {@code EventServer.start()}.
      */
     public void start() {
+        new DesktopOntologyController(ontology).register(app);
         var imageCtrl = new com.selfanalyst.desktop.controller.DesktopChatImageController(chatSessionStore.images());
         chatSessionStore.images().startMaintenance();
         app.post("/desktop/chat/sessions/{id}/images", imageCtrl::upload);
@@ -341,6 +360,7 @@ public class DesktopServer {
     }
 
     public void shutdown() {
+        closeOntology();
         stopSummaryEnhancement();
         if (pendingMemoryReview != null) pendingMemoryReview.close();
         try {
@@ -348,6 +368,10 @@ public class DesktopServer {
         } finally {
             chatSessionStore.close();
         }
+    }
+
+    public void closeOntology() {
+        if (ontology != null) ontology.close();
     }
 
     public void stopSummaryEnhancement() {

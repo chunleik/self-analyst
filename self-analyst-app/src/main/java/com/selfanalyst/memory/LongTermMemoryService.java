@@ -31,6 +31,16 @@ public class LongTermMemoryService {
         this.store = store;
     }
 
+    /** Copies immutable records while holding the same monitor as all memory mutations. */
+    public synchronized GrowthProfile ontologySnapshot() {
+        GrowthProfile source = store.profile();
+        GrowthProfile copy = new GrowthProfile();
+        copy.setGoals(new ArrayList<>(source.getGoals()));
+        copy.setPatterns(new ArrayList<>(source.getPatterns()));
+        copy.setLogs(new ArrayList<>(source.getLogs()));
+        copy.setMemories(new ArrayList<>(source.getMemories()));
+        return copy;
+    }
     public synchronized GrowthProfile profile() {
         return store.profile();
     }

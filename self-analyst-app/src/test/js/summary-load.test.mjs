@@ -138,6 +138,65 @@ test("failed summary refresh does not clear a rendered timeline", async () => {
   assert.equal(sandbox.timeline.innerHTML, before);
 });
 
+test("hidden dashboard does not poll summaries", async () => {
+  const sandbox = createSandbox({ timeline: [] });
+  sandbox.document.hidden = true;
+  sandbox.startAutoRefresh();
+  sandbox.refresh();
+  sandbox.refresh();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(sandbox.summaryCalls(), 0);
+});
+
+test("initial load and repeated polling share a pending summary request", async () => {
+  const sandbox = createSandbox({ timeline: [] });
+  let calls = 0;
+  let finish;
+  sandbox.api.getSummary = () => {
+    calls += 1;
+    return new Promise(resolve => { finish = resolve; });
+  };
+  sandbox.loadAll();
+  sandbox.startAutoRefresh();
+  sandbox.refresh();
+  sandbox.refresh();
+  assert.equal(calls, 1);
+  finish({ ...version, timeline: [] });
+  await new Promise(resolve => setTimeout(resolve, 0));
+});
+
+test("restoring visibility refreshes once and shares subsequent polls", async () => {
+  const sandbox = createSandbox({ timeline: [] });
+  let visibility;
+  sandbox.document.addEventListener = (event, listener) => { if (event === "visibilitychange") visibility = listener; };
+  sandbox.document.hidden = true;
+  sandbox.startAutoRefresh();
+  sandbox.startAutoRefresh();
+  assert.equal(sandbox.summaryCalls(), 0);
+  sandbox.document.hidden = false;
+  visibility();
+  sandbox.refresh();
+  assert.equal(sandbox.summaryCalls(), 1);
+  await new Promise(resolve => setTimeout(resolve, 0));
+});
+
+test("token usage labels actual, estimated, reserved and legacy amounts separately", () => {
+  const sandbox = createSandbox(null);
+  const panel = { innerHTML: "" };
+  sandbox.document.getElementById = id => id === "token-usage-detail" ? panel : null;
+  sandbox.state.usage = { totalTokens: 5000, actualTokens: 100, estimatedTokens: 200, reservedTokens: 4000 };
+  sandbox.renderTokenUsage();
+  for (const key of ["accounted", "actual", "estimated", "reserved", "unclassified", "explanation"]) {
+    assert.match(panel.innerHTML, new RegExp("usage\\." + key));
+  }
+  assert.match(panel.innerHTML, /usage\.reserved<\/dt><dd>4,000/);
+  assert.match(panel.innerHTML, /usage\.unclassified<\/dt><dd>700/);
+  sandbox.state.usage = { totalTokens: 5000 };
+  sandbox.renderTokenUsage();
+  assert.match(panel.innerHTML, /usage\.actual<\/dt><dd>0/);
+  assert.match(panel.innerHTML, /usage\.unclassified<\/dt><dd>5,000/);
+});
+
 test("switching back to the agent tab does not fetch summary", () => {
   const sandbox = createSandbox({
     behaviorAdvice: { type: "empty" },

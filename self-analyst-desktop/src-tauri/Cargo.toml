@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [[bin]]
 name = "titlebar-review"
-path = "src/bin/titlebar-review.rs"
+path = "src/review/titlebar-review.rs"
 required-features = ["titlebar-review"]
 test = false
 

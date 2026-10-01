@@ -125,9 +125,11 @@ back to English for unsupported languages. Select a language in desktop Settings
 language = "en" # auto, zh, or en
 ```
 
-The language selection is saved together with other configuration edits. After saving, quit from
-the system tray and restart the application. Closing the window only hides it to the tray; it
-does not restart the application. If you run the Java backend separately, restart it and refresh
+The language selection is saved together with other configuration edits. After saving, click
+**Restart now** in Advanced configuration to restart the desktop application and apply the language.
+Save or discard any further edits first; restarting interrupts running work. You can also quit
+from the system tray and reopen the application. Closing the window only hides it to the tray.
+If you run the Java backend separately, restart it and refresh
 the page. The interface, native menus, and prompts for newly generated content use the same
 effective language. Existing conversations, summaries, and user-provided text remain unchanged.
 
@@ -294,7 +296,15 @@ remain available.
 New summaries link tasks to title evidence and distinguish observations from inferences; window
 titles cannot establish that a task was completed. Application names and displayed evidence are
 derived locally from validated references, so the model does not need to repeat them. The dashboard's
-current window and today use the same title facts, with a smaller budget and a five-second model timeout.
+current window and today use the same title facts, with a smaller input budget. Model enhancement runs
+in the background with a 60-second timeout per call; the page immediately shows local statistics or
+cached text. Enhancement batches are admitted at most once every five minutes, even when titles change.
+Failures stop the rest of the batch and retry after 5, 10, 20, 40, then at most 60 minutes. Admission
+and retry times survive restarts. Hidden dashboard pages stop polling; overlapping refreshes share one request.
+
+The **Tokens** menu in the status bar separates provider-reported usage, completed-call estimates,
+uncertain failed-call reservations, and unclassified historical accounting. The daily budget still
+uses their conservative total. Historical totals are retained, and the displayed accounting is not a provider bill.
 
 Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages
 are masked. Titles marked as private browsing (for example Incognito or InPrivate) are skipped, as are

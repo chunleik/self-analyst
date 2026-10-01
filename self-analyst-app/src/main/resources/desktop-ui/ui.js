@@ -59,7 +59,26 @@ function updateStatusBar() {
   state.dom.llmDot.title = llmTitle;
   state.dom.llmText.textContent = t("status.llm");
   state.dom.llmText.title = llmTitle;
+  renderTokenUsage();
+}
 
+function renderTokenUsage() {
+  if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
+  var panel = document.getElementById("token-usage-detail");
+  if (!panel) return;
+  var usage = state.usage || {};
+  var number = function (value) { return Number.isFinite(value) && value >= 0 ? value : 0; };
+  var total = number(usage.totalTokens);
+  var actual = number(usage.actualTokens);
+  var estimated = number(usage.estimatedTokens);
+  var reserved = number(usage.reservedTokens);
+  var unknown = Math.max(0, total - actual - estimated - reserved);
+  var rows = [["usage.accounted", total], ["usage.actual", actual], ["usage.estimated", estimated],
+    ["usage.reserved", reserved], ["usage.unclassified", unknown]];
+  panel.innerHTML = '<dl>' + rows.map(function (row) {
+    return '<dt>' + escHtml(t(row[0])) + '</dt><dd>'
+      + escHtml(row[1].toLocaleString(state.dateLocale || "en-US")) + '</dd>';
+  }).join("") + '</dl><p>' + escHtml(t("usage.explanation")) + '</p>';
 }
 
 function setStatusDot(el, ok, label) {
@@ -127,7 +146,7 @@ function openConfigModal(focusKey) {
 }
 
 function switchConfigView(view, focusKey) {
-  if (state.configSaving) return Promise.resolve();
+  if (state.configSaving || state.configRestarting) return Promise.resolve();
   if (["llm", "raw", "storage"].indexOf(view) < 0) return Promise.resolve();
   if (state.configView === view && !focusKey && state.dom.configModal.dataset.view === view) return Promise.resolve();
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()))
@@ -161,7 +180,7 @@ function switchConfigView(view, focusKey) {
 }
 
 function closeConfigModal() {
-  if (state.configSaving) return;
+  if (state.configSaving || state.configRestarting) return;
   // Guard against losing unsaved edits. SPEC-CFGUI-UI-004a.
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty())) && !window.confirm(t("config.confirmDiscardClose"))) {
     return;
@@ -225,7 +244,7 @@ function loadAll() {
   });
 
   // Phase 2: summary may refresh the open window; keep any existing snapshot on screen.
-  withTimeout(api.getSummary(), 30000)
+  withTimeout(requestSummary(), 30000)
     .then(function (summary) {
       if (compatibleSummary(summary)) state.summary = summary;
       state.loading = false;
@@ -278,10 +297,35 @@ function loadTasks() {
 // ---- Auto-refresh ----
 
 var refreshTimer = null;
+var summaryRequest = null;
+var visibilityListenerInstalled = false;
+
+function requestSummary() {
+  if (document.hidden) return Promise.resolve(state.summary);
+  if (summaryRequest) return summaryRequest;
+  summaryRequest = api.getSummary().then(function (summary) {
+    summaryRequest = null;
+    return summary;
+  }, function (error) {
+    summaryRequest = null;
+    throw error;
+  });
+  return summaryRequest;
+}
 
 function startAutoRefresh() {
   stopAutoRefresh();
-  refreshTimer = setInterval(function () {
+  if (!visibilityListenerInstalled && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) refreshVisiblePage();
+    });
+    visibilityListenerInstalled = true;
+  }
+  refreshTimer = setInterval(refreshVisiblePage, 30000);
+}
+
+function refreshVisiblePage() {
+  if (document.hidden) return;
     if (state.tab === "files") {
       api.getStatus().catch(function () { return state.status; }).then(function (status) {
         state.status = status || state.status;
@@ -303,12 +347,11 @@ function startAutoRefresh() {
       updateStatusBar();
     });
     // Summary refresh separately; keep the last rendered snapshot if the request fails.
-    api.getSummary().then(function (summary) {
+    requestSummary().then(function (summary) {
       if (!compatibleSummary(summary)) return;
       state.summary = summary;
       renderTimeline();
     }).catch(function () {});
-  }, 30000);
 }
 
 function stopAutoRefresh() {

@@ -96,7 +96,7 @@ public class UsageMeter implements UsageRecorder {
         this.warnRatio = (warnRatio > 0 && warnRatio <= 1) ? warnRatio : 0.8;
         this.dir = memoryDir.resolve("usage");
         this.day = clock.get();
-        for (Category c : Category.values()) counters.put(c, new long[3]);
+        for (Category c : Category.values()) counters.put(c, new long[6]);
         load();
         log.info("UsageMeter 已初始化 (mode={}, dailyTokens={}, warnRatio={})",
                 this.mode, this.dailyTokens, this.warnRatio);
@@ -104,6 +104,12 @@ public class UsageMeter implements UsageRecorder {
 
     /** 记录一次调用的 token 用量。 */
     public void record(Category category, long inputTokens, long outputTokens) {
+        record(category, inputTokens, outputTokens, Source.ACTUAL);
+    }
+
+    public enum Source { ACTUAL, ESTIMATED, RESERVED }
+
+    public void record(Category category, long inputTokens, long outputTokens, Source source) {
         if (inputTokens < 0) inputTokens = 0;
         if (outputTokens < 0) outputTokens = 0;
         synchronized (lock) {
@@ -112,6 +118,7 @@ public class UsageMeter implements UsageRecorder {
             c[0] += inputTokens;
             c[1] += outputTokens;
             c[2] += 1;
+            c[3 + source.ordinal()] += inputTokens + outputTokens;
             maybeWarn();
             persistThrottled(false);
         }
@@ -179,6 +186,13 @@ public class UsageMeter implements UsageRecorder {
             root.put("warnRatio", warnRatio);
             root.put("status", statusLocked().name().toLowerCase());
             root.put("totalTokens", totalTokensLocked());
+            for (int i = 0; i < 3; i++) {
+                long total = 0;
+                for (long[] value : counters.values()) total += value[3 + i];
+                root.put(SOURCE_FIELDS[i], total);
+            }
+            long classified = counters.values().stream().mapToLong(value -> value[3] + value[4] + value[5]).sum();
+            root.put("unclassifiedTokens", totalTokensLocked() - classified);
             return root;
         }
     }
@@ -194,6 +208,8 @@ public class UsageMeter implements UsageRecorder {
             m.put("inputTokens", v[0]);
             m.put("outputTokens", v[1]);
             m.put("calls", v[2]);
+            for (int i = 0; i < 3; i++) m.put(SOURCE_FIELDS[i], v[3 + i]);
+            m.put("unclassifiedTokens", v[0] + v[1] - v[3] - v[4] - v[5]);
             cats.put(c.name().toLowerCase(), m);
         }
         root.put("categories", cats);
@@ -230,9 +246,7 @@ public class UsageMeter implements UsageRecorder {
             persistThrottled(true); // 落盘当天最终值
             day = now;
             for (long[] c : counters.values()) {
-                c[0] = 0;
-                c[1] = 0;
-                c[2] = 0;
+                java.util.Arrays.fill(c, 0);
             }
             warnLogged = false;
         }
@@ -270,6 +284,11 @@ public class UsageMeter implements UsageRecorder {
                         v[0] = asLong(cm.get("inputTokens"));
                         v[1] = asLong(cm.get("outputTokens"));
                         v[2] = asLong(cm.get("calls"));
+                        long remaining = Math.max(0, v[0] + v[1]);
+                        for (int i = 0; i < 3; i++) {
+                            v[3 + i] = Math.min(remaining, Math.max(0, asLong(cm.get(SOURCE_FIELDS[i]))));
+                            remaining -= v[3 + i];
+                        }
                     }
                 }
             }
@@ -319,4 +338,6 @@ public class UsageMeter implements UsageRecorder {
         if (o instanceof Number n) return n.longValue();
         return 0;
     }
+
+    private static final String[] SOURCE_FIELDS = { "actualTokens", "estimatedTokens", "reservedTokens" };
 }

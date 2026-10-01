@@ -12,7 +12,15 @@ public record SummarySnapshot(
         Map<String, Object> current,
         List<Map<String, Object>> timeline,
         Map<String, Object> behaviorAdvice,
-        String statisticsVersion, String calendarVersion, String timezone) {
+        String statisticsVersion, String calendarVersion, String timezone,
+        Map<String, Object> enhancement) {
+    public SummarySnapshot(String assembledAt, String currentWindowFingerprint,
+                           Map<String, Object> current, List<Map<String, Object>> timeline,
+                           Map<String, Object> behaviorAdvice,
+                           String statisticsVersion, String calendarVersion, String timezone) {
+        this(assembledAt, currentWindowFingerprint, current, timeline, behaviorAdvice,
+                statisticsVersion, calendarVersion, timezone, Map.of());
+    }
     public SummarySnapshot(String assembledAt, String currentWindowFingerprint,
                            Map<String, Object> current, List<Map<String, Object>> timeline,
                            Map<String, Object> behaviorAdvice) {

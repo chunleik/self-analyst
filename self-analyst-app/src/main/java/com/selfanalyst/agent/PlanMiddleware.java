@@ -68,9 +68,10 @@ public final class PlanMiddleware implements MiddlewareBase {
             StringBuilder generated = new StringBuilder();
             AtomicReference<ChatUsage> usage = new AtomicReference<>();
             AtomicBoolean recorded = new AtomicBoolean();
+            AtomicBoolean completed = new AtomicBoolean();
             Runnable recordOnce = () -> {
                 if (recorded.compareAndSet(false, true)) {
-                    recordModelCall(input, generated.toString(), usage.get());
+                    recordModelCall(input, generated.toString(), usage.get(), completed.get());
                 }
             };
             Flux<AgentEvent> modelEvents;
@@ -82,7 +83,7 @@ public final class PlanMiddleware implements MiddlewareBase {
             }
             return modelEvents
                     .doOnNext(event -> collectModelOutput(event, generated, usage))
-                    .doOnComplete(recordOnce)
+                    .doOnComplete(() -> { completed.set(true); recordOnce.run(); })
                     .doOnError(ignored -> recordOnce.run())
                     .doOnCancel(recordOnce);
         });
@@ -94,14 +95,15 @@ public final class PlanMiddleware implements MiddlewareBase {
         return Flux.just(new RequestStopEvent("Daily token budget reached"));
     }
 
-    private void recordModelCall(ModelCallInput input, String generated, ChatUsage usage) {
+    private void recordModelCall(ModelCallInput input, String generated, ChatUsage usage, boolean completed) {
         if (usageMeter == null) return;
         if (usage != null) {
             usageMeter.record(UsageMeter.Category.AGENT,
                     usage.getInputTokens(), usage.getOutputTokens());
         } else {
             usageMeter.record(UsageMeter.Category.AGENT,
-                    estimateModelInputTokens(input), estimateTokens(generated));
+                    estimateModelInputTokens(input), estimateTokens(generated),
+                    completed ? UsageMeter.Source.ESTIMATED : UsageMeter.Source.RESERVED);
         }
     }
 

@@ -951,7 +951,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                 : java.util.Map.of("mode", "off", "status", "ok");
     }
 
-    public final class PlainTask implements AutoCloseable {
+    public final class PlainTask implements com.selfanalyst.desktop.service.SummaryPromptService.SummaryTextSession {
         private final LlmRuntimeManager<AgentRuntime>.Lease lease = runtimes.acquire();
         public String complete(String input, Duration timeout) {
             return completeDetailed(input, timeout).text();
@@ -1053,7 +1053,8 @@ public class SelfAnalystAgent implements AutoCloseable {
                     long output = estimateTokens(receivedText.toString());
                     if (!completed) output = Math.max(output, startupConfig.wikiSummaryOutputTokenReserve());
                     usageMeter.record(UsageMeter.Category.SUMMARY,
-                            estimateTokens(plainSystemPrompt) + estimateTokens(userInput) + 32, output);
+                            estimateTokens(plainSystemPrompt) + estimateTokens(userInput) + 32, output,
+                            completed ? UsageMeter.Source.ESTIMATED : UsageMeter.Source.RESERVED);
                     if (!usageMissingLogged) {
                         usageMissingLogged = true;
                         log.warn("LLM 响应未返回 usage，摘要 token 使用估算；未知失败保留输出预留（仅首次提示）");

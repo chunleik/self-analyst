@@ -361,6 +361,7 @@ public class DesktopServer {
 
     public void shutdown() {
         closeOntology();
+        stopSummaryEnhancement();
         if (pendingMemoryReview != null) pendingMemoryReview.close();
         try {
             if (statusCtrl != null) statusCtrl.close();
@@ -371,6 +372,10 @@ public class DesktopServer {
 
     public void closeOntology() {
         if (ontology != null) ontology.close();
+    }
+
+    public void stopSummaryEnhancement() {
+        if (agentCtrl != null) agentCtrl.closeSummaryEnhancement();
     }
 
     private com.selfanalyst.desktop.service.PendingMemoryReview pendingMemoryReview;

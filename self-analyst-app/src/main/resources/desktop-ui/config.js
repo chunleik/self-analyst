@@ -55,8 +55,10 @@ function renderConfigActionBar() {
     '" id="config-save-result" role="status">' +
     resultText +
     "</span>" +
+    '<span id="config-restart-status" class="config-restart-status" role="status"></span>' +
     "</div>" +
     '<div class="config-action-buttons">' +
+    '<button id="restart-config-btn" class="btn btn-sm btn-outline hidden" type="button" aria-describedby="config-restart-status">' + escHtml(t("config.restartNow")) + '</button>' +
     '<button id="discard-config-btn" class="btn btn-sm btn-outline" type="button">' + escHtml(t("config.discard")) + '</button>' +
     '<button id="save-all-config-btn" class="btn btn-sm btn-primary" type="button">' + escHtml(t("config.saveChanges")) + '</button>' +
     "</div>" +
@@ -183,6 +185,7 @@ function readEmbeddingConfigFromEditor() {
 // ---- Dirty state ----
 
 function handleConfigFieldChange(e) {
+  if (state.configRestarting) return;
   var target = e.target;
   if (target && target.id === "config-language") {
     var editor = document.getElementById("config-raw-editor");
@@ -214,6 +217,7 @@ function updateConfigActionBar() {
   var result = document.querySelector("#config-save-result");
   var discardBtn = document.querySelector("#discard-config-btn");
   var saveBtn = document.querySelector("#save-all-config-btn");
+  var busy = state.configSaving || state.configRestarting;
 
   if (status) {
     if (state.configSaving) {
@@ -236,27 +240,29 @@ function updateConfigActionBar() {
   }
 
   if (discardBtn) {
-    discardBtn.disabled = state.configSaving || !state.configDirty;
+    discardBtn.disabled = busy || !state.configDirty;
   }
 
   var languageSelect = document.getElementById("config-language");
   if (languageSelect) {
-    languageSelect.disabled = state.configSaving || state.configLoadError || !languageDraft(currentEditorText());
+    languageSelect.disabled = busy || state.configLoadError || !languageDraft(currentEditorText());
   }
   var editor = document.getElementById("config-raw-editor");
-  if (editor) editor.readOnly = state.configSaving || state.configLoadError;
+  if (editor) editor.readOnly = busy || state.configLoadError;
   ["test-llm-btn", "test-embedding-btn"].forEach(function (id) {
     var button = document.getElementById(id);
-    if (button) button.disabled = state.configSaving || state.configLoadError;
+    if (button) button.disabled = busy || state.configLoadError;
   });
 
   if (saveBtn) {
-    saveBtn.disabled = state.configSaving || !state.configDirty || state.configLoadError;
+    saveBtn.disabled = busy || !state.configDirty || state.configLoadError;
     saveBtn.textContent = state.configSaving ? t("config.savingShort") : t("config.saveChanges");
   }
+  updateConfigRestart();
 }
 
 function discardConfigChanges() {
+  if (state.configSaving || state.configRestarting) return;
   state.configRawText = state.configRawBaseline;
   state.configDirty = false;
   state.configSaveResult = null;
@@ -264,7 +270,7 @@ function discardConfigChanges() {
 }
 
 function saveAllConfig() {
-  if (state.configSaving || !state.configDirty || state.configLoadError) return;
+  if (state.configSaving || state.configRestarting || !state.configDirty || state.configLoadError) return;
 
   var text = currentEditorText();
   state.configRawText = text;
@@ -272,7 +278,8 @@ function saveAllConfig() {
   state.configSaveResult = null;
   updateConfigActionBar();
 
-  api.saveRawConfig(text).then(function (resp) {
+  stopConfigRuntimeRefresh();
+  return api.saveRawConfig(text).then(function (resp) {
     state.configRawText = text;
     state.configRawBaseline = text;
     state.configDirty = false;
@@ -287,6 +294,7 @@ function saveAllConfig() {
       msg += t("config.unknownKeysSuffix", { keys: resp.unknownKeys.join(", ") });
     }
     state.configSaveResult = { type: "success", msg: msg };
+    state.configRestartError = false;
     if (resp && resp.application) state.configRuntime = { application: resp.application };
     renderConfigTab();
     refreshConfigRuntime();
@@ -348,6 +356,7 @@ function refreshConfigRuntime(remaining) {
     var changed = state.configRuntimeError || JSON.stringify(state.configRuntime) !== JSON.stringify(data);
     state.configRuntime = data;
     state.configRuntimeError = false;
+    updateConfigRestart();
     var target = document.getElementById("config-runtime-status");
     if (target && changed) {
       var details = target.querySelector ? target.querySelector("details") : null;
@@ -368,6 +377,7 @@ function refreshConfigRuntime(remaining) {
   }).catch(function () {
     if (request !== configRuntimeRequest || !state.configOpen) return;
     state.configRuntimeError = true;
+    updateConfigRestart();
     var target = document.getElementById("config-runtime-status");
     if (target) target.innerHTML = renderConfigRuntime();
   });
@@ -428,7 +438,7 @@ function editLanguageDraft(text, code) {
 function renderLanguageSetting(text) {
   var draft = languageDraft(text);
   var selected = draft && draft.found ? draft.found.value : "auto";
-  var disabled = !draft || state.configSaving || state.configLoadError;
+  var disabled = !draft || state.configSaving || state.configRestarting || state.configLoadError;
   var languages = state.status && state.status.languages || [];
   var options = [{ code: "auto", displayName: t("config.languageAuto") }].concat(languages);
   return '<div id="config-language-setting"><label>' + escHtml(t("config.language"))
@@ -436,4 +446,56 @@ function renderLanguageSetting(text) {
     + options.map(function (lang) { return '<option value="' + escHtml(lang.code) + '"' + (lang.code === selected ? ' selected' : '') + '>' + escHtml(lang.displayName) + '</option>'; }).join("")
     + '</select></label> <span>' + escHtml(t("config.languageCurrent", { language: state.lang })) + '</span>'
     + (!draft ? '<p>' + escHtml(t("config.languageUnsafe")) + '</p>' : '') + '</div>';
+}
+
+function configRestartInvoke() {
+  return typeof window !== "undefined" && window.__TAURI__ && window.__TAURI__.core
+    && typeof window.__TAURI__.core.invoke === "function" ? window.__TAURI__.core.invoke : null;
+}
+
+function configLanguageNeedsRestart() {
+  var application = state.configRuntime && state.configRuntime.application || {};
+  return Object.keys(application).some(function (key) {
+    var item = application[key];
+    return item.status === "restart_required" && item.changedKeys
+      && item.changedKeys.indexOf("app.language") >= 0;
+  });
+}
+
+function configRestartBlocked() {
+  return state.configSaving || state.configRestarting || state.configDirty || state.configLoadError
+    || state.configRuntimeError || (state.llmSettingsView
+      && (state.llmSettingsView.dirty() || state.llmSettingsView.saving()));
+}
+
+function updateConfigRestart() {
+  var button = document.getElementById("restart-config-btn");
+  var status = document.getElementById("config-restart-status");
+  var pending = configLanguageNeedsRestart();
+  var native = !!configRestartInvoke();
+  if (button) {
+    button.className = "btn btn-sm btn-outline" + (pending && native ? "" : " hidden");
+    button.disabled = !pending || !native || !!configRestartBlocked();
+    button.textContent = t(state.configRestarting ? "config.restarting" : "config.restartNow");
+  }
+  if (status) {
+    var key = !pending ? null : !native ? "config.languageRestart"
+      : state.configRestarting ? "config.restarting" : state.configRestartError ? "config.restartFailed"
+      : state.configRuntimeError ? "config.runtimeLoadFailed"
+      : configRestartBlocked() ? "config.restartSaveFirst" : "config.restartHint";
+    status.textContent = key ? t(key) : "";
+  }
+}
+
+function restartConfigApplication() {
+  var invoke = configRestartInvoke();
+  if (!invoke || !configLanguageNeedsRestart() || configRestartBlocked()) return Promise.resolve();
+  state.configRestarting = true;
+  state.configRestartError = false;
+  updateConfigActionBar();
+  return Promise.resolve().then(function () { return invoke("restart_application"); }).catch(function () {
+    state.configRestarting = false;
+    state.configRestartError = true;
+    updateConfigActionBar();
+  });
 }

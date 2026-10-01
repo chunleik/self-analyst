@@ -34,6 +34,25 @@ class DesktopSummaryAssemblerTest {
 
     private WikiStore wikiStore;
 
+    @Test
+    void continuousTitleChangesDoNotBypassFiveMinuteAdmission() {
+        CountingFacts facts = titledFacts();
+        AtomicInteger calls = new AtomicInteger();
+        var assembler = new DesktopSummaryAssembler(facts, new BehaviorAdviceService(),
+                new SummaryPromptService(), new SummarySnapshotStore(tempDir), null,
+                Clock.fixed(AFTERNOON, ZONE), Runnable::run);
+        SummaryPromptService.SummaryTextClient client = (prompt, timeout) -> {
+            calls.incrementAndGet();
+            return SummaryPromptServiceTest.validResponse();
+        };
+        for (int i = 0; i < 10; i++) {
+            facts.current = SummaryPromptServiceTest.facts("不断变化的标题" + i, false);
+            facts.today = facts.current;
+            assembler.assemble(new DesktopSummaryAssembler.Request(true, 2, Lang.chinese(), client));
+        }
+        assertTrue(calls.get() <= 2, "fact changes must not admit a new model batch on each poll");
+    }
+
     @AfterEach
     void tearDown() {
         if (wikiStore != null) {
@@ -49,10 +68,10 @@ class DesktopSummaryAssemblerTest {
         Instant before = Instant.parse("2026-09-05T19:59:59Z");
         for (Instant at : List.of(before, before.plusSeconds(1))) {
             var assembler = new DesktopSummaryAssembler(facts, new BehaviorAdviceService(),
-                    new SummaryPromptService(), snapshots, null, Clock.fixed(at, ZONE));
+                    new SummaryPromptService(), snapshots, null, Clock.fixed(at, ZONE), Runnable::run);
             assembler.assemble(new DesktopSummaryAssembler.Request(true, 4, Lang.chinese(), countingClient(calls)));
         }
-        assertEquals(2, facts.behaviorCalls.get(), "a new statistical day invalidates old text and advice");
+        assertEquals(3, facts.behaviorCalls.get(), "a new day refreshes local advice while respecting the existing model cooldown");
     }
 
     @Test
@@ -148,7 +167,7 @@ class DesktopSummaryAssemblerTest {
     }
 
     @Test
-    void fingerprintChangeRegeneratesOneAdvice() {
+    void fingerprintChangeDoesNotRegenerateAdviceDuringAdmissionCooldown() {
         wikiStore = new WikiStore(tempDir.resolve("wiki.db"));
         CountingFacts facts = new CountingFacts();
         assemble(facts, countingClient(new AtomicInteger()), true, 4);
@@ -156,7 +175,7 @@ class DesktopSummaryAssemblerTest {
         facts.today = new SummaryService.LocalFacts("今天大变", List.of(), List.of("Other 2小时"),
                 "2小时", "0秒", 80, "");
         assemble(facts, countingClient(new AtomicInteger()), true, 4);
-        assertEquals(first + 1, facts.behaviorCalls.get());
+        assertEquals(first, facts.behaviorCalls.get());
     }
 
     @Test
@@ -210,7 +229,7 @@ class DesktopSummaryAssemblerTest {
         AtomicInteger calls = new AtomicInteger();
         SummaryPromptService.SummaryTextClient client = (prompt, timeout) -> {
             calls.incrementAndGet();
-            assertEquals(java.time.Duration.ofSeconds(5), timeout);
+            assertEquals(java.time.Duration.ofSeconds(60), timeout);
             return SummaryPromptServiceTest.validResponse();
         };
         var first = assemble(facts, client, true, 4);
@@ -243,7 +262,7 @@ class DesktopSummaryAssemblerTest {
 
         facts.current = SummaryPromptServiceTest.facts("数据库索引文档", false);
         facts.today = facts.current;
-        var refreshed = assemble(facts, client, true, 4);
+        var refreshed = assembleAt(facts, client, true, 4, AFTERNOON.plusSeconds(300), Lang.chinese());
         assertEquals(4, calls.get(), "A new topic refreshes the two open windows only");
         assertEquals("wiki", entry(refreshed, "yesterday").get("source"));
         assertEquals("昨天写方案", entry(refreshed, "yesterday").get("headline"));
@@ -260,13 +279,13 @@ class DesktopSummaryAssemblerTest {
         facts.current = SummaryPromptServiceTest.facts("数据库索引文档", false);
         facts.today = facts.current;
         AtomicInteger calls = new AtomicInteger();
-        var result = assemble(facts, (prompt, timeout) -> {
+        var result = assembleAt(facts, (prompt, timeout) -> {
             calls.incrementAndGet();
-            assertEquals(java.time.Duration.ofSeconds(5), timeout);
+            assertEquals(java.time.Duration.ofSeconds(60), timeout);
             throw new IllegalStateException("timeout");
-        }, true, 2);
-        assertEquals(2, calls.get());
-        assertEquals(facts.current.headline(), entry(result, "current").get("headline"));
+        }, true, 2, AFTERNOON.plusSeconds(300), Lang.chinese());
+        assertEquals(1, calls.get(), "the first failure stops remaining model calls");
+        assertEquals("查看连接超时参数", entry(result, "current").get("headline"));
         assertEquals(facts.current.activeTime(), entry(result, "current").get("activeTime"));
         assertEquals("昨天写方案", entry(result, "yesterday").get("headline"));
     }
@@ -317,7 +336,7 @@ class DesktopSummaryAssemblerTest {
         assertEquals("snapshot", entry(cached, "current").get("source"));
         facts.current = SummaryFactFingerprintTest.withAppSeconds(Map.of("Chrome", 300.0), List.of("Chrome 5分钟"));
         facts.today = facts.current;
-        assemble(facts, client, true, 2);
+        assembleAt(facts, client, true, 2, AFTERNOON.plusSeconds(300), Lang.chinese());
         assertEquals(4, calls.get(), "A five-minute bucket change should refresh the model text");
     }
 
@@ -332,7 +351,10 @@ class DesktopSummaryAssemblerTest {
                     : SummaryPromptServiceTest.validResponse();
         };
         var chinese = assembleAt(facts, client, true, 2, AFTERNOON, Lang.chinese());
-        var english = assembleAt(facts, client, true, 2, AFTERNOON.plusSeconds(60), Lang.english());
+        var waiting = assembleAt(facts, client, true, 2, AFTERNOON.plusSeconds(60), Lang.english());
+        assertEquals(2, calls.get(), "language changes must not bypass admission");
+        assertFalse(asJson(entry(waiting, "current").get("taskSegments")).contains("观察到标题"));
+        var english = assembleAt(facts, client, true, 2, AFTERNOON.plusSeconds(300), Lang.english());
         assertEquals(4, calls.get());
         assertFalse(chinese.get("currentWindowFingerprint").equals(english.get("currentWindowFingerprint")));
         assertEquals("Inspecting connection settings", entry(english, "current").get("headline"));
@@ -341,7 +363,7 @@ class DesktopSummaryAssemblerTest {
     }
 
     @Test
-    void minutePollingDoesNotRenewFailedTextAndRetriesAfterFifteenMinutes() {
+    void minutePollingPreservesFailureCooldownAndRetriesWithBackoff() {
         var facts = titledFacts();
         AtomicInteger calls = new AtomicInteger();
         SummaryPromptService.SummaryTextClient client = (prompt, timeout) -> {
@@ -353,14 +375,14 @@ class DesktopSummaryAssemblerTest {
             Instant at = AFTERNOON.plusSeconds(minute * 60L);
             var result = assembleAt(facts, client, true, 2, at, Lang.chinese());
             assertEquals(at.toString(), result.get("assembledAt"));
-            String expectedTextAt = (minute <= 15 ? AFTERNOON : at).toString();
+            String expectedTextAt = minute < 15 ? null : AFTERNOON.plusSeconds(15 * 60).toString();
             assertEquals(expectedTextAt, entry(result, "current").get("textGeneratedAt"));
             assertEquals(expectedTextAt, entry(result, "today").get("textGeneratedAt"));
-            if (minute <= 15) {
-                assertEquals(2, calls.get());
+            if (minute < 15) {
+                assertEquals(minute < 5 ? 1 : 2, calls.get());
                 assertEquals(facts.current.headline(), entry(result, "current").get("headline"));
             } else {
-                assertEquals(4, calls.get(), "Polling must not keep a failed attempt fresh forever");
+                assertEquals(4, calls.get(), "Polling must not bypass failure cooldown or renew model text");
                 assertEquals("查看连接超时参数", entry(result, "current").get("headline"));
             }
         }
@@ -448,7 +470,7 @@ class DesktopSummaryAssemblerTest {
         Clock clock = Clock.fixed(at, ZONE);
         DesktopSummaryAssembler assembler = new DesktopSummaryAssembler(
                 facts, new BehaviorAdviceService(), new SummaryPromptService(),
-                new SummarySnapshotStore(tempDir), wikiStore, clock);
+                new SummarySnapshotStore(tempDir), wikiStore, clock, Runnable::run);
         return assembler.assemble(new DesktopSummaryAssembler.Request(
                 llmAvailable, cap, lang, client));
     }

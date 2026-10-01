@@ -1,4 +1,6 @@
 {
+  "restartFailedTitle": "Unable to restart SelfAnalyst",
+  "restartFailedBody": "The application has closed but could not restart. Please open SelfAnalyst again. Your saved settings are retained.",
   "show": "Show window",
   "web": "Web desktop",
   "about": "About",

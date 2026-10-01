@@ -143,7 +143,7 @@ function openConfigModal(focusKey) {
 }
 
 function switchConfigView(view, focusKey) {
-  if (state.configSaving) return Promise.resolve();
+  if (state.configSaving || state.configRestarting) return Promise.resolve();
   if (["llm", "raw", "storage"].indexOf(view) < 0) return Promise.resolve();
   if (state.configView === view && !focusKey && state.dom.configModal.dataset.view === view) return Promise.resolve();
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()))
@@ -177,7 +177,7 @@ function switchConfigView(view, focusKey) {
 }
 
 function closeConfigModal() {
-  if (state.configSaving) return;
+  if (state.configSaving || state.configRestarting) return;
   // Guard against losing unsaved edits. SPEC-CFGUI-UI-004a.
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty())) && !window.confirm(t("config.confirmDiscardClose"))) {
     return;

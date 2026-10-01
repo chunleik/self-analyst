@@ -399,6 +399,12 @@
           "markdownDescription": "Enables the open_data_directory command without any pre-configured scope."
         },
         {
+          "description": "Enables the restart_application command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-restart-application",
+          "markdownDescription": "Enables the restart_application command without any pre-configured scope."
+        },
+        {
           "description": "Enables the save_document command without any pre-configured scope.",
           "type": "string",
           "const": "allow-save-document",
@@ -427,6 +433,12 @@
           "type": "string",
           "const": "deny-open-data-directory",
           "markdownDescription": "Denies the open_data_directory command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the restart_application command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-restart-application",
+          "markdownDescription": "Denies the restart_application command without any pre-configured scope."
         },
         {
           "description": "Denies the save_document command without any pre-configured scope.",

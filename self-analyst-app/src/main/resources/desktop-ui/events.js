@@ -68,6 +68,12 @@ function setupEvents() {
     if (target && target.nodeType !== 1) target = target.parentElement;
     target = target && target.closest ? target.closest("button") : null;
     if (!target || !state.dom.configGrid.contains(target)) return;
+    if (target.disabled || state.configRestarting) return;
+
+    if (target.id === "restart-config-btn") {
+      restartConfigApplication();
+      return;
+    }
 
     if (target.id === "save-all-config-btn") {
       saveAllConfig();

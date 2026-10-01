@@ -110,9 +110,11 @@ back to English for unsupported languages. Select a language in desktop Settings
 language = "en" # auto, zh, or en
 ```
 
-The language selection is saved together with other configuration edits. After saving, quit from
-the system tray and restart the application. Closing the window only hides it to the tray; it
-does not restart the application. If you run the Java backend separately, restart it and refresh
+The language selection is saved together with other configuration edits. After saving, click
+**Restart now** in Advanced configuration to restart the desktop application and apply the language.
+Save or discard any further edits first; restarting interrupts running work. You can also quit
+from the system tray and reopen the application. Closing the window only hides it to the tray.
+If you run the Java backend separately, restart it and refresh
 the page. The interface, native menus, and prompts for newly generated content use the same
 effective language. Existing conversations, summaries, and user-provided text remain unchanged.
 

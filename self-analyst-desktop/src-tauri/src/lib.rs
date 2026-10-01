@@ -3,6 +3,7 @@ mod documents;
 mod i18n;
 mod instance;
 mod java_path;
+mod restart;
 mod runtime_storage;
 mod startup_log;
 mod titlebar;
@@ -43,13 +44,22 @@ const INSTALLED_LAYOUT_MARKER: &str = "installed-layout.marker";
 
 struct JavaBackend {
     child: Mutex<Option<Child>>,
-    job: isize,
+    job: std::sync::atomic::AtomicIsize,
     token: String,
     port: Mutex<Option<u16>>,
     port_file: std::path::PathBuf,
 }
 
 impl JavaBackend {
+    fn close_job(&self) {
+        let job = self.job.swap(0, std::sync::atomic::Ordering::AcqRel);
+        if job != 0 {
+            unsafe {
+                let _ = CloseHandle(job as HANDLE);
+            }
+        }
+    }
+
     fn shutdown_gracefully(&self) {
         let port = self.port.lock().ok().and_then(|guard| *guard);
         if let Some(port) = port {
@@ -82,11 +92,7 @@ impl JavaBackend {
 
 impl Drop for JavaBackend {
     fn drop(&mut self) {
-        if self.job != 0 {
-            unsafe {
-                let _ = CloseHandle(self.job as HANDLE);
-            }
-        }
+        self.close_job();
         if let Ok(child) = self.child.get_mut() {
             if let Some(mut child) = child.take() {
                 let _ = child.wait();
@@ -361,7 +367,7 @@ fn start_java(app: AppHandle, automatic: bool) {
     });
     app.manage(JavaBackend {
         child: Mutex::new(Some(child)),
-        job,
+        job: job.into(),
         token: token.clone(),
         port: Mutex::new(None),
         port_file: port_file.clone(),
@@ -711,15 +717,18 @@ pub fn run() {
     // losing the requested code. Preserve it across run_return for process callers.
     let requested_exit = std::rc::Rc::new(std::cell::Cell::new(None));
     let exit_state = requested_exit.clone();
-    let runtime_exit = tauri::Builder::default()
+    let restart = std::sync::Arc::new(restart::Restart::default());
+    let desktop = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             documents::save_document,
             runtime_storage::open_data_directory,
+            restart::restart_application,
             titlebar::titlebar_action,
             titlebar::titlebar_layout,
             titlebar::help_action
         ])
         .manage(Mutex::new(instance::WindowIntent::default()))
+        .manage(restart.clone())
         .plugin(tauri_plugin_shell::init())
         .setup(move |app| {
             startup_log::write("tauri setup started");
@@ -728,32 +737,56 @@ pub fn run() {
                 let window_handle = handle.clone();
                 let _ = handle.run_on_main_thread(move || request_main_window(&window_handle));
             })?;
-            app.manage(Mutex::new(listener));
-            app.manage(single_instance);
+            app.manage(Mutex::new(Some(listener)));
+            app.manage(Mutex::new(Some(single_instance)));
             start_java(app.handle().clone(), automatic);
 
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error building app")
-        .run_return(move |app, event| {
-            if let RunEvent::ExitRequested { code, .. } = event {
-                startup_log::write(&format!("exit requested code={code:?}"));
-                exit_state.set(code);
-                if let Some(state) = app.try_state::<JavaBackend>() {
-                    state.shutdown_gracefully();
-                }
-            } else if let RunEvent::WindowEvent {
-                event: WindowEvent::CloseRequested { api, .. },
-                ..
-            } = event
-            {
-                api.prevent_close();
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
-                }
+        .expect("error building app");
+    let handle = desktop.handle().clone();
+    let runtime_exit = desktop.run_return(move |app, event| {
+        if let RunEvent::ExitRequested { code, .. } = event {
+            startup_log::write(&format!("exit requested code={code:?}"));
+            exit_state.set(code);
+            if let Some(state) = app.try_state::<JavaBackend>() {
+                state.shutdown_gracefully();
             }
-        });
+        } else if let RunEvent::WindowEvent {
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } = event
+        {
+            api.prevent_close();
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.hide();
+            }
+        }
+    });
+    if let Err(error) = restart.finish(
+        || {
+            // AppHandle clones held by listeners can keep managed state alive after
+            // run_return. Explicitly stop children and release the instance first.
+            if let Some(backend) = handle.try_state::<JavaBackend>() {
+                // ExitRequested already completed graceful shutdown.
+                backend.close_job();
+            }
+            if let Some(listener) = handle.try_state::<Mutex<Option<instance::Listener>>>() {
+                drop(listener.lock().unwrap_or_else(|e| e.into_inner()).take());
+            }
+            if let Some(instance) = handle.try_state::<Mutex<Option<instance::Instance>>>() {
+                drop(instance.lock().unwrap_or_else(|e| e.into_inner()).take());
+            }
+        },
+        |command| command.spawn().map(|_| ()),
+    ) {
+        startup_log::write(&format!("restart failed: {error}"));
+        show_message(
+            &i18n::text("restartFailedTitle"),
+            &i18n::text("restartFailedBody"),
+        );
+    }
     std::process::exit(requested_exit.get().unwrap_or(runtime_exit));
 }
 

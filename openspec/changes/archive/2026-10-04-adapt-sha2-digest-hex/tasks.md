@@ -6,4 +6,4 @@
 ## 2. 验证
 
 - [x] 2.1 运行 `openspec validate adapt-sha2-digest-hex --strict`，通过
-- [ ] 2.2 PR 的 `Windows 全量验证` 通过（本机无 Rust 工具链且该文件仅面向 Windows，无法本地编译）
+- [x] 2.2 PR 的 `Windows 全量验证` 通过（本机无 Rust 工具链且该文件仅面向 Windows，无法本地编译）

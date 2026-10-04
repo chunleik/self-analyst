@@ -53,4 +53,4 @@ jobs:
           path: website
       - name: 部署官网
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

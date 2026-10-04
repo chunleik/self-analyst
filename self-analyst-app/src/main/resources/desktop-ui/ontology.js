@@ -60,6 +60,7 @@ function knowledgeQuery(offset) {
 
 function openKnowledge() {
   if (!knowledge.mounted) mountKnowledge();
+  if (typeof refreshNeo4jStatus === "function") refreshNeo4jStatus();
   return loadKnowledge();
 }
 function mountKnowledge() {
@@ -78,6 +79,7 @@ function mountKnowledge() {
       catch (error) { knowledgeMessage(error.message, true); }
     }));
   heading.append(intro, actions); root.append(heading);
+  if (typeof mountNeo4jSync === "function") mountNeo4jSync(root);
   var filters = knowledgeNode("form", null, "knowledge-filters");
   knowledge.query = knowledgeField(filters, "ontology.search", knowledgeNode("input")); knowledge.query.type = "search";
   knowledge.query.maxLength = 300;

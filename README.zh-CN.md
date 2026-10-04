@@ -28,6 +28,7 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。它记录前台�
 
 - **活动回顾**：通过看板时间轴查看当前、今天和历史活动，并带着条目上下文继续追问。统计日为本地时间 04:00 至次日 04:00，详见[活动统计说明](docs/activity-statistics.md)。
 - **个人知识**：在“知识”中把跨日期、跨应用的活动关联到稳定的项目、主题和目标；确认、移除或改正关联，你的决定在重建和重启后保留。知识在本地工作，不额外调用模型。详见[个人知识指南](docs/personal-ontology.md)。
+- **可选 Neo4j 同步**：将当前已纠错的知识图谱手工发送到你配置的 Neo4j 数据库。默认关闭，每次同步都需确认目标、命名空间和发送范围，本地存储仍为权威。详见[配置与只读查询指南](docs/neo4j-sync.md)。
 - **图片提问**：在会话中选择或粘贴 PNG/JPEG 图片，交给支持图片输入的模型分析；每轮最多 4 张，每张不超过 5 MiB 和 2000 万像素。不启用后台截屏。
 - **生成文件**：让助手生成表格、文档、演示文稿或 HTML/SVG，通过会话文件卡片保存或下载。详见[文档生成指南](docs/document-generation.md)。
 - **长期记忆**：自动保存有长期价值的信息，过滤凭据、敏感推断和一次性操作流水；可以在会话中要求更正或忘记。
@@ -36,13 +37,15 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。它记录前台�
 
 ## 隐私与数据边界
 
-活动数据保存在本机，调用模型时只将所需输入发送到你配置的服务端，详见[隐私说明](PRIVACY.md)。
+活动数据保存在本机，调用模型时只将所需输入发送到你配置的服务端。可选 Neo4j 同步仅在明确确认后，
+将有界知识图谱快照发送到你指定的数据库；其中可能包含私密标题、描述和证据。详见[隐私说明](PRIVACY.md)。
 
 - 内容事件只保存白名单内的标题字段，不保存正文、UIA 文本、控件树、截图、OCR 或音频。
 - UIA 查询失败时退回系统窗口标题；敏感应用会跳过 UIA 查询。
 - 文件采集仅限你配置的目录内的文件系统元数据（文件名、路径、大小和时间）；除安全解析 `.gitignore` 外，不读取文件正文，不计算内容哈希，也不生成摘要、主题或向量。
 - 标题送入模型前，会隐藏内网 IPv4 地址、会议号和账号验证页，并跳过带私人浏览标记的标题。没有任何标记的无痕窗口无法识别，请把敏感应用和网站加入 `wiki.privacy.excludeApps`（逗号分隔的可执行文件名，如 `weixin.exe`）和 `wiki.privacy.excludeSites`，然后重启后端。
 - 事件库保存合并后的活动区间，是权威数据，需要定期备份。磁盘低于阻断阈值时停止新采集，不会自动删除历史活动。
+- 保存 Neo4j 配置和查询状态都不会连接 Neo4j。关闭同步不会删除远端副本；来源删除仅在下次成功手工同步后反映到远端。更换命名空间会保留旧命名空间。
 
 ## 配置
 
@@ -50,7 +53,8 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。它记录前台�
 **高级配置**（TOML 原文编辑）和**运行数据**（目录、存储占用和迁移备份清理）。
 
 显式 TOML 配置优先于环境变量，环境变量优先于默认值。`llm.api-key`、`llm.base-url`、`llm.model` 和
-`llm.temperature` 修改后无需重启，新聊天和摘要任务即采用新配置；其他键在重启后生效。
+`llm.temperature` 修改后无需重启，新聊天和摘要任务即采用新配置。保存的 `neo4j.*` 设置在下次手工同步时生效，
+无需重启，也不会自动发送数据；其他需重启的键会在设置中标明。
 外部修改 TOML 文件不会自动应用，需要在应用内保存或重启后端。
 
 | 配置键 | 环境变量 | 默认值 |
@@ -62,6 +66,20 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。它记录前台�
 | `events.port` | —（仅 `config.toml`） | `5700` |
 | `wiki.privacy.excludeApps` | —（仅 `config.toml`） | 空 |
 | `wiki.privacy.excludeSites` | —（仅 `config.toml`） | 空 |
+| `neo4j.enabled` | —（仅 `config.toml`） | `false` |
+| `neo4j.uri` | —（仅 `config.toml`） | 空 |
+| `neo4j.database` | —（仅 `config.toml`） | `neo4j` |
+| `neo4j.username` | —（仅 `config.toml`） | `neo4j` |
+| `neo4j.password-env` | 指定密码环境变量的名称，不是密码值 | `SELF_ANALYST_NEO4J_PASSWORD` |
+| `neo4j.namespace` | —（仅 `config.toml`） | 空；必填且由一个本地数据集独占 |
+| `neo4j.timeout-seconds` | —（仅 `config.toml`） | `15`（范围 `1`–`120`） |
+
+使用 Neo4j 前，在应用启动时继承的环境中设置密码，切勿把密码写入 TOML 或 URI；更改进程环境后需重启应用。
+明文连接仅允许 `localhost`、`127.0.0.1` 或 `[::1]` 上的 `bolt://`；远端必须使用
+`bolt+s://` 或 `neo4j+s://` 和有效、受信任 CA 签发的证书。禁止明文 `neo4j://`、`+ssc`、嵌入凭据、
+路径（包括末尾斜杠）、查询参数和片段。为本地数据集选择独占命名空间，在“知识 → Neo4j 手工同步”
+核对发送范围及目标，再点击“确认并同步…”。目标账号需要图数据写入、创建约束和 `SHOW CONSTRAINTS` 的权限；
+详细配置与安全 Cypher 示例见 [Neo4j 指南](docs/neo4j-sync.md)。
 
 完整键表见[模型设置指南](docs/llm-settings.md)和[用户配置规格](openspec/specs/user-configuration/spec.md)，
 摘要预算与限制见[架构文档](docs/architecture.md)。
@@ -100,6 +118,7 @@ Set-Location self-analyst-desktop; pnpm install; pnpm tauri dev # 运行桌面�
 
 - [文档与规格索引](docs/README.md)
 - [架构](docs/architecture.md)
+- [可选 Neo4j 同步与只读查询](docs/neo4j-sync.md)
 - [测试与集成验证](docs/testing.md)
 - [摘要质量评测](docs/summary-quality-evaluation.md)
 - [官网预览与发布说明](docs/website.md)

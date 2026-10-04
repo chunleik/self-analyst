@@ -84,6 +84,33 @@ public final class Ontology {
         public static Snapshot empty() { return new Snapshot(List.of(), List.of(), Map.of("wiki", "unavailable", "memory", "unavailable")); }
     }
 
+    /** Current, corrected graph; unlike a source Snapshot this includes manual entities. */
+    public record ExportSnapshot(List<Entity> entities, List<Assertion> assertions,
+                                 Map<String, String> redirects, Map<String, String> coverage) {
+        public ExportSnapshot {
+            entities = List.copyOf(entities); assertions = List.copyOf(assertions);
+            redirects = Map.copyOf(redirects); coverage = Map.copyOf(coverage);
+            if (entities.size() > 60000 || assertions.size() > 100000 || redirects.size() > 100000) {
+                throw new IllegalArgumentException("neo4j.snapshotTooLarge");
+            }
+            Map<String, Entity> byId = new HashMap<>();
+            for (Entity entity : entities) {
+                if (byId.put(entity.id(), entity) != null) throw new IllegalArgumentException("Duplicate export entity");
+            }
+            Set<String> keys = new HashSet<>();
+            for (Assertion assertion : assertions) {
+                validateRelation(byId.get(assertion.subject()), assertion.predicate(), byId.get(assertion.object()));
+                if (!keys.add(assertion.key())) throw new IllegalArgumentException("Duplicate export assertion");
+            }
+            for (var entry : redirects.entrySet()) {
+                required(entry.getKey(), 256, "redirect");
+                if (byId.containsKey(entry.getKey()) || !byId.containsKey(entry.getValue())) {
+                    throw new IllegalArgumentException("Invalid export redirect");
+                }
+            }
+        }
+    }
+
     public record UserState(Map<String, Entity> entities, Map<String, Decision> decisions, Map<String, String> redirects) {
         public UserState {
             entities = Map.copyOf(entities); decisions = Map.copyOf(decisions); redirects = Map.copyOf(redirects);

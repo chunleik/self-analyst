@@ -1,4 +1,5 @@
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::os::windows::ffi::OsStrExt;
@@ -12,6 +13,14 @@ use windows_sys::Win32::UI::Controls::Dialogs::{
 };
 
 const MAX_BYTES: u64 = 50 * 1024 * 1024;
+fn hex_digest(hash: Sha256) -> String {
+    let digest = hash.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest.iter() {
+        let _ = write!(hex, "{byte:02x}");
+    }
+    hex
+}
 fn valid_id(id: &str) -> bool {
     id.len() == 32
         && id
@@ -170,7 +179,7 @@ fn save(port: u16, token: &str, session: &str, artifact: &str) -> Result<String,
                 .write_all(&buffer[..n])
                 .map_err(|_| "document.saveFailed")?;
         }
-        if count != size || format!("{:x}", hash.finalize()) != checksum {
+        if count != size || hex_digest(hash) != checksum {
             return Err("document.saveFailed".into());
         }
         output.sync_all().map_err(|_| "document.saveFailed")?;
@@ -266,6 +275,15 @@ fn replace(temporary: &Path, target: &Path, exists: bool) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn digest_is_lowercase_hex() {
+        let mut hash = Sha256::new();
+        hash.update(b"abc");
+        assert_eq!(
+            hex_digest(hash),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
     #[test]
     fn identifiers_and_origin_are_restricted() {
         assert!(supported_extension("html"));

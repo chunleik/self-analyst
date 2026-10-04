@@ -1,6 +1,6 @@
 "use strict";
 
-var knowledge = { mounted: false, offset: 0, detailOffset: 0, selected: null, generation: 0, detailGeneration: 0 };
+var knowledge = { mounted: false, offset: 0, detailOffset: 0, selected: null, items: [], generation: 0, detailGeneration: 0 };
 
 function ontologyRequest(path, method, body) {
   return fetch(API_BASE + "/desktop/ontology" + path, {
@@ -20,8 +20,8 @@ function knowledgeButton(key, action, className) {
   var button = knowledgeNode("button", t(key), className || "btn btn-outline");
   button.type = "button"; button.addEventListener("click", action); return button;
 }
-function knowledgeField(parent, key, input) {
-  var label = knowledgeNode("label", null, "knowledge-field");
+function knowledgeField(parent, key, input, className) {
+  var label = knowledgeNode("label", null, "knowledge-field" + (className ? " " + className : ""));
   label.append(knowledgeNode("span", t(key)), input); parent.append(label); return input;
 }
 function knowledgeSelect(options) {
@@ -33,6 +33,13 @@ function knowledgeMessage(text, error) {
   var node = document.getElementById("knowledge-message");
   if (!node) return;
   node.textContent = text; node.classList.toggle("knowledge-error", !!error);
+}
+function knowledgeMarkSelected() {
+  knowledge.items.forEach(function (item) {
+    var selected = item.id === knowledge.selected;
+    item.button.classList.toggle("selected", selected);
+    item.button.setAttribute("aria-current", String(selected));
+  });
 }
 function knowledgePeriod(entity) {
   if (!entity.start || !entity.end) return "";
@@ -78,15 +85,15 @@ function mountKnowledge() {
     ["project", "activity", "topic", "application", "goal", "pattern", "improvement"].map(function (type) { return [type, "ontology.type." + type]; }))));
   knowledge.start = knowledgeField(filters, "ontology.start", knowledgeNode("input")); knowledge.start.type = "datetime-local";
   knowledge.end = knowledgeField(filters, "ontology.end", knowledgeNode("input")); knowledge.end.type = "datetime-local";
-  knowledge.unclassified = knowledgeField(filters, "ontology.unclassified", knowledgeNode("input")); knowledge.unclassified.type = "checkbox";
+  knowledge.unclassified = knowledgeField(filters, "ontology.unclassified", knowledgeNode("input"), "knowledge-check"); knowledge.unclassified.type = "checkbox";
   var submit = knowledgeNode("button", t("ontology.search"), "btn btn-primary"); submit.type = "submit"; filters.append(submit);
   filters.addEventListener("submit", function (event) { event.preventDefault(); knowledge.offset = 0; loadKnowledge(); });
   root.append(filters);
-  var message = knowledgeNode("p"); message.id = "knowledge-message"; message.setAttribute("role", "status"); message.setAttribute("aria-live", "polite"); root.append(message);
+  var message = knowledgeNode("p", null, "knowledge-status"); message.id = "knowledge-message"; message.setAttribute("role", "status"); message.setAttribute("aria-live", "polite"); root.append(message);
   knowledge.coverage = knowledgeNode("p", null, "knowledge-muted"); root.append(knowledge.coverage);
   var layout = knowledgeNode("div", null, "knowledge-layout");
   var side = knowledgeNode("section", null, "knowledge-list-panel"); side.setAttribute("aria-label", t("ontology.entities"));
-  knowledge.list = knowledgeNode("div", null, "knowledge-list"); knowledge.pages = knowledgeNode("div", null, "knowledge-actions");
+  knowledge.list = knowledgeNode("div", null, "knowledge-list"); knowledge.pages = knowledgeNode("div", null, "knowledge-actions knowledge-pager");
   side.append(knowledge.list, knowledge.pages);
   knowledge.detail = knowledgeNode("section", null, "knowledge-detail"); knowledge.detail.setAttribute("aria-label", t("ontology.details"));
   knowledge.detail.append(knowledgeNode("p", t("ontology.select"), "knowledge-empty")); layout.append(side, knowledge.detail); root.append(layout);
@@ -97,16 +104,16 @@ async function loadKnowledge() {
   try {
     var page = await ontologyRequest("/entities?" + knowledgeQuery(knowledge.offset));
     if (generation !== knowledge.generation) return;
-    knowledge.list.replaceChildren(); knowledge.pages.replaceChildren();
+    knowledge.list.replaceChildren(); knowledge.pages.replaceChildren(); knowledge.items = [];
     if (!page.items.length) knowledge.list.append(knowledgeNode("p", t("ontology.empty"), "knowledge-empty"));
     page.items.forEach(function (entity) {
       var button = knowledgeNode("button", null, "knowledge-entity"); button.type = "button";
-      button.classList.toggle("selected", entity.id === knowledge.selected);
       button.append(knowledgeNode("span", t("ontology.type." + entity.type), "knowledge-badge"), knowledgeNode("strong", entity.name));
       if (entity.start) button.append(knowledgeNode("small", knowledgePeriod(entity)));
       button.addEventListener("click", function () { knowledge.selected = entity.id; knowledge.detailOffset = 0; loadKnowledgeDetail(); });
-      knowledge.list.append(button);
+      knowledge.list.append(button); knowledge.items.push({ id: entity.id, button: button });
     });
+    knowledgeMarkSelected();
     knowledgePager(knowledge.pages, page, function (offset) { knowledge.offset = offset; loadKnowledge(); });
     var coverage = page.coverage || {};
     knowledge.coverage.textContent = t("ontology.coverage", { wiki: t("ontology.status." + (coverage.wiki || "unavailable")),
@@ -116,7 +123,7 @@ async function loadKnowledge() {
     if (knowledge.selected) await loadKnowledgeDetail();
   } catch (error) {
     if (generation !== knowledge.generation) return;
-    knowledge.list.replaceChildren(); knowledge.detail.replaceChildren(); knowledge.coverage.textContent = "";
+    knowledge.list.replaceChildren(); knowledge.items = []; knowledge.detail.replaceChildren(); knowledge.coverage.textContent = "";
     knowledgeMessage(error.message, true);
   }
 }
@@ -128,6 +135,7 @@ function knowledgePager(parent, page, move) {
 }
 async function loadKnowledgeDetail() {
   var id = knowledge.selected, generation = ++knowledge.detailGeneration;
+  knowledgeMarkSelected();
   var params = knowledgeQuery(knowledge.detailOffset); params.set("limit", "20");
   try {
     var detail = await ontologyRequest("/entities/" + encodeURIComponent(id) + "?" + params);
@@ -156,7 +164,7 @@ function renderKnowledgeDetail(detail) {
         if (!window.confirm(t("ontology.confirmDelete", { name: entity.name }))) return;
         try { await ontologyRequest("/entities/" + encodeURIComponent(entity.id), "DELETE"); knowledge.selected = null;
           root.replaceChildren(); await loadKnowledge(); } catch (error) { knowledgeMessage(error.message, true); }
-      }));
+      }, "btn btn-outline knowledge-danger"));
   }
   if (["activity", "project", "pattern", "goal", "topic"].includes(entity.type)) {
     actions.append(knowledgeButton(entity.type === "activity" ? "ontology.assign" : "ontology.addRelation", function () { knowledgeRelationForm(entity); }));
@@ -178,13 +186,13 @@ function renderKnowledgeDetail(detail) {
     buttons.append(knowledgeButton("ontology.reject", function () { knowledgeDecision(a, "reject"); })); row.append(buttons);
     knowledgeEvidence(row, a.evidence); root.append(row);
   });
-  var pages = knowledgeNode("div", null, "knowledge-actions"); knowledgePager(pages, detail.relations, function (offset) { knowledge.detailOffset = offset; loadKnowledgeDetail(); }); root.append(pages);
+  var pages = knowledgeNode("div", null, "knowledge-actions knowledge-pager"); knowledgePager(pages, detail.relations, function (offset) { knowledge.detailOffset = offset; loadKnowledgeDetail(); }); root.append(pages);
 }
 function knowledgeEvidence(parent, evidence) {
   if (!evidence || !evidence.length) { parent.append(knowledgeNode("p", t("ontology.noEvidence"), "knowledge-muted")); return; }
   var details = knowledgeNode("details", null, "knowledge-evidence"); details.append(knowledgeNode("summary", t("ontology.evidence")));
   evidence.forEach(function (fact) {
-    var item = knowledgeNode("div"); item.append(knowledgeNode("code", fact.ref));
+    var item = knowledgeNode("div", null, "knowledge-evidence-item"); item.append(knowledgeNode("code", fact.ref));
     item.append(knowledgeNode("p", fact.available ? (fact.text || t("ontology.userEvidence")) : t("ontology.evidenceMissing")));
     details.append(item);
   }); parent.append(details);

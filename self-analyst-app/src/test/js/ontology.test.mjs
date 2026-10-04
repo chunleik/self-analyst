@@ -43,6 +43,20 @@ test('knowledge renders hostile names as text and shows evidence gaps and ambigu
   assert.match(h.root.textContent, /ontology.readOnly/);
 });
 
+test('selecting an entity or following a relation moves the list highlight', async () => {
+  const other = { ...entity('Other'), id: 'o' };
+  const h = setup(async url => url.includes('/entities/')
+    ? { entity: url.includes('/entities/o') ? other : entity(), classification: 'not-applicable', relations: page([]) }
+    : page([entity(), other]));
+  await h.ctx.openKnowledge();
+  const rows = all(h.root).filter(e => e.className === 'knowledge-entity');
+  assert.deepEqual(rows.map(r => r['aria-current']), ['false', 'false']);
+  rows[0].events.click(); await flush();
+  assert.deepEqual(rows.map(r => r['aria-current']), ['true', 'false']);
+  h.ctx.knowledge.selected = 'o'; await h.ctx.loadKnowledgeDetail();
+  assert.deepEqual(rows.map(r => r['aria-current']), ['false', 'true']);
+});
+
 test('empty and failed source requests clear stale content', async () => {
   let fail = false;
   const h = setup(async () => { if (fail) throw new Error('source failed'); return page([]); });

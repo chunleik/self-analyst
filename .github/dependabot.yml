@@ -1,12 +1,18 @@
 version: 2
 
 updates:
+  # 同一更新项的 patch 升级合并为一个 PR，避免同批自动合并的 PR 互相造成落后于 main。
+  # minor 与 major 不分组，保留逐个人工处理。
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      actions-patch:
+        applies-to: version-updates
+        update-types: ["patch"]
 
   - package-ecosystem: maven
     directory: /
@@ -15,6 +21,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      maven-patch:
+        applies-to: version-updates
+        update-types: ["patch"]
 
   - package-ecosystem: npm
     directory: /self-analyst-desktop
@@ -23,6 +33,10 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      npm-patch:
+        applies-to: version-updates
+        update-types: ["patch"]
 
   - package-ecosystem: cargo
     directory: /self-analyst-desktop/src-tauri
@@ -31,6 +45,10 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      desktop-cargo-patch:
+        applies-to: version-updates
+        update-types: ["patch"]
 
   - package-ecosystem: cargo
     directory: /self-analyst-axsidecar
@@ -39,3 +57,7 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      sidecar-cargo-patch:
+        applies-to: version-updates
+        update-types: ["patch"]

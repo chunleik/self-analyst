@@ -23,6 +23,16 @@ public final class OntologyService implements AutoCloseable {
         // Persisted projections are never treated as current before the sources are checked.
     }
 
+    /** Explicit local snapshot only. Calling this never opens a network connection. */
+    public synchronized ExportSnapshot exportSnapshot() {
+        refresh(false);
+        Graph graph = graph();
+        Map<String, String> redirects = new LinkedHashMap<>();
+        users.redirects().keySet().forEach(id -> redirects.put(id, resolve(id)));
+        return new ExportSnapshot(new ArrayList<>(graph.entities.values()),
+                new ArrayList<>(graph.assertions.values()), redirects, snapshot.coverage());
+    }
+
     public synchronized Map<String, Object> rebuild() {
         refresh(true);
         return statusOf(graph());

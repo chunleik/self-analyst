@@ -29,6 +29,7 @@ Good to know:
 
 - **Activity review**: Explore current, daily, and historical activities on the dashboard timeline, then ask follow-up questions with context from an entry. A day runs from 04:00 to 04:00 the next day in local time; see the [activity statistics guide (Chinese)](docs/activity-statistics.md).
 - **Personal knowledge**: Connect activity across days and apps to stable projects, topics, and goals in **Knowledge**. Confirm, remove, or correct associations; your decisions survive rebuilding and restarting. Knowledge works locally without extra model calls. See the [personal knowledge guide (Chinese)](docs/personal-ontology.md).
+- **Optional Neo4j sync**: Manually publish the current, corrected knowledge graph to a Neo4j database you configure. It is off by default and requires destination, namespace, and data-scope confirmation for every sync. Local storage remains authoritative. See the [setup and read-only query guide (Chinese)](docs/neo4j-sync.md).
 - **Images in chat**: Select or paste PNG/JPEG images for a model that supports image input, up to 4 images per turn, each limited to 5 MiB and 20 megapixels. This does not enable background screenshots.
 - **Generated files**: Ask for spreadsheets, documents, presentations, or HTML/SVG, then save or download them from file cards in chat. See the [document generation guide (Chinese)](docs/document-generation.md).
 - **Long-term memory**: Useful information is retained automatically; credentials, sensitive inferences, and one-off activity are filtered out. Ask the assistant in chat to correct or forget a memory.
@@ -37,14 +38,16 @@ Good to know:
 
 ## Privacy and data boundaries
 
-Activity data stays on your device. Model requests send only the required inputs to the service you
-configure. See the [privacy statement (Chinese)](PRIVACY.md).
+Activity data is stored locally. Model requests send only the required inputs to the service you
+configure. Optional, explicitly confirmed Neo4j sync sends a bounded knowledge-graph snapshot to your
+chosen database; it can include private titles, descriptions, and evidence. See the [privacy statement (Chinese)](PRIVACY.md).
 
 - Content events store only allowlisted title fields. Body text, UIA text, control trees, screenshots, OCR, and audio are never stored.
 - Failed UIA queries fall back to system window titles. Sensitive applications are excluded from UIA queries.
 - File collection is limited to filesystem metadata (names, paths, sizes, and timestamps) in folders you configure. Apart from safely parsing `.gitignore`, it does not read file contents, calculate content hashes, or generate summaries, topics, or vectors.
 - Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages are masked, and private-browsing titles are skipped. A private window that exposes no marker cannot be detected, so list sensitive apps and sites in `wiki.privacy.excludeApps` (comma-separated executable names such as `weixin.exe`) and `wiki.privacy.excludeSites`, then restart the backend.
 - The event database stores merged activity intervals and is authoritative; back it up regularly. Collection stops when disk space falls below the blocking threshold; history is never deleted automatically.
+- Neo4j configuration saves and status checks never connect to Neo4j. Disabling sync does not erase the remote copy; source removals reach it only on the next successful manual sync. Changing namespaces leaves the old namespace in place.
 
 ## Configuration
 
@@ -54,7 +57,8 @@ discovery, and a generation test), **Advanced configuration** (the raw TOML edit
 
 Explicit TOML values take precedence over environment variables, which take precedence over defaults.
 Changes to `llm.api-key`, `llm.base-url`, `llm.model`, and `llm.temperature` apply to new chats and
-summary jobs without restarting; other keys take effect after a restart. External edits to the TOML
+summary jobs without restarting. Saved `neo4j.*` settings apply to the next manual sync without
+restarting or sending data. Other restart-required keys are identified in Settings. External edits to the TOML
 file are not applied until you save through the app or restart the backend.
 
 | Configuration key | Environment variable | Default |
@@ -66,6 +70,22 @@ file are not applied until you save through the app or restart the backend.
 | `events.port` | None (`config.toml` only) | `5700` |
 | `wiki.privacy.excludeApps` | None (`config.toml` only) | Empty |
 | `wiki.privacy.excludeSites` | None (`config.toml` only) | Empty |
+| `neo4j.enabled` | None (`config.toml` only) | `false` |
+| `neo4j.uri` | None (`config.toml` only) | Empty |
+| `neo4j.database` | None (`config.toml` only) | `neo4j` |
+| `neo4j.username` | None (`config.toml` only) | `neo4j` |
+| `neo4j.password-env` | Names the password environment variable; never the password | `SELF_ANALYST_NEO4J_PASSWORD` |
+| `neo4j.namespace` | None (`config.toml` only) | Empty; required, exclusive to one local dataset |
+| `neo4j.timeout-seconds` | None (`config.toml` only) | `15` (range: `1`–`120`) |
+
+For Neo4j, set the password in the environment inherited by the app before starting it; never put
+the password in TOML or the URI. Changing that process environment requires restarting the app.
+Unencrypted connections allow only `bolt://` on `localhost`, `127.0.0.1`, or `[::1]`; remote targets
+require `bolt+s://` or `neo4j+s://` with a valid CA-trusted certificate. Plain `neo4j://`, `+ssc`,
+embedded credentials, paths (including a trailing slash), queries, and fragments are rejected.
+Use a namespace unique to this local dataset. In **Knowledge → Neo4j manual sync**, review the scope
+and destination, then choose **Confirm and sync…**. The configured account needs graph-write,
+constraint-creation, and `SHOW CONSTRAINTS` permissions; setup details and safe Cypher examples are in the [Neo4j guide (Chinese)](docs/neo4j-sync.md).
 
 See the [model settings guide (Chinese)](docs/llm-settings.md) and the
 [user configuration specification (Chinese)](openspec/specs/user-configuration/spec.md) for all
@@ -107,6 +127,7 @@ The following documents are maintained in Simplified Chinese:
 
 - [Documentation and specification index](docs/README.md)
 - [Architecture](docs/architecture.md)
+- [Optional Neo4j sync and read-only queries](docs/neo4j-sync.md)
 - [Testing and integration verification](docs/testing.md)
 - [Summary quality evaluation](docs/summary-quality-evaluation.md)
 - [Website preview and deployment](docs/website.md)

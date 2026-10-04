@@ -165,4 +165,35 @@ class OntologyServiceTest {
         assertThrows(IllegalArgumentException.class, () -> new Snapshot(List.of(activity("a", "Activity", 0)),
                 List.of(new Assertion("a", "relatedTo", "missing", "inferred", "wiki", "accepted", null, null, List.of())), Map.of()));
     }
+    @Test void exportIncludesFinalCorrectionsManualStateRedirectsAndCoverage() {
+        var input = new AtomicReference<>(snapshot(activity("a", "Alpha", 0)));
+        try (var service = service(input)) {
+            Entity alpha = service.saveEntity(null, "project", "Alpha", "description", List.of("alias"));
+            var first = service.exportSnapshot();
+            assertEquals(2, first.entities().size());
+            assertEquals(1, first.assertions().size());
+            assertEquals("inferred", first.assertions().getFirst().claimType());
+            assertEquals("current", first.coverage().get("wiki"));
+            assertThrows(UnsupportedOperationException.class, () -> first.entities().clear());
+            service.decide("a", "relatedTo", alpha.id(), "reject");
+            assertTrue(service.exportSnapshot().assertions().isEmpty());
+            service.decide("a", "relatedTo", alpha.id(), "confirm");
+            Entity target = service.saveEntity(null, "project", "Merged", "", List.of());
+            service.merge(alpha.id(), target.id());
+            var merged = service.exportSnapshot();
+            assertEquals(target.id(), merged.redirects().get(alpha.id()));
+            assertEquals("confirmed", merged.assertions().getFirst().claimType());
+            assertEquals(target.id(), merged.assertions().getFirst().object());
+            var payload = Neo4jSnapshotWriter.prepare(merged);
+            assertTrue(payload.entities().stream().anyMatch(row -> row.get("id").equals(target.id())
+                    && ((List<?>) row.get("mergedIds")).contains(alpha.id())));
+            input.set(snapshot());
+            assertTrue(service.exportSnapshot().assertions().isEmpty());
+            assertEquals(1, service.exportSnapshot().entities().size());
+            service.deleteEntity(target.id());
+            assertTrue(service.exportSnapshot().entities().isEmpty());
+            assertTrue(service.exportSnapshot().redirects().isEmpty());
+        }
+    }
+
 }

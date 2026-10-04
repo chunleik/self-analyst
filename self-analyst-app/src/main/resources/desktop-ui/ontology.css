@@ -97,3 +97,16 @@
 @media (prefers-reduced-motion: reduce) {
   .knowledge-field input, .knowledge-field select, .knowledge-field textarea, .knowledge-entity { transition: none; }
 }
+
+/* Optional manual Neo4j sync */
+.knowledge-neo4j { margin-bottom: 16px; padding: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-lg); background: var(--bg-card); }
+.knowledge-neo4j-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.knowledge-neo4j h3 { margin: 0; font-size: 15px; }
+.knowledge-neo4j p, .knowledge-neo4j details { font-size: 13px; line-height: 1.6; }
+.knowledge-neo4j summary { cursor: pointer; color: var(--accent); }
+.knowledge-neo4j summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.knowledge-neo4j-target { display: grid; grid-template-columns: minmax(110px, max-content) minmax(0, 1fr); gap: 4px 16px; margin: 12px 0; font-size: 12px; }
+.knowledge-neo4j-target dt { color: var(--text-secondary); }
+.knowledge-neo4j-target dd { margin: 0; overflow-wrap: anywhere; }
+.knowledge-neo4j .knowledge-actions { margin-bottom: 0; }
+.knowledge-neo4j-config { padding: 12px; margin: 8px 0; overflow: auto; color: var(--text-primary); background: var(--bg-surface); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }

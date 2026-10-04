@@ -104,6 +104,21 @@ public final class SupportedKeys {
         put("wiki.semantic.index-dir", "./data/memory/wiki-semantic-index", KeyType.STRING);
         put("wiki.semantic.topK", "8", KeyType.INTEGER);
 
+        put("neo4j.enabled", "false", KeyType.BOOLEAN);
+        put("neo4j.uri", "", KeyType.STRING);
+        put("neo4j.database", "neo4j", KeyType.STRING);
+        put("neo4j.username", "neo4j", KeyType.STRING);
+        put("neo4j.password-env", "SELF_ANALYST_NEO4J_PASSWORD", KeyType.STRING);
+        put("neo4j.namespace", "", KeyType.STRING);
+        put("neo4j.timeout-seconds", "15", KeyType.INTEGER);
+        describe("neo4j.enabled", "启用知识页面的手工 Neo4j 同步；保存不联网，下次手工确认时生效。", "Enable manual Neo4j sync in Knowledge; saving never connects, and changes apply to the next confirmed sync.");
+        describe("neo4j.uri", "Neo4j 目标地址：远端必须 bolt+s:// 或 neo4j+s://；仅环回 bolt:// 允许明文，禁止嵌入凭据。", "Neo4j target URI: remote hosts require bolt+s:// or neo4j+s://; plain connections require bolt:// loopback. Never embed credentials.");
+        describe("neo4j.database", "接收图投影的 Neo4j 数据库。", "Neo4j database receiving the graph projection.");
+        describe("neo4j.username", "Neo4j 用户名；仅用于显式确认的手工同步。", "Neo4j username, used only for explicitly confirmed manual sync.");
+        describe("neo4j.password-env", "保存密码的进程环境变量名称，不是密码值；修改进程环境后需重新启动应用。", "Name of the process environment variable holding the password, never the password itself. Restart the app after changing its process environment.");
+        describe("neo4j.namespace", "必填：此本地数据集独占的命名空间；不要与其他数据集共用。", "Required: an exclusive namespace for this local dataset. Do not share it with other datasets.");
+        describe("neo4j.timeout-seconds", "网络总截止时间及连接/事务超时秒数（1–120）；清理最多另等 5 秒，下次手工同步生效。", "Network deadline and connection/transaction timeout in seconds (1–120), plus up to 5 seconds for cleanup; applies to the next manual sync.");
+
         put("embedding.enabled", "false", KeyType.BOOLEAN);
         put("embedding.base-url", "https://api.openai.com/v1", KeyType.STRING);
         put("embedding.api-key", "", KeyType.STRING);

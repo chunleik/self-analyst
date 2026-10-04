@@ -114,6 +114,7 @@ public final class ConfigApplicationService implements AutoCloseable {
         flat.forEach(user::setProperty);
         Properties input = new ConfigResolver(user, environment).inputProperties();
         try {
+            Neo4jConfigResolver.rejectStoredSecrets(user);
             LlmSettings.validate(input);
             FileFilterConfig.parse(Long.parseLong(input.getProperty("file.watch.maxFileSizeKb", "0")),
                     FileFilterConfig.splitCsv(input.getProperty("file.watch.excludeDirs", "")),
@@ -121,7 +122,7 @@ public final class ConfigApplicationService implements AutoCloseable {
                     FileFilterConfig.splitCsv(input.getProperty("file.watch.extensions", "")),
                     Boolean.parseBoolean(input.getProperty("file.watch.respectGitIgnore", "true")));
         } catch (IllegalArgumentException invalid) {
-            throw new TomlValidationException(List.of("配置语义无效，请检查模型参数、事件存储及文件过滤设置"));
+            throw new TomlValidationException(List.of("配置语义无效，请检查模型参数、事件存储、文件过滤及 Neo4j 环境变量设置"));
         }
         ConfigResolver.Snapshot proposed;
         try { proposed = resolve(user); }
@@ -156,6 +157,7 @@ public final class ConfigApplicationService implements AutoCloseable {
                 ? Map.of("status", "unavailable", "activeWorkCount", 0, "revision", 0L) : runtimeStatus.get());
         llm.put("changedKeys", ConfigPolicy.LLM.stream().filter(key -> differs(snapshot, key)).sorted().toList());
         result.put("llm", llm);
+        result.put("neo4j", Map.of("status", "next_manual_sync", "changedKeys", List.of()));
         Map<String, List<String>> groups = new LinkedHashMap<>();
         snapshot.values().keySet().stream().filter(ConfigPolicy::requiresRestart).sorted()
                 .filter(key -> differs(snapshot, key)).forEach(key ->
@@ -182,7 +184,12 @@ public final class ConfigApplicationService implements AutoCloseable {
             Map<String, Object> actual = new LinkedHashMap<>();
             running.forEach((key, value) -> {
                 if (SupportedKeys.contains(key)) actual.put(key,
-                        ConfigResolver.sensitive(key) ? (value.isBlank() ? "" : "****") : value);
+                        ConfigResolver.sensitive(key) ? (value.isBlank() ? "" : "****") : Neo4jConfigResolver.publicValue(key, value));
+            });
+            // 每次手工操作读取最新保存值，因此不能把启动时的副本声称为当前同步配置。
+            ConfigPolicy.NEO4J.forEach(key -> {
+                var value = snapshot.values().get(key);
+                if (value != null) actual.put(key, Neo4jConfigResolver.publicValue(key, value.value()));
             });
             return Map.of("processId", processId, "revision", revision, "configured", snapshot.publicValues(),
                     "running", actual, "application", application(snapshot));

@@ -298,6 +298,7 @@ function saveAllConfig() {
     if (resp && resp.application) state.configRuntime = { application: resp.application };
     renderConfigTab();
     refreshConfigRuntime();
+    if (typeof refreshNeo4jStatus === "function") refreshNeo4jStatus();
   }).catch(function (err) {
     // Save failed: keep dirty state and baseline untouched. SPEC-CFGUI-UI-003f.
     state.configSaving = false;

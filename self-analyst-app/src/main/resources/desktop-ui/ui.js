@@ -147,13 +147,14 @@ function openConfigModal(focusKey) {
 
 function switchConfigView(view, focusKey) {
   if (state.configSaving || state.configRestarting) return Promise.resolve();
-  if (["llm", "raw", "storage"].indexOf(view) < 0) return Promise.resolve();
+  if (["llm", "raw", "storage", "neo4j"].indexOf(view) < 0) return Promise.resolve();
   if (state.configView === view && !focusKey && state.dom.configModal.dataset.view === view) return Promise.resolve();
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()))
       && !window.confirm(t("config.confirmDiscardClose"))) return Promise.resolve();
   if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
+  if (typeof stopNeo4jSync === "function") stopNeo4jSync();
   state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
   state.configDirty = false; state.configRawText = ""; state.configRawBaseline = "";
   state.configRuntime = null; state.configRuntimeError = false;
@@ -170,6 +171,11 @@ function switchConfigView(view, focusKey) {
   if (view === "llm" && typeof mountLlmSettings === "function") {
     state.llmSettingsView = mountLlmSettings(state.dom.configGrid);
     return Promise.resolve();
+  }
+  if (view === "neo4j") {
+    state.dom.configGrid.innerHTML = "";
+    mountNeo4jSync(state.dom.configGrid);
+    return refreshNeo4jStatus();
   }
   if (view === "storage") {
     state.dom.configGrid.innerHTML = "";
@@ -191,6 +197,7 @@ function closeConfigModal() {
   if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
+  if (typeof stopNeo4jSync === "function") stopNeo4jSync();
   state.configDirty = false;
   state.configRawText = ""; state.configRawBaseline = "";
   state.dom.configGrid.innerHTML = "";

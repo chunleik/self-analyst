@@ -20,7 +20,7 @@
 #config-modal .config-modal-header { padding: 17px 24px; }
 #config-modal .config-modal-header h3 { font-size: 17px; }
 #config-modal .config-modal-body { display: flex; flex-direction: column; overflow: hidden; }
-#config-modal .config-view-tabs { flex: 0 0 auto; gap: 25px; padding: 0 24px; border-bottom: 1px solid var(--border-color); }
+#config-modal .config-view-tabs { flex: 0 0 auto; flex-wrap: wrap; gap: 0 25px; padding: 0 24px; border-bottom: 1px solid var(--border-color); }
 #config-modal .config-view-tabs .btn {
   border: 0; border-bottom: 2px solid transparent; border-radius: 0;
   padding: 13px 0 11px; background: none; color: var(--text-secondary); font-size: 13px;
@@ -128,7 +128,7 @@
 @media (max-width: 620px) {
   #config-modal .config-modal-panel { width: calc(100vw - 16px); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); }
   #config-modal .config-modal-header, #config-modal .config-scroll-area, #config-modal .runtime-storage { padding: 14px 15px; }
-  #config-modal .config-view-tabs { padding: 0 15px; gap: 22px; }
+  #config-modal .config-view-tabs { padding: 0 15px; gap: 0 22px; }
   #config-modal .config-raw-header { padding: 14px 15px 0; }
   #config-modal .config-action-bar { padding: 10px 15px; flex-wrap: wrap; gap: 8px; }
   #config-modal .config-action-meta { flex-basis: 100%; }
@@ -144,4 +144,23 @@
   #config-modal .config-modal-header { padding-top: 10px; padding-bottom: 10px; }
   #config-modal .config-view-tabs .btn { padding-top: 9px; padding-bottom: 8px; }
   #config-modal .config-toolbar-row { padding: 9px 0; }
+}
+
+/* Optional manual Neo4j sync */
+#config-modal .config-neo4j { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 20px 24px; overflow-wrap: anywhere; }
+.config-neo4j-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.config-neo4j h3 { margin: 0; font-size: 15px; }
+.config-neo4j p, .config-neo4j details { font-size: 13px; line-height: 1.6; }
+.config-neo4j summary { cursor: pointer; color: var(--accent); }
+.config-neo4j summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.config-neo4j-target { display: grid; grid-template-columns: minmax(110px, max-content) minmax(0, 1fr); gap: 4px 16px; margin: 12px 0; font-size: 12px; }
+.config-neo4j-target dt { color: var(--text-secondary); }
+.config-neo4j-target dd { margin: 0; overflow-wrap: anywhere; }
+.config-neo4j .knowledge-actions { margin-bottom: 0; }
+.config-neo4j-config { padding: 12px; margin: 8px 0; overflow: auto; color: var(--text-primary); background: var(--bg-surface); border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-width: 520px) {
+  #config-modal .config-neo4j { padding: 16px; }
+  #config-modal .config-neo4j-target { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  #config-modal .config-neo4j-target dd { margin-bottom: 8px; }
 }

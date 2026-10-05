@@ -552,6 +552,7 @@
   "ontology.error.unavailable": "本体来源或存储暂不可用，请重试。已有采集、会话和摘要不受影响。",
   "ontology.error.invalid": "请求无效。请检查名称、别名、关系类型、目标实体和时间范围。",
   "config.runtime.next_manual_sync": "保存后用于下次手工同步（不会自动连接）",
+  "neo4j.tab": "Neo4j 同步",
   "neo4j.title": "Neo4j 手工同步",
   "neo4j.intro": "可选图投影，默认关闭。配置与状态查询不会连接 Neo4j；每次发送都需要确认。",
   "neo4j.scopeTitle": "查看发送范围与隐私说明",

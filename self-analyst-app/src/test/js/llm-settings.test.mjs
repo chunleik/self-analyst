@@ -161,3 +161,37 @@ test('runtime data is lazy, guards unsaved drafts and clears raw content when cl
   context.closeConfigModal(); assert.equal(state.configRawText, ''); assert.equal(state.configRawBaseline, '');
   await context.openConfigModal(); assert.equal(mounted, 2); assert.equal(state.configView, 'llm');
 });
+
+test('Neo4j configuration tab is lazy, protects both drafts and stops on navigation or close', async () => {
+  let approved = false, dirtyModel = false, neoLoads = 0, mounts = 0, stops = 0, rawLoads = 0, focused;
+  const state = { configOpen: false, configSaving: false, configDirty: false,
+    dom: { configModal: { dataset: {}, classList: { add() {}, remove() {} } },
+      configGrid: { innerHTML: '', classList: { toggle() {} } } } };
+  const context = vm.createContext({ state, document: { getElementById: () => null },
+    window: { confirm: () => approved }, t: key => key, escHtml: v => v,
+    mountLlmSettings: () => ({ dirty: () => dirtyModel, destroy() {} }),
+    loadRuntimeStorage: async () => {}, mountNeo4jSync: root => { assert.equal(root, state.dom.configGrid); mounts++; },
+    refreshNeo4jStatus: async () => { neoLoads++; }, stopNeo4jSync: () => { stops++; },
+    focusConfigEditorKey: key => { focused = key; } });
+  vm.runInContext(ui, context);
+  context.loadConfig = async () => { rawLoads++; };
+  await context.openConfigModal(); assert.equal(neoLoads, 0); assert.equal(rawLoads, 0);
+  dirtyModel = true; await context.switchConfigView('neo4j');
+  assert.equal(state.configView, 'llm'); assert.equal(neoLoads, 0);
+  approved = true; await context.switchConfigView('neo4j');
+  assert.equal(neoLoads, 1); assert.equal(mounts, 1); assert.equal(rawLoads, 0);
+  await context.switchConfigView('neo4j'); assert.equal(neoLoads, 1, 'same tab must not mount twice');
+  await context.openConfigModal('neo4j.enabled');
+  assert.equal(focused, 'neo4j.enabled'); assert.equal(state.configView, 'raw'); assert.equal(rawLoads, 1);
+  state.configDirty = true; state.configRawText = 'unsaved'; approved = false;
+  const before = stops; await context.switchConfigView('neo4j');
+  assert.equal(state.configView, 'raw'); assert.equal(state.configRawText, 'unsaved'); assert.equal(stops, before);
+  approved = true; await context.switchConfigView('neo4j');
+  assert.equal(neoLoads, 2); assert.equal(state.configRawText, '');
+  context.closeConfigModal(); assert.equal(state.configOpen, false);
+  assert.equal(stops, before + 2, 'accepted switch and close both stop stale Neo4j work');
+  await context.openConfigModal(); assert.equal(state.configView, 'llm'); assert.equal(neoLoads, 2);
+  await context.switchConfigView('storage'); assert.equal(neoLoads, 2);
+  const html = fs.readFileSync(new URL('../../main/resources/desktop-ui/index.html', import.meta.url), 'utf8');
+  assert.match(html, /data-config-view="neo4j" data-i18n="neo4j.tab"/);
+});

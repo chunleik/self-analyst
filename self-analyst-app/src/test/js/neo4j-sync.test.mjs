@@ -134,3 +134,89 @@ test('last synced generation displays counts, time and its own bounded coverage;
   await h.context.refreshNeo4jStatus();
   assert.match(h.root.textContent, /neo4j.error.authentication/); assert.doesNotMatch(h.root.textContent, /2026-10-04/);
 });
+
+test('leaving the panel invalidates a pending read and reopening uses only fresh saved status', async () => {
+  for (const rejectOld of [false, true]) {
+    let finishOld, reads = 0;
+    const h = setup(() => ++reads === 1 ? new Promise((resolve, reject) => {
+      finishOld = () => rejectOld ? reject(new Error('obsolete')) : resolve(ready('old'));
+    }) : ready('saved-new'));
+    const old = h.context.refreshNeo4jStatus();
+    h.context.stopNeo4jSync(); h.root.replaceChildren(); h.context.mountNeo4jSync(h.root);
+    assert.equal(h.context.neo4jSync.status, null);
+    assert.equal(h.context.neo4jSync.syncButton.disabled, true);
+    await h.context.refreshNeo4jStatus(); const text = h.root.textContent;
+    finishOld(); await old;
+    assert.equal(h.context.neo4jSync.status.targetFingerprint, 'saved-new');
+    assert.equal(h.root.textContent, text);
+    assert.equal(h.calls.every(call => call.options.method === 'GET'), true);
+  }
+});
+
+test('closing or switching away during the preflight cannot confirm or send afterward', async () => {
+  for (const reopen of [false, true]) {
+    let finish, reads = 0;
+    const h = setup(() => ++reads === 2 ? new Promise(resolve => { finish = resolve; }) : ready('current'));
+    await h.context.refreshNeo4jStatus(); const pending = h.context.confirmNeo4jSync();
+    h.context.stopNeo4jSync();
+    if (reopen) { h.root.replaceChildren(); h.context.mountNeo4jSync(h.root); await h.context.refreshNeo4jStatus(); }
+    finish(ready('obsolete')); await pending;
+    assert.equal(h.confirmations.length, 0);
+    assert.equal(h.calls.some(call => call.options.method === 'POST'), false);
+    assert.equal(h.context.neo4jSync.busy, false);
+    assert.equal(h.context.neo4jSync.status?.targetFingerprint || null, reopen ? 'current' : null);
+  }
+});
+
+test('confirmed send keeps its lock across reopen and completion refreshes the current target', async () => {
+  for (const fail of [false, true]) {
+    let finish, activeTarget = 'first';
+    const h = setup((url, options) => options.method === 'POST'
+      ? new Promise((resolve, reject) => { finish = () => fail ? reject(new Error('old secret')) : resolve({ ...ready('first'), state: 'success' }); })
+      : ready(activeTarget));
+    await h.context.refreshNeo4jStatus(); const pending = h.context.confirmNeo4jSync(); await flush();
+    h.context.stopNeo4jSync(); h.root.replaceChildren(); h.context.mountNeo4jSync(h.root);
+    assert.match(h.root.textContent, /neo4j.syncing/);
+    assert.equal(h.context.neo4jSync.syncButton.disabled, true);
+    assert.equal(h.context.neo4jSync.refreshButton.disabled, true);
+    await h.context.confirmNeo4jSync(); await h.context.refreshNeo4jStatus();
+    assert.equal(h.calls.filter(call => call.options.method === 'POST').length, 1);
+    activeTarget = 'saved-second'; finish(); await pending;
+    assert.equal(h.context.neo4jSync.status.targetFingerprint, 'saved-second');
+    assert.equal(h.context.neo4jSync.syncButton.disabled, false);
+    assert.equal(h.context.neo4jSync.refreshButton.disabled, false);
+    assert.doesNotMatch(h.root.textContent, /neo4j.completed|old secret/);
+  }
+});
+
+test('confirmed send finishing after close does not reload or update a detached panel', async () => {
+  let finish;
+  const h = setup((url, options) => options.method === 'POST' ? new Promise(resolve => { finish = resolve; }) : ready());
+  await h.context.refreshNeo4jStatus(); const pending = h.context.confirmNeo4jSync(); await flush();
+  h.context.stopNeo4jSync(); const text = h.root.textContent, count = h.calls.length;
+  finish({ ...ready(), state: 'success' }); await pending;
+  assert.equal(h.calls.length, count); assert.equal(h.root.textContent, text);
+  assert.equal(h.context.neo4jSync.busy, false); assert.equal(h.context.neo4jSync.status, null);
+  await h.context.confirmNeo4jSync(); assert.equal(h.calls.length, count);
+});
+
+test('abandoned preflight does not lock a reopened panel or unlock a newer active send', async () => {
+  for (const failOld of [false, true]) {
+    let finishOldRead, finishSend, reads = 0;
+    const h = setup((url, options) => {
+      if (options.method === 'POST') return new Promise(resolve => { finishSend = resolve; });
+      if (++reads === 2) return new Promise((resolve, reject) => { finishOldRead = value => failOld ? reject(new Error('obsolete')) : resolve(value); });
+      return ready('current');
+    });
+    await h.context.refreshNeo4jStatus(); const old = h.context.confirmNeo4jSync();
+    h.context.stopNeo4jSync(); h.root.replaceChildren(); h.context.mountNeo4jSync(h.root);
+    assert.equal(h.context.neo4jSync.busy, false); assert.equal(h.context.neo4jSync.refreshButton.disabled, false);
+    await h.context.refreshNeo4jStatus(); const current = h.context.confirmNeo4jSync(); await flush();
+    assert.equal(h.context.neo4jSync.busy, true);
+    finishOldRead(ready('obsolete')); await old;
+    assert.equal(h.context.neo4jSync.busy, true); assert.equal(h.context.neo4jSync.syncButton.disabled, true);
+    assert.equal(h.confirmations.length, 1); assert.equal(h.calls.filter(c => c.options.method === 'POST').length, 1);
+    finishSend({ ...ready('current'), state: 'success' }); await current;
+    assert.equal(h.context.neo4jSync.busy, false);
+  }
+});

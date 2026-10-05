@@ -552,6 +552,7 @@
   "ontology.error.unavailable": "Knowledge sources or storage are unavailable. Retry later. Capture, chat and summaries remain available.",
   "ontology.error.invalid": "Invalid request. Check the name, aliases, relationship, target entity and time range.",
   "config.runtime.next_manual_sync": "Saved settings apply to the next manual sync (never auto-connects)",
+  "neo4j.tab": "Neo4j sync",
   "neo4j.title": "Manual Neo4j sync",
   "neo4j.intro": "Optional graph projection, off by default. Configuration and status checks never connect to Neo4j; each send requires confirmation.",
   "neo4j.scopeTitle": "Data scope and privacy",

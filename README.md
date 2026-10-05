@@ -83,7 +83,7 @@ the password in TOML or the URI. Changing that process environment requires rest
 Unencrypted connections allow only `bolt://` on `localhost`, `127.0.0.1`, or `[::1]`; remote targets
 require `bolt+s://` or `neo4j+s://` with a valid CA-trusted certificate. Plain `neo4j://`, `+ssc`,
 embedded credentials, paths (including a trailing slash), queries, and fragments are rejected.
-Use a namespace unique to this local dataset. In **Knowledge → Neo4j manual sync**, review the scope
+Use a namespace unique to this local dataset. In **Settings → Neo4j sync**, review the scope
 and destination, then choose **Confirm and sync…**. The configured account needs graph-write,
 constraint-creation, and `SHOW CONSTRAINTS` permissions; setup details and safe Cypher examples are in the [Neo4j guide (Chinese)](docs/neo4j-sync.md).
 

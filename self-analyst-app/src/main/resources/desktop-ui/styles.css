@@ -456,6 +456,22 @@ a:hover {
   margin-bottom: 4px;
 }
 
+.timeline-entry-overview {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-bottom: 6px;
+}
+
+.timeline-entry-topic {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
 .timeline-entry-summary {
   font-size: 12px;
   color: var(--text-secondary);
@@ -1999,3 +2015,16 @@ input:checked + .toggle-switch::after {
 .chat-image-previews > div { display: flex; flex-direction: column; gap: 4px; }
 .chat-image-previews img { width: 80px; height: 64px; object-fit: contain; }
 .chat-message-image { display: inline-block; max-width: min(240px, 100%); max-height: 180px; object-fit: contain; margin: 4px; }
+
+/* Stored topic narratives retain line breaks and never truncate. */
+.timeline-topic-card .timeline-detail-label,
+.timeline-topic-card .timeline-detail-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.timeline-topic-card .timeline-detail-label {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 13px;
+}

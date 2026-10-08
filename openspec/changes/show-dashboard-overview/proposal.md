@@ -1,0 +1,19 @@
+## Why
+看板已经收到完整的 Wiki 摘要，但目前将它放在默认折叠的洞察详情中，用户首先看到的只有主题标题。需要直接展示完整概览，便于了解全天工作及其他活动。
+
+## What Changes
+- 将已有的非空文本 insight 提升为默认可见、不截断的概览，标题作为次级信息。
+- 保留摘要附加内容、时段顺序、证据、建议、生成状态和继续追问；无概览时保持原有降级展示。
+- 将 Wiki 已保存的 taskSegments 透传到摘要 API，并在展开详情按原顺序显示完整主题标题与叙述；隐藏空证据区块。
+- 不改变模型、提示词、原始数据或摘要生成，仅增加兼容的响应字段及展示。
+
+## Capabilities
+
+### New Capabilities
+无。
+
+### Modified Capabilities
+- `desktop-summary`: 增加完整概览默认可读的展示要求。
+
+## Impact
+桌面端 agent.js、styles.css 及 Node 回归测试；同步 desktop-summary 规格与中英文用户说明。SummaryTimelineAssembler 增加既有主题字段映射，不新增依赖。

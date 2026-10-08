@@ -263,6 +263,10 @@ test("event setup without task nodes preserves timeline expand and discuss", () 
   const entry = { classList: { toggle(name) { assert.equal(name, "expanded"); expanded = !expanded; } } };
   listeners.click({ target: { closest(selector) { return selector === ".timeline-entry" ? entry : null; } } });
   assert.equal(expanded, true);
+  listeners.click({ target: { closest(selector) { return selector === ".timeline-entry" ? entry : null; } } });
+  assert.equal(expanded, false);
+  listeners.click({ target: { closest(selector) { return selector === ".timeline-entry" ? entry : null; } } });
+  assert.equal(expanded, true);
   const button = { dataset: { entryIdx: "0" }, classList: { contains: name => name === "timeline-entry-discuss-btn" } };
   button.closest = selector => selector === "button" ? button : entry;
   listeners.click({ target: button });
@@ -283,4 +287,131 @@ test("unknown activity and estimated coverage remain visible in details", () => 
   sandbox.renderTimeline();
   assert.match(sandbox.timeline.innerHTML, /timeline.unknownActivity/);
   assert.match(sandbox.timeline.innerHTML, /timeline.estimated/);
+});
+
+test("full overview is visible before collapsed details and the topic is secondary", () => {
+  const overview = "完整概览第一行。\n" + "其他活动和协作也保留。".repeat(40);
+  const sandbox = createSandbox({ timeline: [{ key: "yesterday", label: "昨天", headline: "主要主题", insight: overview,
+    summary: "额外信息", evidence: "依据", suggestion: "建议" }] });
+  sandbox.renderTimeline();
+  const html = sandbox.timeline.innerHTML;
+  assert.ok(html.includes('<div class="timeline-entry-overview">' + overview + '</div>'));
+  assert.ok(html.indexOf(overview) < html.indexOf('timeline-entry-detail'));
+  assert.ok(html.indexOf(overview) < html.indexOf('timeline-entry-topic'));
+  assert.equal(html.split(overview).length - 1, 1);
+  for (const text of ["主要主题", "额外信息", "依据", "建议", "timeline-entry-discuss-btn"]) assert.ok(html.includes(text));
+});
+
+test("overview safely escapes markup and does not duplicate equal headline or summary", () => {
+  const sandbox = createSandbox({ timeline: [{ headline: "<img src=x onerror=alert(1)>", insight: "<img src=x onerror=alert(1)>",
+    summary: "<img src=x onerror=alert(1)>" }] });
+  sandbox.escHtml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  sandbox.renderTimeline();
+  const html = sandbox.timeline.innerHTML;
+  assert.doesNotMatch(html, /<img/);
+  assert.equal(html.split('&lt;img').length - 1, 1);
+  assert.doesNotMatch(html, /timeline-entry-headline|timeline-entry-summary/);
+});
+
+test("empty and legacy nontext insights retain fallback without an empty overview", () => {
+  for (const insight of [undefined, null, "", "  ", { legacy: "详情" }]) {
+    const sandbox = createSandbox({ timeline: [{ headline: "本地活动", insight, summary: "统计信息" }] });
+    sandbox.renderTimeline();
+    assert.doesNotMatch(sandbox.timeline.innerHTML, /timeline-entry-overview|timeline-entry-topic/);
+    assert.match(sandbox.timeline.innerHTML, /timeline-entry-headline.*本地活动/);
+    assert.match(sandbox.timeline.innerHTML, /统计信息/);
+    if (insight && typeof insight === "object") assert.match(sandbox.timeline.innerHTML, /legacy/);
+  }
+});
+
+test("overview refresh uses new payload and retains all period ordering", () => {
+  const sandbox = createSandbox({ entries: [
+    { key: "current", label: "当前", headline: "当前主题", insight: "当前概览" },
+    { key: "yesterday", label: "昨天", headline: "日主题", insight: "日概览" },
+    { key: "week", label: "本周", headline: "周主题", insight: "周概览" },
+  ] });
+  sandbox.renderTimeline();
+  assert.ok(sandbox.timeline.innerHTML.indexOf("当前概览") < sandbox.timeline.innerHTML.indexOf("日概览"));
+  assert.ok(sandbox.timeline.innerHTML.indexOf("日概览") < sandbox.timeline.innerHTML.indexOf("周概览"));
+  sandbox.state.summary.entries[1].insight = "更新后的概览";
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /更新后的概览/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, />日概览</);
+});
+
+test("overview styles preserve full multiline text and wrap long tokens", () => {
+  const css = fs.readFileSync(new URL("../../main/resources/desktop-ui/styles.css", import.meta.url), "utf8");
+  const rule = css.match(/\.timeline-entry-overview\s*\{([^}]+)\}/)[1];
+  assert.match(rule, /white-space:\s*pre-wrap/);
+  assert.match(rule, /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(rule, /line-clamp|overflow:\s*hidden|text-overflow/);
+});
+
+test("stored topics render in order with complete escaped multiline narratives inside details", () => {
+  const narrative = "第一行\n" + "完整主题内容".repeat(300);
+  const sandbox = createSandbox({ timeline: [{ headline: "主题", insight: "概览", taskSegments: [
+    { title: "<img src=x>", summary: narrative }, { title: "第二主题", summary: "<script>not executable</script>" },
+  ], evidence: [] }] });
+  sandbox.escHtml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  sandbox.renderTimeline();
+  const html = sandbox.timeline.innerHTML;
+  assert.ok(html.indexOf('timeline-entry-detail') < html.indexOf('timeline-topic-card'));
+  assert.ok(html.indexOf('&lt;img src=x&gt;') < html.indexOf('第二主题'));
+  assert.ok(html.includes(narrative));
+  assert.ok(html.includes('&lt;script&gt;not executable&lt;/script&gt;'));
+  assert.doesNotMatch(html, /<img|<script|timeline.evidence/);
+  assert.equal(html.split('timeline-topic-card').length - 1, 2);
+});
+
+test("missing and malformed topic collections preserve legacy details", () => {
+  for (const taskSegments of [undefined, null, {}, "bad", 7, []]) {
+    const sandbox = createSandbox({ timeline: [{ headline: "旧标题", taskSegments, suggestion: "建议", evidence: "依据" }] });
+    sandbox.renderTimeline();
+    assert.doesNotMatch(sandbox.timeline.innerHTML, /timeline-topic-card/);
+    for (const text of ["旧标题", "建议", "依据", "timeline-entry-discuss-btn"]) assert.ok(sandbox.timeline.innerHTML.includes(text));
+  }
+});
+
+test("malformed topics are skipped and partial text fields remain visible", () => {
+  const sandbox = createSandbox({ timeline: [{ headline: "标题", taskSegments: [null, false, [], "bad", {},
+    { title: " ", summary: {} }, { title: "仅标题", summary: 12 }, { title: {}, summary: "仅叙述" },
+  ] }] });
+  sandbox.renderTimeline();
+  assert.equal(sandbox.timeline.innerHTML.split('timeline-topic-card').length - 1, 2);
+  assert.match(sandbox.timeline.innerHTML, /仅标题/);
+  assert.match(sandbox.timeline.innerHTML, /仅叙述/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /\[object Object\]|>12</);
+});
+
+test("empty evidence is hidden while nonempty legacy forms remain escaped", () => {
+  for (const evidence of [undefined, null, [], {}, "", " \n", false, 0]) {
+    const sandbox = createSandbox({ timeline: [{ headline: "标题", evidence }] });
+    sandbox.renderTimeline();
+    assert.doesNotMatch(sandbox.timeline.innerHTML, /timeline.evidence|>\[\]</);
+    assert.match(sandbox.timeline.innerHTML, /timeline-entry-discuss-btn/);
+  }
+  for (const evidence of ["依据", ["依据"], { fact: "依据" }]) {
+    const sandbox = createSandbox({ timeline: [{ headline: "标题", evidence }] });
+    sandbox.renderTimeline();
+    assert.match(sandbox.timeline.innerHTML, /timeline.evidence/);
+    assert.match(sandbox.timeline.innerHTML, /依据/);
+  }
+});
+
+test("refresh replaces topic cards and removes newly empty evidence", () => {
+  const sandbox = createSandbox({ timeline: [{ headline: "标题", taskSegments: [{ title: "旧主题", summary: "旧叙述" }], evidence: ["旧证据"] }] });
+  sandbox.renderTimeline();
+  sandbox.state.summary.timeline[0] = { headline: "标题", taskSegments: [{ title: "新主题", summary: "新叙述" }], evidence: [] };
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /新主题/);
+  assert.match(sandbox.timeline.innerHTML, /新叙述/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /旧主题|旧叙述|旧证据|timeline.evidence/);
+});
+
+test("topic styles wrap full titles and narratives without truncation", () => {
+  const css = fs.readFileSync(new URL("../../main/resources/desktop-ui/styles.css", import.meta.url), "utf8");
+  const rule = css.match(/\.timeline-topic-card \.timeline-detail-label,\s*\.timeline-topic-card \.timeline-detail-text\s*\{([^}]+)\}/)[1];
+  assert.match(rule, /white-space:\s*pre-wrap/);
+  assert.match(rule, /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(rule, /line-clamp|overflow:\s*hidden|text-overflow/);
 });

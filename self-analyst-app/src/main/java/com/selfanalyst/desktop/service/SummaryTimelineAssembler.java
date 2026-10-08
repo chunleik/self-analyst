@@ -123,6 +123,7 @@ public class SummaryTimelineAssembler {
                 : (entry.summary() != null ? entry.summary() : slot.label());
         map.put("headline", headline);
         map.put("insight", entry.summary() == null ? "" : entry.summary());
+        map.put("taskSegments", entry.taskSegments());
         int confidence = entry.taskSegments().stream().mapToInt(task -> "high".equals(task.confidence()) ? 2
                 : "medium".equals(task.confidence()) ? 1 : 0).min().orElse(0);
         if (entry.sourceCoverage().isEmpty() || entry.sourceCoverage().values().stream()

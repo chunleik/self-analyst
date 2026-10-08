@@ -28,6 +28,7 @@ function renderTimeline() {
     var tags = entry.tags || [];
     var evidence = entry.evidence;
     var insight = entry.insight;
+    var overview = typeof insight === "string" && insight.trim() ? insight : "";
     var suggestion = entry.suggestion;
     var localFacts = entry.local_facts;
     var progress = entry.generationProgress;
@@ -40,12 +41,17 @@ function renderTimeline() {
       '">' +
       '<div class="timeline-entry-label">' +
       escHtml(label) +
-      "</div>" +
-      '<div class="timeline-entry-headline">' +
-      escHtml(headline) +
       "</div>";
 
-    if (summary) {
+    if (overview) {
+      html += '<div class="timeline-entry-overview">' + escHtml(overview) + "</div>";
+    }
+    if (!overview || (entry.headline && String(entry.headline).trim() !== overview.trim())) {
+      html += '<div class="timeline-entry-headline' + (overview ? ' timeline-entry-topic' : '') + '">' +
+        escHtml(headline) + "</div>";
+    }
+
+    if (summary && (!overview || String(summary).trim() !== overview.trim())) {
       html +=
         '<div class="timeline-entry-summary">' + escHtml(summary) + "</div>";
     }
@@ -119,7 +125,22 @@ function renderTimeline() {
     if (entry.coverage === "estimated") {
       html += '<div class="timeline-detail-section">' + escHtml(t("timeline.estimated")) + '</div>';
     }
-    if (evidence) {
+    var topics = Array.isArray(entry.taskSegments) ? entry.taskSegments : [];
+    topics.forEach(function (topic) {
+      if (!topic || typeof topic !== "object" || Array.isArray(topic)) return;
+      var title = typeof topic.title === "string" && topic.title.trim() ? topic.title : "";
+      var narrative = typeof topic.summary === "string" && topic.summary.trim() ? topic.summary : "";
+      if (!title && !narrative) return;
+      html += '<div class="timeline-detail-section timeline-topic-card">';
+      if (title) html += '<div class="timeline-detail-label">' + escHtml(title) + '</div>';
+      if (narrative) html += '<div class="timeline-detail-text">' + escHtml(narrative) + '</div>';
+      html += '</div>';
+    });
+
+    var hasEvidence = typeof evidence === "string" ? !!evidence.trim()
+      : Array.isArray(evidence) ? evidence.length > 0
+      : evidence && typeof evidence === "object" && Object.keys(evidence).length > 0;
+    if (hasEvidence) {
       html +=
         '<div class="timeline-detail-section">' +
         '<div class="timeline-detail-label">' + escHtml(t("timeline.evidence")) + '</div>' +
@@ -128,7 +149,7 @@ function renderTimeline() {
         "</div></div>";
     }
 
-    if (insight) {
+    if (insight && !overview) {
       html +=
         '<div class="timeline-detail-section">' +
         '<div class="timeline-detail-label">' + escHtml(t("timeline.insight")) + '</div>' +

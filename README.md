@@ -33,7 +33,7 @@ Good to know:
 - **Images in chat**: Select or paste PNG/JPEG images for a model that supports image input, up to 4 images per turn, each limited to 5 MiB and 20 megapixels. This does not enable background screenshots.
 - **Generated files**: Ask for spreadsheets, documents, presentations, or HTML/SVG, then save or download them from file cards in chat. See the [document generation guide (Chinese)](docs/document-generation.md).
 - **Long-term memory**: Useful information is retained automatically; credentials, sensitive inferences, and one-off activity are filtered out. Ask the assistant in chat to correct or forget a memory.
-- **Help and updates**: The **Help** menu provides the user guide, issue reporting, and **Check for updates**. Checks run only when requested; the app never downloads or installs updates automatically.
+- **Help and updates**: The **Help** menu provides the user guide, **Documentation**, **Personal knowledge guide**, issue reporting, **Check for updates**, and **Project website** (the GitHub repository, opened in your default browser on desktop). Checks run only when requested; the app never downloads or installs updates automatically.
 - **Interface language**: Chinese and English, following the system language by default. Change it in Settings or with `app.language` (`auto`, `zh`, or `en`), then restart the app.
 
 ## Privacy and data boundaries

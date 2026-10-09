@@ -32,7 +32,7 @@ function setup({ native = false, language = 'zh', invoke, openError = false } = 
   document.createElement = () => { const link = element(); link.click = () => { if (openError) throw Error('blocked'); links.push(link); }; return link; };
   for (const id of ['help-trigger', 'help-menu', 'help-dialog', 'help-dialog-title', 'help-dialog-body', 'help-dialog-link', 'help-update-retry', 'window-minimize', 'window-maximize', 'window-close', 'titlebar-drag', 'titlebar-help-slot', 'web-help-slot']) nodes.set(id, element(id));
   const menu = nodes.get('help-menu'); menu.hidden = true;
-  const items = ['guide', 'feedback', 'check_update', 'about'].map(action => { const el = element(action); el.setAttribute('data-help-action', action); menu.appendChild(el); return el; });
+  const items = ['guide', 'documentation', 'knowledge', 'feedback', 'check_update', 'website', 'about'].map(action => { const el = element(action); el.setAttribute('data-help-action', action); menu.appendChild(el); return el; });
   menu.querySelectorAll = () => items;
   nodes.get('web-help-slot').appendChild(nodes.get('help-trigger'));
   const host = element(); Object.assign(host, { innerWidth: 800, innerHeight: 600, devicePixelRatio: 1.5, location: { origin: 'http://localhost:5701' } });
@@ -67,9 +67,9 @@ test('menu toggles, closes outside and on blur without stealing outside focus', 
 
 test('keyboard navigation wraps, Esc returns to trigger and Tab allows normal traversal', () => {
   const s = setup();
-  s.trigger.fire('keydown', { key: 'ArrowUp' }); assert.equal(s.document.activeElement, s.items[3]);
+  s.trigger.fire('keydown', { key: 'ArrowUp' }); assert.equal(s.document.activeElement, s.items.at(-1));
   s.menu.fire('keydown', { key: 'ArrowDown' }); assert.equal(s.document.activeElement, s.items[0]);
-  s.menu.fire('keydown', { key: 'End' }); assert.equal(s.document.activeElement, s.items[3]);
+  s.menu.fire('keydown', { key: 'End' }); assert.equal(s.document.activeElement, s.items.at(-1));
   s.menu.fire('keydown', { key: 'Escape' }); assert.equal(s.menu.hidden, true); assert.equal(s.document.activeElement, s.trigger);
   s.ui.open(); const event = s.menu.fire('keydown', { key: 'Tab' });
   assert.equal(s.menu.hidden, true); assert.equal(event.prevented, undefined);
@@ -131,7 +131,7 @@ test('window failures are shown, help controls do not issue drag commands', asyn
 test('every help and window label is present in both catalogs', () => {
   for (const language of ['en', 'zh']) {
     const catalog = JSON.parse(fs.readFileSync(new URL(`../../main/resources/desktop-ui/locales/${language}.json`, import.meta.url), 'utf8'));
-    for (const key of ['help.label', 'help.guide', 'help.feedback', 'help.about', 'help.webVersion', 'help.dismiss', 'help.failed', 'window.minimize', 'window.maximize', 'window.restore', 'window.close']) assert.equal(typeof catalog[key], 'string', key);
+    for (const key of ['help.label', 'help.guide', 'help.feedback', 'help.website', 'help.documentation', 'help.knowledge', 'help.about', 'help.webVersion', 'help.dismiss', 'help.failed', 'window.minimize', 'window.maximize', 'window.restore', 'window.close']) assert.equal(typeof catalog[key], 'string', key);
   }
 });
 
@@ -216,12 +216,138 @@ test('a late update result cannot replace a newer help message', async () => {
   assert.ok(s.nodes.get('help-dialog-link').href.endsWith('README.zh-CN.md'));
 });
 
-test('update labels are translated and actual menu includes all four actions in order', () => {
+test('update labels are translated and actual menu includes all seven actions in order', () => {
   const html = fs.readFileSync(new URL('../../main/resources/desktop-ui/index.html', import.meta.url), 'utf8');
-  assert.deepEqual([...html.matchAll(/data-help-action="([^"]+)"/g)].map(match => match[1]), ['guide', 'feedback', 'check_update', 'about']);
+  assert.deepEqual([...html.matchAll(/data-help-action="([^"]+)"/g)].map(match => match[1]), ['guide', 'documentation', 'knowledge', 'feedback', 'check_update', 'website', 'about']);
   const keys = ['check', 'checking', 'available', 'current', 'installed', 'latest', 'download', 'releases', 'retry', 'web', 'failed', 'timeout', 'rateLimited', 'noRelease', 'invalid', 'busy'];
   for (const language of ['zh', 'en']) {
     const catalog = JSON.parse(fs.readFileSync(new URL(`../../main/resources/desktop-ui/locales/${language}.json`, import.meta.url), 'utf8'));
     for (const key of keys) assert.ok(catalog['update.' + key], key);
+  }
+});
+
+const projectLinks = {
+  website: 'https://github.com/chunleik/self-analyst',
+  documentation: 'https://github.com/chunleik/self-analyst/blob/main/docs/README.md',
+  knowledge: 'https://github.com/chunleik/self-analyst/blob/main/docs/personal-ontology.md'
+};
+
+test('new project links have exact bilingual labels and reference existing public documents', () => {
+  const labels = {
+    zh: { website: '项目官网', documentation: '帮助文档', knowledge: '个人知识指南' },
+    en: { website: 'Project website', documentation: 'Documentation', knowledge: 'Personal knowledge guide' }
+  };
+  for (const [language, expected] of Object.entries(labels)) {
+    const catalog = JSON.parse(fs.readFileSync(new URL(`../../main/resources/desktop-ui/locales/${language}.json`, import.meta.url), 'utf8'));
+    for (const [action, label] of Object.entries(expected)) assert.equal(catalog['help.' + action], label);
+  }
+  for (const action of ['documentation', 'knowledge']) {
+    const path = projectLinks[action].split('/blob/main/')[1];
+    assert.ok(fs.statSync(new URL('../../../../' + path, import.meta.url)).isFile(), path);
+  }
+  const html = fs.readFileSync(new URL('../../main/resources/desktop-ui/index.html', import.meta.url), 'utf8');
+  const menu = html.slice(html.indexOf('<div id="help-menu"'), html.indexOf('<dialog id="help-dialog"'));
+  assert.match(menu, /data-help-action="knowledge"[^]*?role="separator"[^]*?data-help-action="feedback"/);
+  assert.match(menu, /data-help-action="check_update"[^]*?role="separator"[^]*?data-help-action="website"/);
+});
+
+test('new Web links open only fixed targets in isolated tabs and preserve application state', async () => {
+  for (const language of ['zh', 'en']) {
+    const s = setup({ language });
+    for (const [action, url] of Object.entries(projectLinks)) {
+      s.ui.open();
+      s.items.find(item => item.getAttribute('data-help-action') === action).click();
+      await settle();
+      const link = s.links.at(-1);
+      assert.equal(link.href, url);
+      assert.equal(link.target, '_blank');
+      assert.equal(link.rel, 'noopener noreferrer');
+      assert.equal(s.menu.hidden, true);
+      assert.equal(s.document.activeElement, s.trigger);
+      assert.equal(s.dialog.open, false);
+    }
+    assert.equal(s.calls.length, 0);
+    assert.equal(s.host.location.origin, 'http://localhost:5701');
+    assert.equal(s.state.chatDraft, '保留这段草稿');
+    await s.ui.execute('website?url=https://untrusted.test');
+    assert.equal(s.links.length, 3);
+  }
+});
+
+test('new desktop links invoke fixed help actions with no URL or local data and allow reopening', async () => {
+  for (const language of ['zh', 'en']) {
+    const s = setup({ native: true, language }); await settle();
+    for (const action of Object.keys(projectLinks)) {
+      for (let repeat = 0; repeat < 2; repeat++) {
+        s.ui.open();
+        s.items.find(item => item.getAttribute('data-help-action') === action).click();
+        await settle();
+        assert.deepEqual(s.calls.at(-1), ['help_action', { action }]);
+        assert.equal(s.menu.hidden, true);
+        assert.equal(s.document.activeElement, s.trigger);
+      }
+    }
+    assert.equal(s.links.length, 0);
+    assert.equal(s.state.chatDraft, '保留这段草稿');
+  }
+});
+
+test('new link failures are localized and repeated native retries never navigate the embedded page', async () => {
+  for (const language of ['zh', 'en']) {
+    for (const [action, url] of Object.entries(projectLinks)) {
+      for (const native of [false, true]) {
+        let failure = true;
+        const s = setup({ native, language, openError: true, invoke: name => {
+          if (name === 'help_action' && failure) throw Error('private backend details');
+          return false;
+        } });
+        await settle(); await s.ui.execute(action);
+        assert.equal(s.dialog.open, true);
+        assert.equal(s.nodes.get('help-dialog-body').textContent, language + ':help.failed');
+        assert.equal(s.nodes.get('help-dialog-link').href, url);
+        assert.equal(s.nodes.get('help-dialog-link').hidden, false);
+        if (native) {
+          for (let repeat = 0; repeat < 2; repeat++) {
+            const event = s.nodes.get('help-dialog-link').fire('click'); await settle();
+            assert.equal(event.prevented, true);
+            assert.deepEqual(s.calls.at(-1), ['help_action', { action }]);
+            assert.equal(s.nodes.get('help-dialog-link').href, url);
+          }
+          failure = false;
+          const event = s.nodes.get('help-dialog-link').fire('click'); await settle();
+          assert.equal(event.prevented, true);
+          assert.deepEqual(s.calls.at(-1), ['help_action', { action }]);
+        }
+        s.dialog.close();
+        assert.equal(s.document.activeElement, s.trigger);
+        s.ui.open(); assert.equal(s.menu.hidden, false);
+        assert.equal(s.state.chatDraft, '保留这段草稿');
+        assert.equal(s.links.length, 0);
+      }
+    }
+  }
+});
+
+test('a delayed native link retry cannot reopen a dismissed error or replace a newer message', async () => {
+  for (const newerMessage of [false, true]) {
+    let rejectRetry;
+    let attempt = 0;
+    const s = setup({ native: true, invoke: (name, args) => {
+      if (name !== 'help_action') return false;
+      if (args.action === 'website') {
+        if (++attempt === 1) throw Error('browser unavailable');
+        return new Promise((resolve, reject) => { rejectRetry = reject; });
+      }
+      if (args.action === 'knowledge') throw Error('browser unavailable');
+      return false;
+    } });
+    await settle(); await s.ui.execute('website');
+    assert.equal(s.nodes.get('help-dialog-link').fire('click').prevented, true);
+    await settle(); s.dialog.close();
+    if (newerMessage) await s.ui.execute('knowledge');
+    rejectRetry(Error('late private error')); await settle();
+    assert.equal(s.dialog.open, newerMessage);
+    if (newerMessage) assert.equal(s.nodes.get('help-dialog-link').href, projectLinks.knowledge);
+    assert.equal(s.state.chatDraft, '保留这段草稿');
   }
 });

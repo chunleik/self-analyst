@@ -3,6 +3,9 @@
 (function (root) {
   function guideUrl(action, language) {
     var base = "https://github.com/chunleik/self-analyst/";
+    if (action === "documentation") return base + "blob/main/docs/README.md";
+    if (action === "knowledge") return base + "blob/main/docs/personal-ontology.md";
+    if (action === "website") return "https://github.com/chunleik/self-analyst";
     if (action === "guide") return base + "blob/main/README" + (language === "zh" ? ".zh-CN" : "") + ".md";
     if (action === "feedback") return base + "issues";
     return null;
@@ -58,7 +61,10 @@
       if (!dialog.open) dialog.showModal();
       return dialogGeneration;
     }
-    function failed(link) { message(text("help.label"), text("help.failed"), link); }
+    function failed(link, action) {
+      message(text("help.label"), text("help.failed"), link);
+      if (action) linkAction = action;
+    }
     function updateLink(label, action, tag) {
       doc.getElementById("help-dialog-link").textContent = text(label);
       linkAction = { action: action };
@@ -68,7 +74,11 @@
       if (!native || !linkAction) return;
       event.preventDefault();
       var url = doc.getElementById("help-dialog-link").href;
-      invoke("help_action", linkAction).catch(function () { failed(url); });
+      var action = linkAction;
+      var generation = dialogGeneration;
+      invoke("help_action", action).catch(function () {
+        if (dialog.open && generation === dialogGeneration) failed(url, action);
+      });
     });
     function checkUpdate() {
       if (updatePending) return updatePending;
@@ -103,7 +113,9 @@
       if (!url && action !== "about") return Promise.resolve();
       if (native) {
         pending = true;
-        return invoke("help_action", { action: action }).catch(function () { failed(url); }).finally(function () {
+        return invoke("help_action", { action: action }).catch(function () {
+          failed(url, url ? { action: action } : null);
+        }).finally(function () {
           pending = false;
           if (!dialog.open) trigger.focus();
         });

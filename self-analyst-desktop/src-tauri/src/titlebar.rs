@@ -249,6 +249,13 @@ fn help_url(action: &str, language: &str) -> Option<&'static str> {
             Some("https://github.com/chunleik/self-analyst/blob/main/README.zh-CN.md")
         }
         ("guide", _) => Some("https://github.com/chunleik/self-analyst/blob/main/README.md"),
+        ("documentation", _) => {
+            Some("https://github.com/chunleik/self-analyst/blob/main/docs/README.md")
+        }
+        ("knowledge", _) => {
+            Some("https://github.com/chunleik/self-analyst/blob/main/docs/personal-ontology.md")
+        }
+        ("website", _) => Some("https://github.com/chunleik/self-analyst"),
         ("feedback", _) => Some("https://github.com/chunleik/self-analyst/issues"),
         _ => None,
     }
@@ -343,7 +350,24 @@ mod tests {
             .ends_with("README.zh-CN.md"));
         assert!(help_url("guide", "en").unwrap().ends_with("README.md"));
         assert!(help_url("feedback", "en").unwrap().ends_with("/issues"));
+        for language in ["zh", "en"] {
+            assert_eq!(
+                help_url("documentation", language),
+                Some("https://github.com/chunleik/self-analyst/blob/main/docs/README.md")
+            );
+            assert_eq!(
+                help_url("knowledge", language),
+                Some(
+                    "https://github.com/chunleik/self-analyst/blob/main/docs/personal-ontology.md"
+                )
+            );
+            assert_eq!(
+                help_url("website", language),
+                Some("https://github.com/chunleik/self-analyst")
+            );
+        }
         assert_eq!(help_url("https://example.com", "zh"), None);
+        assert_eq!(help_url("website?url=https://example.com", "en"), None);
     }
 
     #[test]

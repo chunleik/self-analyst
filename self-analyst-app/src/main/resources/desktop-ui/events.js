@@ -18,7 +18,7 @@ function setupEvents() {
     // Expand/collapse entry
     var entry = target.closest(".timeline-entry");
     if (entry && !target.closest("button")) {
-      entry.classList.toggle("expanded");
+      toggleTimelineEntry(entry);
       return;
     }
 

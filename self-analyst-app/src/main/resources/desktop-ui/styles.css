@@ -449,15 +449,11 @@ a:hover {
   margin-bottom: 4px;
 }
 
-.timeline-entry-headline {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin-bottom: 4px;
-}
-
+/* Main text uses the same treatment for local fallback and saved overviews. */
+.timeline-entry-headline,
 .timeline-entry-overview {
   font-size: 14px;
+  font-weight: 400;
   color: var(--text-primary);
   line-height: 1.65;
   white-space: pre-wrap;

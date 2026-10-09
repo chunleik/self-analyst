@@ -31,3 +31,18 @@
 - OpenSpec 全量严格校验 33/33 通过；git diff --check 通过。
 - 真实浏览器布局与截图仍未验证：沿用既有环境限制，不重试被关闭的浏览器授权。离线 HTML 不是实机截图。主规格已同步，change 因布局验证未完成而保留未归档。
 - 本次草稿 PR 包含概览与主题明细的完整改动，保留未完成的视觉验收；不涉及合并、部署或发布。
+
+## 4. 阅读状态修复
+
+- [x] 4.1 统一 styles.css 主摘要样式；agent.js 与 events.js 保存稳定条目展开状态，隔离统计日期/时区并清理移除项。
+- [x] 4.2 补 summary-load.test.mjs 多轮自动刷新、主动收起、重复点击、旧数据、排序/删除与日期切换测试，运行完整 Node 套件。
+- [ ] 4.3 同步主规格/用户说明，运行 OpenSpec 严格校验并在可用浏览器完成 800×600 与桌面视觉验证；若受限明确记录。
+
+## 本次阅读状态修复验证记录
+
+- 基于 main 5529e99；PR #111 已合并。未修改后端、摘要生成或原始数据。
+- 独立 UI 阅读状态使用稳定条目标识，跨重绘恢复展开；清理移除项；按响应时区与 04:00 统计日期隔离，并兼容 Java 固定偏移时区。
+- summary-load.test.mjs 34/34 通过；完整桌面 Node 套件 224 通过、31 个既有跳过、0 失败；agent.js/events.js 语法检查与 git diff --check 通过。
+- OpenSpec 1.14.1 针对 change 与 desktop-summary 严格校验通过。全量严格校验 31/33；desktop-shell 与 user-configuration 的既有需求超过新版 CLI 的 500 字限制，两个文件与基线完全相同，本次未扩大范围修改。
+- 当前执行器本地 Chromium 常规启动仍因 process_singleton_posix socket() failed: Operation not permitted 失败；停止该路径，未修改 sandbox/network，未重试此前关闭的云浏览器 localhost 授权。800×600 与桌面宽度视觉未验证，无修复后截图，不将 DOM/CSS 测试当作视觉验收。
+- 4.3 文档与规格同步已完成，视觉验证仍待可用环境，因此保留该项与 change 未归档。本地修复完成后，按用户“提交PR”授权提交功能分支与草稿 PR；不部署或合并。

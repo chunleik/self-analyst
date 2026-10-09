@@ -415,3 +415,149 @@ test("topic styles wrap full titles and narratives without truncation", () => {
   assert.match(rule, /overflow-wrap:\s*anywhere/);
   assert.doesNotMatch(rule, /line-clamp|overflow:\s*hidden|text-overflow/);
 });
+
+// Minimal DOM nodes are reconstructed from each render, like innerHTML in a browser.
+function renderedEntries(sandbox) {
+  return [...sandbox.timeline.innerHTML.matchAll(/<div class="timeline-entry( expanded)?" data-entry-id="([^"]+)" data-entry-idx="(\d+)">/g)]
+    .map(match => {
+      let expanded = !!match[1];
+      return {
+        dataset: { entryId: match[2], entryIdx: match[3] },
+        classList: { toggle(name) { assert.equal(name, "expanded"); return expanded = !expanded; } },
+        isExpanded: () => expanded,
+      };
+    });
+}
+function bindTimelineEvents(sandbox) {
+  const listeners = {};
+  const element = () => ({ addEventListener() {}, querySelector() { return element(); }, querySelectorAll() { return []; } });
+  for (const node of Object.values(sandbox.state.dom)) {
+    if (node && !Array.isArray(node)) Object.assign(node, element());
+  }
+  sandbox.state.dom = new Proxy(sandbox.state.dom, { get(target, key) { return target[key] ?? element(); } });
+  sandbox.timeline.addEventListener = (event, handler) => { listeners[event] = handler; };
+  sandbox.document.addEventListener = () => {};
+  for (const name of ["handleConfigFieldChange", "openFileStatusEntry", "openFileSettingsModal", "closeFileSettingsModal",
+    "saveFileSettings", "closeChat", "sendChatMessage", "sendChatTabMessage"]) sandbox[name] = () => {};
+  sandbox.openChatTabWithContext = context => { sandbox.discussContext = context; };
+  vm.runInContext(fs.readFileSync(new URL("../../main/resources/desktop-ui/events.js", import.meta.url), "utf8"), sandbox);
+  sandbox.setupEvents();
+  return entry => listeners.click({ target: { closest(selector) { return selector === ".timeline-entry" ? entry : null; } } });
+}
+const readingSummary = () => ({ assembledAt: "2026-10-09T02:00:00Z", timeline: [
+  { key: "current", label: "当前", headline: "本地活动" },
+  { key: "yesterday", label: "昨天", headline: "主题", insight: "完整概览", taskSegments: [{ title: "主题一", summary: "完整详情" }] },
+] });
+
+test("automatic polling preserves expanded details across changing snapshots and user collapse", async () => {
+  const sandbox = createSandbox(readingSummary());
+  const click = bindTimelineEvents(sandbox);
+  sandbox.renderTimeline();
+  click(renderedEntries(sandbox)[1]);
+  sandbox.startAutoRefresh();
+  for (let cycle = 0; cycle < 5; cycle++) {
+    sandbox.api.getSummary = async () => ({ ...version, ...readingSummary(), assembledAt: `2026-10-09T02:0${cycle}:30Z`,
+      timeline: readingSummary().timeline.map(entry => ({ ...entry, insight: `更新概览 ${cycle}`, source: `source-${cycle}` })) });
+    sandbox.refresh();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(renderedEntries(sandbox)[1].isExpanded(), true);
+    assert.match(sandbox.timeline.innerHTML, new RegExp(`更新概览 ${cycle}`));
+  }
+  click(renderedEntries(sandbox)[1]);
+  sandbox.refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(renderedEntries(sandbox)[1].isExpanded(), false);
+});
+
+test("repeated delegated clicks alternate reliably without refresh reopening a collapsed item", () => {
+  const sandbox = createSandbox(readingSummary());
+  const click = bindTimelineEvents(sandbox);
+  sandbox.renderTimeline();
+  const entry = renderedEntries(sandbox)[1];
+  for (let i = 0; i < 10; i++) {
+    click(entry);
+    assert.equal(entry.isExpanded(), i % 2 === 0);
+  }
+  sandbox.renderTimeline();
+  assert.equal(renderedEntries(sandbox)[1].isExpanded(), false);
+});
+
+test("stable identity survives reordering and clears removed entries", () => {
+  const sandbox = createSandbox(readingSummary());
+  sandbox.renderTimeline();
+  sandbox.toggleTimelineEntry(renderedEntries(sandbox)[1]);
+  sandbox.state.summary.timeline.reverse();
+  sandbox.renderTimeline();
+  assert.deepEqual(renderedEntries(sandbox).map(entry => entry.isExpanded()), [true, false]);
+  const removed = sandbox.state.summary.timeline.shift();
+  sandbox.renderTimeline();
+  assert.equal(sandbox.state.timelineExpanded.size, 0);
+  sandbox.state.summary.timeline.push(removed);
+  sandbox.renderTimeline();
+  assert.ok(renderedEntries(sandbox).every(entry => !entry.isExpanded()));
+});
+
+test("reading state is scoped to the 04:00 activity date and timezone", () => {
+  const sandbox = createSandbox({ ...readingSummary(), assembledAt: "2026-10-08T15:59:00Z" });
+  sandbox.renderTimeline();
+  sandbox.toggleTimelineEntry(renderedEntries(sandbox)[1]);
+  // Local midnight does not change the statistics day.
+  sandbox.state.summary.assembledAt = "2026-10-08T19:59:59Z";
+  sandbox.renderTimeline();
+  assert.equal(renderedEntries(sandbox)[1].isExpanded(), true);
+  sandbox.state.summary.assembledAt = "2026-10-08T20:00:00Z";
+  sandbox.renderTimeline();
+  assert.equal(renderedEntries(sandbox)[1].isExpanded(), false);
+  sandbox.toggleTimelineEntry(renderedEntries(sandbox)[1]);
+  sandbox.state.summary.timezone = "UTC";
+  sandbox.renderTimeline();
+  assert.equal(renderedEntries(sandbox)[1].isExpanded(), false);
+  assert.notEqual(sandbox.timelineReadingScope({ timezone: "America/New_York", assembledAt: "2026-11-01T08:59:59Z" }),
+    sandbox.timelineReadingScope({ timezone: "America/New_York", assembledAt: "2026-11-01T09:00:00Z" }));
+});
+
+test("legacy entries without keys retain reading state when fallback text changes", () => {
+  const sandbox = createSandbox({ timeline: [{ label: "昨天", headline: "旧标题", insight: { legacy: "详情" } }] });
+  sandbox.renderTimeline();
+  sandbox.toggleTimelineEntry(renderedEntries(sandbox)[0]);
+  sandbox.state.summary.timeline[0].headline = "新标题";
+  sandbox.renderTimeline();
+  assert.equal(renderedEntries(sandbox)[0].isExpanded(), true);
+  assert.match(sandbox.timeline.innerHTML, /legacy/);
+  sandbox.state.summary.timeline = [];
+  sandbox.renderTimeline();
+  assert.equal(sandbox.state.timelineExpanded.size, 0);
+});
+
+test("fallback headlines and saved overviews share typography without truncation", () => {
+  const css = fs.readFileSync(new URL("../../main/resources/desktop-ui/styles.css", import.meta.url), "utf8");
+  const rule = css.match(/\.timeline-entry-headline,\s*\.timeline-entry-overview\s*\{([^}]+)\}/)[1];
+  for (const style of [/font-size:\s*14px/, /font-weight:\s*400/, /line-height:\s*1.65/,
+    /color:\s*var\(--text-primary\)/, /white-space:\s*pre-wrap/, /overflow-wrap:\s*anywhere/]) assert.match(rule, style);
+  assert.doesNotMatch(rule, /line-clamp|overflow:\s*hidden|text-overflow/);
+});
+
+test("Java fixed-offset timezone IDs respect the local 04:00 boundary", () => {
+  const sandbox = createSandbox(readingSummary());
+  for (const zone of ["GMT+08:00", "UTC+08:00", "+08:00", "+0800"]) {
+    const scope = assembledAt => sandbox.timelineReadingScope({ timezone: zone, assembledAt });
+    assert.notEqual(scope("2026-10-08T19:59:59Z"), scope("2026-10-08T20:00:00Z"));
+    assert.equal(scope("2026-10-08T20:00:00Z"), scope("2026-10-09T00:00:00Z"));
+  }
+  const scope = assembledAt => sandbox.timelineReadingScope({ timezone: "GMT-05:30", assembledAt });
+  assert.notEqual(scope("2026-10-09T09:29:59Z"), scope("2026-10-09T09:30:00Z"));
+});
+
+test("poll errors keep an expanded snapshot and empty payload clears obsolete state", async () => {
+  const sandbox = createSandbox(readingSummary());
+  sandbox.renderTimeline();
+  sandbox.toggleTimelineEntry(renderedEntries(sandbox)[1]);
+  sandbox.renderTimeline();
+  sandbox.api.getSummary = async () => { throw new Error("offline"); };
+  sandbox.refreshVisiblePage();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(renderedEntries(sandbox)[1].isExpanded(), true);
+  sandbox.state.summary = null;
+  sandbox.renderTimeline();
+  assert.equal(sandbox.state.timelineExpanded.size, 0);
+});

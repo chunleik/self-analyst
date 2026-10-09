@@ -5,23 +5,85 @@
 
 // ---- Timeline ----
 
+// Reading state belongs to the view, not the refreshable summary or DOM.
+function timelineReadingScope(summary) {
+  var zone = summary.timezone || "UTC";
+  var date = new Date(summary.assembledAt || Date.now());
+  var day = "legacy";
+  if (Number.isFinite(date.getTime())) {
+    try {
+      // Java ZoneId also emits fixed offsets (e.g. GMT+08:00), which some
+      // WebViews do not accept as Intl timeZone identifiers.
+      var offset = /^(?:(?:UTC|GMT|UT))?([+-])(\d{1,2})(?::?(\d{2}))?(?::?(\d{2}))?$/.exec(zone);
+      var displayDate = date;
+      var displayZone = zone;
+      if (offset) {
+        var seconds = (+offset[2] * 3600 + +(offset[3] || 0) * 60 + +(offset[4] || 0))
+          * (offset[1] === "-" ? -1 : 1);
+        displayDate = new Date(date.getTime() + seconds * 1000);
+        displayZone = "UTC";
+      }
+      var parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: displayZone, year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", hourCycle: "h23"
+      }).formatToParts(displayDate);
+      var fields = {};
+      parts.forEach(function (part) { fields[part.type] = part.value; });
+      // Activity days start at 04:00 in the summary's timezone, including DST.
+      var calendarDay = new Date(Date.UTC(+fields.year, +fields.month - 1, +fields.day));
+      if (+fields.hour < 4) calendarDay.setUTCDate(calendarDay.getUTCDate() - 1);
+      day = calendarDay.toISOString().slice(0, 10);
+    } catch (ignored) {
+      // Malformed legacy zones must not stop rendering.
+      day = new Date(date.getTime() - 4 * 3600000).toISOString().slice(0, 10);
+    }
+  }
+  return JSON.stringify([zone, summary.calendarVersion || "", day]);
+}
+
+function toggleTimelineEntry(entry) {
+  var expanded = entry.classList.toggle("expanded");
+  var id = entry.dataset && entry.dataset.entryId;
+  if (!id) return;
+  if (!state.timelineExpanded) state.timelineExpanded = new Set();
+  if (expanded) state.timelineExpanded.add(id);
+  else state.timelineExpanded.delete(id);
+}
+
 function renderTimeline() {
   var sm = state.summary;
   var body = state.dom.timelineBody;
 
+  if (!state.timelineExpanded) state.timelineExpanded = new Set();
   if (!sm) {
+    state.timelineExpanded.clear();
     body.innerHTML = '<div class="timeline-empty">' + escHtml(t("timeline.insufficient")) + '</div>';
     return;
   }
 
+  var scope = timelineReadingScope(sm);
+  if (state.timelineReadingScope !== scope) {
+    state.timelineExpanded.clear();
+    state.timelineReadingScope = scope;
+  }
   var entries = sm.entries || sm.timeline || [];
   if (!entries.length) {
+    state.timelineExpanded.clear();
     body.innerHTML = '<div class="timeline-empty">' + escHtml(t("timeline.insufficient")) + '</div>';
     return;
   }
 
+  var visibleIds = new Set();
+  var occurrences = new Map();
   var html = '<div class="timeline-list">';
   entries.forEach(function (entry, idx) {
+    // Never use headline, insight, source or array index for keyed entries.
+    var identity = JSON.stringify([entry.key || entry.period || entry.label || "legacy",
+      entry.periodStart || entry.start || ""]);
+    var occurrence = occurrences.get(identity) || 0;
+    occurrences.set(identity, occurrence + 1);
+    var id = encodeURIComponent(JSON.stringify([identity, occurrence]));
+    visibleIds.add(id);
     var label = entry.label || entry.period || t("timeline.period");
     var headline = entry.headline || t("timeline.noSummary");
     var summary = entry.summary || "";
@@ -36,7 +98,8 @@ function renderTimeline() {
     var isLlmAvailable = !!(headline && headline !== t("timeline.noSummary"));
 
     html +=
-      '<div class="timeline-entry" data-entry-idx="' +
+      '<div class="timeline-entry' + (state.timelineExpanded.has(id) ? ' expanded' : '') +
+      '" data-entry-id="' + escHtml(id) + '" data-entry-idx="' +
       idx +
       '">' +
       '<div class="timeline-entry-label">' +
@@ -176,5 +239,8 @@ function renderTimeline() {
   });
   html += "</div>";
 
+  state.timelineExpanded.forEach(function (id) {
+    if (!visibleIds.has(id)) state.timelineExpanded.delete(id);
+  });
   body.innerHTML = html;
 }

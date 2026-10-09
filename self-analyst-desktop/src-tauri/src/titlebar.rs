@@ -357,7 +357,9 @@ mod tests {
             );
             assert_eq!(
                 help_url("knowledge", language),
-                Some("https://github.com/chunleik/self-analyst/blob/main/docs/personal-ontology.md")
+                Some(
+                    "https://github.com/chunleik/self-analyst/blob/main/docs/personal-ontology.md"
+                )
             );
             assert_eq!(
                 help_url("website", language),

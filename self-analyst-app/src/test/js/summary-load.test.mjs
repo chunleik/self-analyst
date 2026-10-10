@@ -90,6 +90,40 @@ test("loadAll keeps an existing snapshot instead of the loading placeholder", ()
   assert.doesNotMatch(sandbox.timeline.innerHTML, /加载中/);
 });
 
+test("blocked daily history shows saved child narratives and the failing hour's diagnostics", () => {
+  const sandbox = createSandbox({ timeline: [{ key: "yesterday", label: "昨天", headline: "应用统计",
+    source: "wiki-partial", incomplete: true,
+    partialSummaries: [{ periodLabel: "10-09 04:00 – 10-09 12:00", summary: "上午原文<script>",
+      taskSegments: [{ title: "主题", summary: "完整主题叙述" }] }],
+    summaryStatus: { state: "waiting_dependencies", dependencies: [{ periodLabel: "10-09 19:00 – 10-09 20:00",
+      state: "failed", generationProgress: { state: "quality", calls: 7, maxCalls: 12, tokens: 31505, maxTokens: 256000,
+        nextRetryAt: "2026-10-10T03:42:00Z", configurationStamp: "PRIVATE" } }] }
+  }] });
+  sandbox.escHtml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  sandbox.renderTimeline();
+  const html = sandbox.timeline.innerHTML;
+  assert.ok(html.indexOf('timeline.historyPartial') < html.indexOf('timeline-entry-detail'));
+  assert.ok(html.indexOf('上午原文&lt;script&gt;') < html.indexOf('timeline-entry-detail'));
+  assert.equal(html.split('上午原文').length - 1, 1);
+  for (const text of ['timeline.historyWaitingDependencies', '上午原文&lt;script&gt;', '完整主题叙述',
+    '10-09 19:00', 'timeline.historyQuality', 'timeline.summaryBudgetUse', 'timeline.historyRetryAt']) assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /<script>|PRIVATE/);
+  sandbox.state.summary.timeline[0] = { key: "yesterday", label: "昨天", headline: "完整标题", insight: "完整日概览", source: "wiki" };
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /完整日概览/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /historyPartial|上午原文|historyQuality/);
+});
+
+test("statistics-only historical fallback is labeled without pretending the model is unconfigured", () => {
+  for (const status of ['missing', 'pending', 'skipped', 'unavailable']) {
+    const sandbox = createSandbox({ timeline: [{ headline: "统计", source: "local", incomplete: true,
+      partialSummaries: [], summaryStatus: { state: status, dependencies: [] } }] });
+    sandbox.renderTimeline();
+    assert.match(sandbox.timeline.innerHTML, /timeline.historyStatisticsOnly/);
+    assert.doesNotMatch(sandbox.timeline.innerHTML, /timeline.llmNotConfigured|historyPartial/);
+  }
+});
+
 test("budget pauses show a reason and accounting without clearing local facts", () => {
   const sandbox = createSandbox({ timeline: [{ label: "昨天", headline: "本地活动", generationProgress: {
     state: "period_budget", calls: 12, maxCalls: 12, tokens: 240000, maxTokens: 256000, reservedTokens: 4096,

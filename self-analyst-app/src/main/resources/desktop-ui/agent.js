@@ -5,6 +5,42 @@
 
 // ---- Timeline ----
 
+function historyStateText(status) {
+  var keys = { waiting_dependencies: "timeline.historyWaitingDependencies", pending: "timeline.historyPending",
+    failed: "timeline.historyFailed", missing: "timeline.historyMissing", skipped: "timeline.historySkipped",
+    unavailable: "timeline.historyUnavailable" };
+  var progress = status.generationProgress;
+  var reasons = { quality: "timeline.historyQuality", period_budget: "timeline.periodBudgetPaused",
+    global_budget: "timeline.dailyBudgetPaused", configuration: "timeline.summaryNeedsConfiguration",
+    input: "timeline.summaryInputPaused" };
+  return t(progress && reasons[progress.state] || keys[status.state] || "timeline.historyPending");
+}
+
+function historyProgressDetail(progress) {
+  if (!progress || typeof progress !== "object") return "";
+  var html = "";
+  if (Number.isFinite(progress.calls) && Number.isFinite(progress.maxCalls)) {
+    html += '<div class="timeline-detail-text">' + escHtml(t("timeline.summaryBudgetUse", {
+      calls: progress.calls, maxCalls: progress.maxCalls,
+      tokens: Number.isFinite(progress.tokens) ? progress.tokens : 0,
+      maxTokens: Number.isFinite(progress.maxTokens) ? progress.maxTokens : 0
+    })) + '</div>';
+  }
+  if (progress.reservedTokens > 0 || progress.estimatedCalls > 0) {
+    html += '<div class="timeline-detail-text">' + escHtml(t("timeline.summaryBudgetEstimate")) + '</div>';
+  }
+  if (typeof progress.nextRetryAt === "string" && !progress.nextRetryAt.startsWith("9999-")
+      && Number.isFinite(Date.parse(progress.nextRetryAt))) {
+    var retry = new Date(progress.nextRetryAt);
+    var zone = state.summary && state.summary.timezone;
+    var formatted;
+    try { formatted = retry.toLocaleString(undefined, zone ? { timeZone: zone } : {}); }
+    catch (ignored) { formatted = progress.nextRetryAt; }
+    html += '<div class="timeline-detail-text">' + escHtml(t("timeline.historyRetryAt", { time: formatted })) + '</div>';
+  }
+  return html;
+}
+
 // Reading state belongs to the view, not the refreshable summary or DOM.
 function timelineReadingScope(summary) {
   var zone = summary.timezone || "UTC";
@@ -94,6 +130,10 @@ function renderTimeline() {
     var suggestion = entry.suggestion;
     var localFacts = entry.local_facts;
     var progress = entry.generationProgress;
+    var history = entry.summaryStatus;
+    var partial = Array.isArray(entry.partialSummaries) ? entry.partialSummaries.filter(function (part) {
+      return part && typeof part.summary === "string" && part.summary.trim();
+    }) : [];
 
     var isLlmAvailable = !!(headline && headline !== t("timeline.noSummary"));
 
@@ -106,10 +146,20 @@ function renderTimeline() {
       escHtml(label) +
       "</div>";
 
+    if (history) {
+      html += '<div class="timeline-entry-summary">' + escHtml(t(partial.length
+        ? "timeline.historyPartial" : "timeline.historyStatisticsOnly")) + '</div>';
+      html += '<div class="timeline-entry-summary">' + escHtml(historyStateText(history)) + '</div>';
+    }
+    partial.forEach(function (part) {
+      html += '<div class="timeline-partial-period">';
+      if (typeof part.periodLabel === "string") html += '<div class="timeline-entry-summary">' + escHtml(part.periodLabel) + '</div>';
+      html += '<div class="timeline-entry-overview">' + escHtml(part.summary) + '</div></div>';
+    });
     if (overview) {
       html += '<div class="timeline-entry-overview">' + escHtml(overview) + "</div>";
     }
-    if (!overview || (entry.headline && String(entry.headline).trim() !== overview.trim())) {
+    if (!partial.length && (!overview || (entry.headline && String(entry.headline).trim() !== overview.trim()))) {
       html += '<div class="timeline-entry-headline' + (overview ? ' timeline-entry-topic' : '') + '">' +
         escHtml(headline) + "</div>";
     }
@@ -127,7 +177,7 @@ function renderTimeline() {
       html += "</div>";
     }
 
-    if (progress && progress.state && progress.state !== "queued") {
+    if (!history && progress && progress.state && progress.state !== "queued") {
       var noticeKey = progress.state === "period_budget" ? "timeline.periodBudgetPaused"
         : progress.state === "global_budget" ? "timeline.dailyBudgetPaused"
         : progress.state === "configuration" ? "timeline.summaryNeedsConfiguration"
@@ -136,8 +186,31 @@ function renderTimeline() {
     }
 
     html += '<div class="timeline-entry-detail">';
+    if (partial.length) html += '<div class="timeline-detail-section">' + escHtml(headline) + '</div>';
 
-    if (progress && Number.isFinite(progress.calls) && Number.isFinite(progress.maxCalls)) {
+    partial.forEach(function (part) {
+      if (!Array.isArray(part.taskSegments) || !part.taskSegments.length) return;
+      html += '<div class="timeline-detail-section">';
+      if (typeof part.periodLabel === "string") html += '<div class="timeline-detail-label">' + escHtml(part.periodLabel) + '</div>';
+      (Array.isArray(part.taskSegments) ? part.taskSegments : []).forEach(function (topic) {
+        if (!topic || typeof topic !== "object") return;
+        if (typeof topic.title === "string") html += '<div class="timeline-detail-label">' + escHtml(topic.title) + '</div>';
+        if (typeof topic.summary === "string") html += '<div class="timeline-detail-text">' + escHtml(topic.summary) + '</div>';
+      });
+      html += '</div>';
+    });
+    if (history) {
+      html += historyProgressDetail(history.generationProgress);
+      (Array.isArray(history.dependencies) ? history.dependencies : []).forEach(function (dependency) {
+        if (!dependency || typeof dependency !== "object") return;
+        html += '<div class="timeline-detail-section">';
+        if (typeof dependency.periodLabel === "string") html += '<div class="timeline-detail-label">' + escHtml(dependency.periodLabel) + '</div>';
+        html += '<div class="timeline-detail-text">' + escHtml(historyStateText(dependency)) + '</div>';
+        html += historyProgressDetail(dependency.generationProgress) + '</div>';
+      });
+    }
+
+    if (!history && progress && Number.isFinite(progress.calls) && Number.isFinite(progress.maxCalls)) {
       html += '<div class="timeline-detail-section">' + escHtml(t("timeline.summaryBudgetUse", {
         calls: progress.calls, maxCalls: progress.maxCalls,
         tokens: Number.isFinite(progress.tokens) ? progress.tokens : 0,

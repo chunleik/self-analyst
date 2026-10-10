@@ -27,6 +27,8 @@ Good to know:
 
 ## Features
 
+If a daily or half-day summary is waiting for another period, the dashboard shows completed child summaries in full, labeled as partial. Expand the entry for incomplete periods, failure reasons, usage, and retry times. When no child summary is available, the entry is labeled as app statistics only; the complete summary replaces it once ready.
+
 - **Activity review**: Explore current, daily, and historical activities on the dashboard timeline. Available overviews are shown in full without expanding an entry, with topic titles underneath; expand to read each saved topic’s full title and narrative in order, or ask follow-up questions with context. Empty evidence sections are hidden. Local fallback summaries and saved overviews share the same text styling. Expanded entries stay open across automatic refreshes until you collapse them; reading state resets when the activity date or timezone changes. A day runs from 04:00 to 04:00 the next day in local time; see the [activity statistics guide (Chinese)](docs/activity-statistics.md).
 - **Personal knowledge**: Connect activity across days and apps to stable projects, topics, and goals in **Knowledge**. Confirm, remove, or correct associations; your decisions survive rebuilding and restarting. Knowledge works locally without extra model calls. See the [personal knowledge guide (Chinese)](docs/personal-ontology.md).
 - **Optional Neo4j sync**: Manually publish the current, corrected knowledge graph to a Neo4j database you configure. It is off by default and requires destination, namespace, and data-scope confirmation for every sync. Local storage remains authoritative. See the [setup and read-only query guide (Chinese)](docs/neo4j-sync.md).

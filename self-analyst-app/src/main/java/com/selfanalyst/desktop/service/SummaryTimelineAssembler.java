@@ -52,7 +52,11 @@ public class SummaryTimelineAssembler {
         if (entry != null) {
             return fromWiki(slot, entry, "wiki", false);
         }
-        return fromLocal(slot, "local");
+        Map<String, Object> result = fromLocal(slot, "local");
+        if (slot.wikiLevel() == WikiLevel.DAY || slot.wikiLevel() == WikiLevel.HALF_DAY) {
+            ClosedSummaryHistory.attach(wikiStore, slot, zone, result);
+        }
+        return result;
     }
 
     private Map<String, Object> assembleSpan(SummaryWindowClassifier.Slot slot) {
@@ -155,8 +159,9 @@ public class SummaryTimelineAssembler {
         SummaryPromptService.EnhancedSummary enhanced = prompts.localOnly(local);
         Map<String, Object> map = fromEnhanced(slot.key(), slot.label(), enhanced, local);
         map.put("source", source);
-        map.put("incomplete", wikiStore == null);
-        addGenerationProgress(slot, map);
+        map.put("incomplete", true);
+        if (slot.wikiLevel() != WikiLevel.DAY && slot.wikiLevel() != WikiLevel.HALF_DAY)
+            addGenerationProgress(slot, map);
         return map;
     }
 

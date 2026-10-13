@@ -124,4 +124,42 @@ class RuntimeStorageCompatibilityTest {
         assertThrows(RuntimeStorageGuard.StorageException.class, () -> RuntimeStorageGuard.acquire(root));
         assertFalse(Files.exists(root.resolve("storage-format.json")));
     }
+    @Test void adoptsSchemaFiveAndVerifiedPreUpgradeBackupWithoutMutation() throws Exception {
+        Path database = root.resolve("memory/llm-wiki.db");
+        try (var wiki = new WikiStore(database)) { }
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            statement.execute("DROP TRIGGER wiki_entries_revision");
+            statement.execute("ALTER TABLE wiki_entries DROP COLUMN revision");
+            for (String table : java.util.List.of("wiki_repair_drafts", "wiki_repair_statements", "wiki_repair_revisions", "wiki_repair_followups"))
+                statement.execute("DROP TABLE " + table);
+            statement.execute("PRAGMA user_version=4");
+        }
+        try (var wiki = new WikiStore(database)) { }
+        assertTrue(Files.isRegularFile(database.resolveSibling("llm-wiki.db.before-summary-repair-v5.bak")));
+        Files.writeString(database.resolveSibling("llm-wiki.db.before-summary-repair-v5.bak.00000000-0000-0000-0000-000000000000.tmp"), "interrupted staging");
+        Map<String, byte[]> before = snapshot();
+        RuntimeStorageCompatibility.verify(root);
+        Map<String, byte[]> after = snapshot();
+        assertEquals(before.keySet(), after.keySet());
+        before.forEach((name, bytes) -> assertArrayEquals(bytes, after.get(name), name));
+    }
+
+    @Test void rejectsUnknownWikiVersionAndIncompleteRepairSchemaReadOnly() throws Exception {
+        Path database = root.resolve("memory/llm-wiki.db");
+        try (var wiki = new WikiStore(database)) { }
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) { statement.execute("PRAGMA user_version=6"); }
+        byte[] original = Files.readAllBytes(database);
+        assertThrows(RuntimeStorageGuard.StorageException.class, () -> RuntimeStorageCompatibility.verify(root));
+        assertArrayEquals(original, Files.readAllBytes(database));
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+             var statement = connection.createStatement()) {
+            statement.execute("PRAGMA user_version=5"); statement.execute("DROP TABLE wiki_repair_revisions");
+        }
+        byte[] incomplete = Files.readAllBytes(database);
+        assertThrows(RuntimeStorageGuard.StorageException.class, () -> RuntimeStorageCompatibility.verify(root));
+        assertArrayEquals(incomplete, Files.readAllBytes(database));
+    }
+
 }

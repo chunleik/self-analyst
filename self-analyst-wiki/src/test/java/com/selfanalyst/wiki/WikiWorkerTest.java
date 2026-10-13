@@ -158,11 +158,11 @@ class WikiWorkerTest {
     void finalCheckpointRecoversARealPublicationFailureWithoutAnotherModelCall(@TempDir Path dir) throws Exception {
         store = new WikiStore(dir.resolve("wiki.db")) {
             boolean fail = true;
-            @Override public void updateStatus(String id, WikiStatus status, String summary, String task,
+            @Override public boolean updateStatusIfRevision(String id, long expectedRevision, WikiStatus status, String summary, String task,
                     List<WikiEntry.TaskSegment> segments, WikiEntry.WikiMetrics metrics, List<String> sources,
                     String model, String prompt, String factsVersion, String projector, Map<String, WikiEntry.SourceCoverage> coverage) {
                 if (fail) { fail = false; throw new IllegalStateException("publication failure"); }
-                super.updateStatus(id, status, summary, task, segments, metrics, sources, model, prompt, factsVersion, projector, coverage);
+                return super.updateStatusIfRevision(id, expectedRevision, status, summary, task, segments, metrics, sources, model, prompt, factsVersion, projector, coverage);
             }
         };
         awDatabase = new Database(dir.resolve("events"));

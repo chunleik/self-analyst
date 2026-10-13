@@ -126,4 +126,38 @@ class WikiEmbeddingWorkerTest {
         // Evidence is NOT included in the index text
         assertFalse(text.contains("raw OCR text"));
     }
+    @Test
+    void userReportsAreVisibleInIndexTextWithoutEmbeddingTheirAuditEvidence() {
+        var confirmed = new WikiEntry.TaskSegment("部署", "已完成甲服务部署。", List.of("PRIVATE_AUDIT"),
+                List.of(), "medium", List.of("user_statement:synthetic"), "user_confirmed");
+        String text = WikiEmbeddingWorker.buildSegmentIndexText(confirmed);
+        assertTrue(text.contains("source:user_confirmed"));
+        assertFalse(text.contains("PRIVATE_AUDIT"));
+        assertFalse(text.contains("user_statement:synthetic"));
+        WikiEntry entry = new WikiEntry("confirmed", WikiLevel.HOUR, t1, t2, "UTC", WikiStatus.SUMMARIZED,
+                confirmed.summary(), confirmed.title(), List.of(confirmed), new WikiEntry.WikiMetrics(90, 0, 0, List.of(), Map.of()),
+                List.of(), "repair", "v10", 0, null, null, t1, t1, t1);
+        String entryText = WikiEmbeddingWorker.buildEntryIndexText(entry, ZoneId.of("UTC"),
+                java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+        assertTrue(entryText.contains("source:user_confirmed"));
+        assertTrue(WikiEmbeddingWorker.matchesCurrentText(entry, "TASK_SEGMENT", WikiSemanticIndex.textHash(text)));
+        assertFalse(WikiEmbeddingWorker.matchesCurrentText(entry, "TASK_SEGMENT", WikiSemanticIndex.textHash("旧摘要")));
+        assertFalse(WikiEmbeddingWorker.matchesCurrentText(entry, "ENTRY_SUMMARY", null));
+    }
+
+    @Test
+    void changedContentUsesDifferentSemanticDocumentIdentity() {
+        WikiEmbeddingWorker worker = new WikiEmbeddingWorker(store, null, null, "synthetic", 2, 60);
+        WikiEntry first = new WikiEntry("changed", WikiLevel.HOUR, t1, t2, "UTC", WikiStatus.SUMMARIZED,
+                "查看部署说明。", "部署", List.of(), new WikiEntry.WikiMetrics(90, 0, 0, List.of(), Map.of()),
+                List.of(), "synthetic", "v10", 0, null, null, t1, t1, t1);
+        store.upsert(first); worker.enqueueEntry(first);
+        String firstId = store.findSemanticDocsByEntry(first.id()).getFirst().docId();
+        WikiEntry second = new WikiEntry("changed", WikiLevel.HOUR, t1, t2, "UTC", WikiStatus.SUMMARIZED,
+                "已完成甲服务部署。", "部署", List.of(), first.metrics(), List.of(), "repair", "v10", 0, null, null, t1, t2, t2);
+        store.upsert(second); worker.enqueueEntry(second);
+        assertEquals(2, store.findSemanticDocsByEntry(first.id()).size());
+        assertEquals(1, store.findSemanticDocsByEntry(first.id()).stream().filter(doc -> doc.docId().equals(firstId)).count());
+    }
+
 }

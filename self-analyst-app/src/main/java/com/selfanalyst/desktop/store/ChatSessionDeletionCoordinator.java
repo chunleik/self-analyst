@@ -23,13 +23,25 @@ public final class ChatSessionDeletionCoordinator {
 
     private final ChatSessionStore store;
     private final DeletionExecutor executor;
+    private final java.util.function.Consumer<String> repairDeletion;
 
     public ChatSessionDeletionCoordinator(
             ChatSessionStore store, SelfAnalystAgent agent, Config config) {
-        this(store, defaultExecutor(agent, config));
+        this(store, defaultExecutor(agent, config), ignored -> {});
+    }
+
+    public ChatSessionDeletionCoordinator(ChatSessionStore store, SelfAnalystAgent agent,
+            Config config, java.util.function.Consumer<String> repairDeletion) {
+        this(store, defaultExecutor(agent, config), repairDeletion);
     }
 
     ChatSessionDeletionCoordinator(ChatSessionStore store, DeletionExecutor executor) {
+        this(store, executor, ignored -> {});
+    }
+
+    ChatSessionDeletionCoordinator(ChatSessionStore store, DeletionExecutor executor,
+            java.util.function.Consumer<String> repairDeletion) {
+        this.repairDeletion = Objects.requireNonNull(repairDeletion);
         this.store = Objects.requireNonNull(store, "store");
         this.executor = Objects.requireNonNull(executor, "executor");
     }
@@ -74,7 +86,17 @@ public final class ChatSessionDeletionCoordinator {
         ChatSessionStore.DeleteResult result = executor.execute(
                 sessionId,
                 durableIntent,
-                () -> store.deletePendingTranscript(sessionId));
+                () -> {
+                    // The durable intent remains until all stores finish. A crash after this
+                    // idempotent cleanup resumes it before the transcript is exposed again.
+                    // Repair creation acquires the same chat -> Wiki lock order. Hold the
+                    // chat lock across both stores so no new draft can appear after cleanup
+                    // while the visible session still exists.
+                    synchronized (store) {
+                        repairDeletion.accept(sessionId);
+                        return store.deletePendingTranscript(sessionId);
+                    }
+                });
         store.finishDeletion(sessionId);
         return result;
     }

@@ -27,18 +27,68 @@ final class WikiSummaryFocus {
                 .thenComparing(WikiTopicProtocol.TopicCard::id));
         int folded = Math.max(0, cards.size() - topicLimit);
         List<WikiTopicProtocol.TopicCard> kept = new ArrayList<>(cards.subList(0, Math.min(topicLimit, cards.size())));
-        if (folded > 0) kept.add(fold(cards.subList(topicLimit, cards.size()), byId, parent));
+        boolean confirmed = cards.stream().anyMatch(card -> "user_confirmed".equals(card.claimType()));
+        if (confirmed) {
+            // A confirmed assertion is indivisible. Pack only whole descriptions/references,
+            // then apply the usual topic selection rather than constructing an oversized card.
+            List<WikiTopicProtocol.TopicCard> candidates = new ArrayList<>(boundedConfirmedCards(cards, byId, parent));
+            cards.stream().filter(card -> !"user_confirmed".equals(card.claimType())).forEach(candidates::add);
+            candidates.sort(Comparator.comparingDouble((WikiTopicProtocol.TopicCard card) -> weight(card, byId, parent)).reversed()
+                    .thenComparing(WikiSummaryFocus::earliest).thenComparing(WikiTopicProtocol.TopicCard::id));
+            kept = new ArrayList<>();
+            // A self-report must never silently disappear into automatic observations.
+            kept.add(candidates.stream().filter(card -> "user_confirmed".equals(card.claimType())).findFirst().orElseThrow());
+            for (WikiTopicProtocol.TopicCard card : candidates) {
+                if (kept.size() >= topicLimit) break;
+                int length = kept.stream().mapToInt(value -> value.summary().codePointCount(0, value.summary().length())).sum();
+                if (!kept.contains(card) && length + kept.size() + card.summary().codePointCount(0, card.summary().length()) <= 1200)
+                    kept.add(card);
+            }
+            kept.sort(Comparator.comparingDouble((WikiTopicProtocol.TopicCard card) -> weight(card, byId, parent)).reversed()
+                    .thenComparing(WikiSummaryFocus::earliest).thenComparing(WikiTopicProtocol.TopicCard::id));
+        } else if (folded > 0) kept.add(fold(cards.subList(topicLimit, cards.size()), byId, parent));
         List<WikiEntry.TaskSegment> segments = kept.stream().map(card -> segment(card, facts, byId)).toList();
         String primary = kept.getFirst().title();
         String summary = result.summary() != null && result.summary().length() > SUMMARY_LIMIT
                 ? composedSummary(kept) : result.summary();
-        if (parent) summary = firstSentence(summary, kept);
+        if (WikiEvidencePolicy.hasConfirmed(segments))
+            summary = WikiEvidencePolicy.text(WikiEvidencePolicy.composeConfirmedSummary(segments), "summary", 1200);
+        else if (parent) summary = firstSentence(summary, kept);
         Map<String, Object> extra = new LinkedHashMap<>(result.metrics().extra());
         extra.put("topicCards", List.copyOf(kept));
         extra.put("foldedTopicCards", folded);
+        if (confirmed) {
+            Set<String> retained = new HashSet<>(); kept.forEach(card -> retained.addAll(card.memberInputIds()));
+            List<WikiTopicProtocol.TopicCard> omitted = cards.stream().filter(card -> "user_confirmed".equals(card.claimType()))
+                    .filter(card -> !retained.containsAll(card.memberInputIds())).toList();
+            extra.put("omittedConfirmedTopicCards", omitted.size());
+            extra.put("omittedConfirmedTopicIds", omitted.stream().map(WikiTopicProtocol.TopicCard::id).toList());
+            extra.put("omittedConfirmedInputIds", omitted.stream().flatMap(card -> card.memberInputIds().stream()).distinct().toList());
+        }
         return new WikiSummarizer.SummaryResult(summary, primary, segments,
                 new WikiEntry.WikiMetrics(result.metrics().activeSeconds(), result.metrics().afkSeconds(),
                         result.metrics().switchCount(), result.metrics().topApps(), extra));
+    }
+
+    private static List<WikiTopicProtocol.TopicCard> boundedConfirmedCards(List<WikiTopicProtocol.TopicCard> cards,
+                                                                             Map<String, Fact> byId, boolean parent) {
+        List<WikiTopicProtocol.TopicCard> groups = new ArrayList<>();
+        List<WikiTopicProtocol.TopicCard> batch = new ArrayList<>();
+        for (WikiTopicProtocol.TopicCard card : cards) {
+            if (!"user_confirmed".equals(card.claimType())) continue;
+            List<WikiTopicProtocol.TopicCard> next = new ArrayList<>(batch); next.add(card);
+            String composed = next.stream().map(WikiTopicProtocol.TopicCard::summary).distinct()
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            int chars = composed.codePointCount(0, composed.length());
+            long refs = next.stream().flatMap(value -> value.representativeFactIds().stream()).distinct().count();
+            if (!batch.isEmpty() && (chars > 500 || refs > WikiEvidencePolicy.MAX_REFERENCES)) {
+                groups.add(batch.size() == 1 ? batch.getFirst() : fold(batch, byId, parent));
+                batch = new ArrayList<>();
+            }
+            batch.add(card);
+        }
+        if (!batch.isEmpty()) groups.add(batch.size() == 1 ? batch.getFirst() : fold(batch, byId, parent));
+        return groups;
     }
 
     private static WikiTopicProtocol.TopicCard fold(List<WikiTopicProtocol.TopicCard> rest, Map<String, Fact> byId,
@@ -50,13 +100,16 @@ final class WikiSummaryFocus {
             card.representativeFactIds().stream().filter(members::contains).findFirst().ifPresent(refs::add);
         }
         if (refs.isEmpty()) refs = WikiTopicProtocol.representatives(members, byId, 3);
+        boolean confirmed = rest.stream().anyMatch(card -> "user_confirmed".equals(card.claimType()));
+        if (confirmed) refs = rest.stream().flatMap(card -> card.representativeFactIds().stream()).distinct().toList();
         boolean inferred = rest.stream().anyMatch(card -> "inferred".equals(card.claimType()));
         int confidence = rest.stream().mapToInt(card -> rank(card.confidence())).min().orElse(0);
         if (inferred) confidence = Math.min(confidence, 1);
-        String title = parent ? "其余活动" : "其他零散活动";
-        String summary = parent ? "其余活动不再展开。" : otherSummary(rest);
-        return new WikiTopicProtocol.TopicCard("t-other", title, summary, members, refs, List.of(),
-                inferred ? "inferred" : "observed", List.of("low", "medium", "high").get(confidence));
+        String title = confirmed ? WikiEvidencePolicy.CONFIRMED_GROUP_TITLE : parent ? "其余活动" : "其他零散活动";
+        String summary = confirmed ? rest.stream().map(WikiTopicProtocol.TopicCard::summary).distinct()
+                .collect(java.util.stream.Collectors.joining("\n")) : parent ? "其余活动不再展开。" : otherSummary(rest);
+        return new WikiTopicProtocol.TopicCard(confirmed ? "t-confirmed-" + WikiTopicProtocol.hash(String.join("|", refs)).substring(0, 20) : "t-other", title, summary, members, refs, List.of(),
+                confirmed ? "user_confirmed" : inferred ? "inferred" : "observed", List.of("low", "medium", "high").get(confidence));
     }
 
     private static String otherSummary(List<WikiTopicProtocol.TopicCard> rest) {
@@ -86,9 +139,9 @@ final class WikiSummaryFocus {
         input.put("claimType", card.claimType());
         input.put("confidence", card.confidence());
         WikiEntry.TaskSegment parsed = WikiEvidencePolicy.parseSegments(List.of(input),
-                WikiEvidencePolicy.facts(facts.sampledTitles())).getFirst();
+                WikiEvidencePolicy.facts(facts)).getFirst();
         List<String> apps = card.memberInputIds().stream().map(byId::get).filter(Objects::nonNull)
-                .map(Fact::app).distinct().sorted().toList();
+                .map(Fact::app).filter(app -> app != null && !app.isBlank()).distinct().sorted().toList();
         return new WikiEntry.TaskSegment(parsed.title(), parsed.summary(), parsed.evidence(), apps,
                 parsed.confidence(), card.representativeFactIds(), parsed.claimType());
     }

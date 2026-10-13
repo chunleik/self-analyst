@@ -1,6 +1,10 @@
 package com.selfanalyst.wiki.semantic;
 
 import com.selfanalyst.wiki.WikiLevel;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
@@ -69,6 +73,7 @@ public class WikiSemanticIndex implements AutoCloseable {
         Document doc = new Document();
         doc.add(new StringField("statistics_version", com.selfanalyst.events.statistics.ActivityStatistics.VERSION, Field.Store.NO));
         doc.add(new StringField("calendar_version", com.selfanalyst.events.statistics.ActivityCalendar.VERSION, Field.Store.NO));
+        doc.add(new StringField("text_hash", textHash(text), Field.Store.YES));
         doc.add(new StringField(FIELD_DOC_ID, docId, Field.Store.YES));
         doc.add(new StringField(FIELD_ENTRY_ID, entryId, Field.Store.YES));
         doc.add(new StringField(FIELD_DOC_TYPE, docType, Field.Store.YES));
@@ -116,7 +121,8 @@ public class WikiSemanticIndex implements AutoCloseable {
                         doc.get(FIELD_PERIOD_END),
                         doc.get(FIELD_SUMMARY),
                         doc.get(FIELD_PRIMARY_TASK),
-                        doc.get(FIELD_MATCHED_TEXT)));
+                        doc.get(FIELD_MATCHED_TEXT), doc.get(FIELD_DOC_ID),
+                        doc.get("text_hash") == null ? textHash(doc.get(FIELD_TEXT)) : doc.get("text_hash")));
             }
             return hits;
         }
@@ -157,5 +163,10 @@ public class WikiSemanticIndex implements AutoCloseable {
             String periodEnd,
             String summary,
             String primaryTask,
-            String matchedText) {}
+            String matchedText, String docId, String textHash) {}
+
+    public static String textHash(String text) {
+        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8))); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
 }

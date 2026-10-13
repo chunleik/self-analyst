@@ -100,6 +100,73 @@ class ChatSessionDeletionCoordinatorTest {
         }
     }
 
+    @Test
+    void repairCleanupFailureRetainsDurableIntentAndRetriesBeforeTranscript(@TempDir Path tempDir) {
+        Config config = Config.testDefaults(tempDir);
+        try (ChatSessionStore store = new ChatSessionStore(config.memoryDir())) {
+            var session = store.create(new ChatSessionStore.CreateRequest());
+            java.util.concurrent.atomic.AtomicInteger cleanup = new java.util.concurrent.atomic.AtomicInteger();
+            var failing = new ChatSessionDeletionCoordinator(store, null, config, id -> {
+                cleanup.incrementAndGet();
+                throw new IllegalStateException("repair store unavailable");
+            });
+            assertThrows(IllegalStateException.class, () -> failing.delete(session.id));
+            assertTrue(store.pendingDeletionIds().contains(session.id));
+            var recovery = new ChatSessionDeletionCoordinator(store, null, config, id -> cleanup.incrementAndGet());
+            recovery.recoverPendingDeletions();
+            org.junit.jupiter.api.Assertions.assertEquals(2, cleanup.get());
+            assertNull(store.getSession(session.id));
+            assertTrue(store.pendingDeletionIds().isEmpty());
+        }
+    }
+
+    @Test
+    void concurrentRepairCreationCannotSlipBetweenCleanupAndTranscriptDeletion(@TempDir Path tempDir) throws Exception {
+        Config config = Config.testDefaults(tempDir);
+        try (ChatSessionStore store = new ChatSessionStore(config.memoryDir());
+             var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var session = store.create(new ChatSessionStore.CreateRequest());
+            var draftSessions = java.util.concurrent.ConcurrentHashMap.<String>newKeySet();
+            draftSessions.add(session.id);
+            var cleaned = new java.util.concurrent.CountDownLatch(1);
+            var finishDeletion = new java.util.concurrent.CountDownLatch(1);
+            var creationStarted = new java.util.concurrent.CountDownLatch(1);
+            var coordinator = new ChatSessionDeletionCoordinator(store,
+                    (id, intent, transcript) -> { intent.run(); return transcript.get(); }, id -> {
+                        draftSessions.remove(id);
+                        cleaned.countDown();
+                        try {
+                            if (!finishDeletion.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                                throw new IllegalStateException("Timed out waiting for deletion barrier");
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(interrupted);
+                        }
+                    });
+            var deletion = executor.submit(() -> coordinator.delete(session.id));
+            assertTrue(cleaned.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            var creation = executor.submit(() -> {
+                creationStarted.countDown();
+                // Mirrors the repair controller's chat -> Wiki mutation boundary.
+                synchronized (store) {
+                    if (store.getSession(session.id) != null) draftSessions.add(session.id);
+                }
+            });
+            try {
+                assertTrue(creationStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                assertThrows(java.util.concurrent.TimeoutException.class,
+                        () -> creation.get(100, java.util.concurrent.TimeUnit.MILLISECONDS));
+            } finally {
+                finishDeletion.countDown();
+            }
+            assertTrue(deletion.get(5, java.util.concurrent.TimeUnit.SECONDS).deleted());
+            creation.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertFalse(draftSessions.contains(session.id));
+            assertNull(store.getSession(session.id));
+            assertTrue(store.pendingDeletionIds().isEmpty());
+        }
+    }
+
     private static void persistAgentState(Path memoryDir, String sessionId) {
         JsonFileAgentStateStore store = new JsonFileAgentStateStore(stateRoot(memoryDir));
         try {

@@ -61,6 +61,21 @@ public class DesktopChatSessionController {
     private final Config config;
     private final MemoryExtractionService memoryExtractionService;
     private final ChatSessionDeletionCoordinator deletionCoordinator;
+    private volatile com.selfanalyst.desktop.service.SummaryRepairChatService summaryRepairChatService;
+
+    public void setSummaryRepairChatService(com.selfanalyst.desktop.service.SummaryRepairChatService service) {
+        this.summaryRepairChatService = service;
+    }
+
+    private boolean repairBound(String sessionId) {
+        var service = summaryRepairChatService;
+        return service != null && service.isBound(sessionId);
+    }
+
+    private Object repairContext(String sessionId) {
+        var service = summaryRepairChatService;
+        return service == null ? null : service.context(sessionId);
+    }
 
     private final ScheduledExecutorService summaryPool = Executors.newScheduledThreadPool(
             1, r -> { Thread t = new Thread(r, "chat-summary"); t.setDaemon(true); return t; });
@@ -129,7 +144,15 @@ public class DesktopChatSessionController {
                 ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
                 return;
             }
-            ctx.json(s);
+            var repair = summaryRepairChatService == null ? null : summaryRepairChatService.view(id);
+            if (repair == null) ctx.json(s);
+            else {
+                // Enrich the read model only. Persisted client message fields are never authority.
+                Map<String, Object> response = MAPPER.convertValue(s, new TypeReference<Map<String, Object>>() {});
+                response.put("contextSnapshot", repairContext(id));
+                response.put("repair", repair);
+                ctx.json(response);
+            }
         } catch (Exception e) {
             ctx.status(500).json(DesktopErrors.payload(ctx, "error.session.get", Map.of("detail", Objects.toString(e.getMessage(), ""))));
         }
@@ -179,6 +202,8 @@ public class DesktopChatSessionController {
             String contextLabel = textOrNull(body, "contextLabel");
             Object contextSnapshot = body.has("contextSnapshot") && !body.get("contextSnapshot").isNull()
                     ? MAPPER.convertValue(body.get("contextSnapshot"), Object.class) : null;
+            Object boundContext = repairContext(id);
+            if (boundContext != null) contextSnapshot = boundContext;
             ChatSessionStore.Session updated = store.updateMeta(id, title, contextLabel, contextSnapshot);
             if (updated == null) {
                 ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
@@ -234,6 +259,10 @@ public class DesktopChatSessionController {
             if (!requireGeneratedSessionId(ctx, id)) return;
             List<ChatSessionStore.Message> incoming = parseMessages(
                     DesktopChatJson.readBoundedBody(ctx));
+            Object boundContext = repairContext(id);
+            if (boundContext != null) {
+                for (var message : incoming) message.contextSnapshot = boundContext;
+            }
             List<ChatSessionStore.Message> appended = store.appendMessages(id, incoming);
             if (appended == null) {
                 ctx.status(404).json(DesktopErrors.payload(ctx, "error.session.notFound", Map.of("id", id)));
@@ -340,6 +369,7 @@ public class DesktopChatSessionController {
     private void scheduleSummary(String id) {
         if (id == null) return;
         cancelSummary(id);
+        if (repairBound(id)) return;
         ScheduledFuture<?> future = summaryPool.schedule(
                 () -> regenerateSummary(id), SUMMARY_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
         pending.put(id, future);
@@ -355,6 +385,7 @@ public class DesktopChatSessionController {
     private void regenerateSummary(String id) {
         pending.remove(id);
         try {
+            if (repairBound(id)) return;
             ChatSessionStore.Session session = store.getSession(id);
             if (session == null) return; // deleted mid-flight
             // LLM availability computed exactly as DesktopAgentController.getSummary.
@@ -375,9 +406,10 @@ public class DesktopChatSessionController {
     }
 
     private void scheduleMemoryExtraction(String sessionId, String assistantMessageId) {
-        if (memoryExtractionService == null) return;
+        if (memoryExtractionService == null || repairBound(sessionId)) return;
         memoryPool.submit(() -> {
             try {
+                if (repairBound(sessionId)) return;
                 ChatSessionStore.Session session = store.getSession(sessionId);
                 if (session == null || session.messages == null) return;
                 ChatSessionStore.Message assistant = null;

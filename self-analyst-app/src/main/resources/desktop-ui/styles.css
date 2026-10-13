@@ -2024,3 +2024,26 @@ input:checked + .toggle-switch::after {
   letter-spacing: normal;
   font-size: 13px;
 }
+
+/* Summary repair uses the same local card renderer in both message surfaces. */
+.summary-repair-context {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.summary-repair-context[hidden] { display: none; }
+.summary-repair-context strong { display: block; margin-bottom: 4px; }
+.timeline-summary-repair-btn { margin: 8px 0; white-space: normal; }
+.timeline-repair-source { margin-top: 5px; font-size: 11px; color: var(--text-secondary); }
+@media (max-width: 760px) {
+  .summary-repair-context { padding: 8px 10px; }
+  .summary-repair-slot { min-width: 0; max-width: 100%; }
+}
+.chat-tab-layout.has-summary-repair { grid-template-columns: 260px minmax(0, 1fr); }
+.chat-tab-layout.has-summary-repair .chat-context-panel { display: none; }
+@media (max-width: 1100px) {
+  .chat-tab-layout.has-summary-repair { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+}

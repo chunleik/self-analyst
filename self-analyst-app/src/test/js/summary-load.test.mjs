@@ -302,7 +302,7 @@ test("event setup without task nodes preserves timeline expand and discuss", () 
   listeners.click({ target: { closest(selector) { return selector === ".timeline-entry" ? entry : null; } } });
   assert.equal(expanded, true);
   const button = { dataset: { entryIdx: "0" }, classList: { contains: name => name === "timeline-entry-discuss-btn" } };
-  button.closest = selector => selector === "button" ? button : entry;
+  button.closest = selector => selector === "button" ? button : selector === ".timeline-entry" ? entry : null;
   listeners.click({ target: button });
   assert.equal(sandbox.discussContext.type, "timeline_entry");
   assert.equal(sandbox.discussContext.id, "today");
@@ -316,11 +316,12 @@ test("old statistics snapshot cannot be reused", () => {
   assert.equal(sandbox.state.summary, null);
 });
 
-test("unknown activity and estimated coverage remain visible in details", () => {
+test("unknown activity and estimated coverage diagnostics are hidden without changing statistics", () => {
   const sandbox = createSandbox({ timeline: [{ headline: "Known app", unknownActivitySeconds: 120, coverage: "estimated" }] });
   sandbox.renderTimeline();
-  assert.match(sandbox.timeline.innerHTML, /timeline.unknownActivity/);
-  assert.match(sandbox.timeline.innerHTML, /timeline.estimated/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /timeline.unknownActivity|timeline.estimated/);
+  assert.equal(sandbox.state.summary.timeline[0].unknownActivitySeconds, 120);
+  assert.equal(sandbox.state.summary.timeline[0].coverage, "estimated");
 });
 
 test("full overview is visible before collapsed details and the topic is secondary", () => {
@@ -594,4 +595,76 @@ test("poll errors keep an expanded snapshot and empty payload clears obsolete st
   sandbox.state.summary = null;
   sandbox.renderTimeline();
   assert.equal(sandbox.state.timelineExpanded.size, 0);
+});
+
+test('known Chinese and English legacy statistics diagnostics disappear in all dashboard periods', () => {
+  const diagnostics = ['未识别应用活动：2小时15分钟', '未识别应用活动 2 分 5 秒',
+    'Unidentified application activity: 2h 15m', 'Unidentified application activity 2m 5s',
+    'AFK 覆盖不足，部分时长未扣除非活跃时间，仅供估计',
+    'AFK 覆盖不足：部分时长未扣除非活跃时间，仅供估计。',
+    'Incomplete AFK coverage: some durations include unverified idle time and are estimates.'];
+  const snapshot = { timeline: ['current', 'yesterday', 'week', 'month'].map(key => ({ key, headline: 'Editor activity',
+    evidence: diagnostics, unknownActivitySeconds: 230, coverage: 'estimated', sourceCoverage: { window: 'complete', afk: 'missing' },
+    taskSegments: [{ title: '排查 AFK 检测问题', summary: 'Investigate unknown application detection in AFK service.' }] })) };
+  const sandbox = createSandbox(snapshot); const before = JSON.stringify(sandbox.state.summary);
+  sandbox.renderTimeline();
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /未识别应用活动|Unidentified application activity|AFK 覆盖不足|Incomplete AFK coverage|timeline.evidence/);
+  assert.match(sandbox.timeline.innerHTML, /排查 AFK 检测问题/);
+  assert.match(sandbox.timeline.innerHTML, /Investigate unknown application detection in AFK service/);
+  assert.equal(JSON.stringify(sandbox.state.summary), before);
+  assert.equal(sandbox.state.summary.timeline[0].sourceCoverage.afk, 'missing');
+});
+
+test('structured diagnostics and serialized legacy duplicate evidence have no empty labels; normal evidence survives', () => {
+  for (const evidence of [
+    [{ type: 'unknown_activity', message: 'synthetic diagnostic' }, { diagnosticType: 'incomplete_afk_coverage', message: 'estimate' }],
+    '["Unidentified application activity: 5m","AFK 覆盖不足，部分时长未扣除非活跃时间，仅供估计"]',
+    '未识别应用活动：5分钟; AFK 覆盖不足，部分时长未扣除非活跃时间，仅供估计',
+  ]) {
+    const sandbox = createSandbox({ timeline: [{ headline: 'Normal topic', evidence }] }); sandbox.renderTimeline();
+    assert.doesNotMatch(sandbox.timeline.innerHTML, /timeline.evidence|synthetic diagnostic|未识别应用/);
+  }
+  const sandbox = createSandbox({ timeline: [{ headline: 'Normal topic', evidence: ['Unidentified application activity: 5m', 'AFK detector source code', 'Active: 10m; AFK: 2m'] }] });
+  sandbox.renderTimeline();
+  assert.match(sandbox.timeline.innerHTML, /AFK detector source code/); assert.match(sandbox.timeline.innerHTML, /AFK: 2m/);
+  assert.doesNotMatch(sandbox.timeline.innerHTML, /Unidentified application activity/);
+});
+
+test('each quality failure has its own exact-target repair button and ordinary follow-up stays available', () => {
+  const target = { entryId: 'failed-hour-1', level: 'HOUR', periodStart: '2026-10-12T10:00:00Z', periodEnd: '2026-10-12T11:00:00Z', timezone: 'UTC', revision: 4 };
+  const second = { ...target, entryId: 'failed-hour-2', periodStart: '2026-10-12T11:00:00Z', periodEnd: '2026-10-12T12:00:00Z' };
+  const sandbox = createSandbox({ timeline: [
+    { label: 'Yesterday', headline: 'Partial review', summaryStatus: { state: 'waiting_dependencies', dependencies: [
+      { periodLabel: '10:00–11:00', state: 'failed', generationProgress: { state: 'quality' }, repairTarget: target },
+      { periodLabel: '11:00–12:00', state: 'failed', generationProgress: { state: 'quality' }, repairTarget: second },
+      { periodLabel: '12:00–13:00', state: 'pending' },
+    ] } },
+    { label: 'Failed hour', headline: 'Activity', summaryStatus: { state: 'failed', repairTarget: target } },
+    { label: 'Invalid target', headline: 'Activity', repairTarget: { ...target, revision: undefined } },
+  ] }); sandbox.renderTimeline();
+  assert.equal((sandbox.timeline.innerHTML.match(/timeline-summary-repair-btn/g) || []).length, 3);
+  assert.match(sandbox.timeline.innerHTML, /data-entry-idx="0" data-dependency-idx="0"/);
+  assert.match(sandbox.timeline.innerHTML, /data-entry-idx="0" data-dependency-idx="1"/);
+  assert.equal((sandbox.timeline.innerHTML.match(/timeline-entry-discuss-btn/g) || []).length, 3);
+  assert.equal((sandbox.timeline.innerHTML.match(/aria-label="repair.openRange"/g) || []).length, 3);
+});
+
+test('nested mouse or keyboard repair activation neither toggles the entry nor binds the parent', () => {
+  const target = { entryId: 'failed-child', level: 'HOUR', periodStart: '2026-10-12T10:00:00Z', periodEnd: '2026-10-12T11:00:00Z', timezone: 'UTC', revision: 4 };
+  const sandbox = createSandbox({ timeline: [{ summaryStatus: { dependencies: [{ repairTarget: target }] } }] });
+  const listeners = {};
+  const element = () => ({ addEventListener() {}, querySelector: () => element(), querySelectorAll: () => [] });
+  for (const value of Object.values(sandbox.state.dom)) if (value && !Array.isArray(value)) Object.assign(value, element());
+  sandbox.state.dom = new Proxy(sandbox.state.dom, { get: (obj, key) => obj[key] ?? element() });
+  sandbox.timeline.addEventListener = (event, handler) => { listeners[event] = handler; };
+  sandbox.document.addEventListener = () => {};
+  for (const name of ['handleConfigFieldChange', 'openFileStatusEntry', 'openFileSettingsModal', 'closeFileSettingsModal', 'saveFileSettings', 'closeChat', 'sendChatMessage', 'sendChatTabMessage']) sandbox[name] = () => {};
+  let selected, stopped = 0, prevented = 0;
+  sandbox.openSummaryRepair = value => { selected = value; };
+  sandbox.toggleTimelineEntry = () => { throw new Error('must not collapse'); };
+  vm.runInContext(fs.readFileSync(new URL('../../main/resources/desktop-ui/events.js', import.meta.url), 'utf8'), sandbox);
+  sandbox.setupEvents();
+  const button = { dataset: { entryIdx: '0', dependencyIdx: '0' } };
+  listeners.click({ target: { closest: selector => selector === '.timeline-summary-repair-btn' ? button : null }, stopPropagation() { stopped++; }, preventDefault() { prevented++; } });
+  assert.equal(selected.entryId, 'failed-child'); assert.equal(stopped, 1); assert.equal(prevented, 1);
 });

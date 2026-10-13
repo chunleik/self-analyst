@@ -128,6 +128,7 @@ public class SummaryTimelineAssembler {
         map.put("headline", headline);
         map.put("insight", entry.summary() == null ? "" : entry.summary());
         map.put("taskSegments", entry.taskSegments());
+        map.put("userRevised", "user-repair".equals(entry.model()));
         int confidence = entry.taskSegments().stream().mapToInt(task -> "high".equals(task.confidence()) ? 2
                 : "medium".equals(task.confidence()) ? 1 : 0).min().orElse(0);
         if (entry.sourceCoverage().isEmpty() || entry.sourceCoverage().values().stream()
@@ -173,6 +174,8 @@ public class SummaryTimelineAssembler {
                     .filter(entry -> entry.timezone().equals(zone.getId()) && entry.status() != WikiStatus.SUMMARIZED)
                     .findFirst().ifPresent(entry -> {
                         Map<String, Object> progress = com.selfanalyst.wiki.WikiGenerationProgress.from(entry);
+                        var target = ClosedSummaryHistory.repairTarget(wikiStore, entry);
+                        if (target != null) map.put("repairTarget", target);
                         if (!progress.isEmpty()) {
                             map.put("generationProgress", progress);
                             map.put("incomplete", true);

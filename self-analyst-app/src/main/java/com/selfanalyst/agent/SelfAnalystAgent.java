@@ -97,6 +97,11 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final AtomicBoolean chatRunning = new AtomicBoolean();
     private final AtomicReference<ActiveDesktopChat> activeDesktopChat = new AtomicReference<>();
     private volatile boolean usageMissingLogged;
+    private volatile com.selfanalyst.desktop.service.SummaryRepairChatService summaryRepairChatService;
+
+    public void setSummaryRepairChatService(com.selfanalyst.desktop.service.SummaryRepairChatService service) {
+        this.summaryRepairChatService = service;
+    }
     // 仅在既有应用级 gate 内设置，整轮（包括工具内保存）保持不变。
     private volatile boolean runtimesForChatAvailable;
 
@@ -433,6 +438,12 @@ public class SelfAnalystAgent implements AutoCloseable {
         return runExclusiveStream(activeChat, () -> Flux.defer(() -> {
             PersistedDesktopTurn turn = persistedTurnSupplier.get();
             if (turn == null) throw new ChatSessionUnavailableException(sessionId);
+            // Resolve server-owned binding before ordinary chat, tools or compaction. Client
+            // context is display data and can neither grant nor remove this routing constraint.
+            var repair = summaryRepairChatService;
+            if (repair != null && repair.isBound(sessionId)) {
+                return repairChat(sessionId, userMessageId, turn, activeChat, repair);
+            }
             var documentExecution = new com.selfanalyst.document.DocumentExecution(
                     sessionId, userMessageId, turn.managedDesktop(), activeChat::cancelled);
             documents.set(documentExecution);
@@ -507,6 +518,38 @@ public class SelfAnalystAgent implements AutoCloseable {
             var execution = documents.get();
             if (execution != null) execution.closeAndAwait();
         })).transform(SelfAnalystAgent::requireTerminalChatResult);
+    }
+
+    private Flux<ChatStreamEvent> repairChat(String sessionId, String userMessageId,
+            PersistedDesktopTurn turn, ActiveDesktopChat active,
+            com.selfanalyst.desktop.service.SummaryRepairChatService repair) {
+        return Flux.defer(() -> {
+            seedSessionHistoryIfAbsent(sessionId, turn.existingHistory());
+            CallPreparation prepared = prepareCall(sessionId, userMessageId, turn.userInput(), List.of());
+            if (prepared.completedReply() != null) {
+                return Flux.just(ChatStreamEvent.result(prepared.completedReply()));
+            }
+            return Mono.fromCallable(() -> {
+                Thread worker = Thread.currentThread();
+                if (!active.beginModelCall(worker::interrupt)) throw new ChatCancelledException(userMessageId);
+                try {
+                    String response = repair.complete(sessionId, userMessageId, active::cancelled);
+                    if (active.cancelled()) throw new ChatCancelledException(userMessageId);
+                    AgentState state = agent.getAgentState(DESKTOP_USER_ID, sessionId);
+                    state.contextMutable().addAll(prepared.messages());
+                    state.contextMutable().add(Msg.builder().name("assistant").role(MsgRole.ASSISTANT)
+                            .textContent(response).build());
+                    agent.saveAgentState(DESKTOP_USER_ID, sessionId);
+                    if (!active.completeModelCall()) throw new ChatCancelledException(userMessageId);
+                    return ChatStreamEvent.result(response);
+                } finally {
+                    // PlainTask restores InterruptedException's flag. Clear only our explicit
+                    // cancellation before the gate's durable rollback touches interruptible files.
+                    if (active.cancelled()) Thread.interrupted();
+                }
+            }).flux();
+        }).doOnTerminate(() -> agent.clearStateCache(DESKTOP_USER_ID, sessionId))
+                .doOnCancel(() -> agent.clearStateCache(DESKTOP_USER_ID, sessionId));
     }
 
     private static Flux<ChatStreamEvent> requireTerminalChatResult(
@@ -905,6 +948,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         private final String userMessageId;
         private volatile int lifecycle;
         private boolean modelCallStarted;
+        private Runnable dedicatedInterrupt;
 
         private ActiveDesktopChat(String sessionId, String userMessageId) {
             this.sessionId = sessionId;
@@ -919,12 +963,20 @@ public class SelfAnalystAgent implements AutoCloseable {
         private synchronized boolean cancel(Runnable interrupt) {
             if (lifecycle != 0) return false;
             lifecycle = 1;
-            if (modelCallStarted) interrupt.run();
+            if (modelCallStarted) {
+                if (dedicatedInterrupt != null) dedicatedInterrupt.run();
+                else interrupt.run();
+            }
             return true;
         }
 
         private synchronized boolean beginModelCall() {
+            return beginModelCall(null);
+        }
+
+        private synchronized boolean beginModelCall(Runnable interrupt) {
             if (lifecycle != 0) return false;
+            dedicatedInterrupt = interrupt;
             modelCallStarted = true;
             return true;
         }

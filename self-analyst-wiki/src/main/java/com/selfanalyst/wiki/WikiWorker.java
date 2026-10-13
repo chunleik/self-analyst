@@ -127,6 +127,7 @@ public class WikiWorker {
         catch (Exception e) { log.warn("Wiki privacy redaction failed: {}", e.getClass().getSimpleName()); }
 
         try {
+            recoverRepairFollowups();
             restorePausedGenerations();
             // Process in priority order: lower levels first
             for (WikiLevel level : PROCESS_ORDER) {
@@ -246,7 +247,12 @@ public class WikiWorker {
         return exactChildren;
     }
 
-    private void processEntry(WikiEntry entry) {
+    private void processEntry(WikiEntry requested) {
+        WikiStore.VersionedEntry snapshot = store.versionedEntry(requested.id());
+        if (snapshot == null || !snapshot.entry().updatedAt().equals(requested.updatedAt())
+                || snapshot.entry().status() == WikiStatus.SUMMARIZED || snapshot.entry().status() == WikiStatus.SKIPPED) return;
+        WikiEntry entry = snapshot.entry();
+        long expectedRevision = snapshot.revision();
         String id = entry.id();
         WikiPeriod period = new WikiPeriod(entry.level(), entry.periodStart(), entry.periodEnd(), entry.timezone());
         WikiFactBuilder.WikiFacts facts = null;
@@ -269,7 +275,7 @@ public class WikiWorker {
             }
 
             if (isEmpty(facts)) {
-                store.markSkipped(id, "No events in period");
+                store.markSkippedIfRevision(id, expectedRevision, "No events in period");
                 return;
             }
 
@@ -287,10 +293,11 @@ public class WikiWorker {
                 generated = true;
             }
 
-            store.updateStatus(id, WikiStatus.SUMMARIZED, result.summary(), result.primaryTask(),
+            boolean accepted = store.updateStatusIfRevision(id, expectedRevision, WikiStatus.SUMMARIZED, result.summary(), result.primaryTask(),
                     result.taskSegments(), result.metrics(),
                     sourceEntries(facts), model, summarizer.promptVersion(),
                     facts.factBuilderVersion(), facts.projectorVersion(), facts.sourceCoverage());
+            if (!accepted) return; // A repair or newer generation won; charged model usage remains settled.
             published = true;
             if (generated && summarizer instanceof WikiSummaryPipeline pipeline) pipeline.markPublished(result);
 
@@ -303,7 +310,7 @@ public class WikiWorker {
                 summarized.ifPresent(embeddingWorker::enqueueEntry);
             }
         } catch (WikiPeriodBudgetException exhausted) {
-            recordFailure(entry, facts, period, "period_budget", "WIKI_PERIOD_BUDGET_EXHAUSTED", PAUSED_UNTIL, false, attemptedConfiguration);
+            recordFailure(entry, expectedRevision, facts, period, "period_budget", "WIKI_PERIOD_BUDGET_EXHAUSTED", PAUSED_UNTIL, false, attemptedConfiguration);
         } catch (WikiSummaryPipeline.CallFailure failure) {
             String state = failure.kind().name().toLowerCase(java.util.Locale.ROOT);
             Instant next = retryTime(entry);
@@ -311,19 +318,30 @@ public class WikiWorker {
                     || failure.kind() == WikiSummaryPipeline.FailureKind.INPUT) next = PAUSED_UNTIL;
             else if (failure.kind() == WikiSummaryPipeline.FailureKind.GLOBAL_BUDGET) next = nextBudgetDay();
             else if (failure.kind() == WikiSummaryPipeline.FailureKind.PERIOD_BUDGET) next = PAUSED_UNTIL;
-            recordFailure(entry, facts, period, state, failure.code(), next, !failure.beforeSend(), attemptedConfiguration);
+            recordFailure(entry, expectedRevision, facts, period, state, failure.code(), next, !failure.beforeSend(), attemptedConfiguration);
         } catch (com.selfanalyst.wiki.usage.BudgetExceededException gate) {
-            recordFailure(entry, facts, period, "global_budget", "WIKI_GLOBAL_BUDGET", nextBudgetDay(), false, attemptedConfiguration);
+            recordFailure(entry, expectedRevision, facts, period, "global_budget", "WIKI_GLOBAL_BUDGET", nextBudgetDay(), false, attemptedConfiguration);
         } catch (com.selfanalyst.wiki.usage.LlmUnavailableException unavailable) {
-            recordFailure(entry, facts, period, "configuration", "WIKI_MODEL_UNAVAILABLE", PAUSED_UNTIL, false, attemptedConfiguration);
+            recordFailure(entry, expectedRevision, facts, period, "configuration", "WIKI_MODEL_UNAVAILABLE", PAUSED_UNTIL, false, attemptedConfiguration);
         } catch (Exception e) {
             String code = safeFailure(e);
             log.warn("Wiki entry {} failed: {}", id, code);
             if (published) return; // A checkpoint-cleanup/index failure cannot undo a committed summary.
             String state = generated ? "publish_failed" : code.startsWith("WIKI_EVIDENCE_")
                     || code.startsWith("WIKI_NARRATIVE_") || code.startsWith("WIKI_RESPONSE_") ? "quality" : "transport";
-            recordFailure(entry, facts, period, state, code, retryTime(entry), true, attemptedConfiguration);
+            recordFailure(entry, expectedRevision, facts, period, state, code, retryTime(entry), true, attemptedConfiguration);
         }
+    }
+
+    private void recoverRepairFollowups() {
+        for (WikiStore.RepairFollowup followup : store.pendingRepairFollowups(100)) {
+            WikiStore.VersionedEntry current = store.versionedEntry(followup.targetId());
+            if (current == null || current.entry().status() != WikiStatus.SUMMARIZED) continue;
+            // Entry discovery is idempotent. A crash between enqueue and acknowledgement retries safely.
+            if (embeddingWorker != null) embeddingWorker.enqueueEntry(current.entry());
+            store.completeRepairFollowup(followup.repairId(), followup.revision());
+        }
+        // The ordinary level-ordered loop below rechecks only actual pending parent dependencies.
     }
 
     private void restorePausedGenerations() {
@@ -340,7 +358,7 @@ public class WikiWorker {
         recoverPaused = false;
     }
 
-    private void recordFailure(WikiEntry entry, WikiFactBuilder.WikiFacts facts, WikiPeriod period,
+    private void recordFailure(WikiEntry entry, long expectedRevision, WikiFactBuilder.WikiFacts facts, WikiPeriod period,
                                String state, String code, Instant next, boolean failure, String attemptedConfiguration) {
         Map<String, Object> progress = new LinkedHashMap<>();
         progress.put("state", state); progress.put("reason", code);
@@ -353,7 +371,7 @@ public class WikiWorker {
             progress.put("maxCalls", pipeline.budgetLimits().maxCalls()); progress.put("maxTokens", pipeline.budgetLimits().maxTokens());
             progress.put("configurationStamp", attemptedConfiguration);
         }
-        store.markGenerationFailure(entry, facts, progress, next, failure);
+        store.markGenerationFailureIfRevision(entry, expectedRevision, facts, progress, next, failure);
     }
 
     private Instant nextBudgetDay() {

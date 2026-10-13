@@ -25,17 +25,22 @@ class WikiStatisticsMigrationTest {
         try (WikiStore store = new WikiStore(path)) { store.upsert(entry("old")); }
         // Recreate the exact v3 column order and uniqueness, including its provenance columns.
         try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + path); Statement s = c.createStatement()) {
+            s.execute("DROP TRIGGER wiki_entries_revision");
+            s.execute("ALTER TABLE wiki_entries DROP COLUMN revision");
             String schema;
             try (ResultSet rows = s.executeQuery("SELECT sql FROM sqlite_master WHERE name='wiki_entries'")) { rows.next(); schema = rows.getString(1); }
             schema = schema.replace("\"wiki_entries\"", "wiki_entries_old")
                     .replace("statistics_version TEXT NOT NULL DEFAULT 'legacy', calendar_version TEXT NOT NULL DEFAULT 'legacy', ", "")
-                    .replace("timezone, statistics_version, calendar_version)", "timezone)");
+                    .replace("timezone, statistics_version, calendar_version)", "timezone)")
+                    .replace(", revision INTEGER NOT NULL DEFAULT 0", "");
             s.execute(schema);
             List<String> columns = new ArrayList<>();
             try (ResultSet rows = s.executeQuery("PRAGMA table_info(wiki_entries_old)")) { while (rows.next()) columns.add(rows.getString("name")); }
             s.execute("INSERT INTO wiki_entries_old SELECT " + String.join(",", columns) + " FROM wiki_entries");
             s.execute("DROP TABLE wiki_entries");
             s.execute("ALTER TABLE wiki_entries_old RENAME TO wiki_entries");
+            for (String table : List.of("wiki_repair_drafts", "wiki_repair_statements", "wiki_repair_revisions", "wiki_repair_followups"))
+                s.execute("DROP TABLE " + table);
             s.execute("PRAGMA user_version=3");
         }
         return path;

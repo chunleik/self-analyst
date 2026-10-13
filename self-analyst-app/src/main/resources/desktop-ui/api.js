@@ -104,6 +104,13 @@ function consumeChatSseResponse(response, onEvent) {
 }
 
 var api = {
+  summaryRepair: function (path, method, body) {
+    return fetch(API_BASE + "/desktop/summary-repairs" + (path || ""), {
+      method: method || "GET",
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(function (response) { return chatJsonResponse(response, "Summary repair failed"); });
+  },
   getStatus: function () {
     return fetch(API_BASE + "/desktop/status").then(function (r) {
       if (!r.ok) return chatJsonResponse(r, "Status fetch failed: ");

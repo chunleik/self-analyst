@@ -18,8 +18,8 @@ import java.util.function.LongSupplier;
 public final class WikiSummaryPipeline extends WikiSummarizer {
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules()
             .enable(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
-    private static final String VERSION = "wiki-tree-v6-abstract";
-    private static final int CHECKPOINT_SCHEMA = 2;
+    private static final String VERSION = "wiki-tree-v7-user-confirmed";
+    private static final int CHECKPOINT_SCHEMA = 3;
 
     /** Null usage means that the durable reservation must be retained conservatively. */
     public record Completion(String text, Long inputTokens, Long outputTokens) {
@@ -457,7 +457,7 @@ public final class WikiSummaryPipeline extends WikiSummarizer {
                 int confidence = strength.inferred() ? Math.min(1, strength.confidence()) : strength.confidence();
                 segments.add(new WikiEntry.TaskSegment(segment.title(), segment.summary(), segment.evidence(), segment.apps(),
                         List.of("low", "medium", "high").get(confidence), segment.evidenceFactIds(),
-                        strength.inferred() ? "inferred" : "observed"));
+                        "user_confirmed".equals(segment.claimType()) ? "user_confirmed" : strength.inferred() ? "inferred" : "observed"));
             }
             return new SummaryResult(result.summary(), result.primaryTask(), List.copyOf(segments), result.metrics());
         }
@@ -572,6 +572,8 @@ public final class WikiSummaryPipeline extends WikiSummarizer {
         generation.put("unresolvedTopicCards", run.unresolvedCards.size());
         generation.put("finalTopicCards", finalCards.size());
         generation.put("foldedTopicCards", folded instanceof Number number ? number.intValue() : 0);
+        for (String key : List.of("omittedConfirmedTopicCards", "omittedConfirmedTopicIds", "omittedConfirmedInputIds"))
+            if (extra.containsKey(key)) generation.put(key, extra.remove(key));
         generation.put("disclaimerClausesRemoved", disclaimers instanceof Number count ? count.intValue() : 0);
         generation.put("candidateGroups", run.plan == null ? 0 : run.plan.candidateGroups());
         generation.put("planFingerprint", run.plan == null ? "legacy" : run.plan.fingerprint());

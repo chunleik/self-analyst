@@ -16,7 +16,7 @@ public class WikiFactBuilder {
     private static final Logger log = LoggerFactory.getLogger(WikiFactBuilder.class);
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
             new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
-    public static final String FACT_BUILDER_VERSION = "wiki-facts-evidence-v6";
+    public static final String FACT_BUILDER_VERSION = "wiki-facts-evidence-v7-user-confirmed";
 
     private final EventStore eventStore;
     private final String hostname;
@@ -114,6 +114,7 @@ public class WikiFactBuilder {
         Map<String, Object> totals = new LinkedHashMap<>();
         List<String> summaries = new ArrayList<>();
         List<WikiTitleSampler.Fact> childFacts = new ArrayList<>();
+        Map<String, WikiEvidencePolicy.ConfirmedSource> provenance = new LinkedHashMap<>();
 
         for (WikiEntry child : childEntries) {
             if (child.metrics() != null) {
@@ -134,7 +135,7 @@ public class WikiFactBuilder {
                     appTotals.merge(ad.app(), (double) ad.seconds(), Double::sum);
                 }
             }
-            if (child.status() == WikiStatus.SUMMARIZED && !localEmpty(child)) addChildFacts(child, childFacts, summaries);
+            if (child.status() == WikiStatus.SUMMARIZED && !localEmpty(child)) addChildFacts(child, childFacts, summaries, provenance);
         }
 
         List<WikiEntry.AppDuration> topApps = appTotals.entrySet().stream()
@@ -149,6 +150,7 @@ public class WikiFactBuilder {
         totals.put("appSecondsExact", appTotals);
         totals.put("privacyExcludedApps", excludedApps(appTotals.keySet()));
         totals.put("sourceEntryIds", childEntries.stream().map(WikiEntry::id).toList());
+        if (!provenance.isEmpty()) totals.put(WikiEvidencePolicy.PROVENANCE_KEY, provenance);
         activeSeconds = ((Number) totals.getOrDefault("activeSecondsExact", 0)).longValue();
         afkSeconds = ((Number) totals.getOrDefault("afkSecondsExact", 0)).longValue();
         return new WikiFacts(period, activeSeconds, afkSeconds, switchCount,
@@ -168,7 +170,8 @@ public class WikiFactBuilder {
         return generation instanceof Map<?, ?> map && "local_empty".equals(map.get("mode"));
     }
 
-    private void addChildFacts(WikiEntry child, List<WikiTitleSampler.Fact> facts, List<String> summaries) {
+    private void addChildFacts(WikiEntry child, List<WikiTitleSampler.Fact> facts, List<String> summaries,
+                               Map<String, WikiEvidencePolicy.ConfirmedSource> provenance) {
         List<WikiEntry.TaskSegment> tasks = child.taskSegments();
         if (tasks.isEmpty()) {
             String app = child.metrics() == null ? "Wiki" : child.metrics().topApps().stream()
@@ -181,9 +184,24 @@ public class WikiFactBuilder {
         int index = 0;
         for (WikiEntry.TaskSegment task : tasks) {
             String title = privacy.redactText(task.title());
-            List<String> apps = task.apps().isEmpty() ? List.of("Wiki")
+            List<String> apps = task.apps().isEmpty() ? List.of("user_confirmed".equals(task.claimType()) ? "" : "Wiki")
                     : task.apps().stream().filter(app -> !privacy.excludedApp(app)).toList();
             if (apps.isEmpty() || privacy.excludedTitle(title)) continue;
+            String description = privacy.redactText(task.summary());
+            if (privacy.excludedTitle(description)) continue;
+            boolean confirmed = "user_confirmed".equals(task.claimType());
+            WikiEvidencePolicy.ConfirmedSource confirmedSource = null;
+            if (confirmed) {
+                var sources = WikiEvidencePolicy.provenance(child.metrics() == null ? null : child.metrics().extra());
+                List<WikiEvidencePolicy.ConfirmedSource> cited = task.evidenceFactIds().stream().map(sources::get)
+                        .filter(Objects::nonNull).distinct().toList();
+                if (cited.isEmpty() || !WikiEvidencePolicy.confirmedDescription(task.title(), task.summary(), cited))
+                    throw new IllegalArgumentException("WIKI_EVIDENCE_PROVENANCE:child");
+                List<String> statements = cited.stream().flatMap(source -> source.statementIds().stream()).distinct().toList();
+                LinkedHashSet<String> chain = new LinkedHashSet<>();
+                cited.forEach(source -> chain.addAll(source.entryIds())); chain.add(child.id());
+                confirmedSource = new WikiEvidencePolicy.ConfirmedSource(title, description, statements, List.copyOf(chain));
+            }
             List<String> refs = new ArrayList<>();
             int appIndex = 0;
             for (String app : apps) {
@@ -191,7 +209,8 @@ public class WikiFactBuilder {
                 refs.add(id);
                 Double seconds = index == 0 && child.metrics() != null
                         ? (double) child.metrics().activeSeconds() : 0d;
-                facts.add(new WikiTitleSampler.Fact(id, "wiki", app, title, "inferred", seconds, 1,
+                if (confirmedSource != null) provenance.put(id, confirmedSource);
+                facts.add(new WikiTitleSampler.Fact(id, "wiki", app, title, confirmed ? "user_confirmed" : "inferred", seconds, 1,
                         List.of(new WikiTitleSampler.Interval(child.periodStart().toString(), child.periodEnd().toString(),
                                 false, List.of(), 0)), 0));
             }
@@ -201,7 +220,9 @@ public class WikiFactBuilder {
             item.put("end", child.periodEnd().toString());
             item.put("timezone", child.timezone());
             item.put("title", title);
-            item.put("summary", privacy.redactText(task.summary()));
+            item.put("summary", description);
+            item.put("claimType", task.claimType());
+            if (confirmedSource != null) item.put("userStatementSource", confirmedSource);
             item.put("evidenceFactIds", refs);
             item.put("confidence", task.confidence());
             item.put("sourceCoverage", child.sourceCoverage());

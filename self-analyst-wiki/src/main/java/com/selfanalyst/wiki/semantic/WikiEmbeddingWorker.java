@@ -136,7 +136,7 @@ public class WikiEmbeddingWorker {
         // ENTRY_SUMMARY doc
         String entryText = buildEntryIndexText(entry, tz, fmt);
         String entryHash = sha256(entryText);
-        String entryDocId = "sem-" + entry.id() + "-entry";
+        String entryDocId = "sem-" + entry.id() + "-entry-" + entryHash.substring(0, 24);
 
         store.upsertSemanticDoc(new WikiStore.SemanticDoc(
                 entryDocId, entry.id(), DOC_TYPE_ENTRY, entry.level().name(),
@@ -151,7 +151,7 @@ public class WikiEmbeddingWorker {
                 WikiEntry.TaskSegment seg = entry.taskSegments().get(i);
                 String segText = buildSegmentIndexText(seg);
                 String segHash = sha256(segText);
-                String segDocId = "sem-" + entry.id() + "-seg-" + i;
+                String segDocId = "sem-" + entry.id() + "-seg-" + i + "-" + segHash.substring(0, 24);
 
                 store.upsertSemanticDoc(new WikiStore.SemanticDoc(
                         segDocId, entry.id(), DOC_TYPE_SEGMENT, entry.level().name(),
@@ -174,7 +174,7 @@ public class WikiEmbeddingWorker {
                     .findFirst().orElse(null);
 
             if (entry == null) {
-                store.markSemanticDocFailed(docId, "Referenced wiki entry not found",
+                store.markSemanticDocFailed(docId, doc.textHash(), "Referenced wiki entry not found",
                         Instant.now().plus(Duration.ofMinutes(10)));
                 return;
             }
@@ -191,25 +191,31 @@ public class WikiEmbeddingWorker {
                         .filter(t -> sha256(t).equals(doc.textHash()))
                         .findFirst().orElse(null);
                 if (text == null) {
-                    store.markSemanticDocFailed(docId, "Segment not found in entry",
+                    store.markSemanticDocFailed(docId, doc.textHash(), "Segment not found in entry",
                             Instant.now().plus(Duration.ofMinutes(10)));
                     return;
                 }
             }
 
+            if (!sha256(text).equals(doc.textHash())) return;
             float[] vector = embeddingClient.embedSingle(text);
+            // An old in-flight embedding may finish after a repair; it cannot publish as the new revision.
+            boolean current = store.findSemanticDocsByEntry(entry.id()).stream().anyMatch(latest ->
+                    latest.docId().equals(docId) && latest.textHash().equals(doc.textHash())
+                            && latest.status() != WikiStore.SemanticDocStatus.STALE);
+            if (!current) return;
             index.indexDocument(docId, entry.id(), doc.docType(), entry.level(),
                     entry.periodStart(), entry.periodEnd(),
                     text, entry.summary(), entry.primaryTask(),
                     truncate(text, 500), vector);
 
-            store.markSemanticDocIndexed(docId);
+            store.markSemanticDocIndexed(docId, doc.textHash());
             log.debug("Indexed semantic doc {} (type={})", docId, doc.docType());
         } catch (Exception e) {
             log.warn("Semantic doc {} failed: {}", docId, e.getMessage());
             int retryCount = doc.retryCount() + 1;
             long delayMinutes = (long) Math.min(1440, Math.pow(2, retryCount));
-            store.markSemanticDocFailed(docId, truncate(e.getMessage(), 500),
+            store.markSemanticDocFailed(docId, doc.textHash(), truncate(e.getMessage(), 500),
                     Instant.now().plus(Duration.ofMinutes(delayMinutes)));
         }
     }
@@ -224,6 +230,7 @@ public class WikiEmbeddingWorker {
         if (entry.taskSegments() != null) {
             for (WikiEntry.TaskSegment seg : entry.taskSegments()) {
                 sb.append(" ").append(seg.title());
+                if ("user_confirmed".equals(seg.claimType())) sb.append(" source:user_confirmed (user self-report)");
             }
         }
         return sb.toString().trim();
@@ -234,10 +241,19 @@ public class WikiEmbeddingWorker {
         sb.append(seg.title()).append(" ");
         sb.append(seg.summary() != null ? seg.summary() : "").append(" ");
         sb.append("confidence:").append(seg.confidence()).append(" ");
+        if ("user_confirmed".equals(seg.claimType())) sb.append("source:user_confirmed (user self-report) ");
         if (seg.apps() != null) {
             sb.append("apps:").append(String.join(",", seg.apps()));
         }
         return sb.toString().trim();
+    }
+
+    public static boolean matchesCurrentText(WikiEntry entry, String docType, String textHash) {
+        if (textHash == null) return false;
+        if (DOC_TYPE_ENTRY.equals(docType)) return textHash.equals(sha256(buildEntryIndexText(entry,
+                ZoneId.of(entry.timezone()), DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))));
+        return entry.taskSegments().stream().map(WikiEmbeddingWorker::buildSegmentIndexText)
+                .anyMatch(text -> textHash.equals(sha256(text)));
     }
 
     private static String sha256(String input) {

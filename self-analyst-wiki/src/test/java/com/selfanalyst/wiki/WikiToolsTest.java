@@ -113,4 +113,36 @@ class WikiToolsTest {
     void shouldReportHasSemanticIndexFalse() {
         assertFalse(tools.hasSemanticIndex());
     }
+    @Test
+    void repairedStatementsRoundTripAndSemanticSearchRejectsOldContent() throws Exception {
+        String sourceId = "user_statement:synthetic-query";
+        var segment = new WikiEntry.TaskSegment("部署", "已完成甲服务部署。", List.of("用户确认陈述"), List.of(),
+                "medium", List.of(sourceId), "user_confirmed");
+        var source = new WikiEvidencePolicy.ConfirmedSource(segment.title(), segment.summary(), List.of(sourceId), List.of("repaired"));
+        var entry = new WikiEntry("repaired", WikiLevel.HOUR, t1, t2, "UTC", WikiStatus.SUMMARIZED,
+                segment.summary(), segment.title(), List.of(segment), new WikiEntry.WikiMetrics(90, 0, 0, List.of(),
+                Map.of(WikiEvidencePolicy.PROVENANCE_KEY, Map.of(sourceId, source))), List.of(), "repair", "v10", 0,
+                null, null, t1, t2, t2);
+        store.upsert(entry);
+        String query = tools.queryWiki(t1.toString(), t2.toString(), "HOUR");
+        assertTrue(query.contains(sourceId)); assertTrue(query.contains("user_confirmed"));
+        try (var index = new com.selfanalyst.wiki.semantic.WikiSemanticIndex(tempDir.resolve("semantic"), 2)) {
+            float[] vector = {1f, 0f};
+            // Old vector documents for the same entry must not surface their stale assertions.
+            index.indexDocument("old", entry.id(), "ENTRY_SUMMARY", entry.level(), t1, t2,
+                    "旧的未经确认表述", "旧的未经确认表述", "旧主题", "旧的未经确认表述", vector);
+            var semantic = new WikiTools(store, index, texts -> List.of(vector), 8);
+            var json = new com.fasterxml.jackson.databind.ObjectMapper();
+            assertTrue(json.readTree(semantic.semanticSearchWiki("部署", null, null, null, 8)).path("results").isEmpty());
+            String canonical = entry.summary() + " " + entry.primaryTask() + " HOUR level summary 2026-06-01 10:00 to 2026-06-01 11:00 "
+                    + segment.title() + " source:user_confirmed (user self-report)";
+            index.indexDocument("new", entry.id(), "ENTRY_SUMMARY", entry.level(), t1, t2,
+                    canonical, entry.summary(), entry.primaryTask(), canonical, vector);
+            var result = json.readTree(semantic.semanticSearchWiki("部署", null, null, null, 8)).path("results");
+            assertEquals(1, result.size());
+            assertEquals("user_confirmed", result.get(0).path("taskSegments").get(0).path("claimType").asText());
+            assertTrue(result.get(0).path("userStatementProvenance").has(sourceId));
+        }
+    }
+
 }

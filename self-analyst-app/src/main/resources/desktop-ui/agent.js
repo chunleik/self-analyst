@@ -5,6 +5,69 @@
 
 // ---- Timeline ----
 
+// Presentation-only compatibility projection. Preserve source statistics and
+// never filter topics merely because they mention AFK or an unknown app.
+function hiddenSummaryDiagnostic(value) {
+  if (value && typeof value === "object") {
+    var kind = value.diagnosticType || value.type || value.code;
+    if (typeof kind === "string") kind = kind.replace(/([a-z])([A-Z])/g, "$1_$2").replace(/-/g, "_").toLowerCase();
+    return ["unknown_activity", "unknown_application_activity", "unidentified_application_activity",
+      "afk_coverage_incomplete", "incomplete_afk_coverage", "afk_coverage_warning"].indexOf(kind) >= 0;
+  }
+  if (typeof value !== "string") return false;
+  var text = value.trim();
+  return /^(?:未识别应用活动|Unidentified application activity)[:： ]*\d[\d.\s]*(?:(?:小时|分钟|分|秒|h|m|s|min|sec|minutes?|seconds?|hours?)[\d.\s]*)+[。.]?$/i.test(text)
+    || /^AFK 覆盖不足[：:,，]\s*部分时长未扣除非活跃时间[，,]仅供估计[。.]?$/.test(text)
+    || /^Incomplete AFK coverage: some durations include unverified idle time and are estimates[.]?$/.test(text);
+}
+
+function summaryEvidenceProjection(value) {
+  if (hiddenSummaryDiagnostic(value)) return null;
+  if (typeof value === "string") {
+    // Legacy evidence is sometimes serialized as JSON rather than an array.
+    var trimmed = value.trim();
+    if (/^[\[{]/.test(trimmed)) {
+      try { return summaryEvidenceProjection(JSON.parse(trimmed)); } catch (ignored) {}
+    }
+    if (!trimmed) return null;
+    var segments = value.split(/\n|[;；]/);
+    var lines = segments.filter(function (line) { return !hiddenSummaryDiagnostic(line); });
+    return lines.length === segments.length ? value : lines.filter(function (line) { return line.trim(); }).join("; ").trim() || null;
+  }
+  if (Array.isArray(value)) {
+    var items = value.map(summaryEvidenceProjection).filter(function (item) { return item != null; });
+    return items.length ? items : null;
+  }
+  if (value && typeof value === "object") {
+    var result = {};
+    Object.keys(value).forEach(function (key) {
+      if (["unknownActivitySeconds", "unknown_activity_seconds", "afkCoverageWarning"].indexOf(key) >= 0) return;
+      var item = summaryEvidenceProjection(value[key]);
+      if (item != null) result[key] = item;
+    });
+    return Object.keys(result).length ? result : null;
+  }
+  return value == null ? null : value;
+}
+
+function validSummaryRepairTarget(target) {
+  return !!(target && typeof target.entryId === "string" && target.entryId
+    && typeof target.level === "string" && target.level
+    && typeof target.timezone === "string" && target.timezone
+    && Number.isInteger(target.revision) && target.revision >= 0
+    && Number.isFinite(Date.parse(target.periodStart)) && Number.isFinite(Date.parse(target.periodEnd))
+    && Date.parse(target.periodEnd) > Date.parse(target.periodStart));
+}
+
+function summaryRepairButton(target, entryIndex, dependencyIndex, label) {
+  if (!validSummaryRepairTarget(target)) return "";
+  var range = label || target.periodStart + " – " + target.periodEnd;
+  return '<button type="button" class="btn btn-sm btn-outline timeline-summary-repair-btn" data-entry-idx="'
+    + entryIndex + '"' + (dependencyIndex == null ? '' : ' data-dependency-idx="' + dependencyIndex + '"')
+    + ' aria-label="' + escHtml(t("repair.openRange", { range: range })) + '">'
+    + escHtml(t("repair.open")) + '</button>';
+}
+
 function historyStateText(status) {
   var keys = { waiting_dependencies: "timeline.historyWaitingDependencies", pending: "timeline.historyPending",
     failed: "timeline.historyFailed", missing: "timeline.historyMissing", skipped: "timeline.historySkipped",
@@ -121,19 +184,21 @@ function renderTimeline() {
     var id = encodeURIComponent(JSON.stringify([identity, occurrence]));
     visibleIds.add(id);
     var label = entry.label || entry.period || t("timeline.period");
-    var headline = entry.headline || t("timeline.noSummary");
-    var summary = entry.summary || "";
+    var headline = summaryEvidenceProjection(entry.headline) || t("timeline.noSummary");
+    var summary = summaryEvidenceProjection(entry.summary) || "";
     var tags = entry.tags || [];
-    var evidence = entry.evidence;
-    var insight = entry.insight;
-    var overview = typeof insight === "string" && insight.trim() ? insight : "";
+    var evidence = summaryEvidenceProjection(entry.evidence);
+    var insight = summaryEvidenceProjection(entry.insight);
+    var overview = typeof insight === "string" && insight.trim() ? summaryEvidenceProjection(insight) || "" : "";
     var suggestion = entry.suggestion;
     var localFacts = entry.local_facts;
     var progress = entry.generationProgress;
     var history = entry.summaryStatus;
-    var partial = Array.isArray(entry.partialSummaries) ? entry.partialSummaries.filter(function (part) {
-      return part && typeof part.summary === "string" && part.summary.trim();
-    }) : [];
+    var partial = Array.isArray(entry.partialSummaries) ? entry.partialSummaries.map(function (part) {
+      if (!part || typeof part.summary !== "string") return null;
+      var projected = summaryEvidenceProjection(part.summary);
+      return projected ? Object.assign({}, part, { summary: projected }) : null;
+    }).filter(function (part) { return part && typeof part.summary === "string" && part.summary.trim(); }) : [];
 
     var isLlmAvailable = !!(headline && headline !== t("timeline.noSummary"));
 
@@ -151,10 +216,16 @@ function renderTimeline() {
         ? "timeline.historyPartial" : "timeline.historyStatisticsOnly")) + '</div>';
       html += '<div class="timeline-entry-summary">' + escHtml(historyStateText(history)) + '</div>';
     }
+    html += summaryRepairButton(entry.repairTarget || history && history.repairTarget, idx, null, label);
+    if (entry.source === "user_revision" || entry.source === "user-revision" || entry.userRevised || entry.repairRevision) {
+      html += '<div class="timeline-repair-source">' + escHtml(t("repair.userRevision")) + '</div>';
+    }
     partial.forEach(function (part) {
       html += '<div class="timeline-partial-period">';
       if (typeof part.periodLabel === "string") html += '<div class="timeline-entry-summary">' + escHtml(part.periodLabel) + '</div>';
-      html += '<div class="timeline-entry-overview">' + escHtml(part.summary) + '</div></div>';
+      html += '<div class="timeline-entry-overview">' + escHtml(part.summary) + '</div>';
+      if (part.userRevised) html += '<div class="timeline-repair-source">' + escHtml(t("repair.userRevision")) + '</div>';
+      html += '</div>';
     });
     if (overview) {
       html += '<div class="timeline-entry-overview">' + escHtml(overview) + "</div>";
@@ -201,12 +272,13 @@ function renderTimeline() {
     });
     if (history) {
       html += historyProgressDetail(history.generationProgress);
-      (Array.isArray(history.dependencies) ? history.dependencies : []).forEach(function (dependency) {
+      (Array.isArray(history.dependencies) ? history.dependencies : []).forEach(function (dependency, dependencyIndex) {
         if (!dependency || typeof dependency !== "object") return;
         html += '<div class="timeline-detail-section">';
         if (typeof dependency.periodLabel === "string") html += '<div class="timeline-detail-label">' + escHtml(dependency.periodLabel) + '</div>';
         html += '<div class="timeline-detail-text">' + escHtml(historyStateText(dependency)) + '</div>';
-        html += historyProgressDetail(dependency.generationProgress) + '</div>';
+        html += historyProgressDetail(dependency.generationProgress);
+        html += summaryRepairButton(dependency.repairTarget, idx, dependencyIndex, dependency.periodLabel) + '</div>';
       });
     }
 
@@ -253,14 +325,6 @@ function renderTimeline() {
         '<div class="llm-not-configured">' + escHtml(t("timeline.llmNotConfigured")) + '</div>';
     }
 
-    if (entry.unknownActivitySeconds > 0) {
-      html += '<div class="timeline-detail-section">' + escHtml(t("timeline.unknownActivity"))
-        + ' ' + escHtml(t("timeline.activityDuration", { minutes: Math.floor(entry.unknownActivitySeconds / 60),
-          seconds: Math.floor(entry.unknownActivitySeconds % 60) })) + '</div>';
-    }
-    if (entry.coverage === "estimated") {
-      html += '<div class="timeline-detail-section">' + escHtml(t("timeline.estimated")) + '</div>';
-    }
     var topics = Array.isArray(entry.taskSegments) ? entry.taskSegments : [];
     topics.forEach(function (topic) {
       if (!topic || typeof topic !== "object" || Array.isArray(topic)) return;
@@ -270,6 +334,7 @@ function renderTimeline() {
       html += '<div class="timeline-detail-section timeline-topic-card">';
       if (title) html += '<div class="timeline-detail-label">' + escHtml(title) + '</div>';
       if (narrative) html += '<div class="timeline-detail-text">' + escHtml(narrative) + '</div>';
+      if (topic.claimType === "user_confirmed") html += '<div class="timeline-repair-source">' + escHtml(t("repair.userConfirmed")) + '</div>';
       html += '</div>';
     });
 

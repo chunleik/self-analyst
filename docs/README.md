@@ -40,6 +40,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 - [document-generation.md](document-generation.md) — 在会话中生成七种格式的文档、修改版本及另存为
 - [personal-ontology.md](personal-ontology.md) — 个人知识、用户纠错、来源覆盖、备份与重建
 - [neo4j-sync.md](neo4j-sync.md) — 可选 Neo4j 手工同步配置、发送范围、清理语义与只读查询
+- [summary-repair.md](summary-repair.md) — 失败小时的对话修复、本地编辑、逐项确认和升级备份
 - [summary-quality-evaluation.md](summary-quality-evaluation.md) — 摘要合成数据评测、正式调用参数和覆盖指标边界
 - [summary-quality-results.md](summary-quality-results.md) — 摘要优化的分阶段验证结果与剩余语义问题
 
@@ -64,6 +65,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 | `merged-event-storage` | [spec](../openspec/specs/merged-event-storage/spec.md) | 合并事件权威存储；旧永久层见历史变更 |
 | `neo4j-sync` | [spec](../openspec/specs/neo4j-sync/spec.md) | [用户指南](neo4j-sync.md) |
 | `personal-ontology` | [spec](../openspec/specs/personal-ontology/spec.md) | [用户指南](personal-ontology.md) |
+| `summary-repair` | [spec](../openspec/specs/summary-repair/spec.md) | [修复指南](summary-repair.md) |
 | `summary-quality-evaluation` | [spec](../openspec/specs/summary-quality-evaluation/spec.md) | [评测指南](summary-quality-evaluation.md)、[验证记录](summary-quality-results.md) |
 | `title-capture` | [spec](../openspec/specs/title-capture/spec.md) | Git 历史 |
 | `user-configuration` | [spec](../openspec/specs/user-configuration/spec.md) | [配置旧文档](archive/legacy-specs/config-toml.md)、[核心旧文档](archive/legacy-specs/core.md) |

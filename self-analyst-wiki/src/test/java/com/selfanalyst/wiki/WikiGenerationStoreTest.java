@@ -253,7 +253,7 @@ class WikiGenerationStoreTest {
     void malformedUnsafeAndOversizedPayloadsNeverBecomeSuccessfulCheckpoints() {
         try (var store = new WikiGenerationStore(database())) {
             var call = store.reserve(KEY, "generation", "node", 100, DEFAULTS);
-            for (String invalid : List.of("not json", "[]", "null", "{\"schemaVersion\":3}",
+            for (String invalid : List.of("not json", "[]", "null", "{\"schemaVersion\":4}",
                     "{\"schemaVersion\":18446744073709551617}", PAYLOAD + "{}",
                     "{\"schemaVersion\":1,\"schemaVersion\":1}", "{\"schemaVersion\":1,\"prompt\":\"private\"}",
                     "{\"schemaVersion\":1,\"nested\":{\"api_key\":\"private\"}}",

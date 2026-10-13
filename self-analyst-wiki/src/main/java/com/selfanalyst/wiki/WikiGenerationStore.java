@@ -43,7 +43,7 @@ public final class WikiGenerationStore implements AutoCloseable {
             .enable(com.fasterxml.jackson.core.JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     private static final Set<String> STAGES = Set.of("DIRECT", "LEAF", "MERGE", "FINAL");
     // 载荷版本独立于SQLite表结构：v1任务片段，v2主题卡片；语义兼容由管线的generation key隔离。
-    private static final Set<Integer> CHECKPOINT_PAYLOAD_VERSIONS = Set.of(1, 2);
+    private static final Set<Integer> CHECKPOINT_PAYLOAD_VERSIONS = Set.of(1, 2, 3);
     private static final Set<String> PRIVATE_FIELDS = Set.of("prompt", "systemprompt", "rawresponse",
             "rawmodelresponse", "apikey", "authorization", "credentials", "secret");
     private static final Map<String, String> SCHEMA = schema();

@@ -418,6 +418,7 @@ function deepChatDisplayMessages(session) {
       role: "ai",
       text: t("chat.welcomeTitle") + "\n\n" + t("chat.welcomeHint"),
       custom: { transient: true },
+      html: typeof summaryRepairSlotHtml === "function" ? summaryRepairSlotHtml(session, -1) : undefined,
     }];
   }
   var retryableAssistantIdx = state.chatSending ? -1 : getLatestAssistantTurnIndex(session.messages);
@@ -431,6 +432,10 @@ function deepChatDisplayMessages(session) {
     if (typeof documentSlotHtml === "function") {
       var slot = documentSlotHtml(session, i);
       if (slot) result[result.length - 1].html = (result[result.length - 1].html || "") + slot;
+    }
+    if (typeof summaryRepairSlotHtml === "function") {
+      var repairSlot = summaryRepairSlotHtml(session, i);
+      if (repairSlot) result[result.length - 1].html = (result[result.length - 1].html || "") + repairSlot;
     }
   }
   var transientError = deepChatTransientError(session.id);
@@ -476,6 +481,7 @@ function renderDeepChatThread() {
     element.addMessage(messages[i], true);
   }
   if (typeof mountChatDocuments === "function") mountChatDocuments();
+  if (typeof mountSummaryRepair === "function") mountSummaryRepair();
   var transientError = session ? deepChatTransientError(session.id) : null;
   if (transientError && transientError.draft) {
     element.defaultInput = { text: transientError.draft };

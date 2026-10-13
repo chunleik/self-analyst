@@ -289,7 +289,7 @@ public class AppSession implements AutoCloseable {
                         watcherManager, contentWatcher,
                         contentPersistenceReady, contentMigrationError,
                         fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings,
-                        userConfigStore, wikiStore);
+                        userConfigStore, wikiStore, wikiGenerationStore);
                 desktopServer.statusController().setRawStatusSupplier(eventServer::rawStatus);
                 desktopServer.start();
                 eventServer.registerWebUi();

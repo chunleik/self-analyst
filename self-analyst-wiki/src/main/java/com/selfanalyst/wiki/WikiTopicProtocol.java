@@ -12,7 +12,7 @@ import java.util.*;
 
 /** Bounded topic membership is a model classification, not proof of a semantic claim. */
 public final class WikiTopicProtocol {
-    public static final String VERSION = "wiki-topic-cards-v2";
+    public static final String VERSION = "wiki-topic-cards-v3-user-confirmed";
     public static final int MAX_CARDS = 24;
     private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules()
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
@@ -26,6 +26,10 @@ public final class WikiTopicProtocol {
             输入含已完成子摘要时，只写一句主线，最多3个主题，不要逐条复述子时段标题。
             词面候选组只帮助组织，不是语义结论；可拆开错误候选组，也可合并不同候选组。
             claimType为observed或inferred，confidence为low/medium/high；推断最多medium，只有观察证据最多low。
+            用户确认子任务使用user_confirmed，最高medium；逐字保留其title和summary，不改写、不新增成果。
+            合并确认任务须保留每个不同确认来源，单卡至多16个引用；超出500字符或16个来源时拆成多卡。
+            合并用户确认任务只能用标题“用户确认的活动”，summary按来源顺序以换行连接原描述，引用全部确认来源。
+            混合来源不得标记observed或inferred；确认内容的整体summary由本地组合，不接受新增断言。
             summary最多1200字符，primaryTask最多160字符；topicCards最多24项，每项title最多80字符，summary最多500字符。
             apps和evidence由本地派生。输出JSON，不加Markdown。无法归类的输入可留空，本地会记录为unresolved。
             """;
@@ -113,6 +117,7 @@ public final class WikiTopicProtocol {
         if (legacy) raw = root.get("taskSegments");
         if (!(raw instanceof List<?> rows) || rows.size() > MAX_CARDS) throw invalid("STRUCTURE");
         Map<String, Fact> byId = catalog(full.sampledTitles().facts());
+        Map<String, WikiEvidencePolicy.ConfirmedSource> provenance = WikiEvidencePolicy.provenance(full.statistics());
         Set<String> inputIds = new TreeSet<>(); inputs.forEach(f -> inputIds.add(f.id()));
         Map<String, TopicCard> byTopic = new LinkedHashMap<>(); sources.forEach(c -> byTopic.put(c.id(), c));
         Set<String> assigned = new TreeSet<>(), consumed = new TreeSet<>();
@@ -121,8 +126,9 @@ public final class WikiTopicProtocol {
         for (Object value : rows) {
             if (!(value instanceof Map<?, ?> row)) throw invalid("STRUCTURE");
             String title = WikiEvidencePolicy.text(row.get("title"), "topicCards.title", 80);
-            WikiDisclaimer.Result descriptionClean = WikiDisclaimer.clean(
-                    WikiEvidencePolicy.text(row.get("summary"), "topicCards.summary", 500));
+            String originalDescription = WikiEvidencePolicy.text(row.get("summary"), "topicCards.summary", 500);
+            WikiDisclaimer.Result descriptionClean = "user_confirmed".equals(row.get("claimType"))
+                    ? new WikiDisclaimer.Result(originalDescription, 0) : WikiDisclaimer.clean(originalDescription);
             removed += descriptionClean.removed();
             String description = descriptionClean.text().isBlank() ? "涉及" + title + "。" : descriptionClean.text();
             List<String> sourceIds = List.of();
@@ -144,28 +150,44 @@ public final class WikiTopicProtocol {
                 }
             }
             Object rawRefs = row.get(legacy ? "evidenceFactIds" : "representativeFactIds");
-            List<String> refs = rawRefs == null ? representatives(members, byId, 3) : ids(rawRefs, 16, true);
+            List<String> refs;
+            if (rawRefs == null && members.stream().anyMatch(provenance::containsKey)) {
+                LinkedHashSet<String> ordered = new LinkedHashSet<>();
+                sourceIds.forEach(source -> ordered.addAll(byTopic.get(source).representativeFactIds()));
+                ordered.addAll(members);
+                Map<WikiEvidencePolicy.ConfirmedSource, String> distinct = new LinkedHashMap<>();
+                for (String id : ordered) if (provenance.containsKey(id)) distinct.putIfAbsent(provenance.get(id), id);
+                if (distinct.size() > WikiEvidencePolicy.MAX_REFERENCES) throw invalid("CONFIRMED_MEMBERS");
+                refs = List.copyOf(distinct.values());
+            } else refs = rawRefs == null ? representatives(members, byId, 3) : ids(rawRefs, 16, true);
             if (!members.containsAll(refs)) throw invalid("UNKNOWN_FACT");
+            Set<WikiEvidencePolicy.ConfirmedSource> citedConfirmed = new HashSet<>();
+            refs.stream().map(provenance::get).filter(Objects::nonNull).forEach(citedConfirmed::add);
+            if (members.stream().map(provenance::get).filter(Objects::nonNull).anyMatch(source -> !citedConfirmed.contains(source)))
+                throw invalid("CONFIRMED_MEMBERS");
             Map<String, Object> segmentInput = new LinkedHashMap<>();
             segmentInput.put("title", title); segmentInput.put("summary", description);
             segmentInput.put("evidenceFactIds", refs); segmentInput.put("claimType", row.get("claimType"));
             segmentInput.put("confidence", row.get("confidence"));
             WikiEntry.TaskSegment segment = WikiEvidencePolicy.parseSegments(List.of(segmentInput),
-                    WikiEvidencePolicy.facts(full.sampledTitles())).getFirst();
+                    WikiEvidencePolicy.facts(full)).getFirst();
+            boolean confirmedMember = members.stream().anyMatch(provenance::containsKey);
+            if (confirmedMember && !"user_confirmed".equals(segment.claimType())) throw invalid("CONFIRMED_SOURCE");
             String type = segment.claimType(); int confidence = rank(segment.confidence());
             for (String id : sourceIds) {
                 TopicCard parent = byTopic.get(id);
-                if ("inferred".equals(parent.claimType())) type = "inferred";
+                if ("user_confirmed".equals(parent.claimType())) type = "user_confirmed";
+                else if ("inferred".equals(parent.claimType()) && !"user_confirmed".equals(type)) type = "inferred";
                 confidence = Math.min(confidence, rank(parent.confidence()));
             }
-            if ("inferred".equals(type)) confidence = Math.min(1, confidence);
+            if (!"observed".equals(type)) confidence = Math.min(1, confidence);
             String finalConfidence = List.of("low", "medium", "high").get(confidence);
             List<String> memberList = List.copyOf(members);
             String id = "t-" + hash(json(List.of(title, description, memberList, sourceIds, type, finalConfidence))).substring(0, 20);
             if (restored && !id.equals(row.get("id"))) throw invalid("CHECKPOINT_ID");
             TopicCard card = new TopicCard(id, title, description, memberList, refs, sourceIds, type, finalConfidence);
             cards.add(card); assigned.addAll(members); consumed.addAll(sourceIds);
-            List<String> apps = members.stream().map(byId::get).map(Fact::app).distinct().sorted().toList();
+            List<String> apps = members.stream().map(byId::get).map(Fact::app).filter(app -> app != null && !app.isBlank()).distinct().sorted().toList();
             segments.add(new WikiEntry.TaskSegment(title, description, segment.evidence(), apps, finalConfidence, refs, type));
         }
         Set<String> unresolved = new TreeSet<>(inputIds); unresolved.removeAll(assigned);
@@ -177,7 +199,9 @@ public final class WikiTopicProtocol {
                 && !byTopic.keySet().containsAll(ids(root.get("unresolvedTopicIds"), byTopic.size(), false))) throw invalid("UNKNOWN_TOPIC");
         if (summary.isBlank()) summary = segments.isEmpty() ? "该时段没有可归纳的主要主题。"
                 : "主要涉及" + segments.getFirst().title() + "。";
-        WikiEvidencePolicy.validateNarrative("summary", summary);
+        if (WikiEvidencePolicy.hasConfirmed(segments))
+            summary = WikiEvidencePolicy.composeBoundedSummary(segments);
+        else WikiEvidencePolicy.validateNarrative("summary", summary);
         // The model's value is required for structure only; the displayed task is a validated card title.
         primaryTask = segments.isEmpty() ? "无可归纳主题" : segments.getFirst().title();
         Map<String, Object> extra = new LinkedHashMap<>(full.statistics());

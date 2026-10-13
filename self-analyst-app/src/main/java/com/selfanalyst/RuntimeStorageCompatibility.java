@@ -135,11 +135,13 @@ final class RuntimeStorageCompatibility {
                 if (kind.equals("root") && Set.of("app.lock", "storage-format.json.tmp").contains(name)) continue;
                 if (kind.equals("config") && name.equals("config.toml")) continue;
                 if (kind.equals("chat") && name.equals(".writer.lock")) continue;
+                // A crashed VACUUM may leave an incomplete staging file; it is never used as a rollback backup.
+                if (kind.equals("memory") && name.matches("llm-wiki\\.db\\.before-summary-repair-v5\\.bak\\.[0-9a-f-]{36}\\.tmp")) continue;
                 if (name.endsWith("-wal") || name.endsWith("-shm") || name.endsWith("-journal")) {
                     if (Files.size(file) != 0) throw invalid("数据库仍有日志状态，请先正常关闭原应用");
                     continue;
                 }
-                if (name.endsWith(".db") || (kind.equals("memory") && name.equals("llm-wiki.db.before-statistics-v4.bak"))) {
+                if (name.endsWith(".db") || (kind.equals("memory") && (name.equals("llm-wiki.db.before-statistics-v4.bak") || name.equals("llm-wiki.db.before-summary-repair-v5.bak")))) {
                     database(file, kind); continue;
                 }
                 if (kind.equals("agent-session") && name.equals("agent_state.json")) {
@@ -268,16 +270,23 @@ final class RuntimeStorageCompatibility {
             columns(connection, "sessions", "id,title,created_at,updated_at,source,context_label,context_snapshot,memory_policy,summary,last_message_preview,message_count");
             columns(connection, "messages", "id,session_id,seq,role,content,created_at,status,error,context_snapshot,suggested_tasks");
             columns(connection, "pending_deletions", "session_id,requested_at");
-        } else if (kind.equals("memory") && (name.equals("llm-wiki.db") || name.equals("llm-wiki.db.before-statistics-v4.bak"))) {
+        } else if (kind.equals("memory") && (name.equals("llm-wiki.db") || (name.equals("llm-wiki.db.before-statistics-v4.bak") || name.equals("llm-wiki.db.before-summary-repair-v5.bak")))) {
             int wikiVersion;
             try (var versionRows = statement.executeQuery("PRAGMA user_version")) {
                 if (!versionRows.next()) throw invalid("Wiki 数据库版本不兼容");
                 wikiVersion = versionRows.getInt(1);
-                if (wikiVersion != 3 && wikiVersion != 4) throw invalid("Wiki 数据库版本不兼容");
+                if (wikiVersion != 3 && wikiVersion != 4 && wikiVersion != 5) throw invalid("Wiki 数据库版本不兼容");
             }
             columns(connection, "wiki_entries", "id,level,period_start,period_end,timezone,status,summary,primary_task,task_segments_json,metrics_json,source_entry_ids_json,model,prompt_version,retry_count,next_retry_at,last_error,created_at,updated_at,summarized_at,fact_builder_version,projector_version,source_coverage_json"
-                    + (wikiVersion == 4 ? ",statistics_version,calendar_version" : ""));
-            if (wikiVersion == 4) columns(connection, "wiki_statistics_progress", "version,history_before");
+                    + (wikiVersion >= 4 ? ",statistics_version,calendar_version" : "")
+                    + (wikiVersion == 5 ? ",revision" : ""));
+            if (wikiVersion >= 4) columns(connection, "wiki_statistics_progress", "version,history_before");
+            if (wikiVersion == 5) {
+                columns(connection, "wiki_repair_drafts", "id,session_id,target_id,target_revision,draft_revision,state,payload_json,created_at,updated_at");
+                columns(connection, "wiki_repair_statements", "id,target_id,repair_id,draft_revision,payload_json,confirmed_at");
+                columns(connection, "wiki_repair_revisions", "id,repair_id,target_id,idempotency_key,before_revision,after_revision,payload_json,committed_at");
+                columns(connection, "wiki_repair_followups", "repair_id,target_id,revision,created_at");
+            }
             columns(connection, "wiki_semantic_documents", "doc_id,entry_id,doc_type,level,period_start,period_end,text_hash,embedding_model,embedding_dimensions,status,retry_count,next_retry_at,last_error,created_at,updated_at,indexed_at");
         } else if (kind.equals("memory") && name.equals("ontology.db")) {
             scalar(connection, "PRAGMA user_version", "1");

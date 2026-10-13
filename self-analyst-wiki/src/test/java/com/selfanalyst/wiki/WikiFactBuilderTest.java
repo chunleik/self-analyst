@@ -271,7 +271,7 @@ class WikiFactBuilderTest {
             assertEquals(80.0, ((Number) apps.get("chrome.exe")).doubleValue(), 1e-9);
             assertEquals("complete", facts.sourceCoverage().get("window").status());
             assertEquals("partial", facts.sourceCoverage().get("afk").status());
-            assertEquals("wiki-facts-evidence-v6", facts.factBuilderVersion());
+            assertEquals("wiki-facts-evidence-v7-user-confirmed", facts.factBuilderVersion());
         }
     }
 

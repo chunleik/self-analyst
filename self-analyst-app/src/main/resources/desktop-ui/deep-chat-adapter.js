@@ -8,6 +8,9 @@
 var deepChatAdapterState = {
   configuredElement: null,
   renderedElement: null,
+  renderObserver: null,
+  messagesElement: null,
+  draftKey: null,
   deferredSyncElement: null,
   readyPromise: null,
   signature: null,
@@ -71,6 +74,34 @@ function deepChatInputConfig(disabled, placeholder) {
   };
 }
 
+// Deep Chat rebuilds its message container after reactive property changes,
+// but its onComponentRender callback only runs for the first render. Watch the
+// container identity, not every message/field mutation, to restore canonical
+// messages and local action slots without disturbing edits or streaming text.
+function observeDeepChatRenders(element) {
+  if (deepChatAdapterState.renderObserver) deepChatAdapterState.renderObserver.disconnect();
+  deepChatAdapterState.renderObserver = null;
+  deepChatAdapterState.messagesElement = element.shadowRoot && element.shadowRoot.querySelector
+    ? element.shadowRoot.querySelector("#messages") : null;
+  if (typeof MutationObserver !== "function" || !element.shadowRoot) return;
+  var syncQueued = false;
+  var observer = new MutationObserver(function () {
+    if (deepChatElement() !== element || deepChatAdapterState.upgradeFailed) return;
+    var messages = element.shadowRoot.querySelector("#messages");
+    if (!messages || messages === deepChatAdapterState.messagesElement) return;
+    deepChatAdapterState.messagesElement = messages;
+    deepChatAdapterState.signature = null;
+    if (syncQueued) return;
+    syncQueued = true;
+    Promise.resolve().then(function () {
+      syncQueued = false;
+      if (deepChatElement() === element && !deepChatAdapterState.upgradeFailed) renderChatTab();
+    });
+  });
+  observer.observe(element.shadowRoot, { childList: true, subtree: true });
+  deepChatAdapterState.renderObserver = observer;
+}
+
 function configureDeepChat(element) {
   if (!element || deepChatAdapterState.configuredElement === element) return;
   scheduleDeepChatUpgradeFallback(element);
@@ -78,6 +109,8 @@ function configureDeepChat(element) {
   deepChatAdapterState.renderedElement = null;
   deepChatAdapterState.signature = null;
   deepChatAdapterState.inputStateKey = null;
+  deepChatAdapterState.draftKey = null;
+  observeDeepChatRenders(element);
 
   element.onComponentRender = function () {
     if (deepChatAdapterState.renderedElement === element) return;
@@ -232,6 +265,8 @@ function markDeepChatUpgradeReady(element) {
 function activateDeepChatFallback(element) {
   if (deepChatAdapterState.upgradeFailed) return;
   deepChatAdapterState.upgradeFailed = true;
+  if (deepChatAdapterState.renderObserver) deepChatAdapterState.renderObserver.disconnect();
+  deepChatAdapterState.renderObserver = null;
   if (element && element.parentElement) element.parentElement.classList.add("hidden");
   if (state.dom.chatFallback) state.dom.chatFallback.classList.remove("hidden");
   if (state.dom.chatFallbackThread) state.dom.chatThread = state.dom.chatFallbackThread;
@@ -361,10 +396,22 @@ function handleDeepChatRequest(body, signals) {
   });
 }
 
+function applyDeepChatDraft(element, text, sessionId) {
+  // defaultInput is reactive and recreates #messages. Reapply it only for a
+  // different intended draft/session, otherwise a restore would loop and erase
+  // what the user typed after the original error.
+  var value = String(text || "");
+  var key = JSON.stringify([sessionId || "", value]);
+  if (deepChatAdapterState.draftKey === key) return false;
+  deepChatAdapterState.draftKey = key;
+  element.defaultInput = { text: value };
+  return true;
+}
+
 function deepChatSetDraft(text) {
   var element = deepChatElement();
   if (!element) return;
-  element.defaultInput = { text: text || "" };
+  applyDeepChatDraft(element, text, state.activeChatSessionId);
   if (typeof element.focusInput === "function") element.focusInput();
 }
 
@@ -418,6 +465,7 @@ function deepChatDisplayMessages(session) {
       role: "ai",
       text: t("chat.welcomeTitle") + "\n\n" + t("chat.welcomeHint"),
       custom: { transient: true },
+      html: typeof summaryRepairSlotHtml === "function" ? summaryRepairSlotHtml(session, -1) : undefined,
     }];
   }
   var retryableAssistantIdx = state.chatSending ? -1 : getLatestAssistantTurnIndex(session.messages);
@@ -431,6 +479,10 @@ function deepChatDisplayMessages(session) {
     if (typeof documentSlotHtml === "function") {
       var slot = documentSlotHtml(session, i);
       if (slot) result[result.length - 1].html = (result[result.length - 1].html || "") + slot;
+    }
+    if (typeof summaryRepairSlotHtml === "function") {
+      var repairSlot = summaryRepairSlotHtml(session, i);
+      if (repairSlot) result[result.length - 1].html = (result[result.length - 1].html || "") + repairSlot;
     }
   }
   var transientError = deepChatTransientError(session.id);
@@ -476,9 +528,11 @@ function renderDeepChatThread() {
     element.addMessage(messages[i], true);
   }
   if (typeof mountChatDocuments === "function") mountChatDocuments();
+  if (typeof mountSummaryRepair === "function") mountSummaryRepair();
   var transientError = session ? deepChatTransientError(session.id) : null;
-  if (transientError && transientError.draft) {
-    element.defaultInput = { text: transientError.draft };
+  if (transientError && transientError.draft && !transientError.draftApplied) {
+    transientError.draftApplied = true;
+    applyDeepChatDraft(element, transientError.draft, session.id);
   }
   if (typeof element.scrollToBottom === "function") element.scrollToBottom();
   return true;
@@ -496,6 +550,11 @@ function updateDeepChatInputState(enabled, placeholder) {
   var key = String(!!enabled) + "|" + String(placeholder || "");
   if (deepChatAdapterState.inputStateKey !== key) {
     deepChatAdapterState.inputStateKey = key;
+    // Updating textInput also rebuilds the component. Seed that render with the
+    // current composer rather than an older error/context defaultInput value.
+    var currentInput = element.shadowRoot && element.shadowRoot.querySelector
+      && element.shadowRoot.querySelector("#text-input");
+    if (currentInput) applyDeepChatDraft(element, currentInput.innerText || currentInput.textContent || "", state.activeChatSessionId);
     element.textInput = deepChatInputConfig(!enabled, placeholder);
     if (typeof element.disableSubmitButton === "function") {
       element.disableSubmitButton(!enabled);

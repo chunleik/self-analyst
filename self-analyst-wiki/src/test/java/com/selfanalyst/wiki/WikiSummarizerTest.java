@@ -97,7 +97,7 @@ class WikiSummarizerTest {
         assertTrue(output.contains("apps和evidence由本地"));
         assertTrue(output.contains("跨应用"));
         assertTrue(output.contains("不要按应用拆分"));
-        assertEquals("wiki-v9-focus", summarizer.promptVersion());
+        assertEquals("wiki-v10-user-confirmed", summarizer.promptVersion());
     }
 
     @Test

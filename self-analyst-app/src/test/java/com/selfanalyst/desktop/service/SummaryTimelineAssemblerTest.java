@@ -265,6 +265,25 @@ class SummaryTimelineAssemblerTest {
         }
     }
 
+    @Test
+    void eachFailedHourGetsItsOwnServerOwnedRepairTarget() {
+        try (WikiStore store = new WikiStore(tempDir.resolve("targets.db"))) {
+            store.upsert(period("day", WikiLevel.DAY, START, END, WikiStatus.PENDING, null));
+            store.upsert(period("h1", WikiLevel.HOUR, START, START.plusSeconds(3600), WikiStatus.FAILED, null));
+            store.upsert(period("h2", WikiLevel.HOUR, START.plusSeconds(3600), START.plusSeconds(7200), WikiStatus.FAILED, null));
+            var response = assembleLocal(store);
+            var dependencies = (List<?>) ((Map<?, ?>) response.get("summaryStatus")).get("dependencies");
+            var targets = dependencies.stream().map(value -> ((Map<?, ?>) value).get("repairTarget"))
+                    .filter(java.util.Objects::nonNull).map(value -> (com.selfanalyst.wiki.WikiRepairService.Target) value).toList();
+            assertEquals(List.of("h1", "h2"), targets.stream().map(com.selfanalyst.wiki.WikiRepairService.Target::entryId).toList());
+            assertEquals(store.revision("h1"), targets.getFirst().revision());
+            assertEquals(WikiLevel.HOUR, targets.getFirst().level());
+            assertFalse(((Map<?, ?>) response.get("summaryStatus")).containsKey("repairTarget"));
+            assertNull(ClosedSummaryHistory.repairTarget(store,
+                    period("future", WikiLevel.HOUR, Instant.now().plusSeconds(3600), Instant.now().plusSeconds(7200), WikiStatus.FAILED, null)));
+        }
+    }
+
     private static WikiEntry period(String id, WikiLevel level, Instant start, Instant end, WikiStatus status, String summary) {
         var progress = Map.<String, Object>of("state", "quality", "reason", "WIKI_EVIDENCE_UNSUPPORTED_CLAIM:taskSegments.summary",
                 "calls", 7, "maxCalls", 12, "tokens", 31505, "maxTokens", 256000, "configurationStamp", "PRIVATE");

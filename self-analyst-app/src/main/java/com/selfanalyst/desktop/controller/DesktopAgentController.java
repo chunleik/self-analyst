@@ -48,6 +48,22 @@ public class DesktopAgentController {
     private final Config config;
     private final ChatSessionStore chatSessionStore;
     private final DesktopSummaryAssembler summaryAssembler;
+    private volatile com.selfanalyst.desktop.service.SummaryRepairChatService summaryRepairChatService;
+
+    public void setSummaryRepairChatService(com.selfanalyst.desktop.service.SummaryRepairChatService service) {
+        this.summaryRepairChatService = service;
+        if (agent != null) agent.setSummaryRepairChatService(service);
+    }
+
+    private Map<String, Object> chatResult(String sessionId, String response) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("message", response);
+        var service = summaryRepairChatService;
+        var repair = service == null || sessionId == null || sessionId.isBlank() ? null : service.view(sessionId);
+        result.put("suggestedTasks", repair == null ? extractSuggestedTasks(response) : List.of());
+        if (repair != null) result.put("repair", repair);
+        return result;
+    }
 
     public DesktopAgentController(SummaryService summaryService,
                                   BehaviorAdviceService adviceService,
@@ -162,13 +178,7 @@ public class DesktopAgentController {
                 throw new SelfAnalystAgent.EmptyAgentResponseException();
             }
 
-            // Extract suggested tasks from the response (heuristic)
-            List<Map<String, Object>> suggestedTasks = extractSuggestedTasks(response);
-
-            ctx.json(Map.of(
-                    "message", response,
-                    "suggestedTasks", suggestedTasks
-            ));
+            ctx.json(chatResult(sessionId, response));
         } catch (Exception e) {
             writeChatErrorResponse(ctx, e);
         }
@@ -208,9 +218,7 @@ public class DesktopAgentController {
                             } else if (event.type()
                                     == SelfAnalystAgent.ChatStreamEventType.RESULT) {
                                 String response = requireAgentResponse(event.text());
-                                Map<String, Object> result = new LinkedHashMap<>();
-                                result.put("message", response);
-                                result.put("suggestedTasks", extractSuggestedTasks(response));
+                                Map<String, Object> result = chatResult(request.sessionId(), response);
                                 writeSseEvent(streamOutput, "result", result);
                                 resultSent.set(true);
                             }
@@ -345,6 +353,9 @@ public class DesktopAgentController {
 
     static ChatError describeChatError(Exception e) {
         for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof com.selfanalyst.desktop.service.SummaryRepairChatService.RepairTurnFailure repairFailure) {
+                return new ChatError(repairFailure.status(), repairFailure.getMessage());
+            }
             if ("CHAT_IMAGE_UNSUPPORTED".equals(cause.getMessage()))
                 return new ChatError(400, "Model does not support images", "error.chat.imageUnsupported");
             if ("Chat image is missing or invalid".equals(cause.getMessage()))

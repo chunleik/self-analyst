@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.selfanalyst.wiki.semantic.EmbeddingClient;
 import com.selfanalyst.wiki.semantic.WikiSemanticIndex;
+import com.selfanalyst.wiki.semantic.WikiEmbeddingWorker;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 import org.slf4j.Logger;
@@ -187,6 +188,10 @@ public class WikiTools {
             List<Map<String, Object>> results = new ArrayList<>();
             for (WikiSemanticIndex.SearchHit hit : hits) {
                 if (!store.isCurrentEntry(hit.entryId())) continue;
+                WikiEntry current = store.query(Instant.parse(hit.periodStart()), Instant.parse(hit.periodEnd()), null)
+                        .stream().filter(entry -> entry.id().equals(hit.entryId()) && entry.status() == WikiStatus.SUMMARIZED)
+                        .findFirst().orElse(null);
+                if (current == null || !WikiEmbeddingWorker.matchesCurrentText(current, hit.docType(), hit.textHash())) continue;
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("score", hit.score());
                 item.put("docType", hit.docType());
@@ -194,9 +199,11 @@ public class WikiTools {
                 item.put("level", hit.level());
                 item.put("periodStart", hit.periodStart());
                 item.put("periodEnd", hit.periodEnd());
-                item.put("summary", hit.summary());
-                item.put("primaryTask", hit.primaryTask());
+                item.put("summary", current.summary());
+                item.put("primaryTask", current.primaryTask());
                 item.put("matchedText", hit.matchedText());
+                item.put("taskSegments", current.taskSegments());
+                item.put("userStatementProvenance", WikiEvidencePolicy.provenance(current.metrics() == null ? null : current.metrics().extra()));
                 results.add(item);
             }
 
@@ -238,6 +245,9 @@ public class WikiTools {
 
     private static Map<String, Object> formatEntry(WikiEntry entry) {
         Map<String, Object> map = new LinkedHashMap<>();
+        map.put("entryId", entry.id());
+        map.put("sourceEntryIds", entry.sourceEntryIds());
+        map.put("userStatementProvenance", WikiEvidencePolicy.provenance(entry.metrics() == null ? null : entry.metrics().extra()));
         map.put("level", entry.level().name());
         map.put("periodStart", entry.periodStart().toString());
         map.put("periodEnd", entry.periodEnd().toString());

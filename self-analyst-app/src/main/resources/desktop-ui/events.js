@@ -15,6 +15,23 @@ function setupEvents() {
   state.dom.timelineBody.addEventListener("click", function (e) {
     var target = e.target;
 
+    // Buttons are native keyboard controls; do not toggle their timeline entry.
+    var repairButton = target.closest(".timeline-summary-repair-btn");
+    if (repairButton) {
+      e.preventDefault();
+      e.stopPropagation();
+      var repairEntries = state.summary ? state.summary.entries || state.summary.timeline || [] : [];
+      var repairEntry = repairEntries[Number(repairButton.dataset.entryIdx)];
+      var repairTarget = repairEntry && (repairEntry.repairTarget || repairEntry.summaryStatus && repairEntry.summaryStatus.repairTarget);
+      if (repairEntry && repairButton.dataset.dependencyIdx != null) {
+        var dependency = repairEntry.summaryStatus && repairEntry.summaryStatus.dependencies
+          && repairEntry.summaryStatus.dependencies[Number(repairButton.dataset.dependencyIdx)];
+        repairTarget = dependency && dependency.repairTarget;
+      }
+      if (validSummaryRepairTarget(repairTarget)) openSummaryRepair(repairTarget);
+      return;
+    }
+
     // Expand/collapse entry
     var entry = target.closest(".timeline-entry");
     if (entry && !target.closest("button")) {

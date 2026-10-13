@@ -142,6 +142,97 @@ public class ChatSessionStore implements AutoCloseable {
         this.documentDeletion = java.util.Objects.requireNonNull(deletion);
     }
 
+    /** Server-only receipt. Client message/context updates cannot create or alter a paid turn. */
+    public record RepairTurnReceipt(String state, String reply, int status) {}
+
+    public synchronized RepairTurnReceipt repairTurn(String sessionId, String userMessageId) {
+        requireValidSessionId(sessionId);
+        if (!isGeneratedMessageId(userMessageId)) throw new IllegalArgumentException("Invalid user turn");
+        return documentTransaction(connection -> {
+            repairTurnSchema(connection);
+            try (PreparedStatement query = connection.prepareStatement(
+                    "SELECT state,reply,status FROM summary_repair_turns WHERE session_id=? AND user_message_id=?")) {
+                query.setString(1, sessionId);
+                query.setString(2, userMessageId);
+                try (ResultSet rows = query.executeQuery()) {
+                    return rows.next() ? new RepairTurnReceipt(rows.getString(1), rows.getString(2), rows.getInt(3)) : null;
+                }
+            }
+        });
+    }
+
+    /** Durable before any model reservation; an uncertain receipt never authorizes another call. */
+    public synchronized void beginRepairTurn(String sessionId, String userMessageId) {
+        Session session = getSession(sessionId);
+        if (session == null || session.messages.stream().noneMatch(message ->
+                userMessageId.equals(message.id) && "user".equals(message.role))) {
+            throw new IllegalArgumentException("User turn does not belong to session");
+        }
+        documentTransaction(connection -> {
+            repairTurnSchema(connection);
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT INTO summary_repair_turns(session_id,user_message_id,state,reply) VALUES(?,?,'started','')")) {
+                insert.setString(1, sessionId);
+                insert.setString(2, userMessageId);
+                insert.executeUpdate();
+            }
+            try (PreparedStatement prune = connection.prepareStatement("""
+                    DELETE FROM summary_repair_turns WHERE session_id=? AND user_message_id NOT IN
+                    (SELECT id FROM messages WHERE session_id=? AND role='user')
+                    """)) {
+                prune.setString(1, sessionId);
+                prune.setString(2, sessionId);
+                prune.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    public synchronized void completeRepairTurn(String sessionId, String userMessageId, String reply) {
+        finishRepairTurn(sessionId, userMessageId, reply, 200);
+    }
+
+    public synchronized void failRepairTurn(String sessionId, String userMessageId, String reply, int status) {
+        if (status != 409 && status != 502 && status != 503) throw new IllegalArgumentException("Invalid repair failure");
+        finishRepairTurn(sessionId, userMessageId, reply, status);
+    }
+
+    private void finishRepairTurn(String sessionId, String userMessageId, String reply, int status) {
+        if (reply == null || reply.isBlank() || reply.length() > 4000) {
+            throw new IllegalArgumentException("Invalid repair reply");
+        }
+        documentTransaction(connection -> {
+            repairTurnSchema(connection);
+            try (PreparedStatement update = connection.prepareStatement("""
+                    UPDATE summary_repair_turns SET state=?,reply=?,status=?
+                    WHERE session_id=? AND user_message_id=? AND state='started'
+                    """)) {
+                update.setString(1, status == 200 ? "completed" : "failed");
+                update.setString(2, reply);
+                update.setInt(3, status);
+                update.setString(4, sessionId);
+                update.setString(5, userMessageId);
+                update.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    private static void repairTurnSchema(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS summary_repair_turns(
+                      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                      user_message_id TEXT NOT NULL,
+                      state TEXT NOT NULL CHECK(state IN ('started','completed','failed')),
+                      reply TEXT NOT NULL CHECK(length(reply)<=4000),
+                      status INTEGER NOT NULL DEFAULT 200,
+                      PRIMARY KEY(session_id,user_message_id)
+                    )
+                    """);
+        }
+    }
+
     public ChatSessionStore(Path memoryDir) {
         this(memoryDir, null, null);
     }
@@ -1628,7 +1719,7 @@ public class ChatSessionStore implements AutoCloseable {
     private static String normalizeSource(String source) {
         if (source == null || source.isBlank()) return "manual";
         return switch (source) {
-            case "manual", "agent_context", "task_context" -> source;
+            case "manual", "agent_context", "task_context", "summary_repair" -> source;
             default -> throw new IllegalArgumentException("Invalid chat session source: " + source);
         };
     }

@@ -253,6 +253,34 @@ class WikiSummaryPipelinePersistenceTest {
         }
     }
 
+
+    @Test void schemaThreePublishesAndLegacyCheckpointCannotMasqueradeAsCurrent() throws Exception {
+        Path path = temp.resolve("protocol-upgrade.db");
+        AtomicInteger calls = new AtomicInteger();
+        try (var store = new WikiGenerationStore(path)) {
+            var pipeline = pipeline(store, 24000, 12, "model", calls, WikiSummaryPipelineTest::groundedResponse);
+            var result = pipeline.summarize(facts(1), TIMEOUT);
+            assertTrue(pipeline.promptVersion().contains("user-confirmed"));
+            pipeline.markPublished(result);
+            String original;
+            try (var connection = DriverManager.getConnection("jdbc:sqlite:" + path);
+                 var rows = connection.createStatement().executeQuery("SELECT payload_json FROM generation_checkpoints")) {
+                assertTrue(rows.next()); original = rows.getString(1);
+            }
+            assertTrue(original.contains("\"schemaVersion\":3"));
+            String legacy = original.replace("\"schemaVersion\":3", "\"schemaVersion\":2");
+            String checksum = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(legacy.getBytes(StandardCharsets.UTF_8)));
+            try (var connection = DriverManager.getConnection("jdbc:sqlite:" + path);
+                 var update = connection.prepareStatement("UPDATE generation_checkpoints SET payload_json=?,payload_hash=?")) {
+                update.setString(1, legacy); update.setString(2, checksum); update.executeUpdate();
+            }
+            var failure = assertThrows(WikiSummaryPipeline.CallFailure.class, () -> pipeline.summarize(facts(1), TIMEOUT));
+            assertEquals("WIKI_CHECKPOINT_INVALID", failure.code());
+            assertEquals(1, calls.get());
+        }
+    }
+
     private static WikiSummaryPipeline pipeline(WikiGenerationStore store, int factChars, int periodCalls,
                                                 String identity, AtomicInteger calls, Function<String, String> response) {
         return new WikiSummaryPipeline(() -> new WikiSummaryPipeline.Session() {

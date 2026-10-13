@@ -499,6 +499,7 @@ function ensureActiveChatSession() {
 
 // Create a session via the backend; returns a Promise resolving to it.
 function createChatSession(opts) {
+  if (typeof preserveRepairComposer === "function") preserveRepairComposer();
   return api.createSession({
     title: (opts && opts.title) || t("chat.newSessionDefault"),
     source: (opts && opts.source) || "manual",
@@ -511,6 +512,7 @@ function createChatSession(opts) {
     session.messagesLoaded = true;
     state.chatSessions.unshift(session);
     state.activeChatSessionId = session.id;
+    if (typeof restoreRepairComposer === "function") restoreRepairComposer(session);
     return session;
   });
 }
@@ -677,6 +679,7 @@ function renderChatTab() {
   renderChatContextPanel();
   updateChatInputState();
   if (typeof refreshChatDocuments === "function") refreshChatDocuments();
+  if (typeof refreshSummaryRepair === "function") refreshSummaryRepair();
 }
 
 function renderChatSessionList() {
@@ -742,10 +745,12 @@ function renderChatSessionList() {
     var item = e.target.closest(".chat-session-item");
     if (item) {
       var sid = item.dataset.sid;
+      if (typeof preserveRepairComposer === "function") preserveRepairComposer();
       state.activeChatSessionId = sid;
       api.setActiveSession(sid).catch(function () { /* best-effort pointer */ });
       var selected = getActiveChatSession();
       renderChatTab();
+      if (typeof restoreRepairComposer === "function") restoreRepairComposer(selected);
       ensureSessionMessagesLoaded(selected).then(renderChatTab).catch(renderChatTab);
     }
   };
@@ -798,7 +803,9 @@ function renderLegacyChatThread() {
   }
 
   if (session.messages.length === 0) {
-    thread.innerHTML = '<div class="chat-welcome"><p>' + escHtml(t("chat.welcomeTitle")) + '</p><p class="chat-welcome-hint">' + escHtml(t("chat.welcomeHint")) + '</p></div>';
+    thread.innerHTML = '<div class="chat-welcome"><p>' + escHtml(t("chat.welcomeTitle")) + '</p><p class="chat-welcome-hint">' + escHtml(t("chat.welcomeHint")) + '</p></div>' +
+      (typeof summaryRepairSlotHtml === "function" ? summaryRepairSlotHtml(session, -1) : "");
+    if (typeof mountSummaryRepair === "function") mountSummaryRepair();
     return;
   }
 
@@ -831,10 +838,12 @@ function renderLegacyChatThread() {
       html += '</div>';
     }
     if (typeof documentSlotHtml === "function") html += documentSlotHtml(session, i);
+    if (typeof summaryRepairSlotHtml === "function") html += summaryRepairSlotHtml(session, i);
     html += '</div>';
   }
   thread.innerHTML = html;
   if (typeof mountChatDocuments === "function") mountChatDocuments();
+  if (typeof mountSummaryRepair === "function") mountSummaryRepair();
   thread.scrollTop = thread.scrollHeight;
 
   // Bind retry buttons
@@ -965,7 +974,9 @@ function sendChatTabMessage(request) {
       imageDraftKey = session.id;
     }
     outcome.sessionId = session.id;
-    return ensureSessionMessagesLoaded(session);
+    return ensureSessionMessagesLoaded(session).then(function (loaded) {
+      return typeof prepareSummaryRepairForChat === "function" ? prepareSummaryRepairForChat(loaded) : loaded;
+    });
   }).then(function (session) {
     var context = buildChatContext(session);
     var userMsg = { role: "user", content: text, status: "sent", contextSnapshot: context };
@@ -982,6 +993,7 @@ function sendChatTabMessage(request) {
         var savedPending = appended[1];
         if (!savedUser || !savedPending) throw new Error("Invalid append response");
         noteChatSessionMutation();
+        session.composerDraft = "";
         if (input && state.activeChatSessionId === session.id) input.value = "";
         if (imageDraft.length) clearChatImages(imageDraftKey, true);
         inputPersisted = true;
@@ -1007,6 +1019,7 @@ function sendChatTabMessage(request) {
           : api.postChat(text, context, session.id, savedUser.id);
         return requireChatExecutionResponse(executionRequest).then(function (execution) {
           var resp = execution.payload;
+          if (typeof acceptSummaryRepairResponse === "function" && resp.repair) acceptSummaryRepairResponse(session.id, resp.repair);
           var content = execution.content;
           var tasks = normalizeSuggestedTasks(
             resp.suggestedTasks || resp.suggested_tasks || resp.tasks || []);
@@ -1048,6 +1061,7 @@ function sendChatTabMessage(request) {
     }
   }).then(function () {
     state.chatSending = false;
+    if (typeof refreshSummaryRepair === "function") refreshSummaryRepair(true);
     renderChatTab();
     return refreshChatSessionListIfNeeded().then(function () {
       renderChatTab();
@@ -1147,6 +1161,7 @@ function retryChatMessage(msgId, options) {
     return markAssistantPersistenceError(session, pendingMsg, err);
   }).then(function () {
     state.chatSending = false;
+    if (typeof refreshSummaryRepair === "function") refreshSummaryRepair(true);
     renderChatTab();
     return refreshChatSessionListIfNeeded().then(function () {
       renderChatTab();
@@ -1155,6 +1170,10 @@ function retryChatMessage(msgId, options) {
 }
 
 function buildChatContext(session) {
+  if (session && session.contextSnapshot && session.contextSnapshot.type === "summary_repair") {
+    return { type: "summary_repair", repairId: session.contextSnapshot.repairId,
+      targetId: session.contextSnapshot.targetId || session.contextSnapshot.target && session.contextSnapshot.target.entryId, boundContext: session.contextSnapshot };
+  }
   var ctx = { type: "global", title: session.title };
   if (session && session.contextSnapshot != null) {
     ctx.boundContext = session.contextSnapshot;

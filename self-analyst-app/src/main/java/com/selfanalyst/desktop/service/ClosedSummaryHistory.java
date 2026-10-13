@@ -93,6 +93,7 @@ final class ClosedSummaryHistory {
                 summary.put("summary", entry.summary());
                 summary.put("headline", entry.primaryTask() == null ? "" : entry.primaryTask());
                 summary.put("taskSegments", entry.taskSegments());
+                summary.put("userRevised", "user-repair".equals(entry.model()));
                 summaries.add(summary);
             } else if (entry == null || entry.status() != WikiStatus.SKIPPED) {
                 complete = false;
@@ -119,9 +120,17 @@ final class ClosedSummaryHistory {
         state.put("state", entry == null ? "missing" : entry.status().name().toLowerCase(Locale.ROOT));
         if (entry != null) {
             Map<String, Object> progress = safeProgress(entry);
+            var target = repairTarget(store, entry);
+            if (target != null) state.put("repairTarget", target);
             if (!progress.isEmpty()) state.put("generationProgress", progress);
         }
         return state;
+    }
+
+    static com.selfanalyst.wiki.WikiRepairService.Target repairTarget(WikiStore store, WikiEntry entry) {
+        if (store == null || !com.selfanalyst.wiki.WikiRepairService.repairable(entry, Instant.now())) return null;
+        return new com.selfanalyst.wiki.WikiRepairService.Target(entry.id(), entry.level(),
+                entry.periodStart(), entry.periodEnd(), entry.timezone(), store.revision(entry.id()));
     }
 
     private static Map<String, Object> safeProgress(WikiEntry entry) {

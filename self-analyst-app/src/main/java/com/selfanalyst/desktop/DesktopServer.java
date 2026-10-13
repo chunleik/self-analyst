@@ -51,6 +51,7 @@ public class DesktopServer {
 
     private final Javalin app;
     private final DesktopAgentController agentCtrl;
+    private final DesktopSummaryRepairController repairCtrl;
     private final DesktopConfigController configCtrl;
     private final DesktopLlmSettingsController llmSettings;
     private final com.selfanalyst.i18n.Lang language;
@@ -150,6 +151,18 @@ public class DesktopServer {
                          DesktopFileController.SettingsApplier fileSettingsApplier,
                          UserConfigStore userConfigStore,
                          com.selfanalyst.wiki.WikiStore wikiStore) {
+        this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
+                contentPersistenceReady, contentMigrationError, fileWatchStore, fileStateSupplier,
+                fileSettingsApplier, userConfigStore, wikiStore, null);
+    }
+
+    public DesktopServer(Javalin app, Config config, SelfAnalystAgent agent, EventStore eventStore,
+                         MemoryStore memoryStore, WatcherManager watcherManager, ContentWatcher contentWatcher,
+                         boolean contentPersistenceReady, String contentMigrationError,
+                         FileWatchStore fileWatchStore, Supplier<DesktopFileController.CollectorState> fileStateSupplier,
+                         DesktopFileController.SettingsApplier fileSettingsApplier, UserConfigStore userConfigStore,
+                         com.selfanalyst.wiki.WikiStore wikiStore,
+                         com.selfanalyst.wiki.WikiGenerationStore generationStore) {
         this.app = app;
 
         Path memoryDir = config.memoryDir();
@@ -165,8 +178,23 @@ public class DesktopServer {
             log.warn("Document service unavailable: {}", failure.getClass().getSimpleName());
         }
         this.documentCtrl = documentController;
+        var privacy = com.selfanalyst.wiki.WikiPrivacyPolicy.of(config.wikiExcludeApps(), config.wikiExcludeSites());
+        var repairFacts = eventStore == null ? null : new com.selfanalyst.wiki.WikiFactBuilder(
+                eventStore, config.wikiPromptMaxContentChars(), () -> 0L, privacy);
+        var repairs = wikiStore == null || repairFacts == null ? null : new com.selfanalyst.wiki.WikiRepairService(
+                wikiStore, entry -> repairFacts.buildFacts(new com.selfanalyst.wiki.WikiPeriod(
+                        entry.level(), entry.periodStart(), entry.periodEnd(), entry.timezone())),
+                () -> privacy, () -> repairConfigurationStamp(config, agent));
+        this.repairCtrl = new DesktopSummaryRepairController(repairs, chatSessionStore);
+        var repairChat = repairs == null ? null : new com.selfanalyst.desktop.service.SummaryRepairChatService(
+                repairs, chatSessionStore, generationStore,
+                new com.selfanalyst.wiki.WikiGenerationStore.BudgetLimits(config.wikiSummaryPeriodMaxCalls(),
+                        config.wikiSummaryPeriodMaxTokens(), config.wikiSummaryOutputTokenReserve()),
+                com.selfanalyst.desktop.service.SummaryRepairChatService.modelSessions(agent), config.effectiveLanguage());
+        if (agent != null) agent.setSummaryRepairChatService(repairChat);
         ChatSessionDeletionCoordinator deletionCoordinator =
-                new ChatSessionDeletionCoordinator(chatSessionStore, agent, config);
+                new ChatSessionDeletionCoordinator(chatSessionStore, agent, config,
+                        repairs == null ? ignored -> { } : repairs::deleteSession);
         try {
             deletionCoordinator.recoverPendingDeletions();
         } catch (RuntimeException recoveryFailure) {
@@ -214,6 +242,7 @@ public class DesktopServer {
 
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
                 config, chatSessionStore, new SummarySnapshotStore(memoryDir), wikiStore);
+        this.agentCtrl.setSummaryRepairChatService(repairChat);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         var configuration = userConfigStore.application(config);
         this.neo4jSync = new com.selfanalyst.ontology.Neo4jSyncService(ontology,
@@ -238,6 +267,7 @@ public class DesktopServer {
         this.chatSessionCtrl = new DesktopChatSessionController(
                 chatSessionStore, chatSummaryService, agent, config, memoryExtractionService,
                 deletionCoordinator);
+        this.chatSessionCtrl.setSummaryRepairChatService(repairChat);
     }
 
     /**
@@ -283,6 +313,8 @@ public class DesktopServer {
         });
         app.get("/desktop-ui", ctx -> ctx.redirect("/desktop-ui/index.html"));
         app.get("/desktop-ui/", ctx -> ctx.redirect("/desktop-ui/index.html"));
+
+        repairCtrl.register(app);
 
         // ── Agent tab ────────────────────────────────────────
         app.get("/desktop/summary", agentCtrl::getSummary);
@@ -385,6 +417,14 @@ public class DesktopServer {
     }
 
     private com.selfanalyst.desktop.service.PendingMemoryReview pendingMemoryReview;
+
+    private static String repairConfigurationStamp(Config config, SelfAnalystAgent agent) {
+        var llm = agent == null ? com.selfanalyst.config.LlmSettings.from(config) : agent.llmSettings();
+        return config.wikiExcludeApps() + "|" + config.wikiExcludeSites() + "|"
+                + config.wikiPromptMaxContentChars() + "|" + config.wikiSummaryMaxRequestChars() + "|"
+                + config.wikiSummaryPeriodMaxCalls() + "|" + config.wikiSummaryPeriodMaxTokens() + "|"
+                + config.wikiSummaryOutputTokenReserve() + "|" + llm.baseUrl() + "|" + llm.model() + "|" + llm.temperature();
+    }
 
     private static String escapeJson(String s) {
         if (s == null) return "null";

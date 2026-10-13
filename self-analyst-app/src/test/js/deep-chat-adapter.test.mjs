@@ -358,3 +358,114 @@ test("stream stop requests backend cancellation and aborts the fetch signal", as
   });
   await handling;
 });
+
+test("a later reactive Deep Chat rebuild restores canonical repair slots without observing ordinary edits", async () => {
+  let notify;
+  let messagesRoot = {};
+  const element = fakeElement();
+  element.shadowRoot = { querySelector(selector) { return selector === '#messages' ? messagesRoot : null; } };
+  const { box, session } = sandbox({ element, globals: {
+    MutationObserver: class { constructor(callback) { notify = callback; } observe() {} disconnect() {} },
+    summaryRepairSlotHtml: () => '<div data-summary-repair-session="session-1"></div>',
+  } });
+  session.messages = [{ id: 'assistant-1', role: 'assistant', status: 'sent', content: 'Review this draft.' }];
+  box.renderChatTab = () => { box.renderCount++; box.renderDeepChatThread(); };
+  box.renderDeepChatThread();
+  assert.match(element.added[0].message.html, /data-summary-repair-session/);
+  const initialClears = element.clears;
+  // A normal subtree input/HTML-card change must not replace the editing DOM.
+  notify(); await Promise.resolve();
+  assert.equal(element.clears, initialClears);
+  // This mirrors the vendor's later property-driven onRender(), which replaces
+  // #messages without emitting its first-render-only onComponentRender hook.
+  messagesRoot = {}; element.added = [];
+  notify(); await Promise.resolve();
+  assert.equal(element.clears, initialClears + 1);
+  assert.equal(element.added[0].message.text, 'Review this draft.');
+  assert.match(element.added[0].message.html, /data-summary-repair-session/);
+  notify(); await Promise.resolve();
+  assert.equal(element.clears, initialClears + 1);
+});
+
+test("reactive transient-error draft restoration settles and does not overwrite subsequent typing", async () => {
+  let notify, messagesRoot = {}, draftWrites = 0, composer = '';
+  const element = fakeElement();
+  element.shadowRoot = { querySelector(selector) { return selector === '#messages' ? messagesRoot : null; } };
+  Object.defineProperty(element, 'defaultInput', { set(value) {
+    draftWrites++; composer = value.text; messagesRoot = {}; this.added = [];
+    // A real setter schedules a component render; model the resulting mutation.
+    Promise.resolve().then(() => notify());
+  } });
+  const { box, session } = sandbox({ element, globals: {
+    MutationObserver: class { constructor(callback) { notify = callback; } observe() {} disconnect() {} },
+  } });
+  session.messages = [{ id: 'assistant-1', role: 'assistant', status: 'error', content: 'Failed' }];
+  box.renderChatTab = () => { box.renderCount++; box.renderDeepChatThread(); };
+  box.setDeepChatTransientError(session.id, { text: 'Failure', draft: 'Original draft' });
+  box.renderDeepChatThread();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  assert.equal(draftWrites, 1);
+  assert.ok(box.renderCount <= 2);
+  assert.equal(composer, 'Original draft');
+  composer = 'User continued typing'; messagesRoot = {}; element.added = []; notify();
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(draftWrites, 1); assert.equal(composer, 'User continued typing');
+  box.deepChatSetDraft('New intended draft');
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  assert.equal(draftWrites, 2);
+  assert.equal(composer, "New intended draft");
+});
+
+test("detached observer callbacks and queued work are inert after reconfigure or fallback", async () => {
+  const observers = [];
+  let oldRoot = {}, newRoot = {};
+  const oldElement = fakeElement(); oldElement.shadowRoot = { querySelector: () => oldRoot };
+  const newElement = fakeElement(); newElement.shadowRoot = { querySelector: () => newRoot };
+  const { box } = sandbox({ element: oldElement, globals: {
+    MutationObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe() {} disconnect() { this.disconnected = true; } },
+  } });
+  box.configureDeepChat(oldElement);
+  oldRoot = {}; observers[0].callback();
+  box.state.dom.deepChat = newElement; box.configureDeepChat(newElement);
+  observers[0].callback(); await Promise.resolve();
+  assert.equal(observers[0].disconnected, true); assert.equal(box.renderCount, 0);
+  newRoot = {}; observers[1].callback();
+  box.activateDeepChatFallback(newElement); const afterFallback = box.renderCount;
+  observers[1].callback(); await Promise.resolve();
+  assert.equal(observers[1].disconnected, true); assert.equal(box.renderCount, afterFallback);
+});
+
+test("container replacement during streaming never clears the active component transaction", async () => {
+  let notify, root = {};
+  const element = fakeElement(); element.shadowRoot = { querySelector: () => root };
+  const { box, session } = sandbox({ element, globals: {
+    MutationObserver: class { constructor(callback) { notify = callback; } observe() {} disconnect() {} },
+  } });
+  session.messages = [{ id: 'assistant-1', role: 'assistant', status: 'pending', content: 'Canonical pending' }];
+  box.renderDeepChatThread(); const clears = element.clears;
+  box.renderChatTab = () => box.renderDeepChatThread();
+  box.deepChatAdapterState.requestSessionId = session.id;
+  root = {}; notify(); await Promise.resolve();
+  assert.equal(element.clears, clears); assert.equal(box.deepChatAdapterState.requestSessionId, session.id);
+  box.deepChatAdapterState.requestSessionId = null;
+  session.messages[0].status = 'sent'; session.messages[0].content = 'Canonical final'; box.renderDeepChatThread();
+  assert.equal(element.clears, clears + 1); assert.equal(element.added[0].message.text, 'Canonical final');
+});
+
+test("composer state changes preserve text retyped after an earlier error", async () => {
+  let notify, root = {}, input = { innerText: 'Retyped after error' }, draft, composer;
+  const element = fakeElement(); element.shadowRoot = { querySelector: selector => selector === '#text-input' ? input : root };
+  Object.defineProperty(element, 'defaultInput', { set(value) { draft = value.text; } });
+  Object.defineProperty(element, 'textInput', { set() {
+    composer = draft; root = {}; Promise.resolve().then(() => notify());
+  } });
+  const { box, session } = sandbox({ element, globals: {
+    MutationObserver: class { constructor(callback) { notify = callback; } observe() {} disconnect() {} },
+  } });
+  box.configureDeepChat(element);
+  box.setDeepChatTransientError(session.id, { text: 'Failure', draft: 'Older failed draft', draftApplied: true });
+  box.renderChatTab = () => box.renderDeepChatThread();
+  box.updateDeepChatInputState(true, 'Ready');
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  assert.equal(composer, 'Retyped after error'); assert.equal(draft, 'Retyped after error');
+});

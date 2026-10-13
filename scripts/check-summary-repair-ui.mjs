@@ -31,15 +31,19 @@ async function connect(url) {
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });
   let sequence = 0;
   const pending = new Map();
+  const errors = [];
   socket.addEventListener('message', event => {
     const message = JSON.parse(event.data);
+    if (message.method === 'Runtime.exceptionThrown') {
+      errors.push(message.params.exceptionDetails); if (errors.length > 10) errors.shift();
+    }
     const request = pending.get(message.id);
     if (!request) return;
     pending.delete(message.id); clearTimeout(request.timer);
     if (message.error) request.reject(new Error(JSON.stringify(message.error))); else request.resolve(message.result);
   });
   socket.addEventListener('close', () => { for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('Browser closed')); } pending.clear(); });
-  return { close: () => socket.close(), send(method, params = {}) {
+  return { errors, close: () => socket.close(), send(method, params = {}) {
     const id = ++sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP timeout: ' + method)); }, 15000);
@@ -77,7 +81,11 @@ export async function checkSummaryRepairUi() {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
       await cdp.send('Page.navigate', { url: 'http://127.0.0.1:' + port + '/?' + query });
       await until(() => evaluate(`location.search === ${JSON.stringify("?" + query)} && document.readyState === "complete" && !!document.getElementById('fixture-ready')`), name + ' fixture ready');
-      if (!query.includes('page=dashboard')) await until(() => evaluate(`!!((${surface}) && (${surface}).querySelector('.summary-repair-card'))`), name + ' repair card');
+      if (!query.includes('page=dashboard')) {
+        const expectedRoot = query.includes('surface=fallback') ? "document.querySelector('#chat-fallback-thread')" : "document.querySelector('#deep-chat').shadowRoot";
+        await until(() => evaluate(`!!((${expectedRoot}) && (${expectedRoot}).querySelector('.summary-repair-card'))`), name + ' repair card');
+        if (!query.includes('surface=fallback')) assert.equal(await evaluate('deepChatAdapterState.upgradeFailed'), false, name + ' unexpectedly fell back');
+      }
       await until(() => evaluate('document.fonts.status === "loaded"'), name + ' fonts');
     }
     async function screenshot(name, bottom = false) {
@@ -130,6 +138,28 @@ export async function checkSummaryRepairUi() {
     await click('Read latest state'); await waitText('Latest saved summary'); await screenshot('conflict-latest', true); await report('conflict');
     await fs.writeFile(path.join(output, 'verification.json'), JSON.stringify({ syntheticOnly: true, modelCalls: 0, reports }, null, 2));
     console.log('Synthetic summary-repair UI smoke passed; screenshots: ' + output);
+  } catch (error) {
+    if (cdp) {
+      try {
+        const result = await cdp.send('Runtime.evaluate', { returnByValue: true, expression: `(() => {
+          const element = document.querySelector('#deep-chat'); const root = element && element.shadowRoot;
+          return { url: location.href, ready: document.readyState, body: document.body.innerText.slice(0, 2500),
+            fallback: document.querySelector('#chat-fallback').className,
+            deepRoot: root ? root.innerHTML.slice(0, 2500) : null,
+            messages: root && !!root.querySelector('#messages'),
+            slots: root && root.querySelectorAll('[data-summary-repair-session]').length,
+            cards: root && root.querySelectorAll('.summary-repair-card').length,
+            session: typeof state !== 'undefined' && state.activeChatSessionId,
+            upgradeFailed: typeof deepChatAdapterState !== 'undefined' && deepChatAdapterState.upgradeFailed };
+        })()` });
+        const diagnostics = { failure: error.message, dom: result.result.value, errors: cdp.errors };
+        await fs.writeFile(path.join(output, 'failure.json'), JSON.stringify(diagnostics, null, 2));
+        console.error('SUMMARY_REPAIR_UI_FAILURE ' + JSON.stringify(diagnostics));
+        const image = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+        await fs.writeFile(path.join(output, 'failure.png'), Buffer.from(image.data, 'base64'));
+      } catch (diagnosticError) { console.error('UI diagnostic capture failed: ' + diagnosticError.message); }
+    }
+    throw error;
   } finally {
     await fs.writeFile(path.join(output, 'browser.log'), log.join(''));
     if (cdp) cdp.close();

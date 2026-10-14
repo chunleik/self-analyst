@@ -10,6 +10,19 @@
     if (action === "feedback") return base + "issues";
     return null;
   }
+  // GitHub's publication instant is UTC. Reject rolled-over dates and arbitrary cache text.
+  function validPublication(value) {
+    if (typeof value !== "string" || value.startsWith("0000-") || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value)) return false;
+    var date = new Date(value);
+    return Number.isFinite(date.getTime()) && date.toISOString().replace(".000Z", "Z") === value;
+  }
+  function formatPublication(value, language) {
+    if (!validPublication(value)) return null;
+    return new Intl.DateTimeFormat(language === "zh" ? "zh-CN" : "en-US", {
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+      second: "2-digit", hourCycle: "h23", timeZoneName: "short"
+    }).format(new Date(value));
+  }
   function mount(doc, host) {
     var trigger = doc.getElementById("help-trigger");
     if (!trigger) return;
@@ -22,6 +35,11 @@
     var maxState = false;
     var pending = false;
     var updatePending = null;
+    var aboutInfo = null;
+    var aboutPending = null;
+    var releaseRequests = Object.create(null);
+    var releaseTimes = Object.create(null);
+    var releaseCacheKey = "selfanalyst.release-publication";
     var dialogGeneration = 0;
     var linkAction = null;
     var retry = doc.getElementById("help-update-retry");
@@ -105,12 +123,64 @@
       return updatePending;
     }
     retry.addEventListener("click", checkUpdate);
+    function publication(version) {
+      if (releaseTimes[version]) return Promise.resolve(releaseTimes[version]);
+      try {
+        var cached = JSON.parse(host.localStorage.getItem(releaseCacheKey));
+        if (cached && cached.version === version && validPublication(cached.publishedAt)) {
+          releaseTimes[version] = cached.publishedAt;
+          return Promise.resolve(cached.publishedAt);
+        }
+      } catch (_) { /* Storage can be disabled, full, or unavailable for this origin. */ }
+      if (!releaseRequests[version]) {
+        releaseRequests[version] = invoke("help_action", { action: "release_info" }).then(function (result) {
+          if (!result || result.version !== version || !validPublication(result.publishedAt)) return null;
+          releaseTimes[version] = result.publishedAt;
+          try { host.localStorage.setItem(releaseCacheKey, JSON.stringify({ version: version, publishedAt: result.publishedAt })); } catch (_) { /* The in-memory result remains usable. */ }
+          return result.publishedAt;
+        }).catch(function () { return null; }).finally(function () { delete releaseRequests[version]; });
+      }
+      return releaseRequests[version];
+    }
+    function showAbout() {
+      if (!native) {
+        message(text("help.about"), "SelfAnalyst\n" + text("help.webVersion") + "\n" + host.location.origin);
+        return Promise.resolve();
+      }
+      var generation = message(text("help.about"), "SelfAnalyst\n" + text("help.aboutLoading"));
+      if (!aboutPending) {
+        aboutPending = aboutInfo ? Promise.resolve(aboutInfo) : invoke("help_action", { action: "about" }).then(function (result) {
+          if (!result || typeof result.version !== "string" || typeof result.backendUrl !== "string" || typeof result.development !== "boolean") throw Error("help.failed");
+          aboutInfo = result;
+          return result;
+        });
+        aboutPending = aboutPending.finally(function () { aboutPending = null; });
+      }
+      function active() { return dialog.open && generation === dialogGeneration; }
+      return aboutPending.then(function (info) {
+        if (!active()) return;
+        function render(publishedAt, status) {
+          if (!active()) return;
+          var language = typeof state !== "undefined" ? state.lang : doc.documentElement.lang;
+          var time = publishedAt && formatPublication(publishedAt, language);
+          doc.getElementById("help-dialog-body").textContent = "SelfAnalyst v" + info.version + "\n" +
+            text("help.desktop") + ": Tauri\n" + text("help.backend") + ": " + info.backendUrl + "\n" +
+            text("help.releasedAt") + ": " + (time || text(status));
+        }
+        if (info.development) { render(null, "help.releaseDevelopment"); return; }
+        render(null, "help.releaseLoading");
+        return publication(info.version).then(function (publishedAt) { render(publishedAt, "help.releaseUnavailable"); });
+      }).catch(function () {
+        if (active()) message(text("help.about"), text("help.failed"));
+      });
+    }
     function execute(action) {
       var language = typeof state !== "undefined" ? state.lang : doc.documentElement.lang;
       var url = guideUrl(action, language);
       close(true);
       if (action === "check_update") return checkUpdate();
-      if (!url && action !== "about") return Promise.resolve();
+      if (action === "about") return showAbout();
+      if (!url) return Promise.resolve();
       if (native) {
         pending = true;
         return invoke("help_action", { action: action }).catch(function () {
@@ -120,16 +190,12 @@
           if (!dialog.open) trigger.focus();
         });
       }
-      if (action === "about") {
-        message(text("help.about"), "SelfAnalyst\n" + text("help.webVersion") + "\n" + host.location.origin);
-      } else {
-        // A real anchor preserves browser popup policy and suppresses the Referer header.
-        var anchor = doc.createElement("a");
-        anchor.href = url;
-        anchor.target = "_blank";
-        anchor.rel = "noopener noreferrer";
-        try { anchor.click(); } catch (_) { failed(url); }
-      }
+      // A real anchor preserves browser popup policy and suppresses the Referer header.
+      var anchor = doc.createElement("a");
+      anchor.href = url;
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      try { anchor.click(); } catch (_) { failed(url); }
       return Promise.resolve();
     }
     trigger.addEventListener("click", function () { if (menu.hidden) open(); else close(true); });
@@ -213,6 +279,6 @@
     localize();
     return { close: close, open: open, execute: execute, refresh: refresh, localize: localize };
   }
-  root.SelfAnalystHelp = { mount: mount, guideUrl: guideUrl };
+  root.SelfAnalystHelp = { mount: mount, guideUrl: guideUrl, formatPublication: formatPublication };
   if (typeof document !== "undefined") root.SelfAnalystTitlebar = mount(document, root);
 })(typeof window !== "undefined" ? window : globalThis);

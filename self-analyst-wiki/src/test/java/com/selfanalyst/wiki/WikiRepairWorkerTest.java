@@ -107,6 +107,21 @@ class WikiRepairWorkerTest {
                 assertEquals("period_budget", WikiGenerationProgress.state(store.versionedEntry("half").entry()));
                 assertEquals(WikiStatus.PENDING, store.versionedEntry("day").entry().status());
                 assertEquals(0, calls.get()); assertEquals(1, ledger.snapshot(WikiGenerationStore.periodKey(period)).calls());
+                var builder = new WikiFactBuilder(null, 24000);
+                var repairs = new WikiRepairService(store, entry -> WikiRepairService.buildRepairFacts(store, builder, entry),
+                        WikiPrivacyPolicy::none, () -> "test");
+                var opened = repairs.open("half-session", "half");
+                assertEquals(WikiLevel.HALF_DAY, opened.target().level());
+                var edited = repairs.edit("half-session", opened.draft().id(), 0,
+                        WikiRepairServiceTest.candidate("查看数据库同步设计。", "inferred", List.of(opened.evidence().getFirst().id())));
+                var valid = repairs.validate("half-session", edited.draft().id(), edited.draft().draftRevision());
+                assertEquals("valid", valid.draft().state(), valid.draft().issues().toString());
+                repairs.commit("half-session", valid.draft().id(), valid.draft().draftRevision(), "half-budget-repair");
+                assertEquals(1, ledger.snapshot(WikiGenerationStore.periodKey(period)).calls());
+                assertEquals(0, calls.get());
+                worker.processOneRound();
+                assertEquals(WikiStatus.SUMMARIZED, store.versionedEntry("day").entry().status());
+                assertEquals(1, calls.get());
             } finally { worker.shutdown(); }
         }
     }

@@ -5,10 +5,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(fileURLToPath(new URL('../../main/resources/desktop-ui/', import.meta.url)));
 const sid = 'a'.repeat(32);
-const target = { entryId: 'synthetic-hour', level: 'HOUR', periodStart: '2026-10-12T16:00:00Z', periodEnd: '2026-10-12T17:00:00Z', timezone: 'UTC', revision: 3 };
+const hourTarget = { entryId: 'synthetic-hour', level: 'HOUR', periodStart: '2026-10-12T16:00:00Z', periodEnd: '2026-10-12T17:00:00Z', timezone: 'UTC', revision: 3 };
+let target = hourTarget;
 let scenario, session, repair, calls;
 function reset(next = 'quality') {
   scenario = next; calls = [];
+  target = next === 'half-budget' ? { ...hourTarget, entryId: 'synthetic-half', level: 'HALF_DAY',
+    periodStart: '2026-10-12T12:00:00Z', periodEnd: '2026-10-13T04:00:00Z' } : hourTarget;
   session = { id: sid, title: 'Synthetic repair · 16:00–17:00', source: 'summary_repair', createdAt: '2026-10-13T08:00:00Z', updatedAt: '2026-10-13T08:00:00Z',
     messages: next === 'empty' ? [] : [{ id: 'synthetic-user', role: 'user', content: 'Please revise this synthetic period.', status: 'sent' },
       { id: 'synthetic-assistant', role: 'assistant', content: next === 'budget' ? 'The model budget for this synthetic period is exhausted. Local editing, validation, and saving remain available.' : 'Review the draft below. These are synthetic fixture records. You can edit and validate locally without a model.', status: next === 'budget' ? 'error' : 'sent' }],
@@ -28,7 +31,9 @@ function summary() {
     { key: 'current', label: 'Current · synthetic', headline: 'Synthetic Editor activity', insight: 'Reviewed a sample test plan and AFK detector documentation.', taskSegments: [{ title: 'AFK detector documentation', summary: 'Read the AFK detector design.' }],
       evidence: ['Unidentified application activity: 4m', 'Incomplete AFK coverage: some durations include unverified idle time and are estimates', 'Editor: Synthetic test plan'], unknownActivitySeconds: 240, coverage: 'estimated' },
     { key: 'yesterday', label: 'Yesterday · synthetic', headline: 'Saved periods and app statistics', partialSummaries: [{ periodLabel: '04:00–12:00', summary: 'Reviewed a sample document.' }],
-      summaryStatus: { state: 'waiting_dependencies', dependencies: [{ periodLabel: '10-12 16:00–17:00', state: 'failed', repairTarget: { ...target }, generationProgress: { state: 'quality', calls: 12, maxCalls: 12, tokens: 5000, maxTokens: 5000 } }] } },
+      summaryStatus: { state: 'waiting_dependencies', dependencies: [{ periodLabel: scenario === 'half-budget' ? '10-12 12:00 – 10-13 04:00' : '10-12 16:00–17:00',
+        state: scenario === 'half-budget' ? 'pending' : 'failed', repairTarget: { ...target },
+        generationProgress: { state: scenario === 'half-budget' ? 'period_budget' : 'quality', calls: 12, maxCalls: 12, tokens: 5000, maxTokens: 5000 } }] } },
   ], behaviorAdvice: { type: 'empty' } };
 }
 const bootstrap = fs.readFileSync(path.join(root, 'init.js'), 'utf8').split('var initializationPending')[0] + `
@@ -49,7 +54,7 @@ const bootstrap = fs.readFileSync(path.join(root, 'init.js'), 'utf8').split('var
   if (params.get('surface') === 'fallback') activateDeepChatFallback(state.dom.deepChat);
   switchTab(params.get('page') === 'dashboard' ? 'agent' : 'chat');
   renderTimeline();
-  document.querySelectorAll('.timeline-entry').forEach(function (entry) { toggleTimelineEntry(entry); });
+  if (params.get('collapsed') !== 'true') document.querySelectorAll('.timeline-entry').forEach(function (entry) { toggleTimelineEntry(entry); });
   renderChatTab();
   await refreshSummaryRepair(true);
   if (params.get('scenario') === 'conflict') {

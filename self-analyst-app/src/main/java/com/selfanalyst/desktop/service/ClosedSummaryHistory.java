@@ -128,7 +128,7 @@ final class ClosedSummaryHistory {
     }
 
     static com.selfanalyst.wiki.WikiRepairService.Target repairTarget(WikiStore store, WikiEntry entry) {
-        if (store == null || !com.selfanalyst.wiki.WikiRepairService.repairable(entry, Instant.now())) return null;
+        if (store == null || !com.selfanalyst.wiki.WikiRepairService.repairable(store, entry, Instant.now())) return null;
         return new com.selfanalyst.wiki.WikiRepairService.Target(entry.id(), entry.level(),
                 entry.periodStart(), entry.periodEnd(), entry.timezone(), store.revision(entry.id()));
     }

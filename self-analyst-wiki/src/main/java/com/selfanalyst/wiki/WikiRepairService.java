@@ -61,14 +61,58 @@ public final class WikiRepairService {
     }
 
     public static boolean repairable(WikiEntry entry, Instant now) {
-        return entry != null && entry.currentStatistics() && entry.level() == WikiLevel.HOUR
-                && !entry.periodEnd().isAfter(now) && entry.status() == WikiStatus.FAILED
-                && ("quality".equals(WikiGenerationProgress.state(entry)) || qualityError(entry.lastError()));
+        return entry != null && entry.currentStatistics()
+                && List.of(WikiLevel.HOUR, WikiLevel.HALF_DAY, WikiLevel.DAY).contains(entry.level())
+                && !entry.periodEnd().isAfter(now)
+                && (entry.status() == WikiStatus.FAILED || entry.status() == WikiStatus.PENDING
+                    && ("period_budget".equals(WikiGenerationProgress.state(entry))
+                        || "WIKI_PERIOD_BUDGET_EXHAUSTED".equals(entry.lastError())));
     }
 
-    private static boolean qualityError(String code) {
-        return code != null && (code.startsWith("WIKI_EVIDENCE_") || code.startsWith("WIKI_NARRATIVE_")
-                || code.startsWith("WIKI_RESPONSE_"));
+    public static boolean repairable(WikiStore store, WikiEntry entry, Instant now) {
+        if (!repairable(entry, now)) return false;
+        synchronized (store) {
+            try { completeChildren(store, entry); return true; }
+            catch (WikiRepairException incomplete) { return false; }
+        }
+    }
+
+    /** Match the normal hierarchy; never turn partial child evidence into a complete parent. */
+    private static List<WikiEntry> completeChildren(WikiStore store, WikiEntry entry) {
+        WikiLevel childLevel = switch (entry.level()) {
+            case HALF_DAY -> WikiLevel.HOUR;
+            case DAY -> WikiLevel.HALF_DAY;
+            default -> null;
+        };
+        if (childLevel == null) return List.of();
+        var periods = WikiPeriodFactory.generate(entry.periodStart(), entry.periodEnd(), childLevel,
+                java.time.ZoneId.of(entry.timezone()));
+        var candidates = store.query(entry.periodStart(), entry.periodEnd(), childLevel);
+        List<WikiEntry> children = new ArrayList<>();
+        Instant cursor = entry.periodStart();
+        for (WikiPeriod period : periods) {
+            if (!period.start().equals(cursor) || period.end().isAfter(entry.periodEnd()))
+                throw new WikiRepairException("WIKI_REPAIR_DEPENDENCIES_INCOMPLETE");
+            WikiEntry child = candidates.stream().filter(WikiEntry::currentStatistics)
+                    .filter(value -> value.level() == childLevel && value.timezone().equals(entry.timezone())
+                            && value.periodStart().equals(period.start()) && value.periodEnd().equals(period.end()))
+                    .findFirst().orElse(null);
+            if (child == null || child.status() != WikiStatus.SKIPPED
+                    && (child.status() != WikiStatus.SUMMARIZED || child.summary() == null || child.summary().isBlank()))
+                throw new WikiRepairException("WIKI_REPAIR_DEPENDENCIES_INCOMPLETE");
+            children.add(child);
+            cursor = period.end();
+        }
+        if (!cursor.equals(entry.periodEnd())) throw new WikiRepairException("WIKI_REPAIR_DEPENDENCIES_INCOMPLETE");
+        return List.copyOf(children);
+    }
+
+    public static WikiFactBuilder.WikiFacts buildRepairFacts(WikiStore store, WikiFactBuilder builder, WikiEntry entry) {
+        synchronized (store) {
+            WikiPeriod period = new WikiPeriod(entry.level(), entry.periodStart(), entry.periodEnd(), entry.timezone());
+            return entry.level() == WikiLevel.HOUR ? builder.buildFacts(period)
+                    : builder.buildFactsFromChildren(completeChildren(store, entry), period);
+        }
     }
 
     public Target target(String entryId) {
@@ -304,6 +348,7 @@ public final class WikiRepairService {
         WikiStore.VersionedEntry target = store.versionedEntry(targetId);
         if (target == null) throw new WikiRepairException("WIKI_REPAIR_TARGET_NOT_FOUND");
         if (!repairable(target.entry(), clock.instant())) throw new WikiRepairException("WIKI_REPAIR_TARGET_NOT_REPAIRABLE");
+        completeChildren(store, target.entry());
         return target;
     }
 
@@ -314,11 +359,19 @@ public final class WikiRepairService {
     }
 
     private WikiFactBuilder.WikiFacts facts(WikiEntry entry) {
+        var children = completeChildren(store, entry);
         WikiFactBuilder.WikiFacts facts = factsProvider.apply(entry);
         if (facts == null || !facts.period().start().equals(entry.periodStart()) || !facts.period().end().equals(entry.periodEnd())
                 || facts.period().level() != entry.level() || !facts.period().timezone().equals(entry.timezone()))
             throw new WikiRepairException("WIKI_REPAIR_FACT_SCOPE");
-        return facts;
+        if (children.isEmpty()) return facts;
+        Map<String, Object> statistics = new LinkedHashMap<>(facts.statistics());
+        Map<String, Long> revisions = new LinkedHashMap<>();
+        children.forEach(child -> revisions.put(child.id(), store.revision(child.id())));
+        statistics.put("repairChildRevisions", revisions);
+        return new WikiFactBuilder.WikiFacts(facts.period(), facts.activeSeconds(), facts.afkSeconds(), facts.switchCount(),
+                facts.topApps(), facts.titleSamples(), facts.contextTitleSamples(), facts.childSummaries(),
+                facts.factBuilderVersion(), facts.projectorVersion(), facts.sourceCoverage(), statistics, facts.sampledTitles());
     }
 
     private String fingerprint(WikiFactBuilder.WikiFacts facts) {
@@ -343,7 +396,7 @@ public final class WikiRepairService {
     private View view(Draft draft, WikiStore.VersionedEntry target, WikiFactBuilder.WikiFacts facts) {
         String error = target.entry().lastError();
         String safeError = error != null && error.matches("WIKI_[A-Z0-9_]+(?::[A-Za-z.]+)?") ? error : "WIKI_QUALITY_FAILED";
-        return new View(draft, target(target), facts == null ? List.of() : WikiEvidencePolicy.facts(facts.sampledTitles()), false,
+        return new View(draft, target(target), facts == null ? List.of() : WikiEvidencePolicy.facts(facts), false,
                 "committed".equals(draft.state()) ? "修订已保存，上级摘要将按正常调度重新检查。" : MISSING_TEXT + " " + safeError, safeCurrentEntry(target.entry()));
     }
 

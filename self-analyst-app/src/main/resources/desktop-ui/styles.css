@@ -2037,6 +2037,8 @@ input:checked + .toggle-switch::after {
 .summary-repair-context[hidden] { display: none; }
 .summary-repair-context strong { display: block; margin-bottom: 4px; }
 .timeline-summary-repair-btn { margin: 8px 0; white-space: normal; }
+.timeline-repair-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.timeline-repair-actions .timeline-summary-repair-btn { max-width: 100%; overflow-wrap: anywhere; }
 .timeline-repair-source { margin-top: 5px; font-size: 11px; color: var(--text-secondary); }
 @media (max-width: 760px) {
   .summary-repair-context { padding: 8px 10px; }

@@ -284,6 +284,36 @@ class SummaryTimelineAssemblerTest {
         }
     }
 
+    @Test
+    void yesterdayExposesBudgetPausedHalfAndThenItsOwnFailureTarget() {
+        try (WikiStore store = new WikiStore(tempDir.resolve("budget-half.db"))) {
+            Instant noon = START.plusSeconds(8 * 3600);
+            store.upsert(period("day", WikiLevel.DAY, START, END, WikiStatus.PENDING, null));
+            store.upsert(period("morning", WikiLevel.HALF_DAY, START, noon, WikiStatus.SUMMARIZED, "上午主题"));
+            store.upsert(period("afternoon", WikiLevel.HALF_DAY, noon, END, WikiStatus.FAILED, null));
+            for (int hour = 8; hour < 24; hour++) {
+                Instant start = START.plusSeconds(hour * 3600L);
+                store.upsert(period("h" + hour, WikiLevel.HOUR, start, start.plusSeconds(3600), WikiStatus.SUMMARIZED, "小时主题"));
+            }
+            var half = store.versionedEntry("afternoon");
+            store.markGenerationFailureIfRevision(half.entry(), half.revision(), null,
+                    Map.of("state", "period_budget", "reason", "WIKI_PERIOD_BUDGET_EXHAUSTED", "calls", 12, "maxCalls", 12),
+                    Instant.parse("9999-12-31T00:00:00Z"), false);
+            var response = assembleLocal(store);
+            var status = (Map<?, ?>) response.get("summaryStatus");
+            assertEquals("waiting_dependencies", status.get("state"));
+            assertNull(status.get("repairTarget"));
+            var dependency = (Map<?, ?>) ((List<?>) status.get("dependencies")).getFirst();
+            var target = (com.selfanalyst.wiki.WikiRepairService.Target) dependency.get("repairTarget");
+            assertEquals("afternoon", target.entryId()); assertEquals(WikiLevel.HALF_DAY, target.level());
+            assertEquals(noon, target.periodStart()); assertEquals(END, target.periodEnd());
+            store.upsert(period("afternoon", WikiLevel.HALF_DAY, noon, END, WikiStatus.SUMMARIZED, "下午主题"));
+            store.upsert(period("day", WikiLevel.DAY, START, END, WikiStatus.FAILED, null));
+            var own = (Map<?, ?>) assembleLocal(store).get("summaryStatus");
+            assertEquals("day", ((com.selfanalyst.wiki.WikiRepairService.Target) own.get("repairTarget")).entryId());
+        }
+    }
+
     private static WikiEntry period(String id, WikiLevel level, Instant start, Instant end, WikiStatus status, String summary) {
         var progress = Map.<String, Object>of("state", "quality", "reason", "WIKI_EVIDENCE_UNSUPPORTED_CLAIM:taskSegments.summary",
                 "calls", 7, "maxCalls", 12, "tokens", 31505, "maxTokens", 256000, "configurationStamp", "PRIVATE");

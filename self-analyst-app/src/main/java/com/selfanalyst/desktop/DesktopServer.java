@@ -182,8 +182,7 @@ public class DesktopServer {
         var repairFacts = eventStore == null ? null : new com.selfanalyst.wiki.WikiFactBuilder(
                 eventStore, config.wikiPromptMaxContentChars(), () -> 0L, privacy);
         var repairs = wikiStore == null || repairFacts == null ? null : new com.selfanalyst.wiki.WikiRepairService(
-                wikiStore, entry -> repairFacts.buildFacts(new com.selfanalyst.wiki.WikiPeriod(
-                        entry.level(), entry.periodStart(), entry.periodEnd(), entry.timezone())),
+                wikiStore, entry -> com.selfanalyst.wiki.WikiRepairService.buildRepairFacts(wikiStore, repairFacts, entry),
                 () -> privacy, () -> repairConfigurationStamp(config, agent));
         this.repairCtrl = new DesktopSummaryRepairController(repairs, chatSessionStore);
         var repairChat = repairs == null ? null : new com.selfanalyst.desktop.service.SummaryRepairChatService(

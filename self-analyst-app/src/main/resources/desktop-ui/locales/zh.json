@@ -1,4 +1,6 @@
 {
+  "repair.openDependency": "修复下级摘要",
+  "repair.issue.WIKI_REPAIR_DEPENDENCIES_INCOMPLETE": "下级摘要尚未齐备，请返回看板先修复未完成的下级时段。",
   "timeline.historyPartial": "部分摘要：以下为已完成时段，尚不代表完整复盘。",
   "timeline.historyStatisticsOnly": "仅应用统计：该时段尚无可展示的主题摘要。",
   "timeline.historyWaitingDependencies": "完整摘要正在等待下级时段；详情可查看未完成时段及原因。",
@@ -687,7 +689,7 @@
   "repair.issue.WIKI_REPAIR_EMPTY_TASK": "确认前请填写任务标题和描述。",
   "repair.issue.WIKI_REPAIR_PRIVACY_EXCLUDED": "此文字被您的隐私设置排除。",
   "repair.issue.WIKI_REPAIR_VALIDATION_REQUIRED": "保存前请先校验此修订。",
-  "repair.issue.WIKI_REPAIR_TARGET_NOT_REPAIRABLE": "此目标已不属于可修复的质量失败，请读取最新摘要。",
+  "repair.issue.WIKI_REPAIR_TARGET_NOT_REPAIRABLE": "此目标已不属于可修复的失败或周期额度耗尽记录，请读取最新摘要。",
   "repair.issue.WIKI_REPAIR_UNAVAILABLE": "修订服务暂不可用，本地输入已保留。",
   "repair.referenceLimit": "每个任务最多选择 16 条证据引用。"
 }

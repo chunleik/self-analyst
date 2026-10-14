@@ -1,4 +1,6 @@
 {
+  "repair.openDependency": "Repair dependent summary",
+  "repair.issue.WIKI_REPAIR_DEPENDENCIES_INCOMPLETE": "Child summaries are incomplete. Return to the dashboard and repair the unfinished periods first.",
   "timeline.historyPartial": "Partial summary: completed periods are shown below. This is not a complete review.",
   "timeline.historyStatisticsOnly": "App statistics only: no topic summary is available for this period.",
   "timeline.historyWaitingDependencies": "The full summary is waiting for child periods. Expand for incomplete periods and reasons.",
@@ -680,7 +682,7 @@
   "repair.issue.WIKI_REPAIR_EMPTY_TASK": "Enter both a task title and description before confirming.",
   "repair.issue.WIKI_REPAIR_PRIVACY_EXCLUDED": "This text is excluded by your privacy settings.",
   "repair.issue.WIKI_REPAIR_VALIDATION_REQUIRED": "Validate this revision before saving.",
-  "repair.issue.WIKI_REPAIR_TARGET_NOT_REPAIRABLE": "This target is no longer a repairable quality failure. Read the latest summary.",
+  "repair.issue.WIKI_REPAIR_TARGET_NOT_REPAIRABLE": "This target is no longer a repairable failed or period-budget-exhausted summary. Read the latest summary.",
   "repair.issue.WIKI_REPAIR_UNAVAILABLE": "Repair is temporarily unavailable. Your local input is kept.",
   "repair.referenceLimit": "Choose at most 16 evidence references per task."
 }

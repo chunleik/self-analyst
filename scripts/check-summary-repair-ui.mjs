@@ -122,6 +122,22 @@ export async function checkSummaryRepairUi() {
       }
       await report(fixture[0]);
     }
+    for (const lang of ['zh', 'en']) {
+      const name = 'blocked-day-' + lang;
+      await open(name, 'page=dashboard&scenario=half-budget&collapsed=true&lang=' + lang, 680);
+      const button = await evaluate(`(() => { const element = document.querySelector('.timeline-repair-actions button');
+        const rect = element.getBoundingClientRect(); return { visible: rect.width > 0 && rect.height > 0,
+          right: rect.right, width: innerWidth, expanded: element.closest('.timeline-entry').classList.contains('expanded'),
+          text: element.textContent }; })()`);
+      assert.equal(button.visible, true); assert.equal(button.expanded, false);
+      assert.ok(button.right <= button.width); assert.ok(button.text.includes('12:00'));
+      await screenshot(name); await report(name);
+      await evaluate(`document.querySelector('.timeline-repair-actions button').click()`);
+      await until(() => evaluate(`state.tab === 'chat' && state.chatSessions.some(session => session.contextSnapshot && session.contextSnapshot.target && session.contextSnapshot.target.entryId === 'synthetic-half')`), 'half-day repair route');
+      const data = await report(name + '-opened');
+      const request = data.calls.find(call => call.path === '/desktop/summary-repairs' && call.method === 'POST');
+      assert.equal(request.body.targetId, 'synthetic-half');
+    }
     await open('local-empty', 'scenario=empty&surface=fallback&lang=en'); await screenshot('local-empty');
     await click('Add task');
     await evaluate(`(() => { const root = ${surface}; for (const [label, text] of [['Overall summary','Completed the synthetic review.'],['Primary topic','Synthetic review'],['Topic title','Synthetic review'],['Task description','Completed the synthetic review.']]) { const wrapper = Array.from(root.querySelectorAll('label')).find(item => item.firstChild && item.firstChild.textContent === label); const input = wrapper && wrapper.querySelector('textarea,input'); if (!input) throw new Error('Missing field ' + label); input.value = text; input.dispatchEvent(new Event('input',{bubbles:true})); } const select = root.querySelector('select'); select.value='user_confirmed'; select.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`);
@@ -162,7 +178,11 @@ export async function checkSummaryRepairUi() {
     throw error;
   } finally {
     await fs.writeFile(path.join(output, 'browser.log'), log.join(''));
-    if (cdp) cdp.close();
+    if (cdp) {
+      await cdp.send('Browser.close').catch(() => {});
+      cdp.close();
+      if (child && child.exitCode == null) await Promise.race([once(child, 'exit'), sleep(5000)]);
+    }
     if (child && child.exitCode == null) { child.kill(); await Promise.race([once(child, 'exit'), sleep(5000)]); }
     await new Promise(resolve => server.close(resolve));
     await fs.rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

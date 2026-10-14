@@ -59,13 +59,13 @@ function validSummaryRepairTarget(target) {
     && Date.parse(target.periodEnd) > Date.parse(target.periodStart));
 }
 
-function summaryRepairButton(target, entryIndex, dependencyIndex, label) {
+function summaryRepairButton(target, entryIndex, dependencyIndex, label, showRange) {
   if (!validSummaryRepairTarget(target)) return "";
   var range = label || target.periodStart + " – " + target.periodEnd;
   return '<button type="button" class="btn btn-sm btn-outline timeline-summary-repair-btn" data-entry-idx="'
     + entryIndex + '"' + (dependencyIndex == null ? '' : ' data-dependency-idx="' + dependencyIndex + '"')
     + ' aria-label="' + escHtml(t("repair.openRange", { range: range })) + '">'
-    + escHtml(t("repair.open")) + '</button>';
+    + escHtml(showRange ? t("repair.openDependency") + " · " + range : t("repair.open")) + '</button>';
 }
 
 function historyStateText(status) {
@@ -217,6 +217,12 @@ function renderTimeline() {
       html += '<div class="timeline-entry-summary">' + escHtml(historyStateText(history)) + '</div>';
     }
     html += summaryRepairButton(entry.repairTarget || history && history.repairTarget, idx, null, label);
+    if (history && Array.isArray(history.dependencies)) {
+      var actions = history.dependencies.map(function (dependency, dependencyIndex) {
+        return dependency && summaryRepairButton(dependency.repairTarget, idx, dependencyIndex, dependency.periodLabel, true) || "";
+      }).join("");
+      if (actions) html += '<div class="timeline-repair-actions">' + actions + '</div>';
+    }
     if (entry.source === "user_revision" || entry.source === "user-revision" || entry.userRevised || entry.repairRevision) {
       html += '<div class="timeline-repair-source">' + escHtml(t("repair.userRevision")) + '</div>';
     }

@@ -15,6 +15,20 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class WikiRepairServiceTest {
+    @Test void periodBudgetPauseRemainsLocallyRepairable() {
+        try (WikiStore store = new WikiStore(directory.resolve("budget.db"))) {
+            store.upsert(entry("target"));
+            var before = store.versionedEntry("target");
+            store.markGenerationFailureIfRevision(before.entry(), before.revision(), null,
+                    Map.of("state", "period_budget", "reason", "WIKI_PERIOD_BUDGET_EXHAUSTED",
+                            "calls", 12, "maxCalls", 12), START, false);
+            assertTrue(WikiRepairService.repairable(store.versionedEntry("target").entry(), CLOCK.instant()));
+            var service = service(store);
+            var valid = ready(service);
+            service.commit("session", valid.draft().id(), valid.draft().draftRevision(), "budget-save");
+            assertEquals(12, WikiGenerationProgress.from(store.versionedEntry("target").entry()).get("calls"));
+        }
+    }
     @TempDir Path directory;
     static final Instant START = Instant.parse("2026-10-10T10:00:00Z");
     static final Clock CLOCK = Clock.fixed(START.plusSeconds(7200), ZoneOffset.UTC);
@@ -226,7 +240,7 @@ class WikiRepairServiceTest {
         }
     }
 
-    @Test void targetMustBeCurrentEndedQualityFailedHour() {
+    @Test void targetMustBeCurrentEndedAndFailedOrBudgetPaused() {
         try (WikiStore store = new WikiStore(directory.resolve("wiki.db"))) {
             var service = service(store);
             assertThrows(WikiRepairException.class, () -> service.open("session", "missing"));
@@ -238,7 +252,8 @@ class WikiRepairServiceTest {
             // Explicit current progress remains quality; overwrite it through the authorized generation transition.
             var snapshot = store.versionedEntry("target");
             store.markGenerationFailureIfRevision(snapshot.entry(), snapshot.revision(), null, Map.of("state", "transport", "reason", "WIKI_TRANSPORT_ERROR"), START, true);
-            assertThrows(WikiRepairException.class, () -> service.open("session", "target"));
+            assertNotNull(service.open("session", "target"));
+            service.deleteSession("session");
             store.updateStatus("target", WikiStatus.SUMMARIZED, "done", "done", List.of(), base.metrics(), List.of(), "model", "p");
             assertThrows(WikiRepairException.class, () -> service.open("session", "target"));
         }

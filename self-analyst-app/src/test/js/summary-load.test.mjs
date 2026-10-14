@@ -642,11 +642,11 @@ test('each quality failure has its own exact-target repair button and ordinary f
     { label: 'Failed hour', headline: 'Activity', summaryStatus: { state: 'failed', repairTarget: target } },
     { label: 'Invalid target', headline: 'Activity', repairTarget: { ...target, revision: undefined } },
   ] }); sandbox.renderTimeline();
-  assert.equal((sandbox.timeline.innerHTML.match(/timeline-summary-repair-btn/g) || []).length, 3);
+  assert.equal((sandbox.timeline.innerHTML.match(/timeline-summary-repair-btn/g) || []).length, 5);
   assert.match(sandbox.timeline.innerHTML, /data-entry-idx="0" data-dependency-idx="0"/);
   assert.match(sandbox.timeline.innerHTML, /data-entry-idx="0" data-dependency-idx="1"/);
   assert.equal((sandbox.timeline.innerHTML.match(/timeline-entry-discuss-btn/g) || []).length, 3);
-  assert.equal((sandbox.timeline.innerHTML.match(/aria-label="repair.openRange"/g) || []).length, 3);
+  assert.equal((sandbox.timeline.innerHTML.match(/aria-label="repair.openRange"/g) || []).length, 5);
 });
 
 test('nested mouse or keyboard repair activation neither toggles the entry nor binds the parent', () => {
@@ -667,4 +667,19 @@ test('nested mouse or keyboard repair activation neither toggles the entry nor b
   const button = { dataset: { entryIdx: '0', dependencyIdx: '0' } };
   listeners.click({ target: { closest: selector => selector === '.timeline-summary-repair-btn' ? button : null }, stopPropagation() { stopped++; }, preventDefault() { prevented++; } });
   assert.equal(selected.entryId, 'failed-child'); assert.equal(stopped, 1); assert.equal(prevented, 1);
+});
+
+test('budget-paused half-day repair is visible before the collapsed details and escapes its range', () => {
+  const target = { entryId: 'half-budget', level: 'HALF_DAY', periodStart: '2026-10-13T04:00:00Z', periodEnd: '2026-10-13T20:00:00Z', timezone: 'Asia/Shanghai', revision: 4 };
+  const sandbox = createSandbox({ timeline: [{ label: 'Yesterday', summaryStatus: {
+    state: 'waiting_dependencies', dependencies: [null, { periodLabel: '12:00–04:00 <test>', state: 'pending',
+      generationProgress: { state: 'period_budget' }, repairTarget: target }, { repairTarget: { revision: -1 } }],
+  } }] });
+  sandbox.escHtml = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+  sandbox.renderTimeline();
+  const beforeDetails = sandbox.timeline.innerHTML.split('<div class="timeline-entry-detail">')[0];
+  assert.match(beforeDetails, /timeline-repair-actions/);
+  assert.match(beforeDetails, /data-entry-idx="0" data-dependency-idx="1"/);
+  assert.match(beforeDetails, /repair.openDependency · 12:00–04:00 &lt;test&gt;/);
+  assert.doesNotMatch(beforeDetails, /<test>|data-dependency-idx="2"|timeline-entry expanded/);
 });

@@ -10,8 +10,6 @@
   "autostartUnavailable": "Start at login (status unavailable)",
   "autostartFailed": "Startup setting failed",
   "autostartFailedBody": "Unable to confirm the startup setting: {error}",
-  "aboutTitle": "About SelfAnalyst",
-  "aboutBody": "SelfAnalyst v{version}\nDesktop: Tauri\nBackend: {url}",
   "dataInUse": "Another SelfAnalyst instance is using this data directory. Close that instance first.",
   "dataLockUnavailable": "Cannot acquire the data directory lock. Check permissions and the filesystem.",
   "dataFormatUnsupported": "This application does not support the data format. Use a compatible version.",

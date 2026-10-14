@@ -1,3 +1,4 @@
+mod about;
 mod autostart;
 mod documents;
 mod i18n;
@@ -100,17 +101,6 @@ impl Drop for JavaBackend {
         }
         let _ = std::fs::remove_file(&self.port_file);
     }
-}
-
-fn show_about_message(port: u16) {
-    let message = i18n::render(
-        "aboutBody",
-        &[
-            ("version", env!("CARGO_PKG_VERSION")),
-            ("url", &backend_url(port, "")),
-        ],
-    );
-    show_message(&i18n::text("aboutTitle"), &message);
 }
 
 fn startup_failure(handle: &AppHandle) {
@@ -846,7 +836,7 @@ mod tests {
                 assert_eq!(item.text()?, expected_text);
                 assert_eq!(item.is_enabled()?, expected_enabled);
                 assert_eq!(item.is_checked()?, expected_checked);
-                if std::env::var("SELF_ANALYST_MENU_REVIEW_ABOUT").is_err() {
+                {
                     let focused_window = window.clone();
                     let focused_menu = menu.clone();
                     let focused_handle = app.handle().clone();
@@ -873,11 +863,6 @@ mod tests {
                         .run_on_main_thread(move || {
                             window.show().unwrap();
                             window.set_focus().unwrap();
-                            if std::env::var("SELF_ANALYST_MENU_REVIEW_ABOUT").is_ok() {
-                                super::show_about_message(13405);
-                                exit_handle.exit(0);
-                                return;
-                            }
                             window
                                 .popup_menu_at(&menu, tauri::PhysicalPosition::new(60, 80))
                                 .unwrap();

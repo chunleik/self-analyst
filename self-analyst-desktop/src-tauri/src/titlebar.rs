@@ -260,19 +260,39 @@ fn help_url(action: &str, language: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum HelpResponse {
+    Update(super::updates::UpdateInfo),
+    About(super::about::AboutInfo),
+    Release(super::about::ReleaseInfo),
+}
+
 #[tauri::command]
 pub async fn help_action(
     app: tauri::AppHandle,
     window: WebviewWindow,
     action: String,
     tag: Option<String>,
-) -> Result<Option<super::updates::UpdateInfo>, String> {
+) -> Result<Option<HelpResponse>, String> {
     let port = managed_port(&app, &window)?;
+    if action == "about" {
+        return Ok(Some(HelpResponse::About(super::about::information(
+            super::backend_url(port, ""),
+        ))));
+    }
+    if action == "release_info" {
+        return tauri::async_runtime::spawn_blocking(|| {
+            super::about::release_info().map(|info| Some(HelpResponse::Release(info)))
+        })
+        .await
+        .map_err(|_| "help.releaseUnavailable".to_owned())?;
+    }
     if action == "check_update" {
         let permit = super::updates::CheckPermit::acquire()?;
         return tauri::async_runtime::spawn_blocking(move || {
             let _permit = permit;
-            super::updates::check().map(Some)
+            super::updates::check().map(|info| Some(HelpResponse::Update(info)))
         })
         .await
         .map_err(|_| "update.failed".to_owned())?;
@@ -284,10 +304,6 @@ pub async fn help_action(
             super::updates::RELEASES_URL.to_owned()
         };
         open::that(url).map_err(|_| "help.failed")?;
-        return Ok(None);
-    }
-    if action == "about" {
-        super::show_about_message(port);
         return Ok(None);
     }
     let url = help_url(&action, &super::i18n::effective_language()).ok_or("help.failed")?;

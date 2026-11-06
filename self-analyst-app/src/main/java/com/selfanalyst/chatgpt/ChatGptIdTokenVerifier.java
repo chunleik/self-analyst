@@ -35,9 +35,9 @@ final class ChatGptIdTokenVerifier implements ChatGptSessionService.IdTokenVerif
             JsonNode header = parse(decoder.decode(pieces[0]));
             if (!"RS256".equals(required(header, "alg")) || header.has("crit")) throw failure("invalid_identity");
             String kid = required(header, "kid");
-            JsonNode metadata = http.get(discovery);
+            JsonNode metadata = fetch(discovery);
             if (!issuer.equals(required(metadata, "issuer"))) throw failure("invalid_identity");
-            JsonNode keys = http.get(http.trusted(required(metadata, "jwks_uri"))).path("keys");
+            JsonNode keys = fetch(http.trusted(required(metadata, "jwks_uri"))).path("keys");
             if (!keys.isArray()) throw failure("invalid_identity");
             JsonNode selected = null;
             for (JsonNode key : keys) {
@@ -81,10 +81,23 @@ final class ChatGptIdTokenVerifier implements ChatGptSessionService.IdTokenVerif
             String email = claims.path("email").isTextual() ? claims.path("email").asText() : "";
             if (subject.length() > 1024 || email.length() > 320) throw failure("invalid_identity");
             return new ChatGptSessionService.Identity(subject, email);
+        } catch (KeysUnavailable e) {
+            // Transient: the token may be valid, so callers must keep credentials and retry later.
+            throw failure("identity_unavailable");
         } catch (Exception e) {
             // Neither the token, remote body, nor nested exception is allowed across this boundary.
             throw failure("invalid_identity");
         }
+    }
+
+    /** Only transport/response failures of the trusted metadata or JWKS fetch are "unavailable". */
+    private JsonNode fetch(URI uri) {
+        try { return http.get(uri); }
+        catch (RuntimeException e) { throw new KeysUnavailable(); }
+    }
+
+    private static final class KeysUnavailable extends RuntimeException {
+        private KeysUnavailable() { super(null, null, false, false); }
     }
 
     static boolean constantEquals(String a, String b) {

@@ -86,6 +86,14 @@ class ChatGptIdTokenVerifierTest {
         jwksOverride = "https://example.invalid/stolen-jwks";
         assertInvalid(sign(claims));
     }
+    @Test void unreachableMetadataIsReportedAsTemporarilyUnavailable() throws Exception {
+        URI closed = URI.create("http://127.0.0.1:1");
+        var offline = new ChatGptIdTokenVerifier(new ChatGptOAuthHttp(HttpClient.newHttpClient(), closed),
+                URI.create(closed + "/discovery"), issuer, Clock.fixed(Instant.ofEpochSecond(1000), ZoneOffset.UTC));
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> offline.verify(sign(claims), "issued-client", "saved-nonce"));
+        assertEquals("chatgpt_identity_unavailable", error.getMessage()); assertNull(error.getCause());
+    }
     @Test void duplicateAndTrailingJsonAreRejected() {
         assertThrows(IllegalStateException.class, () -> parse("{\"a\":1,\"a\":2}".getBytes(StandardCharsets.UTF_8)));
         assertThrows(IllegalStateException.class, () -> parse("{} {}".getBytes(StandardCharsets.UTF_8)));

@@ -328,6 +328,33 @@ class ChatGptResponsesModelTest {
         assertEquals("Bearer test-token", authorization.get());
     }
 
+    @Test void streamDeadlineIsTheConfiguredTimeoutNotAFixedChatWindow() throws Exception {
+        assertEquals(Duration.ofSeconds(45), ChatGptResponsesModel.CHAT_TIMEOUT);
+        // Summary/repair callers allow 60s and 120s; the plain ceiling must not undercut them.
+        assertTrue(ChatGptResponsesModel.PLAIN_TIMEOUT.compareTo(Duration.ofSeconds(120)) > 0);
+        assertEquals(ChatGptResponsesModel.CHAT_TIMEOUT, new ChatGptResponsesModel("m", () -> "t").timeout());
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setExecutor(command -> Thread.startVirtualThread(command));
+        server.createContext("/responses", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (var output = exchange.getResponseBody()) {
+                output.write(event("{\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"slow\"}").getBytes(StandardCharsets.UTF_8));
+                output.flush();
+                try { Thread.sleep(400); } catch (InterruptedException ignored) { return; }
+                output.write(completed("[" + message("slow") + "]").getBytes(StandardCharsets.UTF_8));
+            } catch (java.io.IOException ignored) { /* Client gave up at its deadline. */ }
+        });
+        server.start();
+        model = new ChatGptResponsesModel("model", () -> "token", endpoint(), HttpClient.newHttpClient(), Duration.ofMillis(150));
+        assertEquals(ChatGptResponsesModel.Code.TIMEOUT,
+                assertThrows(ChatGptResponsesModel.ChatGptResponsesException.class, this::call).code());
+        model.close();
+        model = new ChatGptResponsesModel("model", () -> "token", endpoint(), HttpClient.newHttpClient(), Duration.ofSeconds(3));
+        assertEquals("slow", text(call()));
+    }
+
     @Test void deadlineAndCloseTerminateStalledStreamsAndCancellationIsNotSuccess() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.setExecutor(command -> Thread.startVirtualThread(command));

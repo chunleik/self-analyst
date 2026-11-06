@@ -37,6 +37,8 @@ public final class ChatGptSessionService implements AutoCloseable {
     static final String SCOPE = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
     static final String DIRECT_SCOPE = "chatgpt.tokens.use.direct";
     static final String DYNAMIC_CLIENT = "dynamic_agent_client";
+    // Refresh, then verify the returned identity, then hand out the token; extra steps absorb supersession.
+    private static final int MAX_TOKEN_STEPS = 4;
     private static final Set<String> TERMINAL_REFRESH = Set.of("invalid_grant", "invalid_refresh_token", "token_expired",
             "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused");
     private final ChatGptCredentialStore store;
@@ -150,22 +152,28 @@ public final class ChatGptSessionService implements AutoCloseable {
     public Map<String, Object> signOut(String accountId) {
         String id = accountId == null || accountId.isBlank() ? resolveId(accountId, store.read()) : accountId;
         if (id.isEmpty()) return Map.of("remoteRevocationConfirmed", true);
-        signingOut.put(id, sessionEpoch.incrementAndGet()); // Block new requests before waiting for an in-flight token refresh.
+        long epoch = sessionEpoch.incrementAndGet();
+        signingOut.put(id, epoch); // Block new requests immediately, including an in-flight refresh's write-back.
         synchronized (this) { discardAttempt(); }
-        boolean confirmed = store.locked(tx -> {
-            ObjectNode account = account(tx.data(), id);
-            if (account == null) throw failure("unknown_account");
-            boolean revoked = !account.hasNonNull("refreshToken");
-            if (!revoked) {
-                try { revoked = revoke(required(account, "refreshToken"), required(account, "clientId")); }
-                catch (RuntimeException ignored) { revoked = false; }
-            }
-            clearTokens(account);
-            if (id.equals(tx.data().path("activeAccountId").asText())) tx.data().put("activeAccountId", "");
-            tx.save();
-            return revoked;
-        });
+        String[] revocable;
+        try {
+            // Clear locally first; the remote revocation below runs outside the storage lock.
+            revocable = store.locked(tx -> {
+                ObjectNode account = account(tx.data(), id);
+                if (account == null) throw failure("unknown_account");
+                String[] value = account.hasNonNull("refreshToken")
+                        ? new String[] {required(account, "refreshToken"), required(account, "clientId")} : null;
+                clearTokens(account);
+                if (id.equals(tx.data().path("activeAccountId").asText())) tx.data().put("activeAccountId", "");
+                tx.save();
+                return value;
+            });
+        } catch (IllegalStateException e) {
+            if ("chatgpt_unknown_account".equals(e.getMessage())) signingOut.remove(id, epoch);
+            throw e;
+        }
         errorCode = "";
+        boolean confirmed = revocable == null || revokeQuietly(revocable[0], revocable[1]);
         // Keep this account blocked until a successful explicit login, including when local cleanup fails.
         return Map.of("remoteRevocationConfirmed", confirmed);
     }
@@ -180,46 +188,97 @@ public final class ChatGptSessionService implements AutoCloseable {
     public String accessToken(String accountId) {
         requireOpen();
         if (accountId != null && signingOut.containsKey(accountId)) throw failure("sign_in_required");
-        return store.locked(tx -> {
-            String id = resolveId(accountId, tx.data());
-            ObjectNode account = account(tx.data(), id);
-            if (closed || signingOut.containsKey(id) || account == null || !account.hasNonNull("accessToken"))
-                throw failure("sign_in_required");
-            if (!hasDirectScope(account)) throw failure("plan_permission_required");
-            long now = clock.instant().getEpochSecond();
-            long expiresAt = account.path("expiresAt").asLong(0);
-            long earliestRefresh = account.path("earliestRefreshAt").asLong(0);
-            if (expiresAt > now + 60 || (expiresAt > now && earliestRefresh > now))
-                return guardedToken(id, account);
-            if (earliestRefresh > now) throw failure("refresh_not_yet_allowed");
-            if (!account.hasNonNull("refreshToken")) throw failure("sign_in_required");
-            Result result = http.post(endpoints.token, Map.of("grant_type", "refresh_token", "client_id", required(account, "clientId"),
-                    "refresh_token", required(account, "refreshToken"), "resource", RESOURCE));
-            if (result.status != 200) {
-                String code = oauthError(result);
-                if (TERMINAL_REFRESH.contains(code)) {
-                    clearTokens(account); tx.save(); throw failure("sign_in_required");
-                }
-                throw failure("refresh_failed");
+        Ticket first = store.locked(tx -> ticket(tx, accountId));
+        if (first.accessToken != null) return guardedToken(first.id, first.accessToken);
+        // Network waits happen under the refresh lock only; the storage lock is held for short
+        // read/compare/write steps, so status and connection checks never wait on the remote side.
+        return store.refreshing(() -> {
+            for (int step = 0; step < MAX_TOKEN_STEPS; step++) {
+                Ticket current = store.locked(tx -> ticket(tx, first.id)); // Another waiter may have refreshed already.
+                if (current.accessToken != null) return guardedToken(current.id, current.accessToken);
+                if (current.pendingIdToken != null) verifyPending(current);
+                else refresh(current);
             }
-            JsonNode response = parse(result.body);
-            ObjectNode updated = account.deepCopy();
-            if (response.hasNonNull("id_token")) {
-                Identity identity = verifier.verify(required(response, "id_token"), required(account, "clientId"), null);
-                if (!identity.subject.equals(required(account, "subject"))) throw failure("identity_mismatch");
-            }
-            applyTokens(updated, response, false);
-            ((ObjectNode) tx.data().path("accounts")).set(id, updated);
-            try { tx.save(); } // A replacement is never returned until its rotating refresh token is durably saved.
-            catch (RuntimeException e) { signingOut.put(id, sessionEpoch.incrementAndGet()); throw e; }
-            if (!hasDirectScope(updated)) throw failure("plan_permission_required");
-            return guardedToken(id, updated);
+            throw failure("refresh_failed");
         });
     }
 
-    private String guardedToken(String id, JsonNode account) {
+    private Ticket ticket(ChatGptCredentialStore.Transaction tx, String accountId) {
+        String id = resolveId(accountId, tx.data());
+        ObjectNode account = account(tx.data(), id);
+        if (closed || signingOut.containsKey(id) || account == null || !account.hasNonNull("accessToken"))
+            throw failure("sign_in_required");
+        if (!hasDirectScope(account)) throw failure("plan_permission_required");
+        String clientId = required(account, "clientId");
+        // A rotated token is never handed out before its returned identity has been verified.
+        if (account.hasNonNull("pendingIdToken"))
+            return Ticket.verify(id, clientId, required(account, "pendingIdToken"));
+        long now = clock.instant().getEpochSecond();
+        long expiresAt = account.path("expiresAt").asLong(0);
+        long earliestRefresh = account.path("earliestRefreshAt").asLong(0);
+        if (expiresAt > now + 60 || (expiresAt > now && earliestRefresh > now))
+            return Ticket.ready(id, required(account, "accessToken"));
+        if (earliestRefresh > now) throw failure("refresh_not_yet_allowed");
+        if (!account.hasNonNull("refreshToken")) throw failure("sign_in_required");
+        return Ticket.refresh(id, clientId, required(account, "refreshToken"));
+    }
+
+    /** Remote refresh outside the storage lock; the result is written back only if still current. */
+    private void refresh(Ticket ticket) {
+        Result result = http.post(endpoints.token, Map.of("grant_type", "refresh_token", "client_id", ticket.clientId,
+                "refresh_token", ticket.refreshToken, "resource", RESOURCE));
+        if (result.status != 200) {
+            if (!TERMINAL_REFRESH.contains(oauthError(result))) throw failure("refresh_failed");
+            boolean cleared = store.locked(tx -> {
+                ObjectNode account = account(tx.data(), ticket.id);
+                // A newer rotation saved by another process is not invalidated by our stale token.
+                if (account == null || !ticket.refreshToken.equals(account.path("refreshToken").asText(null))) return false;
+                clearTokens(account); tx.save(); return true;
+            });
+            if (cleared) throw failure("sign_in_required");
+            return; // Superseded: the caller re-reads the latest stored credential.
+        }
+        JsonNode response = parse(result.body);
+        boolean kept = store.locked(tx -> {
+            ObjectNode account = account(tx.data(), ticket.id);
+            if (closed || signingOut.containsKey(ticket.id) || account == null
+                    || !ticket.refreshToken.equals(account.path("refreshToken").asText(null))) return false;
+            ObjectNode updated = account.deepCopy();
+            applyTokens(updated, response, false);
+            ((ObjectNode) tx.data().path("accounts")).set(ticket.id, updated);
+            // The rotated refresh token is saved before identity checks, so a later failure cannot lose it.
+            try { tx.save(); }
+            catch (RuntimeException e) { signingOut.put(ticket.id, sessionEpoch.incrementAndGet()); throw e; }
+            return true;
+        });
+        if (!kept && response.path("refresh_token").isTextual())
+            revokeQuietly(response.path("refresh_token").textValue(), ticket.clientId); // Signed out or replaced meanwhile.
+    }
+
+    private void verifyPending(Ticket ticket) {
+        Identity identity = null;
+        try { identity = verifier.verify(ticket.pendingIdToken, ticket.clientId, null); }
+        catch (RuntimeException e) {
+            // Keep the saved credential and retry verification later; never refresh again for it.
+            if ("chatgpt_identity_unavailable".equals(e.getMessage())) throw failure("refresh_failed");
+        }
+        Identity verified = identity;
+        boolean valid = store.locked(tx -> {
+            ObjectNode account = account(tx.data(), ticket.id);
+            if (account == null || !ticket.pendingIdToken.equals(account.path("pendingIdToken").asText(null))) return true;
+            if (verified == null || !verified.subject.equals(account.path("subject").asText())) {
+                clearTokens(account); tx.save(); return false;
+            }
+            account.put("idToken", ticket.pendingIdToken).remove("pendingIdToken");
+            tx.save();
+            return true;
+        });
+        if (!valid) throw failure("sign_in_required");
+    }
+
+    private String guardedToken(String id, String token) {
         if (closed || signingOut.containsKey(id)) throw failure("sign_in_required");
-        return required(account, "accessToken");
+        return token;
     }
 
     private void callback(Attempt attempt, HttpExchange exchange) throws IOException {
@@ -332,7 +391,12 @@ public final class ChatGptSessionService implements AutoCloseable {
         account.put("accessToken", access).put("scopes", scopes)
                 .put("expiresAt", clock.instant().getEpochSecond() + lifetime.asLong());
         if (refresh == null) account.remove("refreshToken"); else account.put("refreshToken", refresh);
-        if (response.has("id_token")) account.put("idToken", required(response, "id_token"));
+        if (response.has("id_token")) {
+            // Login verifies before calling this; a refresh identity is verified after the rotation is saved.
+            account.put(initial ? "idToken" : "pendingIdToken", required(response, "id_token"));
+        }
+        // A verified new login supersedes any identity check left behind by the old session.
+        if (initial) account.remove("pendingIdToken");
         if (response.hasNonNull("earliest_refresh_at")) {
             JsonNode value = response.get("earliest_refresh_at");
             long earliest;
@@ -361,6 +425,10 @@ public final class ChatGptSessionService implements AutoCloseable {
         return false;
     }
 
+    private boolean revokeQuietly(String refresh, String clientId) {
+        try { return revoke(refresh, clientId); } catch (RuntimeException ignored) { return false; }
+    }
+
     private boolean connected(String id, JsonNode account) {
         return !closed && !id.isEmpty() && !signingOut.containsKey(id) && account.hasNonNull("accessToken")
                 && hasDirectScope(account) && (account.path("expiresAt").asLong() > clock.instant().getEpochSecond()
@@ -374,7 +442,7 @@ public final class ChatGptSessionService implements AutoCloseable {
         JsonNode node = data.path("accounts").path(id); return node instanceof ObjectNode object ? object : null;
     }
     private static void clearTokens(ObjectNode account) {
-        account.remove(List.of("accessToken", "refreshToken", "idToken", "expiresAt", "earliestRefreshAt"));
+        account.remove(List.of("accessToken", "refreshToken", "idToken", "pendingIdToken", "expiresAt", "earliestRefreshAt"));
     }
     private static String oauthError(Result result) {
         try { return parse(result.body).path("error").asText(""); } catch (RuntimeException e) { return ""; }
@@ -434,6 +502,17 @@ public final class ChatGptSessionService implements AutoCloseable {
                     URI.create("https://auth.openai.com/api/accounts/oauth/token"), URI.create("https://auth.openai.com/.well-known/openid-configuration"),
                     "https://auth.openai.com");
         }
+    }
+    // Deliberately not a record: record.toString() would expose credentials.
+    private static final class Ticket {
+        final String id, accessToken, clientId, refreshToken, pendingIdToken;
+        private Ticket(String id, String accessToken, String clientId, String refreshToken, String pendingIdToken) {
+            this.id = id; this.accessToken = accessToken; this.clientId = clientId;
+            this.refreshToken = refreshToken; this.pendingIdToken = pendingIdToken;
+        }
+        static Ticket ready(String id, String accessToken) { return new Ticket(id, accessToken, null, null, null); }
+        static Ticket refresh(String id, String clientId, String refresh) { return new Ticket(id, null, clientId, refresh, null); }
+        static Ticket verify(String id, String clientId, String idToken) { return new Ticket(id, null, clientId, null, idToken); }
     }
     private static final class Attempt {
         final String id, accountId, clientId, state, nonce, pkce, callback;

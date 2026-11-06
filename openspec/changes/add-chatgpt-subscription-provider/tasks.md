@@ -29,6 +29,19 @@
 - [ ] 4.5 完成原生/浏览器/Windows 及真实账户验收，确认任务清单与验证限制得到处理后再使用 CLI 归档；当前保留活动 change，不得因 Java/Node 通过提前归档。
 - [ ] 4.6 在用户自行授权的真实账户环境完成浏览器 OAuth、模型发现、生成、刷新及断开验收，记录套餐与服务端权限边界，不能以本地协议夹具代替。
 
+## 5. 评审修复
+
+- [x] 5.1 刷新网络请求移出存储锁：新增独立刷新锁，写回前比对 refresh token，终止错误先比对再清除，注销先清本地后锁外撤销；在 ChatGptSessionServiceTest 补充“刷新中状态查询不阻塞”“其它进程已轮换”“注销时迟到轮换被撤销”回归测试。
+- [x] 5.2 轮换结果先持久化再校验身份：ID token 待校验期间不交出新 access token，校验暂时不可用返回可重试错误且不重复刷新，明确失败清除 token；ChatGptIdTokenVerifier 区分 `chatgpt_identity_unavailable`；补充校验器与会话服务回归测试。
+- [x] 5.3 ChatGPT plain/summary 模型使用 5 分钟内部上限并以调用方超时为准，对话模型保持 45 秒；补充 ChatGptResponsesModelTest 回归测试。
+- [x] 5.4 运行 ChatGPT 相关 Java 定向测试与 llm-settings Node 测试，运行 `openspec validate add-chatgpt-subscription-provider --strict` 及主规格 strict 校验，并在 verification.md 记录结果。证据：Java 定向 77/77、Node 37/37，详见 verification.md“评审修复验证”。
+
+## 6. PR #137 追加评审修复
+
+- [x] 6.1 成功重新登录同一账户时清除旧 pendingIdToken，补充待校验刷新后重新登录及迟到校验失败不清除新凭据的回归测试。
+- [x] 6.2 为进程内及跨进程刷新锁共享一个 90 秒等待期限，超时保留凭据并返回可重试错误，支持中断；补充独立 JVM 持锁、状态读取及释放后恢复回归测试。
+- [x] 6.3 运行 ChatGPT Java 定向测试、相关 Node 测试和 OpenSpec strict 校验，记录本地环境限制。证据：Java 85 项（82 通过、3 Windows-only 跳过）、Node 定向 37/37、全部 OpenSpec 39/39；标准编译与 Windows 验证仍以最新提交 CI 为准。
+
 ## 当前验证状态
 
 Java 定向 98/98 通过；全量 Maven 的 Surefire XML 合计 1173 项，1169 通过、4 跳过、0 失败或错误。Maven 内 Node 为 332 项，300 通过、32 跳过、0 失败。由于环境缺少 ct.sym，Java 使用临时 wrapper 将 --release 21 转为 -source 21 -target 21，并非原样 --release 编译；仓库构建配置未为此改变。用户文档已验收，五项主规格已同步且全部 35 项主规格 strict 验证通过。Rust、浏览器可视、真实账户及 Windows 打包/必需检查仍未完成，因此 3.2、4.2、4.5、4.6 保持未完成且 change 不归档。详细证据与限制见 verification.md。

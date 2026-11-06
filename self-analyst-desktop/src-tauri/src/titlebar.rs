@@ -511,7 +511,10 @@ mod tests {
         ));
         for invalid in [
             url.replace("https://auth.openai.com", "http://auth.openai.com"),
-            url.replace("https://auth.openai.com", "https://auth.openai.com.evil.test"),
+            url.replace(
+                "https://auth.openai.com",
+                "https://auth.openai.com.evil.test",
+            ),
             url.replace("https://auth.openai.com", "https://user@auth.openai.com"),
             url.replace("/api/accounts/authorize", "/oauth/token"),
             url.replace("127.0.0.1", "example.com"),

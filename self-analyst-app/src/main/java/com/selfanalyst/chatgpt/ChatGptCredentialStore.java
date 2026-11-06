@@ -32,8 +32,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /** Owner-only storage. The OS account (including other processes of that account) is trusted. */
 final class ChatGptCredentialStore {
@@ -41,17 +43,24 @@ final class ChatGptCredentialStore {
     private static final Set<PosixFilePermission> DIRECTORY_MODE = PosixFilePermissions.fromString("rwx------");
     private static final Set<PosixFilePermission> FILE_MODE = PosixFilePermissions.fromString("rw-------");
     private static final ConcurrentHashMap<Path, ReentrantLock> LOCKS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Path, ReentrantLock> REFRESH_LOCKS = new ConcurrentHashMap<>();
+    // Bounds a waiter behind one refresh (token request plus ID-token discovery/JWKS, 20s each).
+    private static final long REFRESH_WAIT_SECONDS = 90;
     private static final int MAX_BYTES = 16 * 1024 * 1024;
     private final Path directory;
     private final Path credentials;
     private final Path lockFile;
+    private final Path refreshLockFile;
     private final ReentrantLock localLock;
+    private final ReentrantLock refreshLock;
 
     ChatGptCredentialStore(Path directory) {
         this.directory = directory.toAbsolutePath().normalize();
         this.credentials = this.directory.resolve("credentials.json");
         this.lockFile = this.directory.resolve(".lock");
+        this.refreshLockFile = this.directory.resolve(".refresh-lock");
         this.localLock = LOCKS.computeIfAbsent(this.directory, ignored -> new ReentrantLock());
+        this.refreshLock = REFRESH_LOCKS.computeIfAbsent(this.directory, ignored -> new ReentrantLock());
     }
 
     ObjectNode read() {
@@ -81,17 +90,7 @@ final class ChatGptCredentialStore {
         localLock.lock();
         try {
             prepareDirectory();
-            if (!Files.exists(lockFile, LinkOption.NOFOLLOW_LINKS)) {
-                try (FileChannel channel = FileChannel.open(lockFile,
-                        Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS),
-                        protection(directory, false))) {
-                    initializeNewObject(lockFile, false);
-                    channel.force(true);
-                } catch (java.nio.file.FileAlreadyExistsException ignored) {
-                    // Another process may have initialized the lock while we waited.
-                }
-            }
-            verify(lockFile, false);
+            ensureLockFile(lockFile);
             try (FileChannel channel = FileChannel.open(lockFile, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
                  FileLock ignored = channel.lock()) {
                 verify(directory, true);
@@ -119,6 +118,57 @@ final class ChatGptCredentialStore {
         } finally {
             localLock.unlock();
         }
+    }
+
+    /**
+     * Serializes remote token refresh for this directory across threads and processes. It is
+     * deliberately separate from the storage lock: network waits happen here, while read() and
+     * locked() stay short so status checks and other accounts are never blocked by a refresh.
+     */
+    <T> T refreshing(Supplier<T> operation) {
+        try {
+            if (!refreshLock.tryLock(REFRESH_WAIT_SECONDS, TimeUnit.SECONDS))
+                throw new IllegalStateException("chatgpt_refresh_failed");
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("chatgpt_request_interrupted");
+        }
+        try {
+            FileChannel channel;
+            localLock.lock();
+            try {
+                prepareDirectory();
+                ensureLockFile(refreshLockFile);
+                channel = FileChannel.open(refreshLockFile, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+            } finally {
+                localLock.unlock();
+            }
+            try (channel; FileLock ignored = channel.lock()) {
+                try { return operation.get(); }
+                catch (RuntimeException ex) { throw new CallbackFailure(ex); }
+            }
+        } catch (CallbackFailure ex) {
+            throw ex.original;
+        } catch (IOException | SecurityException | UnsupportedOperationException | OverlappingFileLockException ex) {
+            throw unavailable();
+        } finally {
+            refreshLock.unlock();
+        }
+    }
+
+    private void ensureLockFile(Path file) throws IOException {
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+            try (FileChannel channel = FileChannel.open(file,
+                    Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS),
+                    protection(directory, false))) {
+                // Covers both .lock and .refresh-lock: a new, empty object gets the current-user owner.
+                initializeNewObject(file, false);
+                channel.force(true);
+            } catch (java.nio.file.FileAlreadyExistsException ignored) {
+                // Another process may have initialized the lock while we waited.
+            }
+        }
+        verify(file, false);
     }
 
     private static final class CallbackFailure extends RuntimeException {

@@ -27,7 +27,7 @@ function chatgptErrorText(code) {
     "storage", "identity", "protocol", "registration", "callback", "scope", "unavailable"];
   var suffix = String(code || "").replace(/^.*chatgpt[_.]/, "");
   var aliases = { plan_permission_required: "permission", sign_in_required: "authentication", storage_unavailable: "storage",
-    invalid_identity: "identity", identity_mismatch: "identity", client_mismatch: "identity", authorization_declined: "cancelled",
+    invalid_identity: "identity", identity_unavailable: "network", identity_mismatch: "identity", client_mismatch: "identity", authorization_declined: "cancelled",
     login_expired: "expired", refresh_failed: "network", invalid_callback: "callback", login_start_failed: "unavailable",
     unknown_account: "authentication", network_error: "network", request_interrupted: "network", code_exchange_failed: "authentication",
     invalid_response: "protocol", login_cancelled: "cancelled", discovery_failed: "unsupported", service_closed: "unavailable",

@@ -35,6 +35,13 @@ public final class ChatGptResponsesModel implements Model, AutoCloseable {
     private static final URI ENDPOINT = URI.create("https://api.openai.com/v1/responses");
     private static final String NAMESPACE = "selfanalyst";
     private static final String REASONING = "selfanalystChatgptReasoning";
+    /** Interactive agent calls keep the existing 45-second per-execution contract. */
+    public static final Duration CHAT_TIMEOUT = Duration.ofSeconds(45);
+    /**
+     * Plain/summary calls are bounded by their caller's timeout (60s, 120s or a pipeline budget).
+     * This ceiling matches the API-key path's AgentScope MODEL_DEFAULTS execution timeout.
+     */
+    public static final Duration PLAIN_TIMEOUT = Duration.ofMinutes(5);
     private static final int MAX_ERROR = 64 * 1024;
     private static final int MAX_FRAME = 2 * 1024 * 1024;
     private static final int MAX_RESPONSE = 32 * 1024 * 1024;
@@ -52,7 +59,11 @@ public final class ChatGptResponsesModel implements Model, AutoCloseable {
     private final Set<Runnable> active = ConcurrentHashMap.newKeySet();
 
     public ChatGptResponsesModel(String model, Supplier<String> accessToken) {
-        this(model, accessToken, ENDPOINT, HTTP, Duration.ofSeconds(45));
+        this(model, accessToken, CHAT_TIMEOUT);
+    }
+
+    public ChatGptResponsesModel(String model, Supplier<String> accessToken, Duration timeout) {
+        this(model, accessToken, ENDPOINT, HTTP, timeout);
     }
 
     // Test-only transport injection is deliberately not a public configurable bearer-token destination.
@@ -69,6 +80,8 @@ public final class ChatGptResponsesModel implements Model, AutoCloseable {
     }
 
     @Override public String getModelName() { return model; }
+    /** Whole-stream deadline, including any token refresh before the request is sent. */
+    public Duration timeout() { return timeout; }
 
     @Override public Flux<ChatResponse> stream(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
         return Flux.create(sink -> {

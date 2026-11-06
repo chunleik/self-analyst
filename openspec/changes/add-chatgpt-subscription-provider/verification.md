@@ -50,3 +50,15 @@
 - 真实 ChatGPT 账户 OAuth、套餐权限、模型目录和 Responses 端到端调用：未运行。协议夹具不能证明真实账户已获授权或订阅可用。
 - Windows 便携包构建与运行、远端 Windows 必需检查：未运行。
 - 归档：虽然五项主规格已同步，原生、可视、Windows 与真实账户验收尚未完成，change 继续保持活动，不归档。
+
+## 评审修复验证（任务 5.1–5.4）
+
+修复 PR #136 评审前三项：刷新/撤销网络请求持有存储锁、轮换 refresh token 在身份校验失败时丢失、plain/summary 被 45 秒固定期限截断。
+
+- Java 定向（WSL，OpenJDK 21.0.12，原样 `--release 21` 编译，未使用 wrapper）：
+  `mvn -B -s ~/.m2/settings-aliyun.xml -pl self-analyst-app -am '-Dtest=ChatGpt*Test,LlmRuntimeManagerTest,LlmSettingsServiceTest,PlainTransportFailureTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`
+  结果 77/77 通过，BUILD SUCCESS。其中 ChatGptSessionServiceTest 20 项（新增刷新中状态不阻塞、其它进程已轮换、轮换先落盘后校验、身份明确失败与 sub 不匹配清除 token，并改写注销与刷新交错用例为两枚 refresh token 均撤销），ChatGptIdTokenVerifierTest 7 项（新增元数据不可达返回 `chatgpt_identity_unavailable`），ChatGptResponsesModelTest 14 项（新增可配置流期限），新增 ChatGptRuntimeTimeoutTest 1 项。
+- 合入 main `0b3d91e`（含 Windows 新建对象所有者初始化）后重跑同一命令：83 项，80 通过、3 项 Windows-only 跳过、0 失败；`.refresh-lock` 新建时同样执行新对象所有者初始化。
+- Node：`node --test self-analyst-app/src/test/js/chatgpt-settings.test.mjs self-analyst-app/src/test/js/llm-settings.test.mjs self-analyst-app/src/test/js/chatgpt-runtime-packaging.test.mjs` 37/37 通过（Node 24.18.0）。
+- OpenSpec：change strict 与全部主规格 strict 校验通过。
+- 未运行：跨模块完整 `mvn test`、Windows 必需检查和真实账户验收，仍按 4.2、4.5、4.6 处理。本机可原样 `--release 21` 编译仅说明此次环境，不替代 4.2 的完整 Windows 验证。

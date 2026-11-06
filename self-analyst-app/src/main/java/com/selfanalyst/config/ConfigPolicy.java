@@ -6,7 +6,8 @@ import java.util.Set;
 public final class ConfigPolicy {
     private ConfigPolicy() {}
     public static final Set<String> LLM = Set.of(
-            "llm.api-key", "llm.base-url", "llm.model", "llm.temperature");
+            "llm.api-key", "llm.base-url", "llm.model", "llm.temperature",
+            "llm.provider", "llm.chatgpt-account", "llm.chatgpt-model");
     public static final Set<String> NEO4J = Set.of(
             "neo4j.enabled", "neo4j.uri", "neo4j.database", "neo4j.username",
             "neo4j.password-env", "neo4j.namespace", "neo4j.timeout-seconds");

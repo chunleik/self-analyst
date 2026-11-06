@@ -72,7 +72,7 @@ SHALL 先确认；取消确认保留视图和草稿，确认放弃后进入目�
 - **THEN** 编辑器显示保存成功、新一轮采用新配置及当前回答继续使用旧配置；不得提示全部请求已切换
 
 #### Scenario: 未配置有效密钥
-- **WHEN** 保存后有效 LLM 密钥为空或占位值
+- **WHEN** 保存后所选 API Key 连接的有效密钥为空或占位值，或所选 ChatGPT 账户未连接或缺少直接模型访问权限
 - **THEN** 界面更新已保存基准并显示 LLM 不可用及配置指引，不显示连接成功
 
 #### Scenario: 从脏原文切换模型设置
@@ -219,7 +219,7 @@ raw GET SHALL 在 text/path/exists 基础上返回 SupportedKeys 顺序的 suppo
 结构化配置端点和 ConfigTools SHALL 继续使用点分键、后端白名单、统一生效策略、应用结果及同一 config.toml。
 LLM 与 Embedding 连接测试端点 SHALL 保持可用。结构化写入 MAY 重排并重生成 TOML，但 MUST 产生与
 输入 flat map 等价的可解析结果。
-结构化配置 SHALL 使用 `events` 事件服务分组及 `collection.title.enabled/pollMs` 标题采集字段；其余结构化配置分组、字段与端点路径保持原有契约。旧 `aw` 分组中的本次移除配置以及 `collection.content`、`collection.content.pollMs` MUST 按 SPEC-TOML-RENAME-002 拒绝，不能静默跳过后报告成功。Agent 配置工具 SHALL 使用新点分键，并保持原有可写项范围，仅将对应旧可写键替换为新键。
+结构化配置 SHALL 使用 `events` 事件服务分组及 `collection.title.enabled/pollMs` 标题采集字段；LLM 结构化配置增加 provider、chatgpt-account 和 chatgpt-model 三个非敏感选择字段，其余配置分组、字段与端点路径保持原有契约。旧 `aw` 分组中的本次移除配置以及 `collection.content`、`collection.content.pollMs` MUST 按 SPEC-TOML-RENAME-002 拒绝，不能静默跳过后报告成功。Agent 配置工具 SHALL 使用新点分键，并保持原有可写项范围，仅将对应旧可写键替换为新键。
 
 #### Scenario: Agent 修改配置
 - **WHEN** ConfigTools 设置允许键
@@ -231,7 +231,7 @@ LLM 与 Embedding 连接测试端点 SHALL 保持可用。结构化写入 MAY �
 
 #### Scenario: 三种保存入口拒绝非法模型参数
 - **WHEN** raw、结构化或 Agent 工具提交类型错误、非有限或超出 0..2 的温度或不可用作 HTTP(S) 基础地址的值
-- **THEN** 系统按相同规则拒绝，保留原文件和当前运行配置；缺失或空密钥按未配置状态处理
+- **THEN** 系统按相同规则拒绝，保留原文件和当前运行配置；API Key 模式的缺失或空密钥按未配置状态处理，ChatGPT 模式按所选账户、模型和授权状态判断可用性
 
 #### Scenario: 结构化新采集配置
 - **WHEN** 当前事件服务以默认标题配置运行，客户端提交 `{"collection":{"title":{"enabled":false,"pollMs":800}}}`
@@ -294,8 +294,8 @@ classpath application.properties SHALL 继续作为打包默认值；事件配�
 - **THEN** 系统拒绝该配置变更，原配置和全部原始分区保持不变
 
 ### Requirement: SPEC-CFG-LIVE-001 LLM 应用范围与组件差异
-应用内保存 SHALL 支持 llm.api-key、llm.base-url、llm.model、llm.temperature
-对新工作生效。温度变更 SHALL 影响聊天模型，plain/summary 与压缩 SHALL 保持既有低温策略。
+应用内保存 SHALL 支持 llm.api-key、llm.base-url、llm.model、llm.temperature、llm.provider、llm.chatgpt-account、llm.chatgpt-model
+对新工作生效。温度变更 SHALL 影响支持该参数的 API Key 聊天模型，plain/summary 与压缩 SHALL 保持既有低温策略；ChatGPT 仅发送其支持的参数，不修改另一认证方式的温度。
 系统 SHALL 按解析后的组件配置比较差异；只有注释或来源变化而有效模型参数相同时 MUST NOT 重建模型。
 非热更新组件的重启提示 SHALL 对比其实际运行配置与最新已保存配置，恢复原值后 SHALL 清除该待重启提示。
 配置生效策略 SHALL 由后端集中声明，桌面接口和 Agent 工具 MUST 使用同一声明。
@@ -319,6 +319,10 @@ classpath application.properties SHALL 继续作为打包默认值；事件配�
 #### Scenario: 外部编辑文件
 - **WHEN** 用户仅通过外部编辑器修改 config.toml，未经过应用保存入口
 - **THEN** 本期不保证运行时自动切换；后续启动或应用内保存 SHALL 重新解析当前文件
+
+#### Scenario: provider 缺省与认证方式切换
+- **WHEN** 旧配置缺少 provider，或用户显式切换至 ChatGPT
+- **THEN** 旧配置继续使用 API Key；显式切换后新工作使用独立 ChatGPT 账户与模型，原有 API Key 连接字段保留
 
 ### Requirement: SPEC-CFG-LIVE-002 有效配置和应用结果可见性
 系统 SHALL 提供受既有桌面认证保护的 GET /desktop/config/effective，区分最新已保存配置及来源、
@@ -526,3 +530,14 @@ MUST 保持原磁盘文件和当前可用运行版本，并释放候选资源。
 #### Scenario: 仅改变退役键
 - **WHEN** 用户通过 raw 保存仅改变或删除 llm.max-tokens
 - **THEN** 不重建 LLM 资源、不报告该键需重启，正常调用依旧不发送输出上限
+
+### Requirement: SPEC-CFG-CGAUTH-001 OAuth 凭据与 Embedding 隔离
+配置 SHALL 仅保存 llm.provider、llm.chatgpt-account、llm.chatgpt-model 等非敏感选择，OAuth token 和客户端秘密 MUST NOT 写入 TOML、配置导出、Agent 配置工具或普通有效配置响应。provider 缺省 SHALL 为 api-key；不支持的 provider 或错误字段类型 MUST 被明确拒绝。Embedding SHALL 继续使用独立的有效 API Key 配置，MUST NOT 继承 ChatGPT OAuth token 或把 OAuth 请求发往 Embedding 服务；切换 ChatGPT 不得自动启用 Embedding。
+
+#### Scenario: 导出或读取配置
+- **WHEN** 已登录 ChatGPT 后用户读取 TOML 或通过 Agent 查询配置
+- **THEN** 只可见非敏感认证方式、账户与模型选择，响应不包含 OAuth token 或客户端秘密
+
+#### Scenario: 使用 ChatGPT 并启用 Embedding
+- **WHEN** 当前对话连接选择 ChatGPT 且用户原先启用了 Embedding
+- **THEN** Embedding 继续依照自身 API Key 解析和运行策略执行，绝不使用 ChatGPT OAuth 凭据

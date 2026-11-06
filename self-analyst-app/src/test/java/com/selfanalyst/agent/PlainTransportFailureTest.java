@@ -1,5 +1,6 @@
 package com.selfanalyst.agent;
 
+import com.selfanalyst.chatgpt.ChatGptResponsesModel;
 import com.selfanalyst.wiki.WikiSummaryPipeline.CallFailure;
 import com.selfanalyst.wiki.WikiSummaryPipeline.FailureKind;
 import io.agentscope.core.model.ChatUsage;
@@ -10,11 +11,36 @@ import org.junit.jupiter.api.Test;
 
 import javax.net.ssl.SSLHandshakeException;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class PlainTransportFailureTest {
+    @Test void tokenRefreshFailuresRemainRetryableButMissingGrantStopsBackgroundWork() throws Exception {
+        var cases = Map.of(
+                "chatgpt_network_error", FailureKind.TRANSPORT,
+                "chatgpt_refresh_failed", FailureKind.TRANSPORT,
+                "chatgpt_refresh_not_yet_allowed", FailureKind.TRANSPORT,
+                "chatgpt_request_timeout", FailureKind.TIMEOUT,
+                "chatgpt_request_interrupted", FailureKind.INTERRUPTED,
+                "chatgpt_sign_in_required", FailureKind.CONFIGURATION,
+                "chatgpt_plan_permission_required", FailureKind.CONFIGURATION);
+        for (var entry : cases.entrySet()) {
+            try (var model = new ChatGptResponsesModel("test-model", () -> {
+                throw new IllegalStateException(entry.getKey(), new RuntimeException("private-token"));
+            })) {
+                var failure = assertThrows(ChatGptResponsesModel.ChatGptResponsesException.class,
+                        () -> model.stream(List.of(), List.of(), null).collectList().block(Duration.ofSeconds(2)));
+                var result = classify(new CompletionException(failure), null);
+                assertEquals(entry.getValue(), result.kind(), entry.getKey());
+                assertNull(result.getCause());
+                assertFalse(result.toString().contains("private-token"));
+            }
+        }
+    }
+
     @Test void nestedTransportStatusWinsOverAuthenticationDigitsInTheBody() throws Exception {
         Throwable failure = new CompletionException(new ModelException("outer private 401",
                 new HttpTransportException("private provider response", 500, "secret-body 401")));

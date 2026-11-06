@@ -100,8 +100,8 @@ Write-Host "=== 4/6 Linking minimal JRE (jlink) ===" -ForegroundColor Cyan
 $Runtime = Join-Path $Dist "runtime"
 # Robust offline module set: java.se (incl. desktop/sql/xml/net.http) plus the
 # jdk.* modules libraries load reflectively — TLS ECC, Unsafe, zip FS, locale
-# data (Chinese formatting / i18n) and charsets.
-$modules = "java.se,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.zipfs,jdk.localedata,jdk.charsets,jdk.management.agent"
+# data (Chinese formatting / i18n), charsets and the OAuth loopback listener.
+$modules = "java.se,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.unsupported,jdk.zipfs,jdk.localedata,jdk.charsets,jdk.management.agent,jdk.httpserver"
 & (Join-Path $Jdk "bin\jlink.exe") `
     --add-modules $modules `
     --strip-debug --no-man-pages --no-header-files --compress=zip-6 `

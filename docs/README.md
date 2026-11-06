@@ -37,6 +37,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 
 - [architecture.md](architecture.md) — 系统架构、模块边界、数据流、配置和发布结构
 - [testing.md](testing.md) — 跨模块测试命令与手动验证指南
+- [llm-settings.md](llm-settings.md) — API Key 与 ChatGPT 订阅连接、账户授权、模型选择和诊断
 - [document-generation.md](document-generation.md) — 在会话中生成七种格式的文档、修改版本及另存为
 - [personal-ontology.md](personal-ontology.md) — 个人知识、用户纠错、来源覆盖、备份与重建
 - [neo4j-sync.md](neo4j-sync.md) — 可选 Neo4j 手工同步配置、发送范围、清理语义与只读查询
@@ -53,6 +54,8 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 | `agent-runtime` | [spec](../openspec/specs/agent-runtime/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `behavior-advice` | [spec](../openspec/specs/behavior-advice/spec.md) | [旧文档](archive/legacy-specs/behavior-advice.md) |
 | `chat-sessions` | [spec](../openspec/specs/chat-sessions/spec.md) | [服务契约](archive/legacy-specs/chat-session-store.md)、[SQLite 规格](archive/legacy-specs/chat-session-sqlite-store.md) |
+| `chatgpt-auth` | [spec](../openspec/specs/chatgpt-auth/spec.md) | [连接指南](llm-settings.md) |
+| `chatgpt-responses` | [spec](../openspec/specs/chatgpt-responses/spec.md) | [连接指南](llm-settings.md) |
 | `content-event-persistence` | [spec](../openspec/specs/content-event-persistence/spec.md) | Git 历史 |
 | `desktop-chat` | [spec](../openspec/specs/desktop-chat/spec.md) | Git 历史 |
 | `desktop-shell` | [spec](../openspec/specs/desktop-shell/spec.md) | Git 历史 |

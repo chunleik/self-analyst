@@ -67,4 +67,28 @@ class LlmSettingsServiceTest {
         assertThrows(RuntimeException.class, () -> service.save(Map.of("updates", Map.of("model", "x"))));
         assertEquals("[invalid", store.readRaw());
     }
+    @Test void chatGptSelectionPreservesApiConfigurationAndNeverStoresTokens() throws Exception {
+        var store = new UserConfigStore(dir); var service = service(store);
+        store.saveRaw("# keep comment\n[llm]\napi-key='private-api-key'\nmodel='api-model'\nbase-url='https://api.example.test/v1'\ntemperature=0.3\n");
+        service.save(Map.of("updates", Map.of("provider", "chatgpt", "chatgptAccount", "account-1", "chatgptModel", "subscription-model")));
+        var snapshot = service.read();
+        assertEquals("openai-responses", snapshot.protocol());
+        assertEquals("chatgpt", snapshot.fields().get("provider").effectiveValue());
+        assertEquals("api-model", snapshot.fields().get("model").effectiveValue());
+        assertEquals("account-1", snapshot.fields().get("chatgptAccount").effectiveValue());
+        assertEquals("private-api-key", store.loadUser().getProperty("llm.api-key"));
+        assertTrue(store.readRaw().startsWith("# keep comment"));
+        assertFalse(store.readRaw().contains("access_token"));
+        service.save(Map.of("updates", Map.of("provider", "api-key")));
+        assertEquals("openai-completions", service.read().protocol());
+        assertEquals("subscription-model", service.read().fields().get("chatgptModel").effectiveValue());
+    }
+    @Test void rejectsInvalidProviderAndIncompleteChatGptSelection() throws Exception {
+        var store = new UserConfigStore(dir); var service = service(store);
+        assertThrows(IllegalArgumentException.class, () -> service.save(Map.of("updates", Map.of("provider", "unknown"))));
+        assertThrows(IllegalArgumentException.class, () -> service.save(Map.of("updates", Map.of("provider", "chatgpt"))));
+        assertThrows(IllegalArgumentException.class, () -> service.save(Map.of("updates", Map.of("chatgptAccount", "a\nb"))));
+        assertFalse(Files.exists(store.filePath()));
+    }
+
 }

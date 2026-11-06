@@ -32,6 +32,12 @@ public class DesktopStatusController implements AutoCloseable {
     private final Config config;
     private volatile Supplier<LlmSettings> llmSettings;
     private volatile LlmSettings checkedSettings;
+    private volatile java.util.function.Predicate<String> chatGptAvailability = ignored -> false;
+    public void setChatGptAvailability(java.util.function.Predicate<String> availability) { chatGptAvailability = availability; }
+    private boolean configured(LlmSettings settings) {
+        try { return settings.available() && (!settings.usesChatGpt() || chatGptAvailability.test(settings.chatgptAccount())); }
+        catch (RuntimeException unavailable) { return false; }
+    }
     private final AtomicBoolean checkRunning = new AtomicBoolean();
 
     public void setLlmSettingsSupplier(Supplier<LlmSettings> supplier) { llmSettings = supplier; }
@@ -91,7 +97,7 @@ public class DesktopStatusController implements AutoCloseable {
         if (!checkRunning.compareAndSet(false, true)) return;
         try {
             LlmSettings settings = modelSettings();
-            boolean available = settings.available() && doCheckLlmAvailability(settings);
+            boolean available = configured(settings) && (settings.usesChatGpt() || doCheckLlmAvailability(settings));
             if (settings.equals(modelSettings())) {
                 llmAvailableCache.set(available);
                 checkedSettings = settings;
@@ -147,7 +153,7 @@ public class DesktopStatusController implements AutoCloseable {
         // LLM section
         LlmSettings settings = modelSettings();
         boolean checked = settings.equals(checkedSettings);
-        status.put("llm", buildLlmStatus(checked && llmAvailableCache.get()));
+        status.put("llm", buildLlmStatus(settings.usesChatGpt() ? configured(settings) : checked && llmAvailableCache.get()));
         if (!checked && !checkRunning.get() && !llmChecker.isShutdown())
             llmChecker.execute(this::refreshLlmAvailability);
 
@@ -173,15 +179,16 @@ public class DesktopStatusController implements AutoCloseable {
     Map<String, Object> buildLlmStatus(boolean available) {
         Map<String, Object> llm = new LinkedHashMap<>();
         LlmSettings settings = modelSettings();
-        llm.put("configured", settings.available());
+        llm.put("configured", configured(settings));
+        llm.put("provider", settings.provider());
         llm.put("available", available);
-        llm.put("model", settings.model());
-        llm.put("baseUrl", settings.baseUrl());
+        llm.put("model", settings.requestModel());
+        llm.put("baseUrl", settings.requestBaseUrl());
         return llm;
     }
 
     String effectiveBaseUrlForAvailabilityCheck() {
-        return modelSettings().baseUrl();
+        return modelSettings().requestBaseUrl();
     }
 
     private String watcherStatus(String type) {

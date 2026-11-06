@@ -129,6 +129,9 @@ public final class ConfigResolver {
     }
 
     private void project(Config config) {
+        effective("llm.provider", config.llmProvider());
+        effective("llm.chatgpt-account", config.llmChatgptAccount());
+        effective("llm.chatgpt-model", config.llmChatgptModel());
         effective("llm.api-key", String.valueOf(config.llmApiKey()));
         effective("llm.base-url", String.valueOf(config.llmBaseUrl()));
         effective("llm.model", String.valueOf(config.llmModel()));

@@ -351,7 +351,11 @@ var api = {
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then(function (response) {
       return response.json().then(function (payload) {
-        if (!response.ok) throw new Error(apiErrorMessage(payload, t("llm.error")));
+        if (!response.ok) {
+          var error = new Error(apiErrorMessage(payload, t("llm.error")));
+          error.code = payload.errorCode || payload.code;
+          throw error;
+        }
         return payload;
       });
     });

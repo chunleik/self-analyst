@@ -19,6 +19,9 @@ async function until(check, description, timeout = 25000) {
   }
   throw new Error('Timed out: ' + description + (last ? ': ' + last.message : ''));
 }
+export async function clickSummaryRepairButton(evaluate, surface, text, timeout = 25000) {
+  return until(() => evaluate(`(() => { const root = ${surface}; if (!root) return false; const button = Array.from(root.querySelectorAll('button')).find(item => item.textContent === ${JSON.stringify(text)}); if (!button || button.disabled) return false; button.click(); return true; })()`), 'enabled button: ' + text, timeout);
+}
 async function executable() {
   const candidates = [process.env.SUMMARY_REPAIR_BROWSER,
     process.env['ProgramFiles(x86)'] && path.join(process.env['ProgramFiles(x86)'], 'Microsoft/Edge/Application/msedge.exe'),
@@ -96,8 +99,7 @@ export async function checkSummaryRepairUi() {
       assert.ok(size.page <= size.viewport + 2, name + ' has document-level horizontal overflow');
     }
     async function click(text) {
-      const clicked = await evaluate(`(() => { const root = ${surface}; const button = Array.from(root.querySelectorAll('button')).find(item => item.textContent === ${JSON.stringify(text)}); if (!button || button.disabled) return false; button.click(); return true; })()`);
-      assert.ok(clicked, 'Missing or disabled button: ' + text);
+      await clickSummaryRepairButton(evaluate, surface, text);
     }
     async function waitText(text) {
       return until(() => evaluate(`(${surface}).textContent.includes(${JSON.stringify(text)})`), text);

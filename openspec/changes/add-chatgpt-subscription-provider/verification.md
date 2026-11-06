@@ -2,6 +2,13 @@
 
 日期：2026-11-06。以下是当前工作区的实际检查结果，不代表真实账户端到端可用或 Windows 发布验证已通过。
 
+## 后续远端发布检查
+
+- PR [#136](https://github.com/chunleik/self-analyst/pull/136) 的 `9a3b2b2a4aa10ab3f5eee20d0ea2fd64d58b5521` 已通过 Windows、Ubuntu、macOS 三平台数据守卫及 Windows Rust 格式检查。
+- 同一提交的 [Windows 完整检查](https://github.com/chunleik/self-analyst/actions/runs/42240610296/job/127969814647) 在 Java 测试中失败：Windows 提升权限创建凭据对象后的所有者与当前用户不一致，触发严格存储校验。App 模块 626 项中 1 failure、20 errors、4 skips；后续 Rust/Clippy、UIA、JAR 及发布包检查未运行。这是待修复的真实平台问题，不以本地通过替代远端门禁。
+- 前一个提交仅有 Rust 格式差异，已按 CI 精确差异修复。所有后续结果必须重新核对新提交，不能沿用上述旧 head 作为合并依据。
+- 修复限定在本次独占创建、仍为空且已具备仅当前用户 ACL 的对象上初始化所有者，使用 NOFOLLOW_LINKS 的 ACL view；既有对象仍直接严格校验，不自动修补。最终定向命令 `mvn-build -pl self-analyst-app -am '-Dtest=ChatGptCredentialStoreTest,ChatGptSessionServiceTest' '-Dsurefire.failIfNoSpecifiedTests=false' test` 得到 26 项 Java 通过、3 项 Windows-only 回归待远端执行；同轮 Node 300 通过、32 跳过，未进行本地打包。新增跨平台 owner 校验与 Windows owner/ACL 篡改测试，新提交仍须重新通过远端门禁。
+
 ## 已通过
 
 - 已获许可后完成 Java 针对性验证：98 项，98 通过，0 失败、错误或跳过。包含 ChatGPT 认证、受保护存储、签名身份、目录、Responses、额度暂停，以及配置、热更新、桌面路由、API Key 兼容和失败分类测试。

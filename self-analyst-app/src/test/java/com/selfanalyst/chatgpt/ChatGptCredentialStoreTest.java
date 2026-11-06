@@ -1,13 +1,25 @@
 package com.selfanalyst.chatgpt;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryFlag;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 
@@ -39,6 +51,108 @@ class ChatGptCredentialStoreTest {
             assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(directory.resolve("credentials.json")));
             assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(directory.resolve(".lock")));
         }
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void createsAndReplacesWindowsObjectsWithCurrentUserOwnerAndExclusiveAcl() throws Exception {
+        Path parent = root.resolve("new-parent");
+        Path directory = parent.resolve("credentials");
+        ChatGptCredentialStore store = new ChatGptCredentialStore(directory);
+        store.locked(tx -> {
+            tx.data().putObject("accounts").putObject("one").put("token", "first-secret");
+            tx.save();
+            return null;
+        });
+        assertWindowsProtection(parent, true);
+        assertWindowsProtection(directory, true);
+        assertWindowsProtection(directory.resolve(".lock"), false);
+        assertWindowsProtection(directory.resolve("credentials.json"), false);
+        store.locked(tx -> {
+            tx.data().withObject("accounts").withObject("one").put("token", "rotated-secret");
+            tx.save();
+            return null;
+        });
+        assertWindowsProtection(directory.resolve("credentials.json"), false);
+        assertEquals("rotated-secret", new ChatGptCredentialStore(directory).read()
+                .path("accounts").path("one").path("token").asText());
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void rejectsExtraWindowsAclEntriesWithoutRepairingExistingObjects() throws Exception {
+        Path directory = root.resolve("credentials");
+        ChatGptCredentialStore store = new ChatGptCredentialStore(directory);
+        store.locked(tx -> null);
+        Path credentials = directory.resolve("credentials.json");
+        byte[] originalData = Files.readAllBytes(credentials);
+        UserPrincipal other = otherWindowsPrincipal();
+        for (Path path : List.of(directory, directory.resolve(".lock"), credentials)) {
+            AclFileAttributeView acl = windowsAcl(path);
+            List<AclEntry> original = acl.getAcl();
+            var unsafe = new ArrayList<>(original);
+            unsafe.add(AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(other)
+                    .setPermissions(AclEntryPermission.READ_DATA).build());
+            acl.setAcl(unsafe);
+            try {
+                List<AclEntry> tampered = acl.getAcl();
+                assertStorageFailure(store::read);
+                assertStorageFailure(() -> store.locked(tx -> null));
+                assertEquals(tampered, acl.getAcl());
+                assertArrayEquals(originalData, Files.readAllBytes(credentials));
+            } finally {
+                acl.setAcl(original);
+            }
+        }
+        assertWindowsProtection(directory, true);
+        assertWindowsProtection(directory.resolve(".lock"), false);
+        assertWindowsProtection(credentials, false);
+    }
+
+    @Test
+    void rejectsForeignAclOwnerWithoutMutatingProtection() {
+        assertForeignAclOwnerRejected(() -> "current-user", () -> "foreign-owner");
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void rejectsForeignWindowsOwnersIncludingPreexistingEmptyObjects() throws Exception {
+        UserPrincipal user = currentUser();
+        // Elevated Windows creates objects owned by Administrators. Ordinary tokens cannot
+        // assign that foreign owner; exercise the same read-only verifier in that case.
+        UserPrincipal defaultOwner = windowsAcl(root).getOwner();
+        if (defaultOwner.equals(user)) {
+            assertForeignAclOwnerRejected(user, otherWindowsPrincipal());
+            return;
+        }
+        Path directory = root.resolve("credentials");
+        ChatGptCredentialStore store = new ChatGptCredentialStore(directory);
+        store.locked(tx -> null);
+        Path credentials = directory.resolve("credentials.json");
+        byte[] originalData = Files.readAllBytes(credentials);
+        for (Path path : List.of(directory, directory.resolve(".lock"), credentials)) {
+            AclFileAttributeView acl = windowsAcl(path);
+            List<AclEntry> originalAcl = acl.getAcl();
+            acl.setOwner(defaultOwner);
+            try {
+                assertStorageFailure(store::read);
+                assertStorageFailure(() -> store.locked(tx -> null));
+                assertEquals(defaultOwner, acl.getOwner());
+                assertEquals(originalAcl, acl.getAcl());
+                assertArrayEquals(originalData, Files.readAllBytes(credentials));
+            } finally {
+                acl.setOwner(user);
+            }
+        }
+        Path empty = Files.createDirectory(root.resolve("preexisting-empty"));
+        AclFileAttributeView emptyAcl = windowsAcl(empty);
+        emptyAcl.setAcl(windowsAcl(directory).getAcl());
+        assertEquals(defaultOwner, emptyAcl.getOwner());
+        ChatGptCredentialStore existingEmptyStore = new ChatGptCredentialStore(empty);
+        assertStorageFailure(existingEmptyStore::read);
+        assertStorageFailure(() -> existingEmptyStore.locked(tx -> null));
+        assertEquals(defaultOwner, emptyAcl.getOwner());
+        try (var entries = Files.list(empty)) { assertEquals(0, entries.count()); }
     }
 
     @Test
@@ -143,6 +257,51 @@ class ChatGptCredentialStoreTest {
 
     private void assumePosix() {
         assumeTrue(Files.getFileAttributeView(root, PosixFileAttributeView.class) != null);
+    }
+
+    private UserPrincipal currentUser() throws Exception {
+        return root.getFileSystem().getUserPrincipalLookupService()
+                .lookupPrincipalByName(System.getProperty("user.name"));
+    }
+
+    private void assertForeignAclOwnerRejected(UserPrincipal user, UserPrincipal other) {
+        assertNotEquals(user, other);
+        AclFileAttributeView acl = new AclFileAttributeView() {
+            public String name() { return "acl"; }
+            public UserPrincipal getOwner() { return other; }
+            public List<AclEntry> getAcl() { throw new AssertionError("Foreign owner must fail before reading ACL"); }
+            public void setOwner(UserPrincipal owner) { throw new AssertionError("Must not repair existing owner"); }
+            public void setAcl(List<AclEntry> entries) { throw new AssertionError("Must not repair existing ACL"); }
+        };
+        assertStorageFailure(() -> ChatGptCredentialStore.verifyAclProtection(acl, user, true));
+        assertStorageFailure(() -> ChatGptCredentialStore.verifyAclProtection(acl, user, false));
+    }
+
+    private AclFileAttributeView windowsAcl(Path path) {
+        AclFileAttributeView acl = Files.getFileAttributeView(path, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        assertNotNull(acl, "Windows credential storage requires ACL support");
+        return acl;
+    }
+
+    private UserPrincipal otherWindowsPrincipal() throws Exception {
+        UserPrincipal user = currentUser();
+        for (Path path = root; path != null; path = path.getParent()) {
+            for (AclEntry entry : windowsAcl(path).getAcl()) {
+                if (!entry.principal().equals(user)) return entry.principal();
+            }
+        }
+        throw new AssertionError("Windows test fixture has no foreign principal");
+    }
+
+    private void assertWindowsProtection(Path path, boolean directory) throws Exception {
+        AclFileAttributeView acl = windowsAcl(path);
+        UserPrincipal user = currentUser();
+        assertEquals(user, acl.getOwner());
+        List<AclEntry> entries = acl.getAcl();
+        assertFalse(entries.isEmpty());
+        assertTrue(entries.stream().allMatch(entry -> entry.type() == AclEntryType.ALLOW && entry.principal().equals(user)));
+        assertTrue(entries.stream().anyMatch(entry -> entry.permissions().containsAll(EnumSet.allOf(AclEntryPermission.class))
+                && (!directory || entry.flags().containsAll(Set.of(AclEntryFlag.FILE_INHERIT, AclEntryFlag.DIRECTORY_INHERIT)))));
     }
 
     private void assertStorageFailure(org.junit.jupiter.api.function.Executable action) {

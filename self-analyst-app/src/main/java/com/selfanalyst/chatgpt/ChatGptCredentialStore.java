@@ -85,6 +85,7 @@ final class ChatGptCredentialStore {
                 try (FileChannel channel = FileChannel.open(lockFile,
                         Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS),
                         protection(directory, false))) {
+                    initializeNewObject(lockFile, false);
                     channel.force(true);
                 } catch (java.nio.file.FileAlreadyExistsException ignored) {
                     // Another process may have initialized the lock while we waited.
@@ -177,7 +178,7 @@ final class ChatGptCredentialStore {
             byte[] bytes = JSON.writeValueAsBytes(data);
             if (bytes.length > MAX_BYTES) throw unavailable();
             temporary = Files.createTempFile(directory, ".credentials-", ".tmp", protection(directory, false));
-            verify(temporary, false);
+            initializeNewObject(temporary, false);
             try (FileChannel output = FileChannel.open(temporary, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
                 ByteBuffer buffer = ByteBuffer.wrap(bytes);
                 while (buffer.hasRemaining()) output.write(buffer);
@@ -213,7 +214,10 @@ final class ChatGptCredentialStore {
             Path cursor = ancestor;
             for (Path part : ancestor.relativize(directory)) {
                 Path next = cursor.resolve(part);
-                try { Files.createDirectory(next, protection(cursor, true)); }
+                try {
+                    Files.createDirectory(next, protection(cursor, true));
+                    initializeNewObject(next, true);
+                }
                 catch (java.nio.file.FileAlreadyExistsException ignored) { /* Validate the winning creation. */ }
                 verify(next, true);
                 cursor = next;
@@ -255,10 +259,38 @@ final class ChatGptCredentialStore {
         };
     }
 
-    private static void verify(Path path, boolean directory) throws IOException {
+    /** Call only after this process exclusively creates an empty object, before writing any data. */
+    private static void initializeNewObject(Path path, boolean directory) throws IOException {
+        if (Files.getFileAttributeView(path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS) == null) {
+            BasicFileAttributes basic = checkedAttributes(path, directory);
+            AclFileAttributeView acl = Files.getFileAttributeView(path, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+            if (acl == null) throw unavailable();
+            UserPrincipal user = currentUser(path);
+            verifyAcl(acl, user, directory);
+            if (directory) {
+                try (var entries = Files.newDirectoryStream(path)) {
+                    if (entries.iterator().hasNext()) throw unavailable();
+                }
+            } else if (basic.size() != 0) {
+                throw unavailable();
+            }
+            // Elevated Windows tokens can default to Administrators as owner even when the
+            // creation ACL grants only this user. Normalize only our new, still-empty object.
+            // Existing stores (including empty directories and lock files) are never repaired.
+            if (!acl.getOwner().equals(user)) acl.setOwner(user);
+        }
+        verify(path, directory);
+    }
+
+    private static BasicFileAttributes checkedAttributes(Path path, boolean directory) throws IOException {
         checkComponents(path.getParent());
         BasicFileAttributes basic = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (basic.isSymbolicLink() || (directory ? !basic.isDirectory() : !basic.isRegularFile())) throw unavailable();
+        return basic;
+    }
+
+    private static void verify(Path path, boolean directory) throws IOException {
+        checkedAttributes(path, directory);
         UserPrincipal user = currentUser(path);
         PosixFileAttributeView posix = Files.getFileAttributeView(path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
         if (posix != null) {
@@ -273,7 +305,15 @@ final class ChatGptCredentialStore {
             return;
         }
         AclFileAttributeView acl = Files.getFileAttributeView(path, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        verifyAclProtection(acl, user, directory);
+    }
+
+    static void verifyAclProtection(AclFileAttributeView acl, UserPrincipal user, boolean directory) throws IOException {
         if (acl == null || !acl.getOwner().equals(user)) throw unavailable();
+        verifyAcl(acl, user, directory);
+    }
+
+    private static void verifyAcl(AclFileAttributeView acl, UserPrincipal user, boolean directory) throws IOException {
         List<AclEntry> entries = acl.getAcl();
         if (entries.isEmpty()) throw unavailable();
         for (AclEntry entry : entries) {

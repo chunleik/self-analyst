@@ -65,6 +65,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -518,13 +519,15 @@ public class SelfAnalystAgent implements AutoCloseable {
                 // cache after completion/error/cancel so long-running desktop sessions stay bounded.
                 return Flux.defer(() -> {
                     StringBuilder streamedText = new StringBuilder();
-                    if (!activeChat.beginModelCall()) {
+                    // Bind this exact run before subscribing, so a stop during admission is
+                    // remembered without leaking an interrupt into a later session turn.
+                    var run = agent.prepareRun(prepared.messages(), context);
+                    if (!activeChat.beginModelCall(run::interrupt)) {
                         return Flux.error(new ChatCancelledException(userMessageId));
                     }
                     return Flux.using(
-                                () -> context,
-                                activeContext -> agent.streamEvents(
-                                                prepared.messages(), activeContext)
+                                () -> run,
+                                activeRun -> activeRun.stream()
                                         .onErrorMap(SelfAnalystAgent::safeModelFailure)
                                         .handle((event, sink) -> {
                                             if (event instanceof AgentResultEvent) {
@@ -561,7 +564,7 @@ public class SelfAnalystAgent implements AutoCloseable {
             }
             return Mono.fromCallable(() -> {
                 Thread worker = Thread.currentThread();
-                if (!active.beginModelCall(worker::interrupt)) throw new ChatCancelledException(userMessageId);
+                if (!active.beginModelCall(ignored -> worker.interrupt())) throw new ChatCancelledException(userMessageId);
                 try {
                     String response = repair.complete(sessionId, userMessageId, active::cancelled);
                     if (active.cancelled()) throw new ChatCancelledException(userMessageId);
@@ -952,8 +955,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                 .role(MsgRole.USER)
                 .textContent("用户取消了当前回复")
                 .build();
-        return active.cancel(
-                () -> agent.interrupt(DESKTOP_USER_ID, validated, cancellation));
+        return active.cancel(cancellation);
     }
 
     void rollbackCancelledTurn(String sessionId, String userMessageId) {
@@ -966,7 +968,8 @@ public class SelfAnalystAgent implements AutoCloseable {
                 break;
             }
         }
-        state.interruptControl().reset();
+        // Interruption belongs to the single AgentRun, not the persisted conversation.
+        // A retry receives a fresh RunControl; only durable turn state needs rollback.
         state.setShutdownInterrupted(false);
         state.setCurIter(0);
         state.setReplyId(null);
@@ -978,7 +981,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         private final String userMessageId;
         private volatile int lifecycle;
         private boolean modelCallStarted;
-        private Runnable dedicatedInterrupt;
+        private Consumer<Msg> dedicatedInterrupt;
 
         private ActiveDesktopChat(String sessionId, String userMessageId) {
             this.sessionId = sessionId;
@@ -990,21 +993,16 @@ public class SelfAnalystAgent implements AutoCloseable {
                     && Objects.equals(this.userMessageId, userMessageId);
         }
 
-        private synchronized boolean cancel(Runnable interrupt) {
+        private synchronized boolean cancel(Msg message) {
             if (lifecycle != 0) return false;
             lifecycle = 1;
             if (modelCallStarted) {
-                if (dedicatedInterrupt != null) dedicatedInterrupt.run();
-                else interrupt.run();
+                dedicatedInterrupt.accept(message);
             }
             return true;
         }
 
-        private synchronized boolean beginModelCall() {
-            return beginModelCall(null);
-        }
-
-        private synchronized boolean beginModelCall(Runnable interrupt) {
+        private synchronized boolean beginModelCall(Consumer<Msg> interrupt) {
             if (lifecycle != 0) return false;
             dedicatedInterrupt = interrupt;
             modelCallStarted = true;
@@ -1225,8 +1223,8 @@ public class SelfAnalystAgent implements AutoCloseable {
         chatGptSessions.close();
         ActiveDesktopChat active = activeDesktopChat.get();
         if (active != null) {
-            active.cancel(() -> agent.interrupt(DESKTOP_USER_ID, active.sessionId,
-                    Msg.builder().name("user").role(MsgRole.USER).textContent("应用正在关闭").build()));
+            active.cancel(Msg.builder().name("user").role(MsgRole.USER)
+                    .textContent("应用正在关闭").build());
         }
     }
 

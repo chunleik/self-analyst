@@ -4,6 +4,8 @@ import com.selfanalyst.config.Config;
 import com.selfanalyst.usage.UsageMeter;
 import com.sun.net.httpserver.HttpServer;
 import io.agentscope.core.ReActAgent;
+import io.agentscope.core.agent.AgentRun;
+import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.GenerateReason;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
@@ -20,13 +22,19 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,6 +96,124 @@ class SelfAnalystAgentSessionStateTest {
                     agent.chat(SESSION_A, MESSAGE_A1, "stream this again").block());
             assertEquals(1, modelCalls.get(),
                     "cancelling a canonical replay must not roll back its completed turn");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void cancellationRollsBackOnlyTheActiveTurnAndFreshRunsStillComplete(@TempDir Path tempDir)
+            throws Exception {
+        AtomicInteger modelCalls = new AtomicInteger();
+        CountDownLatch partialReceived = new CountDownLatch(1);
+        CountDownLatch finishCancelledResponse = new CountDownLatch(1);
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            int call = modelCalls.incrementAndGet();
+            String response = sseResponse(call == 2 ? "discard this partial answer" : "reply-" + call);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try {
+                if (call == 2) {
+                    int split = response.indexOf("data:", 6);
+                    exchange.getResponseBody().write(
+                            response.substring(0, split).getBytes(StandardCharsets.UTF_8));
+                    exchange.getResponseBody().flush();
+                    if (!finishCancelledResponse.await(10, TimeUnit.SECONDS)) {
+                        throw new java.io.IOException("Timed out waiting for cancellation");
+                    }
+                    response = response.substring(split);
+                }
+                exchange.getResponseBody().write(response.getBytes(StandardCharsets.UTF_8));
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new java.io.IOException(failure);
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        Config config = withLlm(Config.testDefaults(tempDir), "test-key",
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "test-model");
+        String cancelledMessageId = "2".repeat(12);
+        try (SelfAnalystAgent owner = new SelfAnalystAgent(config)) {
+            try {
+                assertEquals("reply-1", owner.chat(SESSION_A, MESSAGE_A1, "keep this turn")
+                        .block(Duration.ofSeconds(10)));
+                var cancelled = owner.chatStream(SESSION_A, cancelledMessageId,
+                                () -> new SelfAnalystAgent.PersistedDesktopTurn(
+                                        "cancel this turn", null, List.of()))
+                        .doOnNext(event -> {
+                            if (event.type() == SelfAnalystAgent.ChatStreamEventType.DELTA) {
+                                partialReceived.countDown();
+                            }
+                        }).collectList().toFuture();
+                assertTrue(partialReceived.await(10, TimeUnit.SECONDS));
+                String cancelledReplyId = reactAgent(owner)
+                        .getAgentState("desktop", SESSION_A).getReplyId();
+                assertFalse(owner.cancelChat(SESSION_B, cancelledMessageId));
+                assertFalse(owner.cancelChat(SESSION_A, MESSAGE_A1));
+                assertTrue(owner.cancelChat(SESSION_A, cancelledMessageId));
+                assertFalse(owner.cancelChat(SESSION_A, cancelledMessageId));
+                finishCancelledResponse.countDown();
+                assertThrows(ExecutionException.class, () -> cancelled.get(10, TimeUnit.SECONDS),
+                        "cancelled output must not become a canonical result");
+
+                AgentState rolledBack = reactAgent(owner).getAgentState("desktop", SESSION_A);
+                assertEquals(List.of("keep this turn", "reply-1"), rolledBack.getContext().stream()
+                        .map(Msg::getTextContent).toList());
+                assertFalse(rolledBack.isShutdownInterrupted());
+                assertEquals(0, rolledBack.getCurIter());
+                assertNotEquals(cancelledReplyId, rolledBack.getReplyId());
+                assertFalse(owner.cancelChat(SESSION_A, cancelledMessageId));
+
+                assertEquals("reply-3", owner.chat(SESSION_A, cancelledMessageId, "retry this turn")
+                        .block(Duration.ofSeconds(10)));
+                assertEquals("reply-4", owner.chat(SESSION_B, MESSAGE_A1, "other session")
+                        .block(Duration.ofSeconds(10)));
+                assertEquals(4, modelCalls.get());
+                assertEquals("reply-3", owner.chat(SESSION_A, cancelledMessageId, "replay retry")
+                        .block(Duration.ofSeconds(10)));
+                assertEquals(4, modelCalls.get(), "the successful retry remains idempotent");
+            } finally {
+                finishCancelledResponse.countDown();
+            }
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void preparedRunInterruptedBeforeSubscriptionDoesNotPoisonTheNextRun(@TempDir Path tempDir)
+            throws Exception {
+        AtomicInteger modelCalls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            modelCalls.incrementAndGet();
+            exchange.getRequestBody().readAllBytes();
+            byte[] response = sseResponse("fresh run").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        server.start();
+        Config config = withLlm(Config.testDefaults(tempDir), "test-key",
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "test-model");
+        try (SelfAnalystAgent owner = new SelfAnalystAgent(config)) {
+            var run = reactAgent(owner).prepareRun(
+                    List.of(message(MESSAGE_A1, MsgRole.USER, "must not run")),
+                    RuntimeContext.builder().userId("desktop").sessionId(SESSION_A).build());
+            assertTrue(run.interrupt());
+            assertEquals(AgentRun.Status.CANCELLED, run.status());
+            assertThrows(CancellationException.class,
+                    () -> run.stream().collectList().block(Duration.ofSeconds(10)));
+            assertEquals(0, modelCalls.get());
+            assertEquals("fresh run", owner.chat(SESSION_A, MESSAGE_A1, "retry")
+                    .block(Duration.ofSeconds(10)));
+            assertEquals(1, modelCalls.get());
+            assertFalse(run.interrupt(), "late cancellation cannot affect the new run");
         } finally {
             server.stop(0);
         }

@@ -8,9 +8,13 @@
 ## 2. 验证与交付
 
 - [x] 2.1 执行 OpenSpec 严格校验、差异检查及适用测试，记录成功、失败或环境限制。
-- [ ] 2.2 在整合 PR 最新提交运行 Windows 全量验证和三平台数据守卫并确认成功，不使用旧提交检查替代。
-- [ ] 2.3 确认无行为规格变化后通过 CLI 归档 change，检查最终提交并保留 PR 来源及验证证据。
+- [x] 2.2 在整合 PR 最新提交运行 Windows 全量验证和三平台数据守卫并确认成功，不使用旧提交检查替代。
+- [x] 2.3 确认无行为规格变化后通过 CLI 归档 change，检查最终提交并保留 PR 来源及验证证据。
 
 验证记录：`openspec validate --all --strict` 40 项通过；Node UI 测试 296 通过、32 跳过；`git diff --check` 通过。定向 Neo4j 测试 6/6 通过；全量 Maven Java 测试 1178 项、0 失败、0 错误、7 跳过，Maven 中 Node 测试 300 通过、32 跳过。此环境未安装 Cargo，Rust 验证交由既有远端 Windows CI；未执行本地打包。
 
 时序修复验证：新增 2 项 Node 回归测试通过；修复后显式 Node 套件 298 通过、32 跳过；OpenSpec 40/40 通过。远端 Windows 浏览器验证仍必须通过后才能合并。
+
+同步 main #137 后验证：Java 1190 项（0 失败、0 错误、7 跳过），Maven Node 302 通过、32 跳过。提交 `3bc4006d01d6a876a3a8abe30daff3969c4182b2` 的 [CI 42254943146](https://github.com/chunleik/self-analyst/actions/runs/42254943146) 中 Windows 全量验证与三平台数据守卫全部成功，包括真实 Edge UI、Synthetic UIA、Rust 测试/Clippy、远端 JAR 与冒烟。先前 UIA 偶发 null 未通过改时限或跳过处理，新一轮原样测试成功。
+
+归档后最终提交仍必须重新通过远端必需检查才可合并，不能沿用归档前 head 的结果。主规格未发生变化，无需同步；用户向文档未改动。

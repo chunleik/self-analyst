@@ -395,6 +395,8 @@ public final class ChatGptSessionService implements AutoCloseable {
             // Login verifies before calling this; a refresh identity is verified after the rotation is saved.
             account.put(initial ? "idToken" : "pendingIdToken", required(response, "id_token"));
         }
+        // A verified new login supersedes any identity check left behind by the old session.
+        if (initial) account.remove("pendingIdToken");
         if (response.hasNonNull("earliest_refresh_at")) {
             JsonNode value = response.get("earliest_refresh_at");
             long earliest;

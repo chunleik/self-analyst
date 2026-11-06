@@ -62,3 +62,12 @@
 - Node：`node --test self-analyst-app/src/test/js/chatgpt-settings.test.mjs self-analyst-app/src/test/js/llm-settings.test.mjs self-analyst-app/src/test/js/chatgpt-runtime-packaging.test.mjs` 37/37 通过（Node 24.18.0）。
 - OpenSpec：change strict 与全部主规格 strict 校验通过。
 - 未运行：跨模块完整 `mvn test`、Windows 必需检查和真实账户验收，仍按 4.2、4.5、4.6 处理。本机可原样 `--release 21` 编译仅说明此次环境，不替代 4.2 的完整 Windows 验证。
+
+## PR #137 追加评审修复验证（任务 6.1–6.3）
+
+- 成功重新登录清除旧 pendingIdToken，并保护新凭据不被迟到的旧身份校验失败清除。两项新增会话回归先在未修复实现上分别复现 `chatgpt_refresh_failed` 与 `chatgpt_sign_in_required`，修复后通过。
+- 进程内刷新锁、准备阶段短时存储锁及跨进程文件锁共享单调时钟计算的 90 秒等待期限；文件锁改为非阻塞尝试，超时不执行刷新、不修改凭据，中断保留标记。新增独立 JVM 持锁下的超时、状态读取不阻塞、中断及释放后恢复测试；Windows 对象保护测试增加 `.refresh-lock` 所有者和 ACL 断言。
+- Java 定向：`mvn -pl self-analyst-app -am '-Dtest=ChatGpt*Test,LlmRuntimeManagerTest,LlmSettingsServiceTest,PlainTransportFailureTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`，85 项，82 通过、3 项 Windows-only 跳过、0 失败或错误。此云环境有 Java 21 运行时及编译模块，但缺少 `ct.sym`，故使用仓库外临时编译 wrapper 将 `--release 21` 转为 `-source 21 -target 21`；没有修改项目 POM，也不将此结果当作标准编译或 Windows 验证。
+- Maven 内全套 Node：332 项，300 通过、32 跳过、0 失败；ChatGPT/settings/packaging 三个定向文件另跑 37/37 通过。
+- `openspec validate --all --strict`：39/39 通过；`git diff --check` 通过。
+- 最新提交的标准 Java 21 编译、Windows 全量验证与其它必需 GitHub Actions 检查需在合并前另行确认。真实账户端到端验收仍未完成，不归档该 change。

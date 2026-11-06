@@ -27,6 +27,7 @@ import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
+import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -45,7 +46,7 @@ final class ChatGptCredentialStore {
     private static final ConcurrentHashMap<Path, ReentrantLock> LOCKS = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<Path, ReentrantLock> REFRESH_LOCKS = new ConcurrentHashMap<>();
     // Bounds a waiter behind one refresh (token request plus ID-token discovery/JWKS, 20s each).
-    private static final long REFRESH_WAIT_SECONDS = 90;
+    private static final Duration REFRESH_WAIT = Duration.ofSeconds(90);
     private static final int MAX_BYTES = 16 * 1024 * 1024;
     private final Path directory;
     private final Path credentials;
@@ -53,8 +54,15 @@ final class ChatGptCredentialStore {
     private final Path refreshLockFile;
     private final ReentrantLock localLock;
     private final ReentrantLock refreshLock;
+    private final long refreshWaitNanos;
 
     ChatGptCredentialStore(Path directory) {
+        this(directory, REFRESH_WAIT);
+    }
+
+    ChatGptCredentialStore(Path directory, Duration refreshWait) {
+        if (refreshWait.isNegative() || refreshWait.isZero()) throw new IllegalArgumentException("refreshWait must be positive");
+        this.refreshWaitNanos = refreshWait.toNanos();
         this.directory = directory.toAbsolutePath().normalize();
         this.credentials = this.directory.resolve("credentials.json");
         this.lockFile = this.directory.resolve(".lock");
@@ -126,8 +134,9 @@ final class ChatGptCredentialStore {
      * locked() stay short so status checks and other accounts are never blocked by a refresh.
      */
     <T> T refreshing(Supplier<T> operation) {
+        long deadline = System.nanoTime() + refreshWaitNanos;
         try {
-            if (!refreshLock.tryLock(REFRESH_WAIT_SECONDS, TimeUnit.SECONDS))
+            if (!refreshLock.tryLock(refreshWaitNanos, TimeUnit.NANOSECONDS))
                 throw new IllegalStateException("chatgpt_refresh_failed");
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -135,7 +144,8 @@ final class ChatGptCredentialStore {
         }
         try {
             FileChannel channel;
-            localLock.lock();
+            if (!localLock.tryLock(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS))
+                throw new IllegalStateException("chatgpt_refresh_failed");
             try {
                 prepareDirectory();
                 ensureLockFile(refreshLockFile);
@@ -143,16 +153,32 @@ final class ChatGptCredentialStore {
             } finally {
                 localLock.unlock();
             }
-            try (channel; FileLock ignored = channel.lock()) {
+            try (channel; FileLock ignored = acquireRefreshFileLock(channel, deadline)) {
+                verify(directory, true);
+                verify(refreshLockFile, false);
                 try { return operation.get(); }
                 catch (RuntimeException ex) { throw new CallbackFailure(ex); }
             }
         } catch (CallbackFailure ex) {
             throw ex.original;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("chatgpt_request_interrupted");
         } catch (IOException | SecurityException | UnsupportedOperationException | OverlappingFileLockException ex) {
             throw unavailable();
         } finally {
             refreshLock.unlock();
+        }
+    }
+
+    private FileLock acquireRefreshFileLock(FileChannel channel, long deadline) throws IOException, InterruptedException {
+        while (true) {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) throw new IllegalStateException("chatgpt_refresh_failed");
+            FileLock lock = channel.tryLock();
+            if (lock != null) return lock;
+            TimeUnit.NANOSECONDS.sleep(Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(25)));
         }
     }
 

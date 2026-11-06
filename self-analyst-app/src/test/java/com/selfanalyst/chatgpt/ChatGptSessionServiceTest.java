@@ -54,6 +54,7 @@ class ChatGptSessionServiceTest {
     private volatile int revocationStatus = 200;
     private volatile CountDownLatch refreshEntered, refreshRelease;
     private volatile CountDownLatch exchangeEntered, exchangeRelease;
+    private volatile CountDownLatch verifyEntered, verifyRelease;
 
     @BeforeEach void setup() throws Exception {
         client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
@@ -100,6 +101,15 @@ class ChatGptSessionServiceTest {
         return new ChatGptSessionService(temp.resolve("auth"), client, clock, endpoints,
                 (token, clientId, nonce) -> {
                     RuntimeException failure = refreshVerifyFailure;
+                    if (nonce == null && verifyEntered != null) {
+                        verifyEntered.countDown();
+                        try {
+                            if (!verifyRelease.await(5, TimeUnit.SECONDS)) throw new AssertionError("verification not released");
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("chatgpt_request_interrupted");
+                        }
+                    }
                     if (failure != null && nonce == null) throw failure;
                     return new ChatGptSessionService.Identity(subject, "same@example.test");
                 });
@@ -341,6 +351,37 @@ class ChatGptSessionServiceTest {
         String saved = Files.readString(temp.resolve("auth/credentials.json"));
         assertTrue(saved.contains("issued")); assertFalse(saved.contains("rotated-access-secret"));
         assertFalse(saved.contains("rotated-refresh-secret"));
+    }
+
+    @Test void successfulReloginReplacesPendingIdentityWithoutRetryingOldVerification() throws Exception {
+        lifetime = 30; login("issued"); String id = activeId(); lifetime = 3600;
+        refreshVerifyFailure = new IllegalStateException("chatgpt_identity_unavailable");
+        assertEquals("chatgpt_refresh_failed", assertThrows(IllegalStateException.class, () -> service.accessToken(id)).getMessage());
+        assertTrue(Files.readString(temp.resolve("auth/credentials.json")).contains("pendingIdToken"));
+        assertEquals(200, callback(query(service.startLogin(id)), "code=again"));
+        assertEquals(id, activeId());
+        assertEquals("access-secret", service.accessToken(id));
+        assertEquals(1, refreshes.get());
+        assertFalse(Files.readString(temp.resolve("auth/credentials.json")).contains("pendingIdToken"));
+    }
+
+    @Test void lateIdentityFailureCannotClearSuccessfulRelogin() throws Exception {
+        lifetime = 30; login("issued"); String id = activeId(); lifetime = 3600;
+        refreshVerifyFailure = new IllegalStateException("chatgpt_invalid_identity");
+        verifyEntered = new CountDownLatch(1); verifyRelease = new CountDownLatch(1);
+        try (var pool = Executors.newSingleThreadExecutor()) {
+            var token = pool.submit(() -> service.accessToken(id));
+            try {
+                assertTrue(verifyEntered.await(3, TimeUnit.SECONDS));
+                assertEquals(200, callback(query(service.startLogin(id)), "code=again"));
+            } finally {
+                verifyRelease.countDown();
+            }
+            assertEquals("access-secret", token.get(5, TimeUnit.SECONDS));
+        }
+        assertTrue(service.isConnected(id));
+        assertEquals("access-secret", service.accessToken(id));
+        assertEquals(1, refreshes.get());
     }
 
     @Test void refreshedIdentityForAnotherSubjectClearsTokens() throws Exception {

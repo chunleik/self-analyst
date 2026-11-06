@@ -6,8 +6,10 @@ import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
+import java.nio.channels.FileChannel;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.AclEntry;
 import java.nio.file.attribute.AclEntryFlag;
 import java.nio.file.attribute.AclEntryPermission;
@@ -16,12 +18,17 @@ import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -68,6 +75,8 @@ class ChatGptCredentialStoreTest {
         assertWindowsProtection(directory, true);
         assertWindowsProtection(directory.resolve(".lock"), false);
         assertWindowsProtection(directory.resolve("credentials.json"), false);
+        store.refreshing(() -> null);
+        assertWindowsProtection(directory.resolve(".refresh-lock"), false);
         store.locked(tx -> {
             tx.data().withObject("accounts").withObject("one").put("token", "rotated-secret");
             tx.save();
@@ -180,6 +189,93 @@ class ChatGptCredentialStoreTest {
             for (var result : workers.invokeAll(tasks)) result.get();
         }
         assertEquals(24, new ChatGptCredentialStore(directory).read().path("count").asInt());
+    }
+
+    @Test
+    void crossProcessRefreshWaitTimesOutWithoutBlockingReadsOrChangingCredentials() throws Exception {
+        Path directory = root.resolve("credentials");
+        ChatGptCredentialStore store = new ChatGptCredentialStore(directory, Duration.ofMillis(250));
+        store.locked(tx -> null);
+        store.refreshing(() -> null);
+        byte[] original = Files.readAllBytes(directory.resolve("credentials.json"));
+        Process holder = startRefreshHolder(directory);
+        try {
+            awaitRefreshHolder(holder);
+            assertTimeoutPreemptively(Duration.ofSeconds(1), () -> assertFalse(store.read().isEmpty()));
+            AtomicBoolean invoked = new AtomicBoolean();
+            assertTimeoutPreemptively(Duration.ofSeconds(3), () -> {
+                IllegalStateException error = assertThrows(IllegalStateException.class,
+                        () -> store.refreshing(() -> { invoked.set(true); return null; }));
+                assertEquals("chatgpt_refresh_failed", error.getMessage());
+                assertNull(error.getCause());
+            });
+            assertFalse(invoked.get());
+            assertArrayEquals(original, Files.readAllBytes(directory.resolve("credentials.json")));
+        } finally {
+            holder.destroyForcibly().waitFor(15, TimeUnit.SECONDS);
+        }
+        assertEquals("ready", store.refreshing(() -> "ready"));
+    }
+
+    @Test
+    void crossProcessRefreshWaitCanBeInterruptedWithoutKeepingLocalLock() throws Exception {
+        Path directory = root.resolve("credentials");
+        ChatGptCredentialStore store = new ChatGptCredentialStore(directory);
+        store.locked(tx -> null);
+        store.refreshing(() -> null);
+        Process holder = startRefreshHolder(directory);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interrupted = new AtomicBoolean();
+        CountDownLatch started = new CountDownLatch(1);
+        Thread waiter = null;
+        try {
+            awaitRefreshHolder(holder);
+            waiter = new Thread(() -> {
+                started.countDown();
+                try { store.refreshing(() -> { throw new AssertionError("refresh must not run"); }); }
+                catch (Throwable error) { failure.set(error); interrupted.set(Thread.currentThread().isInterrupted()); }
+            });
+            waiter.start();
+            assertTrue(started.await(3, TimeUnit.SECONDS));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (waiter.isAlive() && waiter.getState() != Thread.State.TIMED_WAITING && System.nanoTime() < deadline)
+                Thread.sleep(10);
+            assertEquals(Thread.State.TIMED_WAITING, waiter.getState());
+            waiter.interrupt();
+            waiter.join(3000);
+            assertFalse(waiter.isAlive());
+            assertInstanceOf(IllegalStateException.class, failure.get());
+            assertEquals("chatgpt_request_interrupted", failure.get().getMessage());
+            assertTrue(interrupted.get());
+        } finally {
+            holder.destroyForcibly().waitFor(15, TimeUnit.SECONDS);
+            if (waiter != null) { waiter.interrupt(); waiter.join(3000); }
+        }
+        assertEquals("ready", store.refreshing(() -> "ready"));
+    }
+
+    private Process startRefreshHolder(Path directory) throws Exception {
+        String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        return new ProcessBuilder(java, "-cp", System.getProperty("java.class.path"), RefreshLockProbe.class.getName(),
+                directory.resolve(".refresh-lock").toString(), root.resolve("refresh-ready").toString())
+                .redirectErrorStream(true).redirectOutput(root.resolve("refresh-probe.log").toFile()).start();
+    }
+
+    private void awaitRefreshHolder(Process process) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (!Files.exists(root.resolve("refresh-ready")) && process.isAlive() && System.nanoTime() < deadline)
+            Thread.sleep(20);
+        assertTrue(Files.exists(root.resolve("refresh-ready")), "child did not obtain refresh lock");
+    }
+
+    public static class RefreshLockProbe {
+        public static void main(String[] args) throws Exception {
+            try (var channel = FileChannel.open(Path.of(args[0]), StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
+                 var ignored = channel.lock()) {
+                Files.writeString(Path.of(args[1]), "ready");
+                System.in.read();
+            }
+        }
     }
 
     @Test

@@ -20,7 +20,7 @@ public final class DesktopChatGptController {
             "chatgpt_storage_unavailable", "chatgpt_unknown_account", "chatgpt_login_start_failed",
             "chatgpt_sign_in_required", "chatgpt_plan_permission_required", "chatgpt_refresh_failed",
             "chatgpt_refresh_not_yet_allowed", "chatgpt_network_error", "chatgpt_request_interrupted", "chatgpt_request_timeout",
-            "chatgpt_invalid_identity", "chatgpt_identity_mismatch", "chatgpt_client_mismatch",
+            "chatgpt_invalid_identity", "chatgpt_identity_unavailable", "chatgpt_identity_mismatch", "chatgpt_client_mismatch",
             "chatgpt_authorization_declined", "chatgpt_code_exchange_failed", "chatgpt_invalid_callback",
             "chatgpt_invalid_response", "chatgpt_login_cancelled", "chatgpt_login_expired",
             "chatgpt_discovery_failed", "chatgpt_service_closed", "chatgpt_response_too_large");

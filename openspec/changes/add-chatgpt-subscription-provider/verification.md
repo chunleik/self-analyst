@@ -50,3 +50,24 @@
 - 真实 ChatGPT 账户 OAuth、套餐权限、模型目录和 Responses 端到端调用：未运行。协议夹具不能证明真实账户已获授权或订阅可用。
 - Windows 便携包构建与运行、远端 Windows 必需检查：未运行。
 - 归档：虽然五项主规格已同步，原生、可视、Windows 与真实账户验收尚未完成，change 继续保持活动，不归档。
+
+## 评审修复验证（任务 5.1–5.4）
+
+修复 PR #136 评审前三项：刷新/撤销网络请求持有存储锁、轮换 refresh token 在身份校验失败时丢失、plain/summary 被 45 秒固定期限截断。
+
+- Java 定向（WSL，OpenJDK 21.0.12，原样 `--release 21` 编译，未使用 wrapper）：
+  `mvn -B -s ~/.m2/settings-aliyun.xml -pl self-analyst-app -am '-Dtest=ChatGpt*Test,LlmRuntimeManagerTest,LlmSettingsServiceTest,PlainTransportFailureTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`
+  结果 77/77 通过，BUILD SUCCESS。其中 ChatGptSessionServiceTest 20 项（新增刷新中状态不阻塞、其它进程已轮换、轮换先落盘后校验、身份明确失败与 sub 不匹配清除 token，并改写注销与刷新交错用例为两枚 refresh token 均撤销），ChatGptIdTokenVerifierTest 7 项（新增元数据不可达返回 `chatgpt_identity_unavailable`），ChatGptResponsesModelTest 14 项（新增可配置流期限），新增 ChatGptRuntimeTimeoutTest 1 项。
+- 合入 main `0b3d91e`（含 Windows 新建对象所有者初始化）后重跑同一命令：83 项，80 通过、3 项 Windows-only 跳过、0 失败；`.refresh-lock` 新建时同样执行新对象所有者初始化。
+- Node：`node --test self-analyst-app/src/test/js/chatgpt-settings.test.mjs self-analyst-app/src/test/js/llm-settings.test.mjs self-analyst-app/src/test/js/chatgpt-runtime-packaging.test.mjs` 37/37 通过（Node 24.18.0）。
+- OpenSpec：change strict 与全部主规格 strict 校验通过。
+- 未运行：跨模块完整 `mvn test`、Windows 必需检查和真实账户验收，仍按 4.2、4.5、4.6 处理。本机可原样 `--release 21` 编译仅说明此次环境，不替代 4.2 的完整 Windows 验证。
+
+## PR #137 追加评审修复验证（任务 6.1–6.3）
+
+- 成功重新登录清除旧 pendingIdToken，并保护新凭据不被迟到的旧身份校验失败清除。两项新增会话回归先在未修复实现上分别复现 `chatgpt_refresh_failed` 与 `chatgpt_sign_in_required`，修复后通过。
+- 进程内刷新锁、准备阶段短时存储锁及跨进程文件锁共享单调时钟计算的 90 秒等待期限；文件锁改为非阻塞尝试，超时不执行刷新、不修改凭据，中断保留标记。新增独立 JVM 持锁下的超时、状态读取不阻塞、中断及释放后恢复测试；Windows 对象保护测试增加 `.refresh-lock` 所有者和 ACL 断言。
+- Java 定向：`mvn -pl self-analyst-app -am '-Dtest=ChatGpt*Test,LlmRuntimeManagerTest,LlmSettingsServiceTest,PlainTransportFailureTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`，85 项，82 通过、3 项 Windows-only 跳过、0 失败或错误。此云环境有 Java 21 运行时及编译模块，但缺少 `ct.sym`，故使用仓库外临时编译 wrapper 将 `--release 21` 转为 `-source 21 -target 21`；没有修改项目 POM，也不将此结果当作标准编译或 Windows 验证。
+- Maven 内全套 Node：332 项，300 通过、32 跳过、0 失败；ChatGPT/settings/packaging 三个定向文件另跑 37/37 通过。
+- `openspec validate --all --strict`：39/39 通过；`git diff --check` 通过。
+- 最新提交的标准 Java 21 编译、Windows 全量验证与其它必需 GitHub Actions 检查需在合并前另行确认。真实账户端到端验收仍未完成，不归档该 change。

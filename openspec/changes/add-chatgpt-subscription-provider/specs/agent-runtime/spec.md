@@ -2,7 +2,7 @@
 
 ### Requirement: SPEC-AGT-001 配置驱动的对话模型
 Agent SHALL 根据有效 provider 使用 OpenAI-compatible API Key chat model 或 ChatGPT OAuth Responses model；API Key 模式读取 base URL、model、temperature，ChatGPT 模式读取独立账户及模型选择，maxIters 继续使用既有配置。所有生成调用 MUST NOT 发送客户端输出上限参数，包括 max_tokens 与 max_completion_tokens。对话模型 SHALL 支持流式输出；plain/summary 模型 SHALL 向调用方提供非流式完整结果；API Key 模式使用低温配置，ChatGPT 模式只发送其协议支持的生成参数。
-每次模型执行 SHALL 使用 45 秒超时和单次尝试，除非未来显式修改契约。所选连接缺少有效 API key 或具备推理权限的 ChatGPT 授权时，
+每次对话模型执行 SHALL 使用 45 秒超时和单次尝试，plain/summary 调用 SHALL 单次尝试并以调用方超时为准（内部上限 5 分钟），除非未来显式修改契约。所选连接缺少有效 API key 或具备推理权限的 ChatGPT 授权时，
 应用本地服务 SHALL 继续启动，聊天 SHALL unavailable/degraded；之后通过应用保存有效密钥或选择具备推理权限的已授权 ChatGPT 账户 SHALL
 允许新的聊天恢复可用。LLM 连接参数 SHALL 在新工作开始时生效，maxIters 仍在 Agent 重建或应用重启后生效。
 

@@ -4,6 +4,10 @@
     <parent><groupId>com.selfanalyst</groupId><artifactId>self-analyst</artifactId><version>0.6.1-beta.10</version></parent>
     <artifactId>self-analyst-ontology</artifactId>
     <name>SelfAnalyst :: Personal Ontology</name>
+    <properties>
+        <!-- Neo4j 5.26 requires Lucene 9 independently of application search. -->
+        <neo4j-lucene.version>9.11.1</neo4j-lucene.version>
+    </properties>
     <dependencies>
         <!-- Official shaded driver isolates its Netty/Reactor versions from the application. -->
         <dependency><groupId>org.neo4j.driver</groupId><artifactId>neo4j-java-driver-all</artifactId><version>5.28.15</version></dependency>
@@ -21,8 +25,8 @@
             </exclusions>
         </dependency>
         <!-- The embedded test database needs its own Lucene 9 API; application Lucene remains unchanged. -->
-        <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-core</artifactId><version>9.11.1</version><scope>test</scope></dependency>
-        <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-analysis-common</artifactId><version>9.11.1</version><scope>test</scope></dependency>
-        <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-queryparser</artifactId><version>9.11.1</version><scope>test</scope></dependency>
+        <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-core</artifactId><version>${neo4j-lucene.version}</version><scope>test</scope></dependency>
+        <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-analysis-common</artifactId><version>${neo4j-lucene.version}</version><scope>test</scope></dependency>
+        <dependency><groupId>org.apache.lucene</groupId><artifactId>lucene-queryparser</artifactId><version>${neo4j-lucene.version}</version><scope>test</scope></dependency>
     </dependencies>
 </project>

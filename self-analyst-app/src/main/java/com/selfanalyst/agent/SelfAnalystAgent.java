@@ -195,8 +195,9 @@ public class SelfAnalystAgent implements AutoCloseable {
                 // Capture the account in the leased runtime; refresh never changes this identity.
                 java.util.function.Supplier<String> token = () -> chatGptSessions.accessToken(settings.chatgptAccount());
                 String selectedModel = settings.chatgptModel().isBlank() ? "UNCONFIGURED" : settings.chatgptModel();
-                chatModel = chatGptGate.guard(settings.chatgptAccount(), new ChatGptResponsesModel(selectedModel, token));
-                builtPlainModel = chatGptGate.guard(settings.chatgptAccount(), new ChatGptResponsesModel(selectedModel, token));
+                chatModel = chatGptGate.guard(settings.chatgptAccount(), chatGptModel(selectedModel, token, false));
+                // Plain/summary callers pass their own (often longer) timeout; do not cut them at 45s.
+                builtPlainModel = chatGptGate.guard(settings.chatgptAccount(), chatGptModel(selectedModel, token, true));
             } else {
             GenerateOptions.Builder chatOpts = GenerateOptions.builder()
                     .temperature(settings.temperature());
@@ -270,6 +271,11 @@ public class SelfAnalystAgent implements AutoCloseable {
             builtAgent.close();
             throw failure;
         }
+    }
+
+    static ChatGptResponsesModel chatGptModel(String model, java.util.function.Supplier<String> token, boolean plain) {
+        return new ChatGptResponsesModel(model, token,
+                plain ? ChatGptResponsesModel.PLAIN_TIMEOUT : ChatGptResponsesModel.CHAT_TIMEOUT);
     }
 
     private void selectRuntime(LlmRuntimeManager<AgentRuntime>.Lease lease) {

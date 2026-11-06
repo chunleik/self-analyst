@@ -42,6 +42,12 @@ public final class SupportedKeys {
         put("log.dir", "./logs", KeyType.STRING);
         put("memory.dir", "./data/memory", KeyType.STRING);
 
+        put("llm.provider", "api-key", KeyType.STRING);
+        put("llm.chatgpt-account", "", KeyType.STRING);
+        put("llm.chatgpt-model", "", KeyType.STRING);
+        describe("llm.provider", "对话认证方式：api-key 或 chatgpt。ChatGPT 凭据不写入此配置。", "Chat provider: api-key or chatgpt. OAuth credentials never belong in this configuration.");
+        describe("llm.chatgpt-account", "已在模型设置中授权的 ChatGPT 账户标识。", "Identifier of a ChatGPT account authorized in model settings.");
+        describe("llm.chatgpt-model", "该 ChatGPT 账户选择的模型，不影响 API Key 模型。", "Model selected for this ChatGPT account, independent of the API-key model.");
         put("llm.api-key", "", KeyType.STRING);
         put("llm.base-url", "https://api.openai.com/v1", KeyType.STRING);
         put("llm.model", "gpt-4o", KeyType.STRING);

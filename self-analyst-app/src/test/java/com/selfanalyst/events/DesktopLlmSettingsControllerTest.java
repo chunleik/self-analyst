@@ -26,14 +26,26 @@ class DesktopLlmSettingsControllerTest {
         desktop.start(); server.start();
         String base = "http://127.0.0.1:" + port;
         try (var client = HttpClient.newHttpClient()) {
-            for (String path : List.of("/desktop/llm-settings", "/desktop/llm-settings/presets", "/desktop/llm-settings/test", "/desktop/llm-settings/discover-models")) {
-                boolean probe = path.endsWith("/test") || path.endsWith("/discover-models");
+            for (String path : List.of("/desktop/llm-settings", "/desktop/llm-settings/presets", "/desktop/llm-settings/test", "/desktop/llm-settings/discover-models",
+                    "/desktop/llm-settings/chatgpt/status", "/desktop/llm-settings/chatgpt/login",
+                    "/desktop/llm-settings/chatgpt/cancel", "/desktop/llm-settings/chatgpt/logout",
+                    "/desktop/llm-settings/chatgpt/models", "/desktop/llm-settings/chatgpt/test")) {
+                boolean probe = path.endsWith("/test") || path.endsWith("/discover-models")
+                        || (path.contains("/chatgpt/") && !path.endsWith("/status"));
                 var request = HttpRequest.newBuilder(URI.create(base + path))
                         .method(probe ? "POST" : "GET", probe ? HttpRequest.BodyPublishers.ofString("{}") : HttpRequest.BodyPublishers.noBody());
                 assertEquals(401, client.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode());
                 request.header("X-SelfAnalyst-Token", "test-desktop-token").header("Origin", "https://evil.example");
                 assertEquals(403, client.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode());
             }
+            var signedOut = send(client, base, "/chatgpt/status", "GET", null);
+            assertEquals(200, signedOut.statusCode());
+            assertEquals("signed_out", new ObjectMapper().readTree(signedOut.body()).path("status").asText());
+            assertFalse(Files.exists(dir.resolve("memory/chatgpt-auth")));
+            assertFalse(signedOut.body().contains("private-test-key"));
+            var blocked = send(client, base, "/chatgpt/models", "POST", "{\"accountId\":\"unknown\"}");
+            assertEquals("authentication", new ObjectMapper().readTree(blocked.body()).path("code").asText());
+            assertFalse(Files.exists(dir.resolve("memory/chatgpt-auth")));
             var response = send(client, base, "", "GET", null);
             assertEquals(200, response.statusCode());
             assertFalse(response.body().contains("private-test-key")); assertFalse(response.body().contains("****"));

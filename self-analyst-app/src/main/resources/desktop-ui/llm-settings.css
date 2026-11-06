@@ -20,3 +20,14 @@
 #llm-notice { color: var(--success, #197b44); margin-bottom: 12px; }
 #llm-runtime { padding-left: 20px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .llm-field-grid { grid-template-columns: 1fr; } .llm-field-meta { flex-wrap: wrap; } }
+
+.llm-settings [hidden] { display: none !important; }
+.llm-provider { margin-bottom: 22px; }
+.llm-chatgpt { border: 1px solid var(--border-color); border-radius: 10px; padding: 16px; background: var(--bg-secondary); }
+.llm-auth-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.llm-auth-actions .btn { font-size: 12px; }
+#llm-auth-state, #llm-auth-notice, #llm-auth-error, #llm-auth-open { font-size: 12px; line-height: 1.6; }
+#llm-auth-open { display: inline-block; color: var(--accent); margin: 4px 0; overflow-wrap: anywhere; }
+#llm-auth-error { color: var(--danger, #ba3030); }
+#llm-auth-notice { color: var(--text-secondary); }
+#llm-auth-error:empty, #llm-auth-notice:empty { display: none; }

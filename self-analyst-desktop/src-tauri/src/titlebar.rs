@@ -260,6 +260,97 @@ fn help_url(action: &str, language: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+// Deliberately not a general external-URL opener. OAuth tokens never cross this boundary.
+fn chatgpt_authorization_url(value: &str) -> bool {
+    if value.len() > 8192
+        || value
+            .chars()
+            .any(|c| c.is_ascii_control() || c == ' ' || c == '\\')
+    {
+        return false;
+    }
+    let Ok(url) = tauri::Url::parse(value) else {
+        return false;
+    };
+    if url.scheme() != "https"
+        || url.host_str() != Some("auth.openai.com")
+        || url.port_or_known_default() != Some(443)
+        || url.path() != "/api/accounts/authorize"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    let allowed = [
+        "client_id",
+        "response_type",
+        "redirect_uri",
+        "scope",
+        "state",
+        "nonce",
+        "code_challenge",
+        "code_challenge_method",
+        "login_hint",
+        "prompt",
+        "screen_hint",
+        "resource",
+        "ext_agent_host_id",
+        "agent_name_hint",
+    ];
+    let mut query = std::collections::HashMap::new();
+    for (key, value) in url.query_pairs() {
+        if !allowed.contains(&key.as_ref())
+            || query.insert(key.into_owned(), value.into_owned()).is_some()
+        {
+            return false;
+        }
+    }
+    let get = |key: &str| query.get(key).map(String::as_str).unwrap_or("");
+    let token = |value: &str| {
+        value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+    };
+    let port = get("redirect_uri")
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|value| value.strip_suffix("/auth/callback"));
+    let valid_redirect = port.is_some_and(|port| {
+        !port.is_empty()
+            && port.bytes().all(|c| c.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|port| port > 0)
+    });
+    let host_id = get("ext_agent_host_id").strip_prefix("urn:uuid:");
+    let valid_host = host_id.is_some_and(|id| {
+        id.len() == 36
+            && id.bytes().enumerate().all(|(i, c)| {
+                if [8, 13, 18, 23].contains(&i) {
+                    c == b'-'
+                } else {
+                    c.is_ascii_hexdigit()
+                }
+            })
+    });
+    let valid_client_hint = if get("client_id") == "dynamic_agent_client" {
+        get("agent_name_hint") == "SelfAnalyst"
+    } else {
+        !query.contains_key("agent_name_hint")
+    };
+    valid_redirect
+        && valid_host
+        && valid_client_hint
+        && get("resource") == "https://api.openai.com/v1"
+        && get("response_type") == "code"
+        && get("code_challenge_method") == "S256"
+        && get("code_challenge").len() == 43
+        && token(get("code_challenge"))
+        && (16..=256).contains(&get("state").len())
+        && token(get("state"))
+        && (1..=160).contains(&get("client_id").len())
+        && token(get("client_id"))
+}
+
 #[derive(serde::Serialize)]
 #[serde(untagged)]
 pub enum HelpResponse {
@@ -274,8 +365,16 @@ pub async fn help_action(
     window: WebviewWindow,
     action: String,
     tag: Option<String>,
+    authorization_url: Option<String>,
 ) -> Result<Option<HelpResponse>, String> {
     let port = managed_port(&app, &window)?;
+    if action == "chatgpt_login" {
+        let url = authorization_url
+            .filter(|value| chatgpt_authorization_url(value))
+            .ok_or("llm.chatgpt.browserFailed")?;
+        open::that(url).map_err(|_| "llm.chatgpt.browserFailed")?;
+        return Ok(None);
+    }
     if action == "about" {
         return Ok(Some(HelpResponse::About(super::about::information(
             super::backend_url(port, ""),
@@ -384,6 +483,51 @@ mod tests {
         }
         assert_eq!(help_url("https://example.com", "zh"), None);
         assert_eq!(help_url("website?url=https://example.com", "en"), None);
+    }
+
+    #[test]
+    fn chatgpt_browser_only_accepts_pkce_authorization_with_loopback_callback() {
+        let url = format!(
+            concat!(
+                "https://auth.openai.com/api/accounts/authorize?",
+                "client_id=dynamic_agent_client&response_type=code&",
+                "redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&",
+                "state={}&code_challenge={}&code_challenge_method=S256&",
+                "resource=https%3A%2F%2Fapi.openai.com%2Fv1&",
+                "ext_agent_host_id=urn%3Auuid%3A12345678-1234-1234-1234-123456789abc&",
+                "agent_name_hint=SelfAnalyst"
+            ),
+            "s".repeat(32),
+            "c".repeat(43)
+        );
+        assert!(chatgpt_authorization_url(&url));
+        let returning = url.replace(
+            "client_id=dynamic_agent_client",
+            "client_id=oaiapp_registered",
+        );
+        assert!(!chatgpt_authorization_url(&returning));
+        assert!(chatgpt_authorization_url(
+            &returning.replace("&agent_name_hint=SelfAnalyst", "")
+        ));
+        for invalid in [
+            url.replace("https://auth.openai.com", "http://auth.openai.com"),
+            url.replace("https://auth.openai.com", "https://auth.openai.com.evil.test"),
+            url.replace("https://auth.openai.com", "https://user@auth.openai.com"),
+            url.replace("/api/accounts/authorize", "/oauth/token"),
+            url.replace("127.0.0.1", "example.com"),
+            url.replace("%3A1455", "%3A0"),
+            url.replace("%2Fauth%2Fcallback", "%2Fother"),
+            url.replace("response_type=code", "response_type=token"),
+            url.replace("code_challenge_method=S256", "code_challenge_method=plain"),
+            url.replace("api.openai.com", "evil.test"),
+            url.replace("agent_name_hint=SelfAnalyst", "agent_name_hint=Other"),
+            format!("{url}&client_id=other"),
+            format!("{url}#token"),
+            format!("{url}&id_token_hint=secret"),
+            format!("{url}&code_verifier=secret"),
+        ] {
+            assert!(!chatgpt_authorization_url(&invalid));
+        }
     }
 
     #[test]

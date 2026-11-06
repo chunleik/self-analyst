@@ -53,6 +53,8 @@ public class DesktopConfigController {
     private final Config config;
     private final ConfigApplicationService configuration;
     private final UserConfigStore userStore;
+    private com.selfanalyst.chatgpt.ChatGptSessionService chatGptSessions;
+    public void setChatGptSessions(com.selfanalyst.chatgpt.ChatGptSessionService sessions) { chatGptSessions = sessions; }
 
     public DesktopConfigController(Config config, UserConfigStore userStore) {
         this.config = config;
@@ -501,6 +503,16 @@ public class DesktopConfigController {
             }
 
             Config effective = testConfiguration(body);
+            if ("chatgpt".equals(effective.llmProvider())) {
+                if (chatGptSessions == null || !chatGptSessions.isConnected(effective.llmChatgptAccount())) {
+                    ctx.json(connectionError(ctx, "error.llmNotConfigured", Map.of()));
+                    return;
+                }
+                var catalog = new com.selfanalyst.chatgpt.ChatGptModelCatalog().fetch(
+                        () -> chatGptSessions.accessToken(effective.llmChatgptAccount()));
+                ctx.json(Map.of("ok", catalog.ok(), "model", effective.llmChatgptModel(), "code", catalog.code()));
+                return;
+            }
             String userProvidedKey = body.containsKey("text") ? null : stringOr(body.get("apiKey"), null);
             // If frontend sends a masked key (user didn't type a new one), use stored key
             if (userProvidedKey == null || userProvidedKey.contains("****")) {
@@ -638,6 +650,9 @@ public class DesktopConfigController {
 
     private Map<String, Map<String, Object>> buildLlmSection(Properties eff) {
         var m = new LinkedHashMap<String, Map<String, Object>>();
+        m.put("provider", field("provider", eff.getProperty("llm.provider", "api-key")));
+        m.put("chatgpt-account", field("chatgpt-account", eff.getProperty("llm.chatgpt-account", "")));
+        m.put("chatgpt-model", field("chatgpt-model", eff.getProperty("llm.chatgpt-model", "")));
         String rawKey = eff.getProperty("llm.api-key", "");
         m.put("apiKey", field("apiKey", isPlaceholder(rawKey) ? "" : rawKey, true));
         m.put("baseUrl", field("baseUrl", eff.getProperty("llm.base-url", "https://api.openai.com/v1")));

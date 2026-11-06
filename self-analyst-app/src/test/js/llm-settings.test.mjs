@@ -36,10 +36,10 @@ test('model view has no output-limit control and explains server-controlled limi
   }
 });
 
-test('opening only queries settings and presets; saving sends changed fields and keep', async () => {
+test('opening only queries local settings, presets and account status; saving sends changed fields and keep', async () => {
   const h = setup((path, method) => method === 'PUT' ? Promise.resolve({ settings: snapshot() }) : undefined);
   await h.model.load();
-  assert.deepEqual(h.calls.map(c => c[0]), ['', '/presets']);
+  assert.deepEqual(h.calls.map(c => c[0]), ['', '/presets', '/chatgpt/status']);
   assert.equal(h.model.dirty(), false);
   h.model.change('model', 'new');
   await h.model.save();

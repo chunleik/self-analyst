@@ -41,4 +41,20 @@ class LlmRuntimeManagerTest {
         runtime.awaitIdle();
         assertEquals(1, closed.get());
     }
+    @Test void revokedSessionChangesAvailabilityWithoutRebuildingLeasedVersion() {
+        var connected = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var selection = new LlmSettings("", "https://api.openai.com/v1", "api-model", .7,
+                "chatgpt", "account-1", "plan-model");
+        try (var runtime = new LlmRuntimeManager<AutoCloseable>(new Object(), selection, ignored -> () -> {},
+                value -> value.available() && connected.get())) {
+            assertTrue(runtime.available());
+            long revision;
+            try (var lease = runtime.acquire()) { revision = lease.revision(); }
+            connected.set(false);
+            assertFalse(runtime.available());
+            assertEquals("unavailable", runtime.status().get("status"));
+            try (var lease = runtime.acquire()) { assertEquals(revision, lease.revision()); }
+        }
+    }
+
 }

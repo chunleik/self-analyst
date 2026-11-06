@@ -455,4 +455,21 @@ class ConfigTest {
     private interface ThrowingRunnable {
         void run() throws Exception;
     }
+    @Test void chatGptProviderDefaultsAndEmbeddingRemainSeparate(@TempDir Path dir) throws Exception {
+        Config legacy = Config.load(dir, java.util.Map.of());
+        assertEquals("api-key", legacy.llmProvider());
+        assertEquals("", legacy.llmChatgptAccount());
+        assertEquals("", legacy.llmChatgptModel());
+        Files.writeString(dir.resolve("config.toml"), "[llm]\nprovider='chatgpt'\nchatgpt-account='account-1'\nchatgpt-model='plan-model'\napi-key='existing-api-key'\n");
+        Config config = Config.load(dir, java.util.Map.of());
+        assertEquals("existing-api-key", config.embeddingApiKey());
+        assertEquals("gpt-4o", config.llmModel());
+        var selected = LlmSettings.from(config);
+        assertEquals("plan-model", selected.requestModel());
+        assertEquals("https://api.openai.com/v1", selected.requestBaseUrl());
+        assertTrue(selected.available());
+        assertFalse(config.embeddingEnabled());
+        assertFalse(selected.toString().contains("existing-api-key"));
+    }
+
 }

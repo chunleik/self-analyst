@@ -15,12 +15,13 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。它记录前台�
 
 1. 前往 [GitHub Releases](https://github.com/chunleik/self-analyst/releases)，下载安装包或免安装 ZIP。
 2. 完成安装，或解压 ZIP 后运行 `SelfAnalyst.exe`。发布包自带 Java 运行环境，无需安装开发工具。
-3. 打开右上角配置入口，在“模型设置”中填写服务地址、API Key 和模型，点击“保存并应用”。详见[模型设置指南](docs/llm-settings.md)。
+3. 打开右上角配置入口，在“模型设置”中配置 **API Key** 连接，或选择 **ChatGPT 登录**（预览），在 OpenAI 浏览器页面授权账户并选择模型，再点击“保存并应用”。详见[模型设置指南](docs/llm-settings.md)。
 4. 在“看板”回顾活动，在“会话”中提问，例如“今天主要做了哪些工作？”。
 
 使用须知：
 
 - 未配置模型时也能启动本地服务；聊天和模型摘要需要可用的模型连接。
+- ChatGPT 登录需要 OpenAI 开放所需预览、账户符合资格并授予直接模型访问权限。订阅不等于 API 额度，也不保证可用；登录成功不代表模型能生成。可选生成测试会消耗服务端用量；本地自动化测试不能证明真实账户可用。
 - 关闭窗口后应用继续在系统托盘运行；完全退出请使用托盘菜单。
 - 运行数据保存在 `%LOCALAPPDATA%\com.selfanalyst.desktop`，升级后继续使用。便携模式、备份与恢复见[运行数据指南](docs/runtime-storage.md)。
 
@@ -52,14 +53,18 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。它记录前台�
 - 标题送入模型前，会隐藏内网 IPv4 地址、会议号和账号验证页，并跳过带私人浏览标记的标题。没有任何标记的无痕窗口无法识别，请把敏感应用和网站加入 `wiki.privacy.excludeApps`（逗号分隔的可执行文件名，如 `weixin.exe`）和 `wiki.privacy.excludeSites`，然后重启后端。
 - 事件库保存合并后的活动区间，是权威数据，需要定期备份。磁盘低于阻断阈值时停止新采集，不会自动删除历史活动。
 - 保存 Neo4j 配置和查询状态都不会连接 Neo4j。关闭同步不会删除远端副本；来源删除仅在下次成功手工同步后反映到远端。更换命名空间会保留旧命名空间。
+- ChatGPT OAuth 凭据与 TOML 分开，使用仅当前用户的文件权限保护，没有应用层加密，也不是系统凭据保险库；同一操作系统账户下的进程仍可读取。断开时清除本地令牌并尝试远端撤销，未确认撤销时明确提示；独立 API Key 和会话历史保留。
 
 ## 配置
 
-配置窗口分为三个页签：**模型设置**（一个 OpenAI-compatible 连接，支持连接预设、模型发现和生成测试）、
+配置窗口分为三个页签：**模型设置**（一个活动 API Key 或 ChatGPT 连接，支持模型发现和生成测试）、
 **高级配置**（TOML 原文编辑）和**运行数据**（目录、存储占用和迁移备份清理）。
 
-显式 TOML 配置优先于环境变量，环境变量优先于默认值。`llm.api-key`、`llm.base-url`、`llm.model` 和
-`llm.temperature` 修改后无需重启，新聊天和摘要任务即采用新配置。保存的 `neo4j.*` 设置在下次手工同步时生效，
+显式 TOML 配置优先于环境变量，环境变量优先于默认值。`llm.api-key`、`llm.base-url`、`llm.model`、
+`llm.temperature`、`llm.provider`、`llm.chatgpt-account` 和 `llm.chatgpt-model` 修改后无需重启，
+新聊天和摘要任务即采用新配置。ChatGPT 单独选择账户和模型，不使用 API Key 连接的地址或温度。
+Embedding 仍使用独立的 API Key 连接，可沿用既有 `llm.api-key` 继承规则，不接收 OAuth 令牌，也不会因切换连接而启用。
+保存的 `neo4j.*` 设置在下次手工同步时生效，
 无需重启，也不会自动发送数据；其他需重启的键会在设置中标明。
 外部修改 TOML 文件不会自动应用，需要在应用内保存或重启后端。
 
@@ -68,6 +73,9 @@ SelfAnalyst 是一个本地优先的个人活动分析工具。它记录前台�
 | `llm.base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` |
 | `llm.model` | `LLM_MODEL` | `gpt-4o` |
 | `llm.api-key` | `OPENAI_API_KEY` | 空 |
+| `llm.provider` | —（仅 `config.toml`） | `api-key`；也可选 `chatgpt` |
+| `llm.chatgpt-account` | —（仅 `config.toml`） | 空；所选已授权账户 ID |
+| `llm.chatgpt-model` | —（仅 `config.toml`） | 空；选择可用模型或手工输入 ID |
 | `events.mode` | `EVENTS_MODE` | `embedded` |
 | `events.port` | —（仅 `config.toml`） | `5700` |
 | `wiki.privacy.excludeApps` | —（仅 `config.toml`） | 空 |

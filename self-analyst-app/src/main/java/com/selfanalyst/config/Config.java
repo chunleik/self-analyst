@@ -86,7 +86,10 @@ public record Config(
         String appLanguage,
         Lang effectiveLanguage,
         String wikiExcludeApps,
-        String wikiExcludeSites) {
+        String wikiExcludeSites,
+        String llmProvider,
+        String llmChatgptAccount,
+        String llmChatgptModel) {
 
     private static final Logger log = LoggerFactory.getLogger(Config.class);
 
@@ -113,6 +116,11 @@ public record Config(
         String baseUrl = values.get("llm.base-url",
                 "https://api.openai.com/v1");
         String model = values.get("llm.model", "gpt-4o");
+        String provider = values.get("llm.provider", "api-key");
+        if (!java.util.Set.of("api-key", "chatgpt").contains(provider))
+            throw new IllegalArgumentException("Unsupported LLM provider");
+        String chatgptAccount = values.get("llm.chatgpt-account", "");
+        String chatgptModel = values.get("llm.chatgpt-model", "");
         double llmTemperature = parseDoubleOr(
                 values.get("llm.temperature", "0.7"), 0.7);
         if (llmTemperature < 0 || llmTemperature > 2) {
@@ -353,7 +361,7 @@ public record Config(
                 agentCompactionKeepTokens, desktopSummaryMaxTimelineLlm,
                 budgetMode, budgetDailyTokens, budgetWarnRatio,
                 appLanguage, LangResolver.resolve(appLanguage, Locale.getDefault()),
-                wikiExcludeApps, wikiExcludeSites);
+                wikiExcludeApps, wikiExcludeSites, provider, chatgptAccount, chatgptModel);
     }
 
     /**
@@ -384,7 +392,7 @@ public record Config(
                 8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,
                 "auto", LangResolver.resolve("auto", Locale.getDefault()),
-                "", "");
+                "", "", "api-key", "", "");
     }
 
     /** Load the classpath {@code application.properties} defaults (empty if absent). */
@@ -459,9 +467,9 @@ public record Config(
     }
 
     public void validate() {
-        if (llmApiKey == null || llmApiKey.isBlank() || llmApiKey.equals("CHANGE_ME")) {
+        if (!LlmSettings.from(this).available()) {
             throw new IllegalStateException(
-                    "LLM API key not configured. Set OPENAI_API_KEY or llm.api-key in ./data/config/config.toml");
+                    "LLM connection not configured. Configure an API key or select a ChatGPT account and model in model settings.");
         }
     }
 }

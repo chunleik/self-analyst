@@ -118,9 +118,8 @@ public class AppSession implements AutoCloseable {
             if (config.eventsEmbedded()) {
                 startEmbeddedAW();
             }
-            if (config.llmApiKey() == null || config.llmApiKey().isBlank()
-                    || config.llmApiKey().contains("CHANGE_ME")) {
-                log.warn("LLM API key 未配置，Agent 对话功能不可用。");
+            if (!com.selfanalyst.config.LlmSettings.from(config).available()) {
+                log.warn("LLM 连接未配置，Agent 对话功能不可用。");
             }
 
             // Wiki store

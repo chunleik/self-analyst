@@ -114,14 +114,16 @@ AFK 覆盖与活动时长留在内部判断数据及结构化 metrics/sourceCove
 短事务原子预留一次调用及完整输入 token 估计加 `wiki.summary.outputTokenReserve=4096`。
 配置不可用或全局预算在发出前阻断时不记调用；发出后失败、超时、取消及崩溃不确定请求占用额度。
 真实 usage 通过 call ID 幂等结算，未知结果保留预留，迟到的已知 receipt 可替换保守估计。
-正式 plain 固定温度 0.2，不发送输出上限；真实 usage 可超过预留，因此额度控制后续准入，不承诺账单硬上限。
-plain 显式设置 SDK `maxAttempts=1`，保留原有超时及其他执行默认值；429、5xx 和传输失败不会在一次
-周期预留下隐式重复发送请求，后续尝试须重新经过外层准入。一次模型 receipt 因而对应一次 SDK HTTP 尝试。
+API Key 连接的正式 plain 固定温度 0.2；ChatGPT Responses 连接省略温度。两者都不发送输出上限；真实
+usage 可超过预留，因此额度控制后续准入，不承诺账单硬上限。API Key plain 显式设置 SDK `maxAttempts=1`，
+保留原有超时及其他执行默认值；ChatGPT 适配器使用 45 秒总截止时间和一次 HTTP 生成尝试。429、5xx 和传输
+失败不会在一次周期预留下隐式重复发送生成请求，后续尝试须重新经过外层准入。一次模型 receipt 对应一次生成尝试。
 全局用量与周期账本没有跨库原子事务，不能当作全局所有并发模型调用的统一持久配额。
 
 已验证的叶、归并及最终结果保存为检查点，不保存完整 prompt、原始模型响应或凭据。检查点键包括规范化
-输入、稳定模型指纹、提示词/管线/事实/统计/日历版本及计划参数；模型指纹包含 endpoint、model、实际
-plain 选项、system prompt 和语言的散列，不包含 API key 或进程内 revision。凭据轮换和重启可复用兼容
+输入、稳定模型指纹、提示词/管线/事实/统计/日历版本及计划参数；模型指纹包含 provider、ChatGPT 账户标识
+（API Key 连接为空）、endpoint、model、固定 plain 协议标记、system prompt 和语言的散列，不包含 API Key、
+OAuth 令牌或进程内 revision。凭据轮换和重启可复用兼容
 结果，配置 revision 仅负责唤醒配置暂停。最终检查点先持久化，再幂等发布到 `llm-wiki.db`；跨库发布失败
 只重试本地保存。发布满 7 天的检查点在后续清理时回收，未发布检查点不按时间删除，调用及周期账本不随
 检查点清理归零。独立库使用 schema 1，只读数据准入拒绝未知或损坏格式，不擅自替换为空库。
@@ -155,7 +157,7 @@ raw、结构化及 Agent 工具保存；候选模型准备和写盘成功后发�
 SelfAnalystAgent 保持稳定的工具、会话存储和 UsageMeter，LlmRuntimeManager 管理可替换的聊天、
 plain 和压缩执行资源。聊天取得应用级 gate 后固定一轮租约；独立摘要在任务开始时取得租约。旧模型
 在最后一个使用者离开后释放，模型切换不顺带应用待重启参数。缺少模型配置时，本地服务继续运行，
-Wiki LLM 工作保持可重试，填写密钥后恢复。关闭先拒绝新的配置与模型工作，再等待租约退出并释放资源。
+Wiki LLM 工作保持可重试，补齐所选连接的配置与授权后可恢复。关闭先拒绝新的配置与模型工作，再等待租约退出并释放资源。
 
 GET /desktop/config/effective 提供脱敏的已保存值、来源、实际运行值和各组件应用结果；raw 配置接口
 继续用于受保护的原文编辑。LLM 可热更新的键、Neo4j 下次手工同步生效的键及其它键的重启策略由 ConfigPolicy 统一声明。
@@ -170,8 +172,68 @@ GET /desktop/config/effective 提供脱敏的已保存值、来源、实际运�
 
 `desktop-ui/llm-settings.js` 管理独立草稿和请求代次，前端不读取 raw 文本来构建模型表单。
 配置窗口默认显示模型设置；高级配置保留原文编辑与键定位。切换会确认脏态，运行状态刷新不替换草稿。
-密码只存在于暂时输入和后端内部连接对象，普通查询仅返回凭据状态与来源。测试与发现是显式诊断，
+API Key 输入不进入浏览器持久存储，普通查询仅返回凭据状态与来源；按现有规则保存的 API Key 仍可存在于 TOML，
+已认证的高级原文编辑可读取它。测试与发现是显式诊断，
 不携带业务内容，不自动保存；超时、大小上限和禁止重定向限制远端响应。详见[模型设置指南](llm-settings.md)。
+
+### ChatGPT 授权与运行连接
+
+`llm.provider` 区分默认的 `api-key` 与显式选择的 `chatgpt`。`llm.chatgpt-account` 和
+`llm.chatgpt-model` 保存账户及模型选择，不保存 OAuth 凭据；三个键均经过既有定向 TOML 保存与运行版本
+发布。API Key 地址、模型、温度和凭据独立保留。同一时间只有一个活动连接，不提供自动账户或供应商回退。
+
+`com.selfanalyst.chatgpt` 位于现有 app 模块内。Agent 持有跨模型版本的 `ChatGptSessionService` 与
+`ChatGptInferenceGate`，桌面控制器复用这两个实例；未提供 Agent 的桌面服务仍可独立管理授权。
+模型工厂按 provider 创建原有 Chat Completions 模型或 `ChatGptResponsesModel`，租约固定账户及模型，
+每次生成前只向会话服务取得该账户的有效令牌。刷新不改变租约身份；切换配置不清除另一种连接的凭据。
+运行可用性另外检查账户连接、直接访问 scope 和本进程额度暂停状态，配置已应用不代表远端生成成功。
+
+桌面授权入口位于 `/desktop/llm-settings/chatgpt/{status,login,cancel,logout,models,test}`，复用桌面认证与
+回环来源限制。查询只读取本地状态，不刷新凭据或探测服务端。登录由用户主动发起，Tauri 的受限浏览器入口
+仅接受官方授权目标和有效回环回调参数；前端管理独立请求代次，关闭、切换及取消后丢弃过期响应。
+成功登录只把账户选入草稿，保存后才改变活动连接；授权凭据的保存与断开不属于模型草稿事务。
+
+授权采用 OpenAI 的 Sign in with ChatGPT 开源客户端预览：首次使用官方动态注册标识
+`dynamic_agent_client`、真实应用名 SelfAnalyst 和稳定 `ext_agent_host_id`；后续复用本应用获发的 client ID。
+系统浏览器访问 `https://auth.openai.com/api/accounts/authorize`，临时 `HttpServer` 只监听
+`127.0.0.1` 的随机端口和 `/auth/callback`。每次尝试使用 S256 PKCE、随机 state/nonce、5 分钟有效期和
+单次消费检查；取消、替换或关闭后旧回调不能激活账户。获发客户端 ID 可以先作为待验证注册保存以便重试，
+但只有令牌交换及签名身份验证通过后才保存账户凭据。
+
+令牌交换固定访问 `https://auth.openai.com/api/accounts/oauth/token`；身份通过受信任 OIDC 元数据及
+JWKS 验证 RS256 签名、issuer、audience、有效期、nonce 和重授权账户 subject。认证请求只允许受信任源，
+拒绝重定向并限制超时及响应大小。`chatgpt.tokens.use.direct` 未获授予时保留注册并报告权限不足，不允许推理。
+应用不借用 Codex 客户端身份，不读取浏览器 Cookie 或其它应用登录文件；订阅资格、授权及预览可用性仍由服务端决定。
+
+`ChatGptCredentialStore` 把账户注册、安装标识及令牌存放在 `{memory.dir}/chatgpt-auth/credentials.json`。
+进程内锁与文件锁协调读取、刷新和持久化；轮换令牌成功落盘后才返回，写入要求原子替换，不提供非原子降级。
+POSIX 目录/文件权限为 `0700`/`0600`，Windows 使用仅当前用户 ACL；路径、所有者和权限校验失败时拒绝操作。
+这是文件权限保护，没有应用层加密，也不是系统凭据保险库，不隔离同一操作系统账户下的进程或管理员。
+令牌不出现在普通配置、页面状态、提示词、日志或错误中。
+
+刷新遵循有效期及 `earliest_refresh_at`，临时失败保留凭据，明确失效则清除 token 并保留注册。
+断开先阻止该账户新请求，再尝试由可信元数据声明的远端撤销及本地令牌清理；远端结果未确认时明确报告。
+代次和断开标记阻止迟到结果重新恢复已断开的连接。注册信息、独立 API Key 和聊天历史保留，已发送请求及
+远端数据不承诺撤回。应用关闭会停止授权监听和刷新客户端，不以退出代替远端撤销。
+
+### ChatGPT Responses、用量与独立 Embedding
+
+Responses 适配固定请求 `https://api.openai.com/v1/responses`，不向可编辑 Base URL 发送 OAuth 令牌。
+请求使用 `store: false`、流式输出以及所选模型，转换已有消息、用户图片、函数工具和工具结果，不传递
+API Key 温度或输出 token 上限。`store: false` 不构成对服务端全部日志或数据保留的保证。
+工具参数在完成事件后组装，接入现有串行工具执行；已验证的加密 reasoning 项通过响应元数据保留并在后续轮次
+回传，不解密为可见思考文本。plain 和上下文压缩继续取得合并后的完整文本；缺少有效终止事件、失败或取消
+均不能把部分输出报告为成功。
+
+适配器按 45 秒总截止时间、单次生成尝试和有界响应读取执行，取消释放网络资源；认证刷新在业务请求前完成，
+不形成隐式生成重试。有完整 usage 时交给现有计量路径，否则使用既有估算，不重复记账。
+`ChatGptInferenceGate` 按账户记录本进程的限流/用量耗尽暂停，阻止后续普通模型调用；独立的显式生成测试
+成功可恢复该账户，重启清除本地暂停标记但不改变服务端配额。权限失败不切换其它账户或供应商。
+
+`ChatGptModelCatalog` 仅在主动发现时查询固定 OpenAI 模型端点，返回服务端允许列出的有效模型条目，
+不维护假定授权的静态列表。目录失败仍保留手工 ID；最小测试只发送固定短提示，目录、授权和测试均不保存
+模型草稿。Embedding 仍由独立 `embedding.*` API Key 客户端处理，可按既有规则继承 `llm.api-key`，
+绝不继承 OAuth 令牌，不因切换 provider 自动启用或热更新；文件采集和标题事实边界保持不变。
 
 ## 7. 发布结构
 
@@ -204,6 +266,9 @@ NSIS 安装包把后端 JAR、jlink runtime 和安装布局标记作为 Tauri re
 accessibility sidecar 随内容模块资源打包并按平台释放。所有发布结构都没有 `tools/PaddleOCR-json`、
 `tools/whisper` 或声音模型。
 
+ChatGPT 本机 OAuth 回调依赖 `jdk.httpserver`，便携发布脚本的 jlink 模块集合显式包含该模块。
+模块列表的静态回归检查不替代 Windows 下实际构建、启动、浏览器授权和回调验证。
+
 ## 8. 文档生成与另存为
 
 `self-analyst-app` 的 `com.selfanalyst.document` 提供有界结构化渲染、数据快照导出、文件发布和版本管理。DesktopServer 创建会话 writer 后注入文档服务及 Agent 工具；工具身份从本轮 RuntimeContext 注入，不接受模型指定的会话归属。现有 ReActAgent 持有工具集副本，因此当前实例与后续模型版本的工具模板均注册文档工具。
@@ -228,6 +293,10 @@ WikiSummaryPipeline 的 `generation` 指标分别记录 `processedFacts/omittedF
 5 秒超时、主题指纹缓存及本地降级，不因打开页面重算历史。评测默认离线，显式正式模式复用 PlainTask、
 隔离用量及同一 system prompt，不使用临时聊天温度或输出上限作为正式基线。方法见
 [摘要质量评测指南](summary-quality-evaluation.md)。
+
+ChatGPT 的本地协议夹具及 UI 测试覆盖授权状态、凭据隔离、Responses、模型设置与失败分类，但不证明真实
+账户已获预览资格、模型权限或订阅额度。真实账户浏览器授权、模型生成、刷新和断开需另行验收；
+Node、Java、Rust、可视检查及 Windows 发布检查应分别记录结果，未执行的阶段不能由其它测试替代。
 
 - Java：`mvn test`
 - Rust sidecar：`cargo test --manifest-path self-analyst-axsidecar/Cargo.toml`

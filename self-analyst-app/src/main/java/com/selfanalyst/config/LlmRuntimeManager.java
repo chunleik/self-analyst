@@ -2,11 +2,13 @@ package com.selfanalyst.config;
 
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /** 与保存共用提交锁；调用持有租约，旧版本只在最后一个调用离开后退休。 */
 public final class LlmRuntimeManager<T extends AutoCloseable> implements AutoCloseable {
     private final Object lock;
     private final Function<LlmSettings, T> factory;
+    private final Predicate<LlmSettings> availability;
     private final Set<Version> versions = new LinkedHashSet<>();
     private Version current;
     private boolean closed;
@@ -48,8 +50,13 @@ public final class LlmRuntimeManager<T extends AutoCloseable> implements AutoClo
         }
     }
     public LlmRuntimeManager(Object lock, LlmSettings initial, Function<LlmSettings, T> factory) {
+        this(lock, initial, factory, LlmSettings::available);
+    }
+    public LlmRuntimeManager(Object lock, LlmSettings initial, Function<LlmSettings, T> factory,
+                             Predicate<LlmSettings> availability) {
         this.lock = lock;
         this.factory = factory;
+        this.availability = availability;
         publish(prepare(initial));
     }
     public Candidate prepare(LlmSettings settings) {
@@ -85,11 +92,11 @@ public final class LlmRuntimeManager<T extends AutoCloseable> implements AutoClo
     public Map<String, Object> status() {
         synchronized (lock) {
             int old = versions.stream().filter(v -> v != current).mapToInt(v -> v.users).sum();
-            return Map.of("status", closed || !current.settings.available() ? "unavailable" : old > 0 ? "draining" : "applied",
+            return Map.of("status", closed || !availability.test(current.settings) ? "unavailable" : old > 0 ? "draining" : "applied",
                     "activeWorkCount", old, "revision", current.revision);
         }
     }
-    public boolean available() { synchronized (lock) { return accepting && current.settings.available(); } }
+    public boolean available() { synchronized (lock) { return accepting && availability.test(current.settings); } }
     private void retireIfUnused(Version version) {
         if (version.retired && version.users == 0 && versions.remove(version)) dispose(version.resource);
     }

@@ -1,5 +1,8 @@
 package com.selfanalyst.agent;
 
+import com.selfanalyst.chatgpt.ChatGptSessionService;
+import com.selfanalyst.chatgpt.ChatGptResponsesModel;
+import io.agentscope.core.model.Model;
 import com.selfanalyst.config.Config;
 import com.selfanalyst.config.ConfigApplicationService;
 import com.selfanalyst.config.LlmSettings;
@@ -78,10 +81,18 @@ public class SelfAnalystAgent implements AutoCloseable {
     private final Toolkit toolkit;
     private final ConfigApplicationService configuration;
     private final LlmRuntimeManager<AgentRuntime> runtimes;
+    private final ChatGptSessionService chatGptSessions;
+    private final com.selfanalyst.chatgpt.ChatGptInferenceGate chatGptGate = new com.selfanalyst.chatgpt.ChatGptInferenceGate();
     private final AtomicBoolean closed = new AtomicBoolean();
-    private record AgentRuntime(ReActAgent agent, OpenAIChatModel plain,
+    private record AgentRuntime(ReActAgent agent, Model plain, Model chat,
                                 TransactionalAgentStateCompactor compactor) implements AutoCloseable {
-        @Override public void close() { agent.close(); }
+        @Override public void close() {
+            agent.close();
+            if (chat instanceof ChatGptResponsesModel responses) responses.close();
+            if (plain instanceof ChatGptResponsesModel responses) responses.close();
+            if (chat instanceof com.selfanalyst.chatgpt.ChatGptInferenceGate.GuardedModel guarded) guarded.close();
+            if (plain instanceof com.selfanalyst.chatgpt.ChatGptInferenceGate.GuardedModel guarded) guarded.close();
+        }
     }
     private final MemoryStore memory;
     private final EventQueryTools tools;
@@ -128,6 +139,7 @@ public class SelfAnalystAgent implements AutoCloseable {
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter) throws IOException {
         this.startupConfig = config;
+        this.chatGptSessions = new ChatGptSessionService(config.memoryDir().resolve("chatgpt-auth"));
         this.configuration = userConfigStore == null ? null : userConfigStore.application(config);
         this.usageMeter = usageMeter;
         this.lang = config.effectiveLanguage();
@@ -160,25 +172,34 @@ public class SelfAnalystAgent implements AutoCloseable {
         try {
             this.runtimes = new LlmRuntimeManager<>(
                     configuration == null ? new Object() : configuration.commitLock(),
-                    LlmSettings.from(config), this::buildRuntime);
+                    LlmSettings.from(config), this::buildRuntime, this::connectionAvailable);
             try (var lease = runtimes.acquire()) { selectRuntime(lease); }
             if (configuration != null) configuration.attach(runtimes);
         } catch (RuntimeException | Error failure) {
             if (registeredWebSearchMcpClient != null) registeredWebSearchMcpClient.close();
             builtStateStore.close();
+            chatGptSessions.close();
             throw failure;
         }
     }
 
     private AgentRuntime buildRuntime(LlmSettings settings) {
         Config config = startupConfig;
-        OpenAIChatModel builtPlainModel;
+        Model builtPlainModel;
+        Model chatModel;
         ReActAgent builtAgent;
             String llmBaseUrl = settings.baseUrl();
 
+            if (settings.usesChatGpt()) {
+                // Capture the account in the leased runtime; refresh never changes this identity.
+                java.util.function.Supplier<String> token = () -> chatGptSessions.accessToken(settings.chatgptAccount());
+                String selectedModel = settings.chatgptModel().isBlank() ? "UNCONFIGURED" : settings.chatgptModel();
+                chatModel = chatGptGate.guard(settings.chatgptAccount(), new ChatGptResponsesModel(selectedModel, token));
+                builtPlainModel = chatGptGate.guard(settings.chatgptAccount(), new ChatGptResponsesModel(selectedModel, token));
+            } else {
             GenerateOptions.Builder chatOpts = GenerateOptions.builder()
                     .temperature(settings.temperature());
-            OpenAIChatModel chatModel = OpenAIChatModel.builder()
+            chatModel = OpenAIChatModel.builder()
                     .apiKey((settings.available() ? settings.apiKey() : "UNCONFIGURED"))
                     .modelName(settings.model())
                     .baseUrl(llmBaseUrl)
@@ -199,6 +220,8 @@ public class SelfAnalystAgent implements AutoCloseable {
                     .stream(false)
                     .generateOptions(plainOpts.build())
                     .build();
+
+            }
 
             builtAgent = ReActAgent.builder()
                     .name("SelfAnalyst")
@@ -241,7 +264,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         } else {
             compactor = null;
         }
-            return new AgentRuntime(builtAgent, builtPlainModel, compactor);
+            return new AgentRuntime(builtAgent, builtPlainModel, chatModel, compactor);
         } catch (RuntimeException | Error failure) {
             builtAgent.close();
             throw failure;
@@ -251,8 +274,15 @@ public class SelfAnalystAgent implements AutoCloseable {
     private void selectRuntime(LlmRuntimeManager<AgentRuntime>.Lease lease) {
         agent = lease.resource().agent();
         stateCompactor = lease.resource().compactor();
-        runtimesForChatAvailable = lease.settings().available();
+        runtimesForChatAvailable = connectionAvailable(lease.settings());
     }
+
+    private boolean connectionAvailable(LlmSettings settings) {
+        try { return settings.available() && (!settings.usesChatGpt() || (chatGptSessions.isConnected(settings.chatgptAccount()) && chatGptGate.available(settings.chatgptAccount()))); }
+        catch (RuntimeException unavailable) { return false; }
+    }
+    public ChatGptSessionService chatGptSessions() { return chatGptSessions; }
+    public com.selfanalyst.chatgpt.ChatGptInferenceGate chatGptGate() { return chatGptGate; }
 
     public LlmSettings llmSettings() { return runtimes.settings(); }
     public boolean isLlmAvailable() { return runtimes.available(); }
@@ -1009,14 +1039,14 @@ public class SelfAnalystAgent implements AutoCloseable {
             return completeDetailed(input, timeout).text();
         }
         public void preflight() {
-            if (!lease.settings().available()) throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
+            if (!connectionAvailable(lease.settings())) throw new com.selfanalyst.wiki.usage.LlmUnavailableException();
             if (usageMeter != null) usageMeter.enforce(UsageMeter.Category.SUMMARY);
         }
         public Completion completeDetailed(String input, Duration timeout) {
             preflight();
             return completePlainDetailed(lease.resource().plain(), input, timeout);
         }
-        public boolean available() { return lease.settings().available(); }
+        public boolean available() { return connectionAvailable(lease.settings()); }
         public String cacheIdentity() { return plainCacheIdentity(lease.settings(), lang.code(), AgentPrompts.plainCompletionPrompt(lang)); }
         public String configurationRevision() { return Long.toString(lease.revision()); }
         public int requestOverheadChars() { return AgentPrompts.plainCompletionPrompt(lang).length() + 128; }
@@ -1029,14 +1059,15 @@ public class SelfAnalystAgent implements AutoCloseable {
     /** Stable across process restarts and credential rotation; contains no plaintext configuration. */
     static String plainCacheIdentity(LlmSettings settings, String language, String systemPrompt) {
         try {
-            java.net.URI uri = java.net.URI.create(settings.baseUrl()).normalize();
+            java.net.URI uri = java.net.URI.create(settings.requestBaseUrl()).normalize();
             String scheme = uri.getScheme().toLowerCase(java.util.Locale.ROOT);
             String host = uri.getHost().toLowerCase(java.util.Locale.ROOT);
             int port = uri.getPort();
             if ((scheme.equals("https") && port == 443) || (scheme.equals("http") && port == 80)) port = -1;
             String path = uri.getPath() == null ? "" : uri.getPath().replaceAll("/+$", "");
             String endpoint = new java.net.URI(scheme, null, host, port, path, uri.getQuery(), null).toASCIIString();
-            String source = endpoint.length() + ":" + endpoint + settings.model().length() + ":" + settings.model()
+            String source = settings.provider() + ":" + (settings.usesChatGpt() ? settings.chatgptAccount() : "")
+                    + ":" + endpoint.length() + ":" + endpoint + settings.requestModel().length() + ":" + settings.requestModel()
                     + ":plain-v1:0.2:" + language.length() + ":" + language
                     + ":" + systemPrompt.length() + ":" + systemPrompt;
             byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -1053,7 +1084,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         try (PlainTask task = plainTask()) { return task.complete(userInput, timeout); }
     }
 
-    private Completion completePlainDetailed(OpenAIChatModel plainModel, String userInput, Duration timeout) {
+    private Completion completePlainDetailed(Model plainModel, String userInput, Duration timeout) {
         if (timeout == null || timeout.isZero() || timeout.isNegative())
             throw new CallFailure(FailureKind.INPUT, "WIKI_TIMEOUT_INVALID", true);
         String plainSystemPrompt = AgentPrompts.plainCompletionPrompt(lang);
@@ -1125,6 +1156,15 @@ public class SelfAnalystAgent implements AutoCloseable {
         Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         Throwable current = failure;
         for (int depth = 0; depth < 16 && current != null && visited.add(current); depth++) {
+            if (current instanceof ChatGptResponsesModel.ChatGptResponsesException chatgpt) {
+                FailureKind kind = switch (chatgpt.code()) {
+                    case AUTHENTICATION, ACCESS_DENIED, RATE_LIMIT, INVALID_REQUEST -> FailureKind.CONFIGURATION;
+                    case TIMEOUT -> FailureKind.TIMEOUT;
+                    case CANCELLED -> FailureKind.INTERRUPTED;
+                    default -> null;
+                };
+                if (kind != null) return plainCallFailure(kind, "WIKI_CHATGPT_" + chatgpt.code().name(), usage);
+            }
             // SDK messages can include response bodies. Only typed status codes may influence
             // classification, including when ModelException or Reactor wraps the provider error.
             Integer status = current instanceof ModelHttpException http ? http.getStatusCode()
@@ -1182,6 +1222,7 @@ public class SelfAnalystAgent implements AutoCloseable {
     public void beginShutdown() {
         if (configuration != null) configuration.close();
         runtimes.close();
+        chatGptSessions.close();
         ActiveDesktopChat active = activeDesktopChat.get();
         if (active != null) {
             active.cancel(() -> agent.interrupt(DESKTOP_USER_ID, active.sessionId,

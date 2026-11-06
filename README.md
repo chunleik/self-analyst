@@ -16,12 +16,13 @@ The desktop release is currently available for **Windows 10/11**. A macOS packag
 
 1. Download the installer or portable ZIP from [GitHub Releases](https://github.com/chunleik/self-analyst/releases).
 2. Install the app, or extract the ZIP and run `SelfAnalyst.exe`. Release packages include a Java runtime; no development tools are required.
-3. Open Settings in the upper-right corner, enter your service URL, API key, and model in **Model settings**, then choose **Save and apply**. See the [model settings guide (Chinese)](docs/llm-settings.md).
+3. Open Settings in the upper-right corner. In **Model settings**, configure an **API Key** connection, or choose **ChatGPT sign-in** (preview), authorize your account in OpenAI’s browser page, and select a model. Choose **Save and apply**. See the [model settings guide (Chinese)](docs/llm-settings.md).
 4. Review activities in **Dashboard**, or ask a question in **Chat**, such as "What did I mainly work on today?"
 
 Good to know:
 
 - Local services start without a configured model; chat and model-generated summaries need a working model connection.
+- ChatGPT sign-in requires OpenAI’s supported preview, account eligibility, and direct model authorization. A subscription is not API credit and does not guarantee access. Signing in does not verify model generation; use the optional generation test, which consumes service-side usage. Local automated tests do not establish real-account access.
 - Closing the window keeps the app running in the system tray. Use the tray menu to quit completely.
 - Runtime data is stored in `%LOCALAPPDATA%\com.selfanalyst.desktop` and survives upgrades. See the [runtime data guide (Chinese)](docs/runtime-storage.md) for portable mode, backup, and recovery.
 
@@ -54,16 +55,21 @@ chosen database; it can include private titles, descriptions, and evidence. See 
 - Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages are masked, and private-browsing titles are skipped. A private window that exposes no marker cannot be detected, so list sensitive apps and sites in `wiki.privacy.excludeApps` (comma-separated executable names such as `weixin.exe`) and `wiki.privacy.excludeSites`, then restart the backend.
 - The event database stores merged activity intervals and is authoritative; back it up regularly. Collection stops when disk space falls below the blocking threshold; history is never deleted automatically.
 - Neo4j configuration saves and status checks never connect to Neo4j. Disabling sync does not erase the remote copy; source removals reach it only on the next successful manual sync. Changing namespaces leaves the old namespace in place.
+- ChatGPT OAuth credentials are stored separately from TOML with owner-only filesystem permissions, not application-level encryption or an OS credential vault. Processes running as the same OS user can still access them. Disconnecting clears local tokens and attempts remote revocation; an unconfirmed revocation is reported. Independent API keys and chat history are kept.
 
 ## Configuration
 
-Settings has three tabs: **Model settings** (one OpenAI-compatible connection, with presets, model
-discovery, and a generation test), **Advanced configuration** (the raw TOML editor), and
+Settings has three tabs: **Model settings** (one active API Key or ChatGPT connection, with model
+discovery and a generation test), **Advanced configuration** (the raw TOML editor), and
 **Runtime data** (directories, storage usage, and migration backup cleanup).
 
 Explicit TOML values take precedence over environment variables, which take precedence over defaults.
-Changes to `llm.api-key`, `llm.base-url`, `llm.model`, and `llm.temperature` apply to new chats and
-summary jobs without restarting. Saved `neo4j.*` settings apply to the next manual sync without
+Changes to `llm.api-key`, `llm.base-url`, `llm.model`, `llm.temperature`, `llm.provider`,
+`llm.chatgpt-account`, and `llm.chatgpt-model` apply to new chats and summary jobs without restarting.
+ChatGPT uses its own account and model selection, not the API Key connection’s URL or temperature.
+Embedding remains a separate API Key connection, may retain its existing `llm.api-key` fallback,
+and never receives OAuth tokens or becomes enabled merely by switching providers.
+Saved `neo4j.*` settings apply to the next manual sync without
 restarting or sending data. Other restart-required keys are identified in Settings. External edits to the TOML
 file are not applied until you save through the app or restart the backend.
 
@@ -72,6 +78,9 @@ file are not applied until you save through the app or restart the backend.
 | `llm.base-url` | `LLM_BASE_URL` | `https://api.openai.com/v1` |
 | `llm.model` | `LLM_MODEL` | `gpt-4o` |
 | `llm.api-key` | `OPENAI_API_KEY` | Empty |
+| `llm.provider` | None (`config.toml` only) | `api-key`; alternatively `chatgpt` |
+| `llm.chatgpt-account` | None (`config.toml` only) | Empty; selected authorized account ID |
+| `llm.chatgpt-model` | None (`config.toml` only) | Empty; select an available model or enter its ID |
 | `events.mode` | `EVENTS_MODE` | `embedded` |
 | `events.port` | None (`config.toml` only) | `5700` |
 | `wiki.privacy.excludeApps` | None (`config.toml` only) | Empty |

@@ -10,7 +10,8 @@ import java.util.Set;
 public final class DesktopLlmSettingsController {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> CODES = Set.of("baseUrl", "model", "temperature", "credential",
-            "invalid_request", "unsupported_field", "unsupported_toml_edit", "credential_required");
+            "invalid_request", "unsupported_field", "unsupported_toml_edit", "credential_required",
+            "provider", "chatgptAccount", "chatgptModel");
     private final LlmSettingsService service;
     private final LlmConnectionProbe probe;
     public DesktopLlmSettingsController(ConfigApplicationService configuration) {

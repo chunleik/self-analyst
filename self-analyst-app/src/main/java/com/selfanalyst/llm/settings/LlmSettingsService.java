@@ -8,7 +8,8 @@ import java.util.*;
 public final class LlmSettingsService {
     private static final Map<String, String> FIELDS = Map.of(
             "baseUrl", "llm.base-url", "model", "llm.model",
-            "temperature", "llm.temperature");
+            "temperature", "llm.temperature", "provider", "llm.provider",
+            "chatgptAccount", "llm.chatgpt-account", "chatgptModel", "llm.chatgpt-model");
     private final LlmSettingsRepository repository;
     public LlmSettingsService(LlmSettingsRepository repository) { this.repository = repository; }
 
@@ -41,8 +42,8 @@ public final class LlmSettingsService {
                 };
                 fields.put(name, new FieldState(value, user.getProperty(key), resolved.values().get(key).source()));
             });
-            return new Snapshot("openai-completions", fields,
-                    new CredentialState(settings.available(), resolved.values().get("llm.api-key").source(),
+            return new Snapshot(settings.usesChatGpt() ? "openai-responses" : "openai-completions", fields,
+                    new CredentialState(settings.apiKeyConfigured(), resolved.values().get("llm.api-key").source(),
                             user.containsKey("llm.api-key")), repository.runtime());
         }
     }
@@ -108,6 +109,14 @@ public final class LlmSettingsService {
     }
 
     private static String normalize(String name, Object value) {
+        if (name.equals("provider")) {
+            if (!(value instanceof String provider) || !Set.of("api-key", "chatgpt").contains(provider)) throw invalid("provider");
+            return provider;
+        }
+        if (name.equals("chatgptAccount") || name.equals("chatgptModel")) {
+            if (!(value instanceof String s) || s.length() > 256 || s.chars().anyMatch(Character::isISOControl)) throw invalid(name);
+            return s.trim();
+        }
         if (name.equals("baseUrl")) return baseUrl(value);
         if (name.equals("model")) return string(value, name);
         if (!(value instanceof Number n) || !Double.isFinite(n.doubleValue())) throw invalid(name);
@@ -121,6 +130,10 @@ public final class LlmSettingsService {
     private static void validate(LlmSettings settings) {
         baseUrl(settings.baseUrl());
         string(settings.model(), "model");
+        if (settings.usesChatGpt()) {
+            string(settings.chatgptAccount(), "chatgptAccount");
+            string(settings.chatgptModel(), "chatgptModel");
+        }
         Properties properties = new Properties(); properties.putAll(settings.properties());
         try { LlmSettings.validate(properties); } catch (IllegalArgumentException ignored) { throw invalid("invalid_request"); }
     }

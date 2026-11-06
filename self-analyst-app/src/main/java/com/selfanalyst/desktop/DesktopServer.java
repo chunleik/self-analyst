@@ -54,6 +54,8 @@ public class DesktopServer {
     private final DesktopSummaryRepairController repairCtrl;
     private final DesktopConfigController configCtrl;
     private final DesktopLlmSettingsController llmSettings;
+    private final DesktopChatGptController chatGpt;
+    private final com.selfanalyst.chatgpt.ChatGptSessionService chatGptSessions;
     private final com.selfanalyst.i18n.Lang language;
     private final DesktopTaskController taskCtrl;
     private final DesktopStatusController statusCtrl;
@@ -242,7 +244,12 @@ public class DesktopServer {
         this.agentCtrl = new DesktopAgentController(summaryService, adviceService, agent, taskStore,
                 config, chatSessionStore, new SummarySnapshotStore(memoryDir), wikiStore);
         this.agentCtrl.setSummaryRepairChatService(repairChat);
+        this.chatGptSessions = agent != null ? agent.chatGptSessions()
+                : new com.selfanalyst.chatgpt.ChatGptSessionService(config.memoryDir().resolve("chatgpt-auth"));
+        var chatGptGate = agent != null ? agent.chatGptGate() : new com.selfanalyst.chatgpt.ChatGptInferenceGate();
+        this.chatGpt = new DesktopChatGptController(chatGptSessions, chatGptGate);
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
+        this.configCtrl.setChatGptSessions(chatGptSessions);
         var configuration = userConfigStore.application(config);
         this.neo4jSync = new com.selfanalyst.ontology.Neo4jSyncService(ontology,
                 () -> com.selfanalyst.config.Neo4jConfigResolver.from(configuration.saved().properties()),
@@ -258,6 +265,7 @@ public class DesktopServer {
                 contentPersistenceReady, contentMigrationError,
                 fileCtrl::collectorStatus);
         if (agent != null) this.statusCtrl.setLlmSettingsSupplier(agent::llmSettings);
+        this.statusCtrl.setChatGptAvailability(account -> chatGptSessions.isConnected(account) && chatGptGate.available(account));
         this.memoryCtrl = longTermMemoryService != null
                 ? new DesktopMemoryController(longTermMemoryService)
                 : null;
@@ -338,6 +346,12 @@ public class DesktopServer {
         app.get("/desktop/llm-settings/presets", llmSettings::presets);
         app.post("/desktop/llm-settings/test", llmSettings::test);
         app.post("/desktop/llm-settings/discover-models", llmSettings::discover);
+        app.get("/desktop/llm-settings/chatgpt/status", chatGpt::status);
+        app.post("/desktop/llm-settings/chatgpt/login", chatGpt::login);
+        app.post("/desktop/llm-settings/chatgpt/cancel", chatGpt::cancel);
+        app.post("/desktop/llm-settings/chatgpt/logout", chatGpt::logout);
+        app.post("/desktop/llm-settings/chatgpt/models", chatGpt::models);
+        app.post("/desktop/llm-settings/chatgpt/test", chatGpt::test);
         app.put("/desktop/config", configCtrl::putConfig);
         app.get("/desktop/config/raw", configCtrl::getRawConfig);
         app.get("/desktop/config/runtime-storage", configCtrl::getRuntimeStorage);
@@ -402,6 +416,7 @@ public class DesktopServer {
         if (pendingMemoryReview != null) pendingMemoryReview.close();
         try {
             if (statusCtrl != null) statusCtrl.close();
+            chatGptSessions.close();
         } finally {
             chatSessionStore.close();
         }
@@ -422,7 +437,8 @@ public class DesktopServer {
         return config.wikiExcludeApps() + "|" + config.wikiExcludeSites() + "|"
                 + config.wikiPromptMaxContentChars() + "|" + config.wikiSummaryMaxRequestChars() + "|"
                 + config.wikiSummaryPeriodMaxCalls() + "|" + config.wikiSummaryPeriodMaxTokens() + "|"
-                + config.wikiSummaryOutputTokenReserve() + "|" + llm.baseUrl() + "|" + llm.model() + "|" + llm.temperature();
+                + config.wikiSummaryOutputTokenReserve() + "|" + llm.provider() + "|" + llm.chatgptAccount() + "|"
+                + llm.requestBaseUrl() + "|" + llm.requestModel() + "|" + (llm.usesChatGpt() ? "default" : llm.temperature());
     }
 
     private static String escapeJson(String s) {

@@ -165,6 +165,51 @@ class ChatGptResponsesModelTest {
         assertEquals("Bearer test-token", authorization.get());
     }
 
+    @Test void replaysAssistantTextAsOutputTextOnTheNextUserTurn() throws Exception {
+        serve(200, completed("[" + message("OK") + "]"));
+        Msg user = Msg.builder().role(MsgRole.USER).textContent("Say OK").build();
+        ReasoningContext accumulator = new ReasoningContext("assistant");
+        model.stream(List.of(user), List.of(), null).collectList().block().forEach(accumulator::processChunk);
+        Msg assistant = accumulator.buildFinalMessage();
+        assertNotNull(assistant);
+        Msg next = Msg.builder().role(MsgRole.USER).textContent("Say OK again").build();
+
+        assertEquals("OK", text(model.stream(List.of(user, assistant, next), List.of(), null).collectList().block()));
+        JsonNode wire = request.get();
+        assertEquals("input_text", wire.at("/input/0/content/0/type").asText());
+        assertEquals("assistant", wire.at("/input/1/role").asText());
+        // Real Responses rejects input_text here with HTTP 400 invalid_value.
+        assertEquals("output_text", wire.at("/input/1/content/0/type").asText());
+        assertEquals("OK", wire.at("/input/1/content/0/text").asText());
+        assertEquals("input_text", wire.at("/input/2/content/0/type").asText());
+        assertEquals(2, attempts.get());
+    }
+
+    @Test void preservesTextRolesAndOrderAroundAssistantToolCalls() throws Exception {
+        serve(200, completed("[" + message("done") + "]"));
+        List<Msg> history = List.of(
+                Msg.builder().role(MsgRole.SYSTEM).textContent("instructions").build(),
+                Msg.builder().role(MsgRole.ASSISTANT).content(List.of(
+                        TextBlock.builder().text("before").build(),
+                        ToolUseBlock.builder().id("call_1").name("query").input(Map.of("q", "hello")).build(),
+                        TextBlock.builder().text("after").build())).build(),
+                Msg.builder().role(MsgRole.TOOL).content(ToolResultBlock.of("call_1", "query",
+                        TextBlock.builder().text("result").build())).build());
+        model.stream(history, List.of(SCHEMA), null).collectList().block();
+        JsonNode wire = request.get();
+        assertEquals("developer", wire.at("/input/0/role").asText());
+        assertEquals("input_text", wire.at("/input/0/content/0/type").asText());
+        assertEquals("output_text", wire.at("/input/1/content/0/type").asText());
+        assertEquals("before", wire.at("/input/1/content/0/text").asText());
+        assertEquals("function_call", wire.at("/input/2/type").asText());
+        assertEquals("output_text", wire.at("/input/3/content/0/type").asText());
+        assertEquals("after", wire.at("/input/3/content/0/text").asText());
+        assertEquals("function_call_output", wire.at("/input/4/type").asText());
+        assertEquals("input_text", wire.at("/input/4/output/0/type").asText());
+        assertEquals("result", wire.at("/input/4/output/0/text").asText());
+        assertEquals(5, wire.path("input").size());
+    }
+
     @Test void replaysEncryptedReasoningThroughActualAgentScopeAccumulatorAndToolRoundTrip() throws Exception {
         String reasoning = "{\"type\":\"reasoning\",\"id\":\"rs_1\",\"encrypted_content\":\"opaque_encrypted-content==\","
                 + "\"summary\":[{\"type\":\"summary_text\",\"text\":\"private plaintext\"}],\"instructions\":\"never replay\"}";

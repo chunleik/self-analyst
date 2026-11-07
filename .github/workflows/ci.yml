@@ -121,3 +121,30 @@ jobs:
       - name: 冒烟验证打包 JAR
         shell: pwsh
         run: ./scripts/check-packaged-jar.ps1
+
+  privacy-ui:
+    name: 隐私界面验证 (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v7
+      - name: 配置 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: 安装固定版本浏览器测试依赖
+        run: |
+          python -m pip install playwright==1.58.0
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: 验证生产隐私 UI 与合成数据
+        run: python scripts/check-privacy-ui.py --output-dir artifacts/privacy-ui
+      - name: 保存中英文与小尺寸截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: privacy-ui-screenshots
+          path: artifacts/privacy-ui/
+          if-no-files-found: warn
+          retention-days: 14

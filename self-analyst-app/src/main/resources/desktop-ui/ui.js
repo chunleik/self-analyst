@@ -147,7 +147,7 @@ function openConfigModal(focusKey) {
 
 function switchConfigView(view, focusKey) {
   if (state.configSaving || state.configRestarting) return Promise.resolve();
-  if (["llm", "raw", "storage", "neo4j"].indexOf(view) < 0) return Promise.resolve();
+  if (["llm", "raw", "storage", "neo4j", "privacy"].indexOf(view) < 0) return Promise.resolve();
   if (state.configView === view && !focusKey && state.dom.configModal.dataset.view === view) return Promise.resolve();
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()))
       && !window.confirm(t("config.confirmDiscardClose"))) return Promise.resolve();
@@ -155,6 +155,7 @@ function switchConfigView(view, focusKey) {
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
   if (typeof stopNeo4jSync === "function") stopNeo4jSync();
+  if (typeof stopPrivacySettings === "function") stopPrivacySettings();
   state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
   state.configDirty = false; state.configRawText = ""; state.configRawBaseline = "";
   state.configRuntime = null; state.configRuntimeError = false;
@@ -172,6 +173,7 @@ function switchConfigView(view, focusKey) {
     state.llmSettingsView = mountLlmSettings(state.dom.configGrid);
     return Promise.resolve();
   }
+  if (view === "privacy") return mountPrivacySettings(state.dom.configGrid);
   if (view === "neo4j") {
     state.dom.configGrid.innerHTML = "";
     mountNeo4jSync(state.dom.configGrid);
@@ -198,6 +200,7 @@ function closeConfigModal() {
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
   if (typeof stopNeo4jSync === "function") stopNeo4jSync();
+  if (typeof stopPrivacySettings === "function") stopPrivacySettings();
   state.configDirty = false;
   state.configRawText = ""; state.configRawBaseline = "";
   state.dom.configGrid.innerHTML = "";

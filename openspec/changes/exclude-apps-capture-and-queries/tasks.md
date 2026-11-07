@@ -20,11 +20,11 @@
 ## 4. 隐私设置接口与页签
 
 - [x] 4.1 新增 `DesktopPrivacyController` 与路由 `GET`/`PUT /desktop/privacy`：读取两键合成清单（冲突显示为 capture）、近 30 天窗口桶候选（前 100、剔除已在清单、空白与 unknown 排除）、校验与去重后经 `ConfigApplicationService.update` 保存；新增 `DesktopPrivacyControllerTest` 覆盖载荷、候选排序与剔除、非法应用名拒绝、保存后运行策略已更新
-- [ ] 4.2 新增 `privacy-settings.js`、`privacy-settings.css`，在 `index.html` 增加“隐私”页签并在 `ui.js` 的 `switchConfigView` 挂载；实现可搜索候选下拉（键盘选择、手动输入）、每行模式下拉与移除、网站 chip、保存提示与脏状态放弃确认
-- [ ] 4.3 在 `locales/zh.json`、`locales/en.json` 增加全部文案（含“不采集期间不留本地记录、已生成摘要与会话中已看到内容不追溯”说明）；新增 `src/test/js/privacy-settings.test.mjs` 覆盖渲染、添加/切换/移除、保存载荷、候选失败降级，并确保 `i18n-catalog.test.mjs` 通过
+- [x] 4.2 新增 `privacy-settings.js`、`privacy-settings.css`，在 `index.html` 增加“隐私”页签并在 `ui.js` 的 `switchConfigView` 挂载；实现可搜索候选下拉（键盘选择、手动输入）、每行模式下拉与移除、网站 chip、保存提示与脏状态放弃确认
+- [x] 4.3 在 `locales/zh.json`、`locales/en.json` 增加全部文案（含“不采集期间不留本地记录、已生成摘要与会话中已看到内容不追溯”说明）；新增 `src/test/js/privacy-settings.test.mjs` 覆盖渲染、添加/切换/移除、保存载荷、候选失败降级，并确保 `i18n-catalog.test.mjs` 通过
 
 ## 5. 文档与验证
 
-- [ ] 5.1 同步更新 `README.md`（英文）、`README.zh-CN.md`（中文）的配置与隐私说明以及 `PRIVACY.md`，介绍隐私页签、两种模式、热生效与不追溯边界；检查完整差异确认英文版无中文段落
+- [x] 5.1 同步更新 `README.md`（英文）、`README.zh-CN.md`（中文）的配置与隐私说明以及 `PRIVACY.md`，介绍隐私页签、两种模式、热生效与不追溯边界；检查完整差异确认英文版无中文段落
 - [ ] 5.2 运行 `mvn test` 与 `openspec validate exclude-apps-capture-and-queries --strict`，记录结果；按需截取隐私页签截图供 PR 使用
 - [ ] 5.3 使用 `openspec-sync-specs` 将增量同步到 `title-capture`、`event-query-tools`、`agent-document-generation`、`llm-wiki`、`user-configuration` 主规格，并再次严格校验

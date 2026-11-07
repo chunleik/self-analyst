@@ -1,10 +1,11 @@
 #config-modal .privacy-settings [hidden] { display: none; }
 #config-modal .privacy-settings { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+#config-modal .privacy-settings .config-scroll-area { padding-top: 16px; padding-bottom: 16px; }
 .privacy-settings h3 { font-size: 20px; margin: 0 0 8px; }
-.privacy-settings h4 { font-size: 14px; margin: 24px 0 10px; }
+.privacy-settings h4 { font-size: 14px; margin: 18px 0 10px; }
 .privacy-settings p { line-height: 1.6; margin: 6px 0; }
 .privacy-muted { color: var(--text-secondary); font-size: 12px; }
-.privacy-boundary { background: var(--config-wash); border: 1px solid var(--border-color); border-radius: 9px; padding: 10px 14px; font-size: 12px; margin: 16px 0; }
+.privacy-boundary { background: var(--config-wash); border: 1px solid var(--border-color); border-radius: 9px; padding: 10px 14px; font-size: 12px; margin: 12px 0; }
 .privacy-settings label { display: block; font-size: 12px; margin-bottom: 6px; }
 .privacy-add-row { display: flex; align-items: start; gap: 8px; }
 .privacy-add-row > input, .privacy-combo { flex: 1; min-width: 0; }
@@ -16,7 +17,7 @@
 .privacy-option { padding: 9px 10px; font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
 .privacy-option:hover, .privacy-option[aria-selected="true"] { background: var(--config-wash); color: var(--accent); }
 .privacy-apps { margin-top: 14px; }
-.privacy-app-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(155px, auto) auto; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border-color); }
+.privacy-app-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(155px, auto) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-color); }
 .privacy-app-name { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; }
 .privacy-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .privacy-chip { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; border: 1px solid var(--border-color); border-radius: 18px; padding: 3px 5px 3px 12px; gap: 8px; font-size: 12px; }

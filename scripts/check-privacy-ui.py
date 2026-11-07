@@ -73,7 +73,7 @@ def check_browser(server, output):
 
     origin = f"http://127.0.0.1:{server.server_port}"
     output.mkdir(parents=True, exist_ok=True)
-    errors, external_requests = [], []
+    errors, external_requests, local_font_stubs = [], [], []
     with sync_playwright() as playwright:
         options = {"headless": True}
         if os.environ.get("PRIVACY_BROWSER"):
@@ -86,6 +86,10 @@ def check_browser(server, output):
             parsed = urlsplit(route.request.url)
             if f"{parsed.scheme}://{parsed.netloc}" == origin:
                 route.continue_()
+            elif route.request.url == "https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap":
+                # 已有 deep-chat 的可选字体依赖在 fixture 中本地替代，绝不发送请求。
+                local_font_stubs.append(route.request.url)
+                route.fulfill(status=200, content_type="text/css", body="/* Offline fixture: use installed system fonts. */")
             else:
                 external_requests.append(route.request.url)
                 route.abort()
@@ -134,7 +138,12 @@ def check_browser(server, output):
                 )
                 for width, height in [(800, 600), (390, 700)]:
                     page.set_viewport_size({"width": width, "height": height})
+                    scroll = page.locator(".privacy-settings .config-scroll-area")
+                    scroll.evaluate("element => { element.scrollTop = 0; }")
                     page.screenshot(path=str(output / f"privacy-settings-{lang}-{width}x{height}.png"))
+                    scroll.evaluate("element => { element.scrollTop = element.scrollHeight; }")
+                    page.screenshot(path=str(output / f"privacy-settings-{lang}-{width}x{height}-bottom.png"))
+                    assert page.locator(".privacy-chip").last.is_visible()
                     overflow = page.evaluate("""() => {
                       const selectors = ['.config-modal-panel', '.privacy-settings', '.privacy-settings .config-scroll-area'];
                       return selectors.filter(selector => {
@@ -155,6 +164,7 @@ def check_browser(server, output):
                 "languages": ["zh", "en"], "viewports": [[1280, 1000], [800, 600], [390, 700]],
                 "keyboardSelection": True, "dirtyCancellation": True, "save": True,
                 "externalRequests": external_requests, "pageErrors": errors,
+                "locallyStubbedOptionalFonts": local_font_stubs,
             }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         except Exception:
             page.screenshot(path=str(output / "failure.png"))

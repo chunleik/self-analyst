@@ -43,13 +43,17 @@ class ChatGptResponsesModelTest {
     }
 
     private ChatGptResponsesModel serve(int status, String response) throws Exception {
+        return serve(status, response, "text/event-stream");
+    }
+
+    private ChatGptResponsesModel serve(int status, String response, String contentType) throws Exception {
         responseBody.set(response);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/responses", exchange -> {
             attempts.incrementAndGet();
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             request.set(JSON.readTree(exchange.getRequestBody()));
-            exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+            if (contentType != null) exchange.getResponseHeaders().add("Content-Type", contentType);
             exchange.getResponseHeaders().add("Location", "/redirect-target");
             byte[] bytes = responseBody.get().getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(status, bytes.length);
@@ -104,6 +108,31 @@ class ChatGptResponsesModelTest {
         serve(200, "data: " + "x".repeat(2 * 1024 * 1024 + 1));
         var failure = assertThrows(ChatGptResponsesModel.ChatGptResponsesException.class, this::call);
         assertEquals(ChatGptResponsesModel.Code.PROTOCOL, failure.code());
+    }
+
+    @Test void acceptsMissingContentTypeOnlyWithACompleteValidEventStream() throws Exception {
+        String delta = event("{\"type\":\"response.output_text.delta\",\"output_index\":0,\"content_index\":0,\"delta\":\"OK\"}");
+        serve(200, delta + completed("[" + message("OK") + "]"), null);
+        List<ChatResponse> responses = call();
+        assertEquals("OK", text(responses));
+        assertEquals("stop", responses.getLast().getFinishReason());
+        assertEquals(12, responses.getLast().getUsage().getInputTokens());
+        assertEquals(1, attempts.get());
+        for (String invalid : List.of("", "{\"output_text\":\"OK\"}", "<html>OK</html>", delta,
+                delta + event("{\"type\":\"response.incomplete\"}"),
+                delta + event("{\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"unknown\"}}}"))) {
+            responseBody.set(invalid);
+            assertEquals(ChatGptResponsesModel.Code.PROTOCOL,
+                    assertThrows(ChatGptResponsesModel.ChatGptResponsesException.class, this::call).code());
+        }
+        assertEquals(7, attempts.get());
+    }
+
+    @Test void rejectsAnExplicitNonStreamingContentTypeEvenWithValidEventData() throws Exception {
+        serve(200, completed("[" + message("OK") + "]"), "application/json");
+        assertEquals(ChatGptResponsesModel.Code.PROTOCOL,
+                assertThrows(ChatGptResponsesModel.ChatGptResponsesException.class, this::call).code());
+        assertEquals(1, attempts.get());
     }
 
     @Test void mapsHistoryImagesToolsAndOnlySupportedOptions() throws Exception {

@@ -28,7 +28,7 @@
 ## 6. 文档与验证
 
 - [x] 6.1 更新 `docs/personal-ontology.md` 中的界面用语（“待整理”“重新自动匹配”等）；用 `grep` 确认 README.md / README.zh-CN.md 没有引用旧文案，或同步更新这两个文件
-- [ ] 6.2 运行 `mvn -pl self-analyst-app -am '-Dtest=DesktopOntologyHttpTest' '-Dsurefire.failIfNoSpecifiedTests=false' test` 与 `mvn test`，确认全部通过
+- [x] 6.2 运行 `mvn -pl self-analyst-app -am '-Dtest=DesktopOntologyHttpTest' '-Dsurefire.failIfNoSpecifiedTests=false' test` 与 `mvn test`，确认全部通过
 - [ ] 6.3 用 `pnpm tauri dev` 启动应用，在浅色/深色和窄窗口下手动检查知识页，截图附到 PR（跳过：当前云端缺少 Cargo，Tauri 无法启动；Chromium 创建 socket 也受环境限制。用户已同意不修改 workflow、提交不带截图的 PR；保留可复现的 `scripts/check-knowledge-ui.py`，未声称浏览器验收通过）
 - [x] 6.4 运行 `openspec validate improve-knowledge-tab-ux --strict`，确认通过
 

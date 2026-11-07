@@ -40,3 +40,11 @@
 - `openspec validate improve-knowledge-tab-ux --strict` 通过；`openspec validate --all --strict` 40 项通过。已使用同步流程更新主规格，未归档。
 - 未修改后端、依赖、README 或 GitHub workflow；原有英文/中文 README 未引用已替换的界面文案。
 - 共享主题目前只有浅色令牌定义；浏览器脚本会忠实记录深色系统偏好下仍保持浅色的现状，不注入自造深色主题。
+
+## 合并、发布与归档核对（2026-11-07）
+
+- 实现 PR [#148](https://github.com/chunleik/self-analyst/pull/148) 已于 2026-11-07 合并，合并提交为 55762027bf1cd10122da67e6a891711b7abdb305；最新 head 6880415 的五项 CI 全部通过，包含 Windows 全量验证。
+- v0.6.1-beta.14 已发布；[该 tag 的独立 Windows Release](https://github.com/chunleik/self-analyst/actions/runs/42374710702) 全部通过：OpenSpec 41 项，Java 1,275 项（0 失败、0 错误、7 跳过），Node 360 项全部通过，Tauri Rust 49 项及桌面端/边车 Clippy 通过，UIA、JAR 与 NSIS 安装/重装/启动/卸载验证通过。四个公开资产已独立核对 SHA-256、大小与包内版本，关键前端资源与源码一致。
+- 主规格 personal-ontology 中 SPEC-ONTO-009 与 SPEC-ONTO-013 已逐项核对，与本 change 增量完全一致；归档不重复改写主规格。
+- 用户已在发布后明确要求归档、push 并合并。任务 6.3 继续保留为已获同意跳过的人工验收，不将其标成通过；归档不会补造截图或改变已披露限制。
+- docs/personal-ontology.md 保留为现行用户指南；docs/releases/v0.6.1-beta.14.md 保留为版本准备时的历史发行说明，发布页补充实际验证结果。本次不移动或删除这些文档，不归档其他 change，不再次发版。

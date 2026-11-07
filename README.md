@@ -52,16 +52,34 @@ chosen database; it can include private titles, descriptions, and evidence. See 
 - Content events store only allowlisted title fields. Body text, UIA text, control trees, screenshots, OCR, and audio are never stored.
 - Failed UIA queries fall back to system window titles. Sensitive applications are excluded from UIA queries.
 - File collection is limited to filesystem metadata (names, paths, sizes, and timestamps) in folders you configure. Apart from safely parsing `.gitignore`, it does not read file contents, calculate content hashes, or generate summaries, topics, or vectors.
-- Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages are masked, and private-browsing titles are skipped. A private window that exposes no marker cannot be detected, so list sensitive apps and sites in `wiki.privacy.excludeApps` (comma-separated executable names such as `weixin.exe`) and `wiki.privacy.excludeSites`, then restart the backend.
+- Before titles reach the model, private IPv4 addresses, meeting numbers, and account-verification pages are masked, and private-browsing titles are skipped. A private window that exposes no marker cannot be detected; add sensitive applications and sites in **Settings → Privacy**.
+- Each application has two modes: **Do not collect** stops new window/content events and UIA queries for that app; **Hide from model** keeps local records but excludes matching events from new model inputs. Both modes hide matching historical events from new model queries, summaries, repair requests, and event projections used for generated documents. Local displays and AFK collection remain unchanged. Uncollected intervals cannot be recovered later.
+- Privacy rules apply immediately after saving in the app, including the raw TOML editor. They do not delete existing records or rewrite saved summaries, old tool results, or content already seen in a chat. An in-flight model operation keeps the policy snapshot it started with; the next operation uses the saved policy. Numeric AQL aggregates can still include hidden time. Projection exports report the actual exported `recordCount` and `privacyFilteredCount`; `complete: true` means the filtered projection completed.
+- Agent AQL queries cannot use `tag` to overwrite `app`, `title`, `context_title`, `url_host`, or `private_browsing`, which would bypass privacy filtering. Other custom tags and direct local AQL queries remain available.
 - The event database stores merged activity intervals and is authoritative; back it up regularly. Collection stops when disk space falls below the blocking threshold; history is never deleted automatically.
 - Neo4j configuration saves and status checks never connect to Neo4j. Disabling sync does not erase the remote copy; source removals reach it only on the next successful manual sync. Changing namespaces leaves the old namespace in place.
 - ChatGPT OAuth credentials are stored separately from TOML with owner-only filesystem permissions, not application-level encryption or an OS credential vault. Processes running as the same OS user can still access them. Disconnecting clears local tokens and attempts remote revocation; an unconfirmed revocation is reported. Independent API keys and chat history are kept.
 
 ## Configuration
 
-Settings has three tabs: **Model settings** (one active API Key or ChatGPT connection, with model
-discovery and a generation test), **Advanced configuration** (the raw TOML editor), and
-**Runtime data** (directories, storage usage, and migration backup cleanup).
+Settings has five tabs: **Model settings** (one active API Key or ChatGPT connection, with model
+discovery and a generation test), **Privacy** (application modes and hidden sites),
+**Advanced configuration** (the raw TOML editor), **Runtime data** (directories, storage usage,
+and migration backup cleanup), and **Neo4j sync** (optional, manually confirmed graph sharing).
+
+In **Privacy**, search recent applications or enter an executable name manually, choose a mode,
+and save. Candidates come from the last 30 days of local window activity, with up to 100 entries
+ordered by duration. Manual entry remains available if candidates cannot be loaded. Application
+names match the whole executable name, ignoring case; add variants such as `PotPlayerMini.exe`
+and `PotPlayerMini64.exe` separately. Website entries hide matching titles, context titles, or hosts
+from the model and do not stop browser collection.
+
+The underlying keys are `events.collection.excludeApps` (**Do not collect**),
+`wiki.privacy.excludeApps` (**Hide from model**), and `wiki.privacy.excludeSites` (hidden sites).
+They accept comma- or semicolon-separated values, default to empty, and are not writable by Agent
+configuration tools. The model policy combines both application lists; if an app appears in both,
+Privacy displays **Do not collect**. All three keys apply without restarting after a successful
+save through the app.
 
 Explicit TOML values take precedence over environment variables, which take precedence over defaults.
 Changes to `llm.api-key`, `llm.base-url`, `llm.model`, `llm.temperature`, `llm.provider`,
@@ -83,6 +101,7 @@ file are not applied until you save through the app or restart the backend.
 | `llm.chatgpt-model` | None (`config.toml` only) | Empty; select an available model or enter its ID |
 | `events.mode` | `EVENTS_MODE` | `embedded` |
 | `events.port` | None (`config.toml` only) | `5700` |
+| `events.collection.excludeApps` | None (`config.toml` only) | Empty |
 | `wiki.privacy.excludeApps` | None (`config.toml` only) | Empty |
 | `wiki.privacy.excludeSites` | None (`config.toml` only) | Empty |
 | `neo4j.enabled` | None (`config.toml` only) | `false` |

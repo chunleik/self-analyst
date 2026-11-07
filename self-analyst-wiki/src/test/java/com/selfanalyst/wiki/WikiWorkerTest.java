@@ -24,6 +24,53 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WikiWorkerTest {
 
     @Test
+    void workerCapturesPolicyOncePerPeriodWithoutChangingPreviouslyGeneratedSummary(@TempDir Path dir) throws Exception {
+        store = new WikiStore(dir.resolve("wiki.db"));
+        awDatabase = new Database(dir.resolve("events"));
+        var events = new EventStore(awDatabase, PulseTimeConfig.DEFAULT);
+        Instant start = Instant.parse("2026-09-21T04:00:00Z");
+        var first = entry("first", WikiLevel.HOUR, start, start.plusSeconds(3600), WikiStatus.PENDING);
+        var next = entry("next", WikiLevel.HOUR, start.plusSeconds(3600), start.plusSeconds(7200), WikiStatus.PENDING);
+        store.upsert(first); store.upsert(next);
+        String host = java.net.InetAddress.getLocalHost().getHostName();
+        for (var entry : List.of(first, next)) {
+            events.insertEvent("watcher-window_" + host, new com.selfanalyst.events.model.Event(entry.periodStart(), 60,
+                    Map.of("app", "Secret.exe", "title", "Confidential project")));
+            events.insertEvent("watcher-window_" + host, new com.selfanalyst.events.model.Event(entry.periodStart().plusSeconds(60), 60,
+                    Map.of("app", "Editor", "title", "Public project")));
+        }
+        var policy = new AtomicReference<>(WikiPrivacyPolicy.none());
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var prompts = new java.util.ArrayList<String>();
+        var summarizer = new WikiSummarizer(ignored -> "") {
+            @Override public SummaryResult summarize(WikiFactBuilder.WikiFacts facts, Duration timeout) {
+                prompts.add(buildPrompt(facts));
+                policy.set(WikiPrivacyPolicy.of("secret.exe", ""));
+                return new SummaryResult("Saved summary", "Saved task", List.of(),
+                        new WikiEntry.WikiMetrics(facts.activeSeconds(), facts.afkSeconds(), facts.switchCount(),
+                                facts.topApps(), facts.statistics()));
+            }
+        };
+        // The worker's supplied snapshot must override the builder's fixed policy.
+        worker = new WikiWorker(store, new WikiFactBuilder(events, 24000), summarizer, ZoneId.of("UTC"),
+                Duration.ofSeconds(5), 3600, false, null, () -> start.plusSeconds(7200),
+                () -> { reads.incrementAndGet(); return policy.get(); });
+        Method process = WikiWorker.class.getDeclaredMethod("processEntry", WikiEntry.class);
+        process.setAccessible(true);
+        process.invoke(worker, first);
+        var saved = store.versionedEntry("first").entry();
+        process.invoke(worker, next);
+        assertEquals(2, reads.get());
+        assertEquals(2, prompts.size());
+        assertTrue(prompts.getFirst().contains("Confidential project"));
+        assertFalse(prompts.getLast().contains("Confidential project"));
+        assertFalse(prompts.getLast().contains("Secret.exe"));
+        assertTrue(prompts.getLast().contains("Public project"));
+        assertEquals(saved, store.versionedEntry("first").entry());
+        assertEquals(saved.metrics().topApps(), store.versionedEntry("next").entry().metrics().topApps());
+    }
+
+    @Test
     void exhaustedPeriodDoesNotStarveAnotherPeriodAndRaisedLimitResumesWithoutReset(@TempDir Path dir) throws Exception {
         store = new WikiStore(dir.resolve("wiki.db"));
         awDatabase = new Database(dir.resolve("events"));

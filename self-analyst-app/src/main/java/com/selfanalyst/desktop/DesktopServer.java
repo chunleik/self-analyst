@@ -53,6 +53,7 @@ public class DesktopServer {
     private final DesktopAgentController agentCtrl;
     private final DesktopSummaryRepairController repairCtrl;
     private final DesktopConfigController configCtrl;
+    private final DesktopPrivacyController privacyCtrl;
     private final DesktopLlmSettingsController llmSettings;
     private final DesktopChatGptController chatGpt;
     private final com.selfanalyst.chatgpt.ChatGptSessionService chatGptSessions;
@@ -165,7 +166,24 @@ public class DesktopServer {
                          DesktopFileController.SettingsApplier fileSettingsApplier, UserConfigStore userConfigStore,
                          com.selfanalyst.wiki.WikiStore wikiStore,
                          com.selfanalyst.wiki.WikiGenerationStore generationStore) {
+        this(app, config, agent, eventStore, memoryStore, watcherManager, contentWatcher,
+                contentPersistenceReady, contentMigrationError, fileWatchStore, fileStateSupplier,
+                fileSettingsApplier, userConfigStore, wikiStore, generationStore,
+                new com.selfanalyst.config.PrivacyRuntime(config));
+    }
+
+    public DesktopServer(Javalin app, Config config, SelfAnalystAgent agent, EventStore eventStore,
+                         MemoryStore memoryStore, WatcherManager watcherManager, ContentWatcher contentWatcher,
+                         boolean contentPersistenceReady, String contentMigrationError,
+                         FileWatchStore fileWatchStore, Supplier<DesktopFileController.CollectorState> fileStateSupplier,
+                         DesktopFileController.SettingsApplier fileSettingsApplier, UserConfigStore userConfigStore,
+                         com.selfanalyst.wiki.WikiStore wikiStore,
+                         com.selfanalyst.wiki.WikiGenerationStore generationStore,
+                         com.selfanalyst.config.PrivacyRuntime privacyRuntime) {
         this.app = app;
+        userConfigStore.application(config).attachPrivacy(next -> privacyRuntime.apply(
+                next.collectionExcludeApps(), next.wikiExcludeApps(), next.wikiExcludeSites()));
+        var privacy = privacyRuntime.modelPolicy();
 
         Path memoryDir = config.memoryDir();
         TaskStore taskStore = new TaskStore(memoryDir);
@@ -173,19 +191,18 @@ public class DesktopServer {
         DesktopDocumentController documentController = null;
         try {
             var documents = new com.selfanalyst.document.DocumentService(memoryDir, chatSessionStore);
-            documents.setDataSources(new com.selfanalyst.document.DocumentDataSources(config, eventStore, fileWatchStore, wikiStore));
+            documents.setDataSources(new com.selfanalyst.document.DocumentDataSources(config, eventStore, fileWatchStore, wikiStore, privacy));
             documentController = new DesktopDocumentController(documents, config);
             if (agent != null) agent.registerDocumentTools(documents);
         } catch (Exception failure) {
             log.warn("Document service unavailable: {}", failure.getClass().getSimpleName());
         }
         this.documentCtrl = documentController;
-        var privacy = com.selfanalyst.wiki.WikiPrivacyPolicy.of(config.wikiExcludeApps(), config.wikiExcludeSites());
         var repairFacts = eventStore == null ? null : new com.selfanalyst.wiki.WikiFactBuilder(
                 eventStore, config.wikiPromptMaxContentChars(), () -> 0L, privacy);
         var repairs = wikiStore == null || repairFacts == null ? null : new com.selfanalyst.wiki.WikiRepairService(
-                wikiStore, entry -> com.selfanalyst.wiki.WikiRepairService.buildRepairFacts(wikiStore, repairFacts, entry),
-                () -> privacy, () -> repairConfigurationStamp(config, agent));
+                wikiStore, (entry, policy) -> com.selfanalyst.wiki.WikiRepairService.buildRepairFacts(wikiStore, repairFacts, entry, policy),
+                privacy, policy -> repairConfigurationStamp(config, agent, policy));
         this.repairCtrl = new DesktopSummaryRepairController(repairs, chatSessionStore);
         var repairChat = repairs == null ? null : new com.selfanalyst.desktop.service.SummaryRepairChatService(
                 repairs, chatSessionStore, generationStore,
@@ -204,7 +221,7 @@ public class DesktopServer {
         }
         this.chatSessionStore = chatSessionStore;
         SummaryService summaryService = new SummaryService(eventStore, memoryStore, config.effectiveLanguage(),
-                com.selfanalyst.wiki.WikiPrivacyPolicy.of(config.wikiExcludeApps(), config.wikiExcludeSites()));
+                privacy);
         BehaviorAdviceService adviceService = new BehaviorAdviceService(config.effectiveLanguage());
         LongTermMemoryService longTermMemoryService = memoryStore != null
                 ? new LongTermMemoryService(memoryStore)
@@ -223,7 +240,7 @@ public class DesktopServer {
             ontology = new com.selfanalyst.ontology.OntologyService(
                     new com.selfanalyst.ontology.OntologyStore(memoryDir.resolve("ontology.db")),
                     new com.selfanalyst.ontology.OntologySources(wikiStore, memorySource,
-                            com.selfanalyst.wiki.WikiPrivacyPolicy.of(config.wikiExcludeApps(), config.wikiExcludeSites())));
+                            privacy));
             if (agent != null) agent.registerOntologyTools(ontology);
         } catch (RuntimeException failure) {
             if (ontology != null) ontology.close();
@@ -251,6 +268,7 @@ public class DesktopServer {
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.configCtrl.setChatGptSessions(chatGptSessions);
         var configuration = userConfigStore.application(config);
+        this.privacyCtrl = new DesktopPrivacyController(configuration, eventStore);
         this.neo4jSync = new com.selfanalyst.ontology.Neo4jSyncService(ontology,
                 () -> com.selfanalyst.config.Neo4jConfigResolver.from(configuration.saved().properties()),
                 System::getenv);
@@ -339,6 +357,8 @@ public class DesktopServer {
 
         // ── Config tab ───────────────────────────────────────
         app.get("/desktop/config", configCtrl::getConfig);
+        app.get("/desktop/privacy", privacyCtrl::getPrivacy);
+        app.put("/desktop/privacy", privacyCtrl::putPrivacy);
         app.before("/desktop/*", ctx -> ctx.attribute("selfanalyst.language", language));
         app.get("/desktop/config/effective", configCtrl::getEffectiveConfig);
         app.get("/desktop/llm-settings", llmSettings::get);
@@ -432,9 +452,10 @@ public class DesktopServer {
 
     private com.selfanalyst.desktop.service.PendingMemoryReview pendingMemoryReview;
 
-    private static String repairConfigurationStamp(Config config, SelfAnalystAgent agent) {
+    private static String repairConfigurationStamp(Config config, SelfAnalystAgent agent,
+                                                   com.selfanalyst.wiki.WikiPrivacyPolicy privacy) {
         var llm = agent == null ? com.selfanalyst.config.LlmSettings.from(config) : agent.llmSettings();
-        return config.wikiExcludeApps() + "|" + config.wikiExcludeSites() + "|"
+        return privacy.fingerprint() + "|"
                 + config.wikiPromptMaxContentChars() + "|" + config.wikiSummaryMaxRequestChars() + "|"
                 + config.wikiSummaryPeriodMaxCalls() + "|" + config.wikiSummaryPeriodMaxTokens() + "|"
                 + config.wikiSummaryOutputTokenReserve() + "|" + llm.provider() + "|" + llm.chatgptAccount() + "|"

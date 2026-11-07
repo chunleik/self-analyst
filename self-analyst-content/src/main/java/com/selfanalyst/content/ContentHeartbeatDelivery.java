@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /** 内容 heartbeat 的稳定来源身份和最多三次投递状态。 */
 final class ContentHeartbeatDelivery {
@@ -14,7 +15,7 @@ final class ContentHeartbeatDelivery {
     private boolean broken;
 
 
-    Map<String, Object> request(Map<String, Object> allowedData,
+    synchronized Map<String, Object> request(Map<String, Object> allowedData,
                                 Instant timestamp, double duration) {
         if (lastRequest != null && (timestamp.isBefore(lastRequest)
                 || java.time.Duration.between(lastRequest, timestamp).toSeconds() > 10)) {
@@ -35,13 +36,25 @@ final class ContentHeartbeatDelivery {
         return pending.body();
     }
 
-    void complete(boolean success) {
+    synchronized void complete(boolean success) {
         if (pending == null) return;
         if (!success) broken = true;
         if (success || pending.attempts() + 1 >= MAX_ATTEMPTS) {
             pending = null;
         } else {
             pending = new Pending(pending.body(), pending.attempts() + 1);
+        }
+    }
+
+    synchronized void resetContinuity() {
+        pending = null;
+        broken = true;
+    }
+
+    synchronized void discardExcluded(Predicate<String> excluded) {
+        if (pending != null && pending.body().get("data") instanceof Map<?, ?> data
+                && excluded.test((String) data.get("app"))) {
+            resetContinuity();
         }
     }
 

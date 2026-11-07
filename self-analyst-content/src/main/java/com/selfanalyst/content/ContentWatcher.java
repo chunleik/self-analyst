@@ -19,6 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 
 /**
  * Content watcher with decoupled capture and heartbeat.
@@ -37,6 +39,7 @@ public class ContentWatcher extends Thread {
     static final String CLIENT = "watcher-content";
 
     private final PlatformCapture platform;
+    private final Predicate<String> captureExcluded;
     private final TitleCapture capture;
     private final UiaTreeWalker treeWalker;
     private final String serverUrl;
@@ -57,10 +60,25 @@ public class ContentWatcher extends Thread {
 
     /** Latest capture snapshot — written by capture thread, read by heartbeat thread. */
     private volatile Snapshot latest;
+    private final AtomicLong captureGeneration = new AtomicLong();
+    private long observedHandle;
+    private String observedApp;
+    private String observedTitle;
+    private long lastCaptureAttemptNanos = Long.MIN_VALUE;
 
-    private record Snapshot(long handle, String app, String title, TitleCaptureResult result) {}
+    private record Snapshot(long generation, long handle, String app, String title, TitleCaptureResult result) {}
 
     public ContentWatcher(String serverUrl, int pollIntervalMs) {
+        this(serverUrl, pollIntervalMs, app -> false);
+    }
+
+    public ContentWatcher(String serverUrl, int pollIntervalMs, Predicate<String> captureExcluded) {
+        this(serverUrl, pollIntervalMs, captureExcluded, detectPlatform(), new UiaTreeWalker());
+    }
+
+    ContentWatcher(String serverUrl, int pollIntervalMs, Predicate<String> captureExcluded,
+                   PlatformCapture platform, UiaTreeWalker treeWalker) {
+        this.captureExcluded = Objects.requireNonNull(captureExcluded);
         this.serverUrl = serverUrl;
         this.pollIntervalMs = pollIntervalMs;
         int stableRefreshIntervalMs = Math.max(
@@ -68,13 +86,13 @@ public class ContentWatcher extends Thread {
         this.pollIntervalNanos = TimeUnit.MILLISECONDS.toNanos(pollIntervalMs);
         this.stableRefreshIntervalNanos =
                 TimeUnit.MILLISECONDS.toNanos(stableRefreshIntervalMs);
-        this.treeWalker = new UiaTreeWalker();
+        this.treeWalker = Objects.requireNonNull(treeWalker);
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
         this.hostname = getHostname();
         this.bucketId = bucketIdForHostname(hostname);
-        this.platform = detectPlatform();
+        this.platform = Objects.requireNonNull(platform);
         this.capture = new TitleCapture();
         setDaemon(true);
         setName("content-watcher");
@@ -93,16 +111,7 @@ public class ContentWatcher extends Thread {
 
             while (running) {
                 long cycleStart = System.currentTimeMillis();
-                Snapshot snap = latest;
-                if (snap != null) {
-                    PlatformCapture.ForegroundWindow current =
-                            platform.getForegroundWindowInfo();
-                    if (sameWindow(snap.handle, snap.app, snap.title, current)) {
-                        sendHeartbeat(snap.app, snap.title, snap.result);
-                    }
-                    // Do not clear latest on mismatch: the capture thread may have published
-                    // a replacement snapshot after this heartbeat thread read `snap`.
-                }
+                heartbeatOnce();
                 long elapsed = System.currentTimeMillis() - cycleStart;
                 long sleepMs = pollIntervalMs - elapsed;
                 if (sleepMs > 0) {
@@ -124,67 +133,10 @@ public class ContentWatcher extends Thread {
     // ── UIA title-capture thread ────────────────────────────────────
 
     private void captureLoop() {
-        long observedHandle = 0L;
-        String observedApp = null;
-        String observedTitle = null;
-        long lastCaptureAttemptNanos = Long.MIN_VALUE;
-
         while (running) {
             long cycleStartNanos = System.nanoTime();
             try {
-                PlatformCapture.ForegroundWindow foreground =
-                        platform.getForegroundWindowInfo();
-                long handle = foreground.handle();
-                if (handle == 0) {
-                    observedHandle = 0;
-                    observedApp = null;
-                    observedTitle = null;
-                    latest = null;
-                    continue;
-                }
-
-                String app = foreground.app();
-                String title = foreground.title();
-                boolean windowChanged = handle != observedHandle
-                        || !Objects.equals(app, observedApp)
-                        || !Objects.equals(title, observedTitle);
-                observedHandle = handle;
-                observedApp = app;
-                observedTitle = title;
-                if (windowChanged) latest = null;
-
-                // Excluded apps / credential windows: keep OS window metadata but never query UIA.
-                if (capture.isExcluded(app, title)) {
-                    latest = new Snapshot(handle, app, title, capture.windowOnly());
-                    continue;
-                }
-
-                long nowNanos = System.nanoTime();
-                if (!captureIsDue(
-                        windowChanged, nowNanos, lastCaptureAttemptNanos,
-                        stableRefreshIntervalNanos)) {
-                    continue;
-                }
-                // Advance the monotonic schedule before starting potentially slow UIA work.
-                lastCaptureAttemptNanos = nowNanos;
-
-                UiaTreeWalker.UiaWalkResult walkResult;
-                try {
-                    walkResult = treeWalker.walk(handle);
-                } catch (Exception e) {
-                    walkResult = new UiaTreeWalker.UiaWalkResult("", null);
-                }
-
-                TitleCaptureResult titleResult = capture.capture(
-                        app, walkResult.root(), walkResult.text());
-
-                PlatformCapture.ForegroundWindow confirmed =
-                        platform.getForegroundWindowInfo();
-                if (sameWindow(handle, app, title, confirmed)) {
-                    latest = new Snapshot(handle, app, title, titleResult);
-                } else {
-                    latest = null;
-                }
+                captureOnce();
             } catch (Exception e) {
                 log.error("Content capture failed type={}", e.getClass().getSimpleName());
             } finally {
@@ -202,6 +154,99 @@ public class ContentWatcher extends Thread {
                 }
             }
         }
+    }
+
+    /** One capture poll, also used by deterministic platform-independent tests. */
+    void captureOnce() {
+        long generation = captureGeneration.get();
+        PlatformCapture.ForegroundWindow foreground =
+                platform.getForegroundWindowInfo();
+        long handle = foreground != null ? foreground.handle() : 0;
+        if (handle == 0 || captureExcluded.test(foreground.app())) {
+            observedHandle = 0;
+            observedApp = null;
+            observedTitle = null;
+            discardCapture();
+            return;
+        }
+
+        String app = foreground.app();
+        String title = foreground.title();
+        Snapshot previous = latest;
+        boolean windowChanged = previous == null || previous.generation != generation
+                || handle != observedHandle
+                || !Objects.equals(app, observedApp)
+                || !Objects.equals(title, observedTitle);
+        observedHandle = handle;
+        observedApp = app;
+        observedTitle = title;
+        if (windowChanged) latest = null;
+
+        // Excluded apps / credential windows: keep OS window metadata but never query UIA.
+        if (capture.isExcluded(app, title)) {
+            if (captureExcluded.test(app)) {
+                discardCapture();
+            } else if (generation == captureGeneration.get()) {
+                latest = new Snapshot(generation, handle, app, title, capture.windowOnly());
+            }
+            return;
+        }
+
+        long nowNanos = System.nanoTime();
+        if (!captureIsDue(
+                windowChanged, nowNanos, lastCaptureAttemptNanos,
+                stableRefreshIntervalNanos)) {
+            return;
+        }
+        // Advance the monotonic schedule before starting potentially slow UIA work.
+        lastCaptureAttemptNanos = nowNanos;
+
+        if (captureExcluded.test(app)) {
+            discardCapture();
+            return;
+        }
+        UiaTreeWalker.UiaWalkResult walkResult;
+        try {
+            walkResult = treeWalker.walk(handle);
+        } catch (Exception e) {
+            walkResult = new UiaTreeWalker.UiaWalkResult("", null);
+        }
+
+        TitleCaptureResult titleResult = capture.capture(
+                app, walkResult.root(), walkResult.text());
+
+        PlatformCapture.ForegroundWindow confirmed =
+                platform.getForegroundWindowInfo();
+        if (captureExcluded.test(app) || (confirmed != null && captureExcluded.test(confirmed.app()))) {
+            discardCapture();
+        } else if (generation == captureGeneration.get()
+                && sameWindow(handle, app, title, confirmed)) {
+            latest = new Snapshot(generation, handle, app, title, titleResult);
+        } else {
+            latest = null;
+        }
+    }
+
+    void heartbeatOnce() {
+        heartbeatDelivery.discardExcluded(captureExcluded);
+        PlatformCapture.ForegroundWindow current = platform.getForegroundWindowInfo();
+        if (current == null || current.handle() == 0 || captureExcluded.test(current.app())) {
+            discardCapture();
+            return;
+        }
+        Snapshot snap = latest;
+        if (snap != null && captureExcluded.test(snap.app)) {
+            discardCapture();
+        } else if (snap != null && snap.generation == captureGeneration.get()
+                && sameWindow(snap.handle, snap.app, snap.title, current)) {
+            sendHeartbeat(snap);
+        }
+    }
+
+    private void discardCapture() {
+        captureGeneration.incrementAndGet();
+        latest = null;
+        heartbeatDelivery.resetContinuity();
     }
 
     static boolean captureIsDue(boolean windowChanged, long nowNanos,
@@ -236,32 +281,51 @@ public class ContentWatcher extends Thread {
             "ContentWatcher is only supported on Windows. OS: " + os);
     }
 
-    private void sendHeartbeat(String app, String title, TitleCaptureResult result) {
+    private void sendHeartbeat(Snapshot snap) {
+        String app = snap.app;
+        String title = snap.title;
+        TitleCaptureResult result = snap.result;
         try {
             String url = serverUrl + "/api/0/buckets/" + bucketId + "/heartbeat";
 
+            if (captureExcluded.test(app)) {
+                discardCapture();
+                return;
+            }
+            heartbeatDelivery.discardExcluded(captureExcluded);
             Map<String, Object> data = heartbeatData(app, title, result);
 
             Map<String, Object> body = heartbeatDelivery.request(data, Instant.now(),
                     Math.max(HEARTBEAT_DURATION_S, pollIntervalMs / 1000.0));
 
-            String json = MAPPER.writeValueAsString(body);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(5))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(json))
-                .build();
-
-            HttpResponse<Void> response =
-                    httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-            heartbeatHealthy = response.statusCode() >= 200 && response.statusCode() < 300;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> pendingData = (Map<String, Object>) body.get("data");
+            PlatformCapture.ForegroundWindow current = platform.getForegroundWindowInfo();
+            if (captureExcluded.test((String) pendingData.get("app"))
+                    || current == null || captureExcluded.test(current.app())) {
+                discardCapture();
+                return;
+            }
+            if (snap.generation != captureGeneration.get()
+                    || !sameWindow(snap.handle, app, title, current)) return;
+            heartbeatHealthy = deliverHeartbeat(url, body);
             heartbeatDelivery.complete(heartbeatHealthy);
         } catch (Exception e) {
             heartbeatHealthy = false;
             heartbeatDelivery.complete(false);
         }
+    }
+
+    protected boolean deliverHeartbeat(String url, Map<String, Object> body) throws Exception {
+        String json = MAPPER.writeValueAsString(body);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+        int status = httpClient.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
+        return status >= 200 && status < 300;
     }
 
     static Map<String, Object> heartbeatData(String app, String title, TitleCaptureResult result) {

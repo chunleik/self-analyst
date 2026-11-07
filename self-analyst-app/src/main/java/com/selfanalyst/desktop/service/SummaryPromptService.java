@@ -14,6 +14,14 @@ import java.util.*;
  */
 public class SummaryPromptService {
 
+    private final java.util.function.Supplier<com.selfanalyst.wiki.WikiPrivacyPolicy> privacy;
+
+    public SummaryPromptService() { this(com.selfanalyst.wiki.WikiPrivacyPolicy::none); }
+
+    public SummaryPromptService(java.util.function.Supplier<com.selfanalyst.wiki.WikiPrivacyPolicy> privacy) {
+        this.privacy = Objects.requireNonNull(privacy);
+    }
+
     public static final String PROMPT_VERSION = "desktop-derived-evidence-v3";
     static final int MAX_PROMPT_CHARS = 8000;
 
@@ -92,7 +100,8 @@ public class SummaryPromptService {
         }
 
         try {
-            String prompt = buildAdvicePrompt(advice, lang);
+            var policy = Objects.requireNonNull(privacy.get());
+            String prompt = buildAdvicePrompt(advice, lang, policy);
             String response = client.complete(prompt, Duration.ofSeconds(60));
             if (response == null || response.isBlank()) {
                 return advice;
@@ -133,6 +142,7 @@ public class SummaryPromptService {
         String goal = facts.goalContext() == null ? "" : facts.goalContext();
         if (goal.length() > 512) goal = goal.substring(0, 512);
         Map<String, Object> samplingCoverage = new LinkedHashMap<>(facts.titleFacts().coverage());
+        samplingCoverage.remove("privacyFingerprint");
         samplingCoverage.remove("appSeconds"); // Local cache metadata does not consume the title prompt budget.
         return Messages.text(lang, "summary.prompt").formatted(facts.titleFacts().jsonLines(),
                         samplingCoverage, goal)
@@ -199,7 +209,21 @@ public class SummaryPromptService {
     }
 
     static String buildAdvicePrompt(BehaviorAdviceService.BehaviorAdvice advice, Lang lang) {
-        return Messages.text(lang, "advice.prompt").formatted(advice.type(), advice.title(), advice.body(), advice.evidenceTags() != null ? String.join(", ", advice.evidenceTags()) : Messages.text(lang, "common.none"), advice.basis() != null ? advice.basis().trend() : Messages.text(lang, "common.unknown"));
+        return buildAdvicePrompt(advice, lang, com.selfanalyst.wiki.WikiPrivacyPolicy.none());
+    }
+
+    static String buildAdvicePrompt(BehaviorAdviceService.BehaviorAdvice advice, Lang lang,
+                                    com.selfanalyst.wiki.WikiPrivacyPolicy policy) {
+        List<String> evidence = advice.evidenceTags() == null ? List.of() : advice.evidenceTags().stream()
+                .map(value -> modelAdviceText(value, policy)).filter(value -> !value.isBlank()).toList();
+        return Messages.text(lang, "advice.prompt").formatted(modelAdviceText(advice.type(), policy),
+                modelAdviceText(advice.title(), policy), modelAdviceText(advice.body(), policy),
+                evidence.isEmpty() ? Messages.text(lang, "common.none") : String.join(", ", evidence),
+                advice.basis() == null ? Messages.text(lang, "common.unknown") : modelAdviceText(advice.basis().trend(), policy));
+    }
+
+    private static String modelAdviceText(String text, com.selfanalyst.wiki.WikiPrivacyPolicy policy) {
+        return policy.excludedAppMention(text) || policy.excludedTitle(text) ? "" : Objects.toString(policy.redactText(text), "");
     }
 
     private static BehaviorAdviceService.BehaviorAdvice parseAdviceResponse(

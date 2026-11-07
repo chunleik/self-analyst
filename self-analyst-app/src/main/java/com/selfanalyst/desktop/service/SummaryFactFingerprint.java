@@ -68,7 +68,8 @@ public final class SummaryFactFingerprint {
                 + ";k" + bucketMinutes(facts.afkTime())
                 + ";s" + (facts.switchCount() / SWITCH_BUCKET)
                 + ";q" + facts.coverage() + ";u" + (long) facts.unknownActivitySeconds()
-                + ";titles=" + titleKey(facts);
+                + ";titles=" + titleKey(facts)
+                + ";privacy=" + facts.titleFacts().coverage().getOrDefault("privacyFingerprint", "legacy");
     }
 
     private static String appsKey(SummaryService.LocalFacts facts) {

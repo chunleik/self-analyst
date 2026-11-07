@@ -12,6 +12,64 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ConfigApplicationServiceTest {
 
+    @Test void privacyRawAndStructuredSavesApplyBeforeReturning() throws Exception {
+        var store = new UserConfigStore(dir);
+        var service = service(store);
+        var privacy = new PrivacyRuntime(service.saved().config());
+        var calls = new AtomicInteger();
+        service.attachPrivacy(config -> {
+            assertEquals(config.collectionExcludeApps(), store.loadUser().getProperty("events.collection.excludeApps", ""));
+            privacy.apply(config.collectionExcludeApps(), config.wikiExcludeApps(), config.wikiExcludeSites());
+            calls.incrementAndGet();
+        });
+        var result = service.saveRaw("[events.collection]\nexcludeApps='capture.exe'\n"
+                + "[wiki.privacy]\nexcludeApps='hidden.exe'\nexcludeSites='private.test'\n");
+        assertEquals(1, calls.get());
+        assertTrue(privacy.captureExcluded().test("capture.exe"));
+        assertTrue(privacy.modelPolicy().get().excludedApp("hidden.exe"));
+        assertTrue(privacy.modelPolicy().get().excludedHost("private.test"));
+        var running = (Map<?, ?>) service.effectivePayload().get("running");
+        for (String key : ConfigPolicy.PRIVACY) {
+            assertFalse(ConfigPolicy.requiresRestart(key));
+            assertFalse(result.restartRequired().contains(key));
+            assertEquals(service.saved().values().get(key).value(), running.get(key));
+        }
+        service.update(Map.of("events.collection.excludeApps", "", "wiki.privacy.excludeApps", "capture.exe"));
+        assertEquals(2, calls.get());
+        assertFalse(privacy.captureExcluded().test("capture.exe"));
+        assertTrue(privacy.modelPolicy().get().excludedApp("capture.exe"));
+        assertEquals("", ((Map<?, ?>) service.effectivePayload().get("running")).get("events.collection.excludeApps"));
+    }
+
+    @Test void invalidAndFailedWritesDoNotApplyPrivacy() throws Exception {
+        var failWrite = new AtomicBoolean();
+        var store = new UserConfigStore(dir) {
+            @Override public void saveRaw(String text) throws IOException {
+                if (failWrite.get()) throw new IOException("test failure");
+                super.saveRaw(text);
+            }
+        };
+        store.saveRaw("[events.collection]\nexcludeApps='old.exe'\n");
+        var service = service(store);
+        var privacy = new PrivacyRuntime(service.saved().config());
+        var calls = new AtomicInteger();
+        service.attachPrivacy(config -> {
+            calls.incrementAndGet();
+            privacy.apply(config.collectionExcludeApps(), config.wikiExcludeApps(), config.wikiExcludeSites());
+        });
+        String before = store.readRaw();
+        assertThrows(TomlValidationException.class, () -> service.saveRaw(
+                "[events.collection]\nexcludeApps='new.exe'\nwindow='invalid'\n"));
+        failWrite.set(true);
+        assertThrows(IOException.class, () -> service.update(Map.of("events.collection.excludeApps", "new.exe")));
+        assertEquals(0, calls.get());
+        assertEquals(before, store.readRaw());
+        assertTrue(privacy.captureExcluded().test("old.exe"));
+        assertFalse(privacy.captureExcluded().test("new.exe"));
+        assertEquals("old.exe", ((Map<?, ?>) service.effectivePayload().get("running")).get("events.collection.excludeApps"));
+    }
+
+
     @Test void retiredOutputLimitIsIgnoredAndDoesNotRebuildModels() throws Exception {
         var store = new UserConfigStore(dir);
         var environment = Map.of("LLM_MAX_TOKENS", "8");

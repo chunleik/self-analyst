@@ -3,18 +3,26 @@ package com.selfanalyst.events.watcher;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.function.Predicate;
 
 public class WatcherManager {
     private final List<Watcher> watchers = new ArrayList<>();
     private final String serverUrl;
+    private final Predicate<String> captureExcluded;
     private boolean started = false;
 
     public WatcherManager(String serverUrl) {
+        this(serverUrl, app -> false);
+    }
+
+    public WatcherManager(String serverUrl, Predicate<String> captureExcluded) {
         this.serverUrl = serverUrl;
+        this.captureExcluded = Objects.requireNonNull(captureExcluded);
     }
 
     public WatcherManager addWindowWatcher() {
-        watchers.add(new WindowWatcher(serverUrl));
+        watchers.add(new WindowWatcher(serverUrl, captureExcluded));
         return this;
     }
 

@@ -22,6 +22,55 @@ class SummaryServiceTest {
     Path tempDir;
 
     @Test
+    void collectionExcludedHistoryUsesOneRuntimeSnapshotAndKeepsLocalStatistics() throws Exception {
+        var runtime = new com.selfanalyst.config.PrivacyRuntime("", "", "");
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var changeDuringRead = new java.util.concurrent.atomic.AtomicBoolean(true);
+        try (Database db = new Database(tempDir.resolve("runtime-privacy"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT) {
+                @Override public Map<String, EventRange> queryIntersecting(List<String> ids, Instant start, Instant end) {
+                    if (changeDuringRead.getAndSet(false)) runtime.apply("Secret.exe", "", "");
+                    return super.queryIntersecting(ids, start, end);
+                }
+            };
+            SummaryService service = new SummaryService(events, null, com.selfanalyst.i18n.Lang.chinese(), () -> {
+                reads.incrementAndGet(); return runtime.modelPolicy().get();
+            });
+            Instant start = Instant.parse("2026-09-14T20:00:00Z"), end = start.plusSeconds(120);
+            events.insertEvent(service.windowBucket(), new Event(start, 60,
+                    Map.of("app", "Secret.exe", "title", "Confidential project")));
+            events.insertEvent(service.windowBucket(), new Event(start.plusSeconds(60), 60,
+                    Map.of("app", "Editor", "title", "Public project")));
+            events.insertEvent(service.afkBucket(), new Event(start, 120, Map.of("status", "not-afk")));
+            var first = service.currentWindowFacts(start, end, "current");
+            assertEquals(1, reads.get());
+            assertTrue(first.titleFacts().jsonLines().contains("Confidential project"));
+            var next = service.currentWindowFacts(start, end, "current");
+            assertEquals(2, reads.get());
+            assertFalse(next.titleFacts().jsonLines().contains("Confidential project"));
+            assertEquals(first.topApps(), next.topApps());
+            assertEquals(first.headline(), next.headline());
+            assertEquals(first.evidence(), next.evidence());
+            assertEquals(first.activeTime(), next.activeTime());
+            assertEquals(first.titleFacts().coverage().get("appSeconds"), next.titleFacts().coverage().get("appSeconds"));
+            String prompt = SummaryPromptService.buildPrompt(next, com.selfanalyst.i18n.Lang.chinese());
+            assertFalse(prompt.contains("Secret.exe"));
+            assertFalse(prompt.contains("Confidential project"));
+            assertFalse(prompt.contains("privacyFingerprint"));
+            assertFalse(prompt.contains(runtime.modelPolicy().get().fingerprint()));
+            String fingerprint = SummaryFactFingerprint.of(next, next);
+            runtime.apply("SECRET.EXE;Unused.exe", "", "");
+            var changedPolicy = service.currentWindowFacts(start, end, "current");
+            assertEquals(next.titleFacts().facts(), changedPolicy.titleFacts().facts());
+            assertFalse(fingerprint.equals(SummaryFactFingerprint.of(changedPolicy, changedPolicy)));
+            runtime.apply("", "", "");
+            assertTrue(service.currentWindowFacts(start, end, "current").titleFacts().jsonLines().contains("Confidential project"));
+            assertEquals(2, events.queryIntersecting(List.of(service.windowBucket()), start, end)
+                    .get(service.windowBucket()).events().size());
+        }
+    }
+
+    @Test
     void currentWindowsShareWikiTitleFactsWithoutDependingOnWikiBackground() throws Exception {
         try (Database db = new Database(tempDir.resolve("current-titles"))) {
             java.util.List<List<String>> queries = new java.util.ArrayList<>();

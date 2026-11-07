@@ -15,6 +15,38 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class WikiRepairServiceTest {
+    @Test void repairOperationsUseOnePolicyForFactsAndConfirmation() {
+        try (WikiStore store = new WikiStore(directory.resolve("snapshot.db"))) {
+            store.upsert(entry("target"));
+            var policy = new AtomicReference<>(WikiPrivacyPolicy.none());
+            var reads = new java.util.concurrent.atomic.AtomicInteger();
+            var seen = new java.util.ArrayList<String>();
+            var switchDuringFacts = new java.util.concurrent.atomic.AtomicBoolean(true);
+            var service = new WikiRepairService(store, (entry, captured) -> {
+                seen.add(captured.fingerprint());
+                if (switchDuringFacts.getAndSet(false)) policy.set(WikiPrivacyPolicy.of("IDE", ""));
+                var facts = facts(entry);
+                return captured.excludedApp("IDE") ? facts.withInput(
+                        new WikiTitleSampler.Selection(List.of(), "", Map.of("candidateFacts", 0)), List.of()) : facts;
+            }, () -> { reads.incrementAndGet(); return policy.get(); }, WikiPrivacyPolicy::fingerprint, CLOCK);
+            var opened = service.open("session", "target");
+            assertEquals(1, reads.get());
+            assertEquals(1, opened.evidence().size());
+            assertTrue(service.read("session", opened.draft().id()).evidence().isEmpty());
+            assertEquals(2, reads.get());
+            policy.set(WikiPrivacyPolicy.none());
+            var edited = service.edit("session", opened.draft().id(), 0, candidate("已完成数据库同步。", "user_confirmed", List.of()));
+            int before = reads.get();
+            var confirmed = service.confirm("session", edited.draft().id(), edited.draft().draftRevision(), List.of(0));
+            assertEquals(before + 1, reads.get());
+            assertEquals(1, confirmed.draft().statements().size());
+            before = reads.get();
+            assertEquals("valid", service.validate("session", confirmed.draft().id(), confirmed.draft().draftRevision()).draft().state());
+            assertEquals(before + 1, reads.get());
+            assertEquals(WikiStatus.FAILED, store.versionedEntry("target").entry().status());
+        }
+    }
+
     @Test void periodBudgetPauseRemainsLocallyRepairable() {
         try (WikiStore store = new WikiStore(directory.resolve("budget.db"))) {
             store.upsert(entry("target"));

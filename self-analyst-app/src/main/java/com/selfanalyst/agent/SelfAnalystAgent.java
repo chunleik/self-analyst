@@ -139,6 +139,14 @@ public class SelfAnalystAgent implements AutoCloseable {
     public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
                              UserConfigStore userConfigStore, FileTools fileTools,
                              UsageMeter usageMeter) throws IOException {
+        this(config, wikiStore, wikiTools, userConfigStore, fileTools, usageMeter,
+                new com.selfanalyst.config.PrivacyRuntime(config).modelPolicy());
+    }
+
+    public SelfAnalystAgent(Config config, WikiStore wikiStore, WikiTools wikiTools,
+                             UserConfigStore userConfigStore, FileTools fileTools,
+                             UsageMeter usageMeter,
+                             java.util.function.Supplier<com.selfanalyst.wiki.WikiPrivacyPolicy> privacy) throws IOException {
         this.startupConfig = config;
         this.chatGptSessions = new ChatGptSessionService(config.memoryDir().resolve("chatgpt-auth"));
         this.configuration = userConfigStore == null ? null : userConfigStore.application(config);
@@ -149,7 +157,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         this.hasConfigTools = userConfigStore != null;
         this.hasFileTools = fileTools != null;
         this.memory = MemoryStore.load(config.memoryDir());
-        this.tools = new EventQueryTools(config.eventsBaseUrl(), config.eventsTimeout());
+        this.tools = new EventQueryTools(config.eventsBaseUrl(), config.eventsTimeout(), privacy);
 
         // AgentScope 2.x executes multiple tool calls in parallel by default. Keep the
         // 1.x sequential semantics because several tools share local stores/connections.

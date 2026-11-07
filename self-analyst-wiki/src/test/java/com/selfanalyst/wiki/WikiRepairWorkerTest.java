@@ -132,7 +132,9 @@ class WikiRepairWorkerTest {
                 store.upsert(WikiRepairServiceTest.entry("target"));
                 CountDownLatch started = new CountDownLatch(1), release = new CountDownLatch(1);
                 WikiFactBuilder builder = new WikiFactBuilder(null, 24000) {
-                    @Override public WikiFacts buildFacts(WikiPeriod period) { return WikiRepairServiceTest.facts(WikiRepairServiceTest.entry("target")); }
+                    @Override public WikiFacts buildFacts(WikiPeriod period, WikiPrivacyPolicy privacy) {
+                        return WikiRepairServiceTest.facts(WikiRepairServiceTest.entry("target"));
+                    }
                 };
                 WikiSummarizer summarizer = new WikiSummarizer(prompt -> "unused") {
                     @Override public SummaryResult summarize(WikiFactBuilder.WikiFacts facts, Duration timeout) {

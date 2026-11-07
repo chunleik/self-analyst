@@ -20,6 +20,69 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WikiFactBuilderTest {
 
     @Test
+    void eachFactBuildCapturesExactlyOneImmutablePolicy() throws Exception {
+        var policy = new java.util.concurrent.atomic.AtomicReference<>(WikiPrivacyPolicy.none());
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        try (Database db = new Database(tempDir.resolve("dynamic-privacy"))) {
+            EventStore events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            String host = java.net.InetAddress.getLocalHost().getHostName();
+            Instant start = Instant.parse("2026-09-21T04:00:00Z");
+            events.insertEvent("watcher-window_" + host, new Event(start, 60,
+                    Map.of("app", "Secret.exe", "title", "Confidential project")));
+            events.insertEvent("watcher-afk_" + host, new Event(start, 60, Map.of("status", "not-afk")));
+            var builder = new WikiFactBuilder(events, 24000, () -> null, () -> {
+                reads.incrementAndGet(); return policy.get();
+            });
+            var period = new WikiPeriod(WikiLevel.HOUR, start, start.plusSeconds(3600), "UTC");
+            var first = builder.buildCompleteFacts(period);
+            assertEquals(1, reads.get());
+            assertTrue(new WikiSummarizer(ignored -> "").buildPrompt(first).contains("Secret.exe"));
+            policy.set(WikiPrivacyPolicy.of("secret.exe", ""));
+            var second = builder.buildCompleteFacts(period);
+            assertEquals(2, reads.get());
+            assertTrue(second.sampledTitles().facts().isEmpty());
+            assertFalse(new WikiSummarizer(ignored -> "").buildPrompt(second).contains("Secret.exe"));
+            assertEquals(first.topApps(), second.topApps());
+            assertEquals(first.activeSeconds(), second.activeSeconds());
+            assertTrue(first.sampledTitles().jsonLines().contains("Confidential project"));
+        }
+    }
+
+    @Test
+    void hiddenOnlyLegacyChildCannotReturnUnderSyntheticWikiApp() {
+        Instant start = Instant.parse("2026-09-01T04:00:00Z"), end = start.plusSeconds(3600);
+        var policy = new java.util.concurrent.atomic.AtomicReference<>(WikiPrivacyPolicy.none());
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var child = new WikiEntry("legacy", WikiLevel.HOUR, start, end, "UTC", WikiStatus.SUMMARIZED,
+                "Confidential project", "Confidential project", java.util.List.of(),
+                new WikiEntry.WikiMetrics(60, 0, 0, java.util.List.of(new WikiEntry.AppDuration("Secret.exe", 60)), Map.of()),
+                java.util.List.of(), "model", "v1", 0, null, null, start, end, end);
+        var builder = new WikiFactBuilder(null, 24000, () -> null, () -> {
+            reads.incrementAndGet(); return policy.get();
+        });
+        var period = new WikiPeriod(WikiLevel.HALF_DAY, start, start.plusSeconds(28800), "UTC");
+        assertEquals(1, builder.buildFactsFromChildren(java.util.List.of(child), period).childSummaries().size());
+        policy.set(WikiPrivacyPolicy.of("SECRET.EXE", ""));
+        var hidden = builder.buildFactsFromChildren(java.util.List.of(child), period);
+        assertEquals(2, reads.get());
+        assertTrue(hidden.childSummaries().isEmpty());
+        assertTrue(hidden.sampledTitles().facts().isEmpty());
+        assertEquals(60, hidden.activeSeconds());
+        assertEquals(child.metrics().topApps(), hidden.topApps());
+        assertEquals("Confidential project", child.summary());
+    }
+
+    @Test
+    void privacyFingerprintDependsOnNormalizedContentsNotObjectIdentity() {
+        var a = WikiPrivacyPolicy.of("Secret.exe;Editor", "Example.com");
+        var b = WikiPrivacyPolicy.of("editor, SECRET.EXE,editor", "example.com");
+        assertEquals(a.fingerprint(), b.fingerprint());
+        assertFalse(a.fingerprint().equals(WikiPrivacyPolicy.of("Secret.exe", "example.com").fingerprint()));
+        assertFalse(a.fingerprint().equals(WikiPrivacyPolicy.of("Secret.exe;Editor", "other.test").fingerprint()));
+        assertFalse(a.fingerprint().contains("Secret.exe"));
+    }
+
+    @Test
     void parentKeepsDatedTasksAndNonemptyCoverageWithoutDroppingEvidence() {
         Instant start = Instant.parse("2026-09-01T04:00:00Z");
         Instant end = start.plusSeconds(86400);

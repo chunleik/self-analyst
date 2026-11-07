@@ -75,7 +75,7 @@ public class DesktopSummaryAssembler implements AutoCloseable {
                             WikiStore wikiStore, Clock clock, Executor executor) {
         this.facts = facts;
         this.adviceService = adviceService;
-        this.prompts = prompts != null ? prompts : new SummaryPromptService();
+        this.prompts = prompts != null ? prompts : new SummaryPromptService(facts::privacyPolicy);
         this.snapshots = snapshots;
         this.windows = new SummaryWindowClassifier(clock);
         this.timeline = new SummaryTimelineAssembler(wikiStore, facts, this.prompts, clock.getZone());

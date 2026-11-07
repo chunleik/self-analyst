@@ -14,6 +14,43 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class DocumentDataSourceTest {
     @TempDir Path temp;
+    @Test void projectionExportFiltersWithOneSnapshotAndCountsOnlyPublishedRows() throws Exception {
+        Instant start = Instant.parse("2026-11-01T00:00:00Z"), end = start.plusSeconds(3600);
+        var config = ConfigResolver.resolve(new Properties(), Map.of()).config();
+        var privacy = new com.selfanalyst.config.PrivacyRuntime("capture.exe", "hidden.exe", "private.test");
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        try (var db = new Database(temp.resolve("privacy-events"))) {
+            var events = new EventStore(db, PulseTimeConfig.DEFAULT);
+            new BucketStore(db).create(Bucket.create("bucket", "Synthetic", "currentwindow", "test", "test"));
+            for (var data : List.of(Map.<String, Object>of("app", "capture.exe"),
+                    Map.<String, Object>of("app", "HIDDEN.EXE"),
+                    Map.<String, Object>of("app", "browser.exe", "url_host", "sub.private.test"),
+                    Map.<String, Object>of("app", "browser.exe", "context_title", "private.test article"),
+                    Map.<String, Object>of("app", "browser.exe", "private_browsing", true),
+                    Map.<String, Object>of("app", "visible.exe", "title", "visible"))) {
+                events.insertEvent("bucket", new Event(start, 10, data));
+            }
+            var sources = new DocumentDataSources(config, events, null, null,
+                    () -> { reads.incrementAndGet(); return privacy.modelPolicy().get(); });
+            var query = sources.parse("{\"source\":\"projection\",\"bucketId\":\"bucket\",\"start\":\"" + start
+                    + "\",\"end\":\"" + end + "\",\"fields\":[\"data\"]}");
+            for (int index = 0; index < 2; index++) {
+                Path directory = Files.createDirectories(temp.resolve("export-" + index));
+                try (var prepared = sources.prepare(query, DocumentFormat.JSON, "Synthetic export", directory, new DocumentBudget(() -> false))) {
+                    var rows = prepared.request().sheets().getFirst().rows();
+                    assertEquals(index == 0 ? 1 : 5, rows.size());
+                    if (index == 0) assertEquals("visible.exe", rows.getFirst().getFirst().path("app").asText());
+                    var metadata = prepared.request().source().path("metadata");
+                    assertEquals(rows.size(), metadata.path("recordCount").asInt());
+                    assertEquals(index == 0 ? 5 : 1, metadata.path("privacyFilteredCount").asInt());
+                    assertTrue(metadata.path("complete").asBoolean());
+                }
+                assertEquals(index + 1, reads.get());
+                privacy.apply("", "", "");
+            }
+        }
+    }
+
     @Test void typedSnapshotsPreserveRecordsAndHalfOpenBounds() throws Exception {
         Instant start = Instant.parse("2026-09-01T00:00:00Z"), end = start.plusSeconds(3600);
         var properties = new Properties(); properties.setProperty("events.mode", "embedded");

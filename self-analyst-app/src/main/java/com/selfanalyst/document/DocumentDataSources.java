@@ -8,6 +8,9 @@ import com.selfanalyst.events.store.EventStore;
 import com.selfanalyst.file.FileWatchStore;
 import com.selfanalyst.wiki.WikiStore;
 import com.selfanalyst.wiki.WikiLevel;
+import com.selfanalyst.wiki.WikiPrivacyPolicy;
+import com.selfanalyst.tools.EventPrivacyFilter;
+import java.util.function.Supplier;
 import java.nio.file.Path;
 import java.time.*;
 import java.util.*;
@@ -22,8 +25,14 @@ public final class DocumentDataSources {
     private final EventStore events;
     private final FileWatchStore files;
     private final WikiStore wiki;
+    private final Supplier<WikiPrivacyPolicy> privacy;
     public DocumentDataSources(Config config, EventStore events, FileWatchStore files, WikiStore wiki) {
+        this(config, events, files, wiki, new com.selfanalyst.config.PrivacyRuntime(config).modelPolicy());
+    }
+    public DocumentDataSources(Config config, EventStore events, FileWatchStore files, WikiStore wiki,
+                               Supplier<WikiPrivacyPolicy> privacy) {
         this.config = config; this.events = events; this.files = files; this.wiki = wiki;
+        this.privacy = Objects.requireNonNull(privacy);
     }
     public record Query(String source, String bucketId, Instant start, Instant end, String timezone,
                         List<String> fields, String level) {}
@@ -68,6 +77,7 @@ public final class DocumentDataSources {
         node.set("fields", DocumentRequest.JSON.valueToTree(query.fields)); return node;
     }
     public Prepared prepare(Query query, DocumentFormat format, String title, Path directory, DocumentBudget budget) throws Exception {
+        WikiPrivacyPolicy policy = Objects.requireNonNull(privacy.get());
         if (format == DocumentFormat.SVG)
             throw new IllegalArgumentException("SVG 不支持直接数据导出，请使用 generate_document 提供矢量源码");
         var spool = new DocumentRowSpool(directory.resolve("rows.part"));
@@ -77,13 +87,19 @@ public final class DocumentDataSources {
                 spool.append(query.fields.stream().map(field -> row.path(field)).toList());
             };
             List<String> coverage = new ArrayList<>();
+            long[] privacyFilteredCount = {0};
             switch (query.source) {
                 case "raw" -> throw new IllegalArgumentException("RAW_STORAGE_RETIRED: 逐心跳原始导出已退役，请使用合并事件导出");
                 case "projection" -> {
                     if (events == null) throw new IllegalArgumentException("事件投影不可用");
                     events.exportSnapshot(query.bucketId, query.start, query.end, DocumentRequest.MAX_ROWS, event -> {
+                        JsonNode data = DocumentRequest.JSON.valueToTree(event.data());
+                        if (EventPrivacyFilter.excludedData(data, policy)) {
+                            privacyFilteredCount[0]++;
+                            return;
+                        }
                         var row = DocumentRequest.JSON.createObjectNode(); row.put("id", event.id()); row.put("timestamp", event.timestamp().toString());
-                        row.put("duration", event.duration()); row.set("data", DocumentRequest.JSON.valueToTree(event.data())); consume.accept(row);
+                        row.put("duration", event.duration()); row.set("data", data); consume.accept(row);
                     }, budget::check);
                 }
                 case "file-metadata" -> {
@@ -109,6 +125,7 @@ public final class DocumentDataSources {
             var source = DocumentRequest.JSON.createObjectNode(); source.put("schemaVersion", 1); source.set("exportQuery", descriptor(query));
             var metadata = source.putObject("metadata"); metadata.setAll(descriptor(query));
             metadata.put("generatedAt", Instant.now().toString()); metadata.put("recordCount", spool.size()); metadata.put("complete", true);
+            if (query.source.equals("projection")) metadata.put("privacyFilteredCount", privacyFilteredCount[0]);
             metadata.set("partitions", DocumentRequest.JSON.valueToTree(coverage));
             if (format == DocumentFormat.CSV) metadata.put("csvEscaping", "电子表格公式前缀添加单引号，原值请使用 JSON");
             return new Prepared(new DocumentRequest(format, title, source, List.of(),

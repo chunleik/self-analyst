@@ -16,4 +16,8 @@ public interface SummaryFactSource {
     }
 
     SummaryService.BehaviorData behaviorData();
+
+    default com.selfanalyst.wiki.WikiPrivacyPolicy privacyPolicy() {
+        return com.selfanalyst.wiki.WikiPrivacyPolicy.none();
+    }
 }

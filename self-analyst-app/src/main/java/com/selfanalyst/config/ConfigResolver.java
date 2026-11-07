@@ -171,6 +171,9 @@ public final class ConfigResolver {
         effective("websearch.mcp-url", String.valueOf(config.webSearchMcpUrl()));
         effective("websearch.api-key", String.valueOf(config.webSearchApiKey()));
         effective("llm.temperature", String.valueOf(config.llmTemperature()));
+        effective("events.collection.excludeApps", config.collectionExcludeApps());
+        effective("wiki.privacy.excludeApps", config.wikiExcludeApps());
+        effective("wiki.privacy.excludeSites", config.wikiExcludeSites());
         effective("events.collection.window", String.valueOf(config.collectWindow()));
         effective("events.collection.afk", String.valueOf(config.collectAfk()));
         effective("events.collection.title.enabled", String.valueOf(config.collectTitle()));

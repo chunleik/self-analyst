@@ -20,6 +20,27 @@ class OntologySourcesTest {
                 List.of(), "model", "v1", 0, null, null, start, start, start);
     }
 
+    @Test void snapshotRemainsConsistentWhenPolicyChangesDuringSourceRead() {
+        try (var wiki = new WikiStore(root.resolve("dynamic-wiki.db"))) {
+            Instant start = Instant.parse("2026-09-01T00:00:00Z");
+            wiki.upsert(entry("hour", WikiLevel.HOUR, start, 3600, "Project docs", List.of("f1")));
+            var policy = new java.util.concurrent.atomic.AtomicReference<>(WikiPrivacyPolicy.none());
+            var reads = new java.util.concurrent.atomic.AtomicInteger();
+            var sources = new OntologySources(wiki, () -> {
+                policy.set(WikiPrivacyPolicy.of("IDE", ""));
+                return new GrowthProfile();
+            }, () -> { reads.incrementAndGet(); return policy.get(); });
+            var first = sources.get();
+            assertEquals(1, reads.get());
+            assertTrue(first.entities().stream().anyMatch(e -> e.type().equals("activity")));
+            assertTrue(first.entities().stream().filter(e -> e.type().equals("activity"))
+                    .findFirst().orElseThrow().evidence().getFirst().available());
+            assertTrue(sources.get().entities().isEmpty());
+            assertEquals(2, reads.get());
+            assertEquals(1, wiki.ontologySnapshot(10).size());
+        }
+    }
+
     @Test void projectsMemoryRemovalAndLegacyGoalsHaveLiveSourceIdentity() throws Exception {
         var memory = new LongTermMemoryService(MemoryStore.load(root));
         var project = memory.createManual("project", "SelfAnalyst", "user statement", null, "ui_manual", "active");

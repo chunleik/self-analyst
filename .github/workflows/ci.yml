@@ -124,7 +124,8 @@ jobs:
 
   privacy-ui:
     name: 隐私界面验证 (Linux)
-    runs-on: ubuntu-latest
+    # 与固定 Playwright 版本匹配，避免 latest 自动升级到尚未支持的发行版。
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: 检出代码

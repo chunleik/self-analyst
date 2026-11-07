@@ -46,3 +46,20 @@ test('selected and keyboard focus states stay visible', () => {
   assert.match(cssRule('.knowledge-entity.selected'), /background:\s*var\(--accent-soft\)/);
   assert.match(styles, /\.knowledge-page button:focus-visible[^{]*\{[^}]*outline:\s*2px solid var\(--accent\)/);
 });
+
+
+test('hidden menu, custom dates and picker pagination override shared display rules', () => {
+  for (const selector of ['.knowledge-menu-panel[hidden]', '.knowledge-custom-time[hidden]', '.knowledge-picker-list[hidden]', '.knowledge-picker .btn[hidden]']) {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(styles, new RegExp(escaped + '[^{]*\\{[^}]*display:\\s*none'));
+  }
+});
+
+test('every entity type and relation state has a distinguishable theme style', () => {
+  for (const type of ['project', 'activity', 'application', 'topic', 'goal', 'pattern', 'improvement']) {
+    assert.ok(styles.includes(`.knowledge-badge[data-type=${type}]`), type);
+  }
+  for (const status of ['confirmed', 'inferred', 'candidate']) assert.ok(styles.includes(`.knowledge-claim[data-status=${status}]`), status);
+  assert.match(cssRule('.knowledge-detail'), /overflow-y:\s*auto/);
+  assert.match(styles, /\.knowledge-picker-option\[aria-selected=true\][^{]*\{[^}]*outline:\s*2px solid var\(--accent\)/);
+});

@@ -60,4 +60,34 @@ class EventPrivacyFilterTest {
             assertFalse(filtered.contains("secret"));
         }
     }
+    @Test void aqlRecognizesFlatRowsAndAwEventsButPreservesNonEvents() throws Exception {
+        String response = """
+                {"rows":[{"timestamp":"now","duration":5,"app":"private.exe","title":"secret"},
+                  {"timestamp":"now","duration":3,"app":"editor.exe","title":"visible"},
+                  {"data":{"app":"private.exe"}},
+                  {"app":"private.exe"},7],
+                 "named":{"results":[{"timestamp":null,"duration":"changed","app":"private.exe"}]},
+                 "data":{"app":"private.exe"},"total_duration":8}
+                """;
+        var policy = WikiPrivacyPolicy.of("private.exe", "");
+        var result = JSON.readTree(EventPrivacyFilter.filterAql(response, policy));
+        assertEquals(3, result.path("rows").size());
+        assertEquals("visible", result.at("/rows/0/title").asText());
+        assertEquals("private.exe", result.at("/rows/1/app").asText());
+        assertEquals(7, result.at("/rows/2").asInt());
+        assertTrue(result.at("/named/results").isEmpty());
+        assertEquals("private.exe", result.at("/data/app").asText());
+        assertEquals(8, result.path("total_duration").asInt());
+        // QueryEvents must keep its narrower AW event-only contract.
+        var ordinary = JSON.readTree(EventPrivacyFilter.filter(response, policy));
+        assertEquals("secret", ordinary.at("/rows/0/title").asText());
+        assertEquals(1, ordinary.at("/named/results").size());
+    }
+
+    @Test void aqlInvalidJsonFailsClosedAndUnchangedJsonKeepsFormatting() {
+        assertTrue(EventPrivacyFilter.filterAql("private.exe", WikiPrivacyPolicy.none()).contains("error"));
+        String response = " { \"rows\" : [ { \"timestamp\" : \"now\", \"duration\" : 5 } ], \"other\" : null } ";
+        assertEquals(response, EventPrivacyFilter.filterAql(response, WikiPrivacyPolicy.none()));
+    }
+
 }

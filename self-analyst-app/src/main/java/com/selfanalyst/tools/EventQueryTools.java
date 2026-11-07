@@ -54,6 +54,7 @@ public class EventQueryTools {
             String endTime) {
 
         WikiPrivacyPolicy policy = privacy.get();
+        if (policy == null) return "{\"error\":\"EVENT_PRIVACY_UNAVAILABLE\"}";
         int boundedLimit = limit <= 0 ? 100 : Math.min(limit, MAX_EVENT_LIMIT);
         StringBuilder url = new StringBuilder("buckets/")
                 .append(bucketId).append("/events?limit=").append(boundedLimit);
@@ -80,6 +81,7 @@ public class EventQueryTools {
             String timeperiod) {
 
         WikiPrivacyPolicy policy = privacy.get();
+        if (policy == null) return "{\"error\":\"EVENT_PRIVACY_UNAVAILABLE\"}";
         String[] queryLines = aqlQuery.split(";");
         StringBuilder body = new StringBuilder("{")
                 .append("\"timeperiods\": [\"").append(timeperiod).append("\"],")
@@ -137,7 +139,7 @@ public class EventQueryTools {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            return response(resp, policy);
+            return response(resp, policy, true);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return "{\"error\":\"EVENT_SERVICE_INTERRUPTED\"}";
@@ -147,10 +149,16 @@ public class EventQueryTools {
     }
 
     private static String response(HttpResponse<String> response, WikiPrivacyPolicy policy) {
+        return response(response, policy, false);
+    }
+
+    private static String response(HttpResponse<String> response, WikiPrivacyPolicy policy, boolean aql) {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             return "{\"error\":\"EVENT_SERVICE_HTTP_" + response.statusCode() + "\"}";
         }
-        String body = policy == null ? response.body() : EventPrivacyFilter.filter(response.body(), policy);
+        String body = policy == null ? response.body() : aql
+                ? EventPrivacyFilter.filterAql(response.body(), policy)
+                : EventPrivacyFilter.filter(response.body(), policy);
         return boundResult(body);
     }
 

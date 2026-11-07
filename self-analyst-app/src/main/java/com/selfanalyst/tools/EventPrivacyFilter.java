@@ -18,12 +18,21 @@ public final class EventPrivacyFilter {
     private EventPrivacyFilter() {}
 
     public static String filter(String response, WikiPrivacyPolicy policy) {
+        return filter(response, policy, false);
+    }
+
+    /** Embedded AQL serializes event data directly into timestamp/duration rows. */
+    public static String filterAql(String response, WikiPrivacyPolicy policy) {
+        return filter(response, policy, true);
+    }
+
+    private static String filter(String response, WikiPrivacyPolicy policy, boolean aql) {
         Objects.requireNonNull(policy);
         if (response == null) return INVALID_JSON;
         try {
             JsonNode root = JSON.readTree(response);
             if (root == null || root.isMissingNode()) return INVALID_JSON;
-            return removeExcluded(root, policy) ? JSON.writeValueAsString(root) : response;
+            return removeExcluded(root, policy, aql) ? JSON.writeValueAsString(root) : response;
         } catch (JsonProcessingException invalid) {
             // Never echo an unparseable response that may contain excluded data.
             return INVALID_JSON;
@@ -37,16 +46,18 @@ public final class EventPrivacyFilter {
                 || policy.excludedTitle(data.path("context_title").asText(null));
     }
 
-    private static boolean removeExcluded(JsonNode node, WikiPrivacyPolicy policy) {
+    private static boolean removeExcluded(JsonNode node, WikiPrivacyPolicy policy, boolean aql) {
         boolean changed = false;
         Iterator<JsonNode> children = node.elements();
         while (children.hasNext()) {
             JsonNode child = children.next();
-            if (node.isArray() && child.isObject() && excludedData(child.get("data"), policy)) {
+            if (node.isArray() && child.isObject()
+                    && (excludedData(child.get("data"), policy)
+                    || (aql && child.has("timestamp") && child.has("duration") && excludedData(child, policy)))) {
                 children.remove();
                 changed = true;
             } else {
-                changed |= removeExcluded(child, policy);
+                changed |= removeExcluded(child, policy, aql);
             }
         }
         return changed;

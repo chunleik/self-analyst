@@ -131,4 +131,12 @@ class EventQueryToolsTest {
             }
         } finally { server.stop(0); }
     }
+    @Test void missingPolicyFailsClosedBeforeSendingEitherEventRequest() throws Exception {
+        var tools = new EventQueryTools("http://127.0.0.1:1/api/0", 1000, () -> null);
+        for (String result : new String[] {tools.queryEvents("bucket", 1, null, null),
+                tools.executeAQL("RETURN = [];", "2026-01-01/2026-01-02")}) {
+            assertEquals("EVENT_PRIVACY_UNAVAILABLE", new ObjectMapper().readTree(result).path("error").asText());
+        }
+    }
+
 }

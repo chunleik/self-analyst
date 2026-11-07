@@ -1,5 +1,6 @@
 package com.selfanalyst.tools;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
 import com.selfanalyst.wiki.WikiPrivacyPolicy;
@@ -11,9 +12,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Objects;
+import java.util.List;
+import java.util.Map;
+import java.util.Arrays;
 import java.util.function.Supplier;
 
 public class EventQueryTools {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     static final int MAX_EVENT_LIMIT = 500;
     static final int MAX_TOOL_RESULT_CHARS = 80_000;
@@ -73,7 +79,8 @@ public class EventQueryTools {
             "aqlQuery 为 AQL 查询语句，多条语句用分号分隔，最后一条必须是 RETURN = ...;" +
             "常用 AQL 函数：query_bucket(), find_bucket(), filter_keyvals(), " +
             "filter_period_intersect(), merge_events_by_keys(), sort_by_duration(), categorize()。" +
-            "事件结果按最新隐私配置过滤；服务端聚合数值仍可能包含被隐藏活动的时长，不代表可见活动总量。")
+            "事件结果按最新隐私配置过滤；服务端聚合数值仍可能包含被隐藏活动的时长，不代表可见活动总量。" +
+            "禁止使用 tag 覆盖 app、title、context_title、url_host、private_browsing；其他自定义标签可用。")
     public String executeAQL(
             @ToolParam(name = "aqlQuery", description = "AQL 查询语句")
             String aqlQuery,
@@ -82,21 +89,17 @@ public class EventQueryTools {
 
         WikiPrivacyPolicy policy = privacy.get();
         if (policy == null) return "{\"error\":\"EVENT_PRIVACY_UNAVAILABLE\"}";
-        String[] queryLines = aqlQuery.split(";");
-        StringBuilder body = new StringBuilder("{")
-                .append("\"timeperiods\": [\"").append(timeperiod).append("\"],")
-                .append("\"query\": [");
-        int added = 0;
-        for (String rawLine : queryLines) {
-            String line = rawLine.trim();
-            if (!line.isEmpty()) {
-                if (added > 0) body.append(", ");
-                body.append("\"").append(line.replace("\"", "\\\"")).append(";\"");
-                added++;
-            }
+        try {
+            List<String> lines = Arrays.stream(aqlQuery.split(";"))
+                    .map(String::trim).filter(line -> !line.isEmpty()).map(line -> line + ";").toList();
+            AqlPrivacyGuard.validate(String.join(" ", lines));
+            String body = JSON.writeValueAsString(Map.of("timeperiods", List.of(timeperiod), "query", lines));
+            return post("query/", body, policy);
+        } catch (AqlPrivacyGuard.UnsafeQueryException unsafe) {
+            return "{\"error\":\"EVENT_PRIVACY_UNSAFE_AQL\"}";
+        } catch (IOException | IllegalArgumentException | NullPointerException invalid) {
+            return "{\"error\":\"EVENT_SERVICE_INVALID_AQL\"}";
         }
-        body.append("]}");
-        return post("query/", body.toString(), policy);
     }
 
     @Tool(description = "获取事件服务运行信息，包括版本、主机名等")

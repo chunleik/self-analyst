@@ -194,6 +194,11 @@ public class AqlInterpreter {
         return s;
     }
 
+    /** Read-only function metadata for callers validating the same expression syntax. */
+    public boolean supportsFunction(String name) {
+        return functions.containsKey(name);
+    }
+
     public AqlContext getContext() {
         return ctx;
     }

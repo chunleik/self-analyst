@@ -91,6 +91,41 @@ class EventQueryPrivacyIntegrationTest {
         assertEquals("changed", response.at("/rows/0/duration").asText());
     }
 
+
+    @Test void protectedTagsAreBlockedButDirectLocalAqlRemainsUnchanged() throws Exception {
+        for (String key : List.of("app", "title", "context_title", "url_host", "private_browsing")) {
+            String command = "RETURN = tag(" + SOURCE + ", '" + key + ":changed');";
+            JsonNode rejected = JSON.readTree(tools.executeAQL(command, PERIOD));
+            assertEquals("EVENT_PRIVACY_UNSAFE_AQL", rejected.path("error").asText());
+        }
+        String command = "RETURN = tag(" + SOURCE + ", 'app:changed');";
+        var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(
+                "http://127.0.0.1:" + server.port() + "/api/0/query/"))
+                .header("Content-Type", "application/json")
+                .POST(java.net.http.HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(
+                        Map.of("query", List.of(command), "timeperiods", List.of(PERIOD)))))
+                .build();
+        var local = java.net.http.HttpClient.newHttpClient().send(request,
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, local.statusCode());
+        JsonNode rows = JSON.readTree(local.body()).path("rows");
+        assertEquals(7, rows.size());
+        for (JsonNode row : rows) assertEquals("changed", row.path("app").asText());
+    }
+
+    @Test void safeTagsAndLiteralMentionsKeepWorkingOnRealInterpreter() throws Exception {
+        assertOnlyVisible(query("RETURN = tag(" + SOURCE + ", 'app:changed'); RETURN = " + SOURCE + ";").path("rows"));
+        for (String tags : List.of("'project:work'", "project:work", "'note:tag(events app:changed)'")) {
+            assertOnlyVisible(query("RETURN = tag(" + SOURCE + ", " + tags + ");").path("rows"));
+        }
+        JsonNode matches = query("RETURN = filter_keyvals(" + SOURCE + ", 'title', ['tag(events, app:changed)']);");
+        assertTrue(matches.path("rows").isEmpty());
+        String escapedKey = "\\" + "u0061pp";
+        JsonNode result = query("RETURN = tag(" + SOURCE + ", '" + escapedKey + ":changed');");
+        assertOnlyVisible(result.path("rows"));
+        assertEquals("changed", result.at("/rows/0").path(escapedKey).asText());
+    }
+
     private JsonNode query(String query) throws Exception {
         String result = tools.executeAQL(query, PERIOD);
         assertFalse(result.contains("事件查询工具结果已截断"), "Privacy filtering must happen before budgeting");

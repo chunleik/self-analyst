@@ -139,4 +139,47 @@ class EventQueryToolsTest {
         }
     }
 
+    @Test void guardRejectsProtectedTagsBeforeHttpAndJsonPreservesValidatedText() throws Exception {
+        var bodies = new CopyOnWriteArrayList<String>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/api/0/", exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            byte[] bytes = "{\"rows\":[]}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length); exchange.getResponseBody().write(bytes); exchange.close();
+        });
+        server.start();
+        try {
+            var tools = new EventQueryTools("http://127.0.0.1:" + server.getAddress().getPort() + "/api/0", 5000);
+            for (String key : java.util.List.of("app", "title", "context_title", "url_host", "private_browsing")) {
+                String result = tools.executeAQL("e = query_bucket('bucket'); RETURN = sort_by_duration(tag(e, '" + key + ":changed'));", "a/b");
+                assertEquals("EVENT_PRIVACY_UNSAFE_AQL", new ObjectMapper().readTree(result).path("error").asText());
+            }
+            for (String quote : java.util.List.of("'", "\"")) {
+                String result = tools.executeAQL("RETURN = tag(query_bucket('bucket'), " + quote + ");", "a/b");
+                assertEquals("EVENT_PRIVACY_UNSAFE_AQL", new ObjectMapper().readTree(result).path("error").asText());
+            }
+            String deep = "query_bucket('bucket')";
+            for (int depth = 0; depth < 66; depth++) deep = "sort_by_duration(" + deep + ")";
+            String rejected = tools.executeAQL("RETURN = " + deep + ";", "a/b");
+            assertEquals("EVENT_PRIVACY_UNSAFE_AQL", new ObjectMapper().readTree(rejected).path("error").asText());
+            assertTrue(bodies.isEmpty(), "Rejected queries must never be sent");
+            String unicode = "\\" + "u0061pp";
+            String period = "start/\"end\\path\n\t";
+            for (String spec : java.util.List.of(unicode + ":changed", "project:tag(e app:changed)",
+                    "note:C:\\temp", "note:tab\tcontrol\b", "note:double\"quote")) {
+                String line = "RETURN = tag(query_bucket('bucket'), '" + spec + "');";
+                String result = tools.executeAQL("  " + line + "  ", period);
+                assertFalse(new ObjectMapper().readTree(result).has("error"), result);
+                var decoded = new ObjectMapper().readTree(bodies.getLast());
+                assertEquals(line, decoded.path("query").get(0).asText());
+                assertEquals(period, decoded.path("timeperiods").get(0).asText());
+            }
+            String multi = " e = query_bucket('bucket'); RETURN = tag(e, 'project:work'); ";
+            tools.executeAQL(multi, "a/b");
+            var decoded = new ObjectMapper().readTree(bodies.getLast()).path("query");
+            assertEquals("e = query_bucket('bucket');", decoded.get(0).asText());
+            assertEquals("RETURN = tag(e, 'project:work');", decoded.get(1).asText());
+        } finally { server.stop(0); }
+    }
+
 }

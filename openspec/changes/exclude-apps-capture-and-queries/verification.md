@@ -8,14 +8,14 @@ Change：`exclude-apps-capture-and-queries`。沿用原功能分支和规划，�
 - 窗口/内容采集在源头排除应用，清空连续性和待重试快照，AFK 与事件服务 heartbeat API 不变。
 - Wiki、摘要、模型建议、修复、查询、本体来源及事件投影使用模型隐私策略；本机统计和已有摘要不追溯修改。
 - 隐私 API 和中英文页签支持候选/手工输入、两种模式、网站条目、保存反馈及草稿保护。
-- 原 `tasks.md` 实际有 16 个可勾选项。没有增加独立 change。
+- 原 `tasks.md` 实际有 16 个可勾选项。没有增加独立 change；经用户确认的补充均先更新现有规划，再实施。
 
 ## 逐项状态
 
 - 1.1、1.2、1.3：完成，配置键、快照与统一热应用测试通过。
 - 2.1、2.2、2.3：完成，采集排除、重试边界、应用装配与指定回归通过。
 - 3.1、3.2、3.4：完成，模型路径、嵌套/展平过滤与投影元数据回归通过。
-- 3.3：普通查询与真实 AQL 响应过滤通过；`tag` 覆盖隐私字段的补充仍待确认，保持未完成。
+- 3.3：完成，普通查询与真实 AQL 响应过滤、隐私字段覆盖拦截、标准 JSON 传输与定向回归通过。
 - 4.1、4.2、4.3：完成，API、双语 UI、键盘交互、保存错误/草稿保护及浏览器检查通过。
 - 5.1、5.2、5.3：完成，双语 README 与隐私说明、全套测试、截图和五份主规格同步已执行。
   最新提交的必需 CI 全部通过之前，不报告整个任务完成。
@@ -33,6 +33,7 @@ Change：`exclude-apps-capture-and-queries`。沿用原功能分支和规划，�
 - 事件 JSON 过滤与投影：覆盖嵌套事件、无痕标记、上下文标题、网站、非事件对象、过滤先于预算、导出计数与配置切换。
 - 隐私 API 组：27 个 Java 测试通过，包含配置服务、HTTP 路由与控制器校验。
 - 隐私 UI 与 i18n：12 个 targeted Node 测试通过；完整 Node 套件 313 passed、32 skipped、0 failed（平台相关跳过）。
+- AQL 补充：`mvn -pl self-analyst-app -am '-Dtest=EventPrivacyFilterTest,EventQueryToolsTest,EventQueryPrivacyIntegrationTest,AqlPrivacyGuardTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`，22 个 Java 测试通过。覆盖五个字段、嵌套/变量、普通标签、字面文本、真实 HTTP、Unicode/反斜杠/控制字符、深度上限和最终 RETURN。初次新增测试把非法函数名的异常限定得过窄；实际解析器已拒绝输入，修正测试预期后通过。
 
 ## 截图方法
 
@@ -48,9 +49,10 @@ Change：`exclude-apps-capture-and-queries`。沿用原功能分支和规划，�
 
 - 用户确认后，在现有规划中补充模型建议证据过滤及单次修复固定策略；实际现行建议通常为通用标签，过滤是对含敏感证据的防御边界，不改本机展示。
 - JSON 空响应最初被 Jackson 解析为 MissingNode，已补 fail-closed 回归并修复；无法解析的成功响应不再原样回显。
+- 最后审查发现单个引号形式的畸形标签会触发字符串越界；已显式拒绝并覆盖单双引号两种输入，断言返回结构化错误且不发送 HTTP。独立只读审查未确认其他 tag/传输绕过。
 - 全量测试首轮发现修复并发测试仍覆盖旧单参数事实构造方法，新快照重载导致测试没有进入预期竞争点；修正测试替身，保持竞争断言与超时不变。
 - AQL 审查使用实际解释器，发现嵌入式响应为展平行而非 AW 的 `data` 包装；加入真实事件服务 HTTP 集成测试，覆盖普通和命名对象返回，避免仅用错误形状的桩。
-- 另外发现 AQL `tag` 可改写隐私识别字段。此项补充确认与最终验证状态以 PR 为准；不能仅凭普通查询测试通过宣称完整隐私边界已验证。
+- 另外发现 AQL `tag` 可改写隐私识别字段，且手工 JSON 拼接会把字面量 Unicode 转义解码为受保护字段。用户确认后补充现有规划，工具执行前按实际 AQL 语法拦截五个隐私字段覆盖，并改用标准 JSON 序列化；普通标签、本机直接 AQL 及聚合数值保持可用。
 
 ## 与初始设计的差异
 
@@ -59,12 +61,12 @@ Change：`exclude-apps-capture-and-queries`。沿用原功能分支和规划，�
   普通 queryEvents 的非事件对象语义不变；这是为满足原定 AQL 隐私目标所需的响应形状修正。
 - 没有新增产品运行时依赖。CI 为真实截图新增固定版本 Playwright 测试依赖和独立 Ubuntu 作业，没有改变原有检查要求。
 - 排除切换还需拦截待重试事件并防止旧异步快照恢复，故增加采集连续性/代次防护；通用 heartbeat 协议和 AFK 不变。
-- `tag` 的字段覆盖限制及标准 JSON 请求序列化尚未实施。标准序列化需保证验证的查询与服务端实际解码执行的查询一致，
-  避免字面量 Unicode 转义在传输中变成被禁止的字段名。该补充待确认后按原 change 更新流程完成。
+- 经用户确认，`tag` 的字段覆盖限制仅位于 Agent 工具边界，使用实际解释器的语法与函数元数据，无法安全识别时拒绝。
+  标准 JSON 序列化保证检查与执行文本一致，防止 Unicode 传输绕过；本机 AQL 的解释与执行语义未改动。
 
 ## 最终检查
 
-- 云端完整 `mvn test`（上述 JDK 编译适配）：1240 个 Java 测试，0 failures、0 errors、7 skipped；Node 313 passed、32 skipped、0 failed；全部 Maven 模块 BUILD SUCCESS。
+- AQL 防护及畸形输入修复后的最终云端完整 `mvn test`（上述 JDK 编译适配）：1247 个 Java 测试，0 failures、0 errors、7 skipped；Node 313 passed、32 skipped、0 failed；全部 Maven 模块 BUILD SUCCESS。
 - `openspec validate exclude-apps-capture-and-queries --strict`：通过。
 - `openspec validate --all --strict`：同步后 40 项通过；`openspec validate --specs --strict`：35 份主规格通过。
 - GitHub CI #393 的隐私界面验证通过，中英文、键盘、草稿取消、保存和三种尺寸检查完成。
@@ -73,7 +75,7 @@ Change：`exclude-apps-capture-and-queries`。沿用原功能分支和规划，�
 - 已检查完整 README 差异，英文版新增内容没有中文说明，中文版对应更新齐全。
 - 已同步 `title-capture`、`event-query-tools`、`agent-document-generation`、`llm-wiki`、`user-configuration`。
   保留原主规格的既有场景；配置总述由四页签协调为包含隐私的五页签。未归档。
-- AQL tag 字段覆盖限制等待确认，任务 3.3 重新打开；最新提交的 Windows/跨平台最终 CI 仍待完成。
+- AQL tag 补充已实施；最终提交的 Windows/跨平台 CI 结果在 PR 中持续更新，全部成功前保持 draft，不合并、不批准。
 
 第二轮全量测试发现配置分组数量断言仍为 19；新增采集排除键后应为 20。已修正数量并增加新键及空默认值的明确断言，
 9 项配置解析回归与上述最终完整套件通过。第一次远端截图作业未进入浏览器：`ubuntu-latest` 已是 Ubuntu 26.04，

@@ -33,6 +33,35 @@ test("API errors translate known codes and retain legacy diagnostics", () => {
   assert.equal(ctx.apiErrorMessage({ errorCode: "unknown", error: "legacy" }, "fallback"), "Operation failed: legacy");
 });
 
+test("ChatGPT settings validation errors are localized and preserve the save draft", async () => {
+  for (const lang of ["zh", "en"]) {
+    const ctx = sandbox();
+    ctx.state.lang = lang;
+    ctx.window = { location: { origin: "http://localhost" } };
+    vm.runInContext(read("api.js"), ctx);
+    vm.runInContext(read("llm-settings.js"), ctx);
+    const messages = JSON.parse(fs.readFileSync(new URL(`../../main/resources/i18n/messages/${lang}.json`, import.meta.url), "utf8"));
+    for (const field of ["chatgptModel", "chatgptAccount", "provider"]) {
+      const code = "error.llmSettings." + field;
+      ctx.fetch = async () => ({ ok: false, json: async () => ({ errorCode: code, error: code }) });
+      const model = ctx.createLlmSettingsModel(ctx.api.llmSettings, () => {});
+      model.snapshot = { fields: { provider: { effectiveValue: "api-key" } } };
+      model.change("provider", "chatgpt");
+      model.change("chatgptAccount", "test-account");
+      await model.save();
+      assert.doesNotMatch(model.error, /error\.llmSettings\./, `${lang}: ${field}`);
+      assert.ok(model.error.length > 0);
+      assert.equal(model.error, messages[code], `${lang}: frontend/backend agree`);
+      assert.equal(model.value("chatgptAccount"), "test-account");
+      assert.equal(model.value("chatgptModel"), "");
+      assert.equal(model.dirty(), true);
+      assert.equal(model.saving, false);
+      assert.equal(model.notice, "");
+      model.destroy();
+    }
+  }
+});
+
 test("language resources load and unavailable language falls back to English", async () => {
   const ctx = sandbox();
   ctx.fetch = async url => ({ ok: url.includes("en.json"), json: async () => JSON.parse(read("locales/en.json")) });

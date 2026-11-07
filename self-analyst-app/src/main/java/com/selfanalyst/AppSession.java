@@ -210,7 +210,7 @@ public class AppSession implements AutoCloseable {
             SelfAnalystAgent a = null;
             try {
                 a = new SelfAnalystAgent(config, wikiStore, wikiTools, userConfigStore, fileTools,
-                        usageMeter);
+                        usageMeter, privacyRuntime.modelPolicy());
             } catch (Exception e) {
                 log.warn("Agent 初始化失败 (API key 无效?): {}", e.getMessage());
             }

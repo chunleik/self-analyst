@@ -2,6 +2,7 @@ package com.selfanalyst.tools;
 
 import io.agentscope.core.tool.Tool;
 import io.agentscope.core.tool.ToolParam;
+import com.selfanalyst.wiki.WikiPrivacyPolicy;
 
 import java.io.IOException;
 import java.net.URI;
@@ -9,6 +10,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Objects;
+import java.util.function.Supplier;
 
 public class EventQueryTools {
 
@@ -18,10 +21,16 @@ public class EventQueryTools {
     private final HttpClient client;
     private final String baseUrl;
     private final Duration timeout;
+    private final Supplier<WikiPrivacyPolicy> privacy;
 
     public EventQueryTools(String baseUrl, int timeoutMillis) {
+        this(baseUrl, timeoutMillis, WikiPrivacyPolicy::none);
+    }
+
+    public EventQueryTools(String baseUrl, int timeoutMillis, Supplier<WikiPrivacyPolicy> privacy) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
         this.timeout = Duration.ofMillis(timeoutMillis);
+        this.privacy = Objects.requireNonNull(privacy);
         this.client = HttpClient.newBuilder()
                 .connectTimeout(timeout)
                 .build();
@@ -33,7 +42,7 @@ public class EventQueryTools {
     }
 
     @Tool(description = "从指定的事件桶获取 heartbeat 合并后的投影事件。limit 控制返回条数，" +
-            "startTime 和 endTime 为 UTC 时间的 ISO-8601 格式（如 2026-06-14T16:00:00 对应北京时间6月15日0点），可选")
+            "startTime 和 endTime 为 UTC 时间的 ISO-8601 格式（如 2026-06-14T16:00:00 对应北京时间6月15日0点），可选。结果按最新隐私配置过滤。")
     public String queryEvents(
             @ToolParam(name = "bucketId", description = "事件桶 ID，如 watcher-window_<hostname>")
             String bucketId,
@@ -44,6 +53,7 @@ public class EventQueryTools {
             @ToolParam(name = "endTime", description = "结束时间 ISO-8601，可选")
             String endTime) {
 
+        WikiPrivacyPolicy policy = privacy.get();
         int boundedLimit = limit <= 0 ? 100 : Math.min(limit, MAX_EVENT_LIMIT);
         StringBuilder url = new StringBuilder("buckets/")
                 .append(bucketId).append("/events?limit=").append(boundedLimit);
@@ -53,7 +63,7 @@ public class EventQueryTools {
         if (endTime != null && !endTime.isBlank()) {
             url.append("&end=").append(endTime);
         }
-        return get(url.toString());
+        return get(url.toString(), policy);
     }
 
     @Tool(description = "执行事件投影的 AQL 查询。这是最灵活的数据查询方式。" +
@@ -61,13 +71,15 @@ public class EventQueryTools {
             "例如北京时间 2026-06-15 00:00—23:59 对应 UTC 范围为 2026-06-14T16:00:00/2026-06-15T16:00:00。" +
             "aqlQuery 为 AQL 查询语句，多条语句用分号分隔，最后一条必须是 RETURN = ...;" +
             "常用 AQL 函数：query_bucket(), find_bucket(), filter_keyvals(), " +
-            "filter_period_intersect(), merge_events_by_keys(), sort_by_duration(), categorize()")
+            "filter_period_intersect(), merge_events_by_keys(), sort_by_duration(), categorize()。" +
+            "事件结果按最新隐私配置过滤；服务端聚合数值仍可能包含被隐藏活动的时长，不代表可见活动总量。")
     public String executeAQL(
             @ToolParam(name = "aqlQuery", description = "AQL 查询语句")
             String aqlQuery,
             @ToolParam(name = "timeperiod", description = "时间范围（UTC），如 2026-06-14T16:00:00/2026-06-15T16:00:00 对应北京时间6月15日全天")
             String timeperiod) {
 
+        WikiPrivacyPolicy policy = privacy.get();
         String[] queryLines = aqlQuery.split(";");
         StringBuilder body = new StringBuilder("{")
                 .append("\"timeperiods\": [\"").append(timeperiod).append("\"],")
@@ -82,7 +94,7 @@ public class EventQueryTools {
             }
         }
         body.append("]}");
-        return post("query/", body.toString());
+        return post("query/", body.toString(), policy);
     }
 
     @Tool(description = "获取事件服务运行信息，包括版本、主机名等")
@@ -96,6 +108,10 @@ public class EventQueryTools {
     }
 
     private String get(String path) {
+        return get(path, null);
+    }
+
+    private String get(String path, WikiPrivacyPolicy policy) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + path))
@@ -103,13 +119,16 @@ public class EventQueryTools {
                     .GET()
                     .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            return boundResult(resp.body());
-        } catch (IOException | InterruptedException e) {
-            return "{\"error\": \"" + e.getMessage() + "\"}";
+            return response(resp, policy);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "{\"error\":\"EVENT_SERVICE_INTERRUPTED\"}";
+        } catch (IOException | IllegalArgumentException e) {
+            return "{\"error\":\"EVENT_SERVICE_REQUEST_FAILED\"}";
         }
     }
 
-    private String post(String path, String body) {
+    private String post(String path, String body, WikiPrivacyPolicy policy) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + path))
@@ -118,10 +137,21 @@ public class EventQueryTools {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
             HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            return boundResult(resp.body());
-        } catch (IOException | InterruptedException e) {
-            return "{\"error\": \"" + e.getMessage() + "\"}";
+            return response(resp, policy);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "{\"error\":\"EVENT_SERVICE_INTERRUPTED\"}";
+        } catch (IOException | IllegalArgumentException e) {
+            return "{\"error\":\"EVENT_SERVICE_REQUEST_FAILED\"}";
         }
+    }
+
+    private static String response(HttpResponse<String> response, WikiPrivacyPolicy policy) {
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            return "{\"error\":\"EVENT_SERVICE_HTTP_" + response.statusCode() + "\"}";
+        }
+        String body = policy == null ? response.body() : EventPrivacyFilter.filter(response.body(), policy);
+        return boundResult(body);
     }
 
     private static String boundResult(String result) {

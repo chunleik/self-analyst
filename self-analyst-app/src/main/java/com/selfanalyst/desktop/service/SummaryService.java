@@ -64,6 +64,11 @@ public class SummaryService implements SummaryFactSource {
         this.contentBucket = "watcher-content_" + host;
     }
 
+    @Override
+    public com.selfanalyst.wiki.WikiPrivacyPolicy privacyPolicy() {
+        return Objects.requireNonNull(privacy.get());
+    }
+
     String windowBucket() {
         return windowBucket;
     }

@@ -70,6 +70,13 @@ public final class WikiPrivacyPolicy {
         return app != null && apps.contains(app.toLowerCase(Locale.ROOT));
     }
 
+    /** Free-form model evidence may contain application names rather than an app field. */
+    public boolean excludedAppMention(String text) {
+        if (text == null || apps.isEmpty()) return false;
+        String lower = text.toLowerCase(Locale.ROOT);
+        return apps.stream().anyMatch(lower::contains);
+    }
+
     public boolean excludedTitle(String title) {
         if (title == null) return false;
         if (PRIVATE_BROWSING.matcher(title).find()) return true;

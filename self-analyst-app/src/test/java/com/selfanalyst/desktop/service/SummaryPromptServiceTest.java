@@ -14,6 +14,35 @@ import static org.junit.jupiter.api.Assertions.*;
 class SummaryPromptServiceTest {
 
     @Test
+    void adviceUsesOnePolicyAndKeepsLocalEvidenceUnfiltered() {
+        var runtime = new com.selfanalyst.config.PrivacyRuntime("Secret.exe", "", "private.test");
+        AtomicInteger reads = new AtomicInteger();
+        var service = new SummaryPromptService(() -> { reads.incrementAndGet(); return runtime.modelPolicy().get(); });
+        var advice = new BehaviorAdviceService.BehaviorAdvice("suggestion", "7 days", "now", "Take a break",
+                "Entertainment averaged 60 minutes", List.of("Secret.exe 40 minutes", "Editor 20 minutes", "private.test article"),
+                new BehaviorAdviceService.BehaviorAdvice.Basis("7 days", "increasing", "break", "complete"), "medium", null);
+        var result = service.enhanceAdvice(advice, (prompt, timeout) -> {
+            assertFalse(prompt.contains("Secret.exe"));
+            assertFalse(prompt.contains("private.test"));
+            assertTrue(prompt.contains("Editor 20 minutes"));
+            assertTrue(prompt.contains("60 minutes"));
+            runtime.apply("Editor", "", "");
+            return "{\"title\":\"Rest\",\"body\":\"Take a short break\",\"confidence\":\"medium\"}";
+        }, Lang.english());
+        assertEquals(1, reads.get());
+        assertEquals(advice.evidenceTags(), result.evidenceTags());
+        assertEquals(advice.basis(), result.basis());
+        assertEquals(advice.scopeLabel(), result.scopeLabel());
+        service.enhanceAdvice(advice, (prompt, timeout) -> {
+            assertTrue(prompt.contains("Secret.exe"));
+            assertFalse(prompt.contains("Editor 20 minutes"));
+            return "{}";
+        }, Lang.english());
+        assertEquals(2, reads.get());
+        assertEquals(List.of("Secret.exe 40 minutes", "Editor 20 minutes", "private.test article"), advice.evidenceTags());
+    }
+
+    @Test
     void enhancementUsesOneSixtySecondCallAndPreservesLocalStatistics() {
         SummaryPromptService service = new SummaryPromptService();
         SummaryService.LocalFacts facts = facts("连接超时参数调试", false);

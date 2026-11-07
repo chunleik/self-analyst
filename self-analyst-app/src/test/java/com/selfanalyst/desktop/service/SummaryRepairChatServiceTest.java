@@ -36,6 +36,36 @@ class SummaryRepairChatServiceTest {
             """;
 
     @Test
+    void policyChangeDuringModelTurnAppliesOnlyToNextRepairRequest() {
+        var policy = new java.util.concurrent.atomic.AtomicReference<>(WikiPrivacyPolicy.none());
+        AtomicInteger reads = new AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
+        try (Fixture fixture = new Fixture(() -> { reads.incrementAndGet(); return policy.get(); })) {
+            reads.set(0);
+            var service = fixture.service(() -> new FakeModel(calls) {
+                @Override public WikiSummaryPipeline.Completion completeDetailed(String prompt, Duration timeout) {
+                    assertTrue(prompt.contains("数据库同步设计"));
+                    policy.set(WikiPrivacyPolicy.of("IDE", "数据库"));
+                    return super.completeDetailed(prompt, timeout);
+                }
+            });
+            service.complete(fixture.session, fixture.turn("Please revise"), () -> false);
+            assertEquals(1, reads.get());
+            assertEquals(1, calls.get());
+            var draft = fixture.repairs.bySession(fixture.session).draft();
+            assertEquals("valid", draft.state());
+            assertEquals(WikiStatus.FAILED, fixture.wiki.versionedEntry("target").entry().status());
+            int beforeNextRequest = reads.get();
+            var failure = assertThrows(SummaryRepairChatService.RepairTurnFailure.class,
+                    () -> service.complete(fixture.session, fixture.turn("Please revise again"), () -> false));
+            assertEquals(409, failure.status());
+            assertEquals(beforeNextRequest + 1, reads.get());
+            assertEquals(1, calls.get());
+            assertEquals(draft, fixture.repairs.bySession(fixture.session).draft());
+        }
+    }
+
+    @Test
     void multiTurnUsesPersistedInputAndRestartsReplayWithoutDuplicateCharge() {
         AtomicInteger calls = new AtomicInteger();
         try (Fixture fixture = new Fixture()) {
@@ -362,7 +392,8 @@ class SummaryRepairChatServiceTest {
         final java.util.concurrent.atomic.AtomicReference<String> configuration = new java.util.concurrent.atomic.AtomicReference<>("test");
         final java.util.concurrent.atomic.AtomicReference<WikiFactBuilder.WikiFacts> facts = new java.util.concurrent.atomic.AtomicReference<>();
         final String session;
-        Fixture() {
+        Fixture() { this(WikiPrivacyPolicy::none); }
+        Fixture(Supplier<WikiPrivacyPolicy> privacy) {
             var metrics = new WikiEntry.WikiMetrics(1200, 0, 1,
                     List.of(new WikiEntry.AppDuration("IDE", 1200)), Map.of());
             wiki.upsert(new WikiEntry("target", WikiLevel.HOUR, PERIOD.start(), PERIOD.end(), "UTC", WikiStatus.FAILED,
@@ -372,7 +403,12 @@ class SummaryRepairChatServiceTest {
                     "数据库同步设计", "window", 1200.0, 1, List.of(), 0)), "", Map.of());
             facts.set(new WikiFactBuilder.WikiFacts(PERIOD, 1200, 0, 1, metrics.topApps(), List.of(), List.of(), List.of(),
                     WikiFactBuilder.FACT_BUILDER_VERSION, "test", Map.of(), Map.of(), selection));
-            repairs = new WikiRepairService(wiki, ignored -> facts.get(), WikiPrivacyPolicy::none, configuration::get);
+            repairs = new WikiRepairService(wiki, (ignored, policy) -> {
+                var current = facts.get();
+                var allowed = current.sampledTitles().facts().stream()
+                        .filter(fact -> !policy.excluded(fact.app(), fact.title())).toList();
+                return current.withInput(new WikiTitleSampler.Selection(allowed, "", Map.of()), current.childSummaries());
+            }, privacy, policy -> configuration.get() + "|" + policy.fingerprint());
             session = chats.create(new ChatSessionStore.CreateRequest()).id;
             repairs.open(session, "target");
         }

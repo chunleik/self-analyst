@@ -24,9 +24,11 @@ public final class WikiRepairService {
             .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
     private static final String MISSING_TEXT = "原失败文本未保存，将依据现有记录重新整理。";
     private final WikiStore store;
-    private final Function<WikiEntry, WikiFactBuilder.WikiFacts> factsProvider;
+    private final java.util.function.BiFunction<WikiEntry, WikiPrivacyPolicy, WikiFactBuilder.WikiFacts> factsProvider;
     private final Supplier<WikiPrivacyPolicy> privacy;
-    private final Supplier<String> configurationStamp;
+    private final Function<WikiPrivacyPolicy, String> configurationStamp;
+    private final WikiPrivacyPolicy capturedPrivacy;
+    private final String capturedConfiguration;
     private final Clock clock;
 
     public record Candidate(String summary, String primaryTask, List<WikiEntry.TaskSegment> taskSegments) {
@@ -55,9 +57,37 @@ public final class WikiRepairService {
 
     public WikiRepairService(WikiStore store, Function<WikiEntry, WikiFactBuilder.WikiFacts> factsProvider,
                              Supplier<WikiPrivacyPolicy> privacy, Supplier<String> configurationStamp, Clock clock) {
+        this(store, (entry, policy) -> factsProvider.apply(entry), privacy, policy -> configurationStamp.get(), clock, null, null);
+    }
+
+    public WikiRepairService(WikiStore store,
+                             java.util.function.BiFunction<WikiEntry, WikiPrivacyPolicy, WikiFactBuilder.WikiFacts> factsProvider,
+                             Supplier<WikiPrivacyPolicy> privacy, Function<WikiPrivacyPolicy, String> configurationStamp) {
+        this(store, factsProvider, privacy, configurationStamp, Clock.systemUTC(), null, null);
+    }
+
+    public WikiRepairService(WikiStore store,
+                             java.util.function.BiFunction<WikiEntry, WikiPrivacyPolicy, WikiFactBuilder.WikiFacts> factsProvider,
+                             Supplier<WikiPrivacyPolicy> privacy, Function<WikiPrivacyPolicy, String> configurationStamp, Clock clock) {
+        this(store, factsProvider, privacy, configurationStamp, clock, null, null);
+    }
+
+    private WikiRepairService(WikiStore store,
+                              java.util.function.BiFunction<WikiEntry, WikiPrivacyPolicy, WikiFactBuilder.WikiFacts> factsProvider,
+                              Supplier<WikiPrivacyPolicy> privacy, Function<WikiPrivacyPolicy, String> configurationStamp,
+                              Clock clock, WikiPrivacyPolicy capturedPrivacy, String capturedConfiguration) {
         this.store = Objects.requireNonNull(store); this.factsProvider = Objects.requireNonNull(factsProvider);
         this.privacy = Objects.requireNonNull(privacy); this.configurationStamp = Objects.requireNonNull(configurationStamp);
         this.clock = Objects.requireNonNull(clock);
+        this.capturedPrivacy = capturedPrivacy; this.capturedConfiguration = capturedConfiguration;
+    }
+
+    /** Bind a whole local operation or model turn to one immutable policy and configuration. */
+    public WikiRepairService snapshot() {
+        if (capturedPrivacy != null) return this;
+        WikiPrivacyPolicy policy = Objects.requireNonNull(privacy.get());
+        String configuration = configurationStamp.apply(policy);
+        return new WikiRepairService(store, factsProvider, privacy, configurationStamp, clock, policy, configuration);
     }
 
     public static boolean repairable(WikiEntry entry, Instant now) {
@@ -108,10 +138,15 @@ public final class WikiRepairService {
     }
 
     public static WikiFactBuilder.WikiFacts buildRepairFacts(WikiStore store, WikiFactBuilder builder, WikiEntry entry) {
+        return buildRepairFacts(store, builder, entry, builder.privacy());
+    }
+
+    public static WikiFactBuilder.WikiFacts buildRepairFacts(WikiStore store, WikiFactBuilder builder,
+                                                            WikiEntry entry, WikiPrivacyPolicy policy) {
         synchronized (store) {
             WikiPeriod period = new WikiPeriod(entry.level(), entry.periodStart(), entry.periodEnd(), entry.timezone());
-            return entry.level() == WikiLevel.HOUR ? builder.buildFacts(period)
-                    : builder.buildFactsFromChildren(completeChildren(store, entry), period);
+            return entry.level() == WikiLevel.HOUR ? builder.buildFacts(period, policy)
+                    : builder.buildFactsFromChildren(completeChildren(store, entry), period, policy);
         }
     }
 
@@ -123,6 +158,7 @@ public final class WikiRepairService {
     public View open(String sessionId, String targetId) { return open(sessionId, targetId, -1); }
 
     public View open(String sessionId, String targetId, long expectedTargetRevision) {
+        if (capturedPrivacy == null) return snapshot().open(sessionId, targetId, expectedTargetRevision);
         boundedId(sessionId); boundedId(targetId);
         synchronized (store) {
             Draft existing = store.repairDraftBySession(sessionId);
@@ -143,6 +179,7 @@ public final class WikiRepairService {
     }
 
     public View bySession(String sessionId) {
+        if (capturedPrivacy == null) return snapshot().bySession(sessionId);
         boundedId(sessionId);
         synchronized (store) {
             Draft draft = store.repairDraftBySession(sessionId);
@@ -151,11 +188,13 @@ public final class WikiRepairService {
     }
 
     public View read(String sessionId, String repairId) {
+        if (capturedPrivacy == null) return snapshot().read(sessionId, repairId);
         synchronized (store) { return view(requireDraft(sessionId, repairId, null)); }
     }
 
     /** Fail known conflicts locally before acquiring a model session or reserving any quota. */
     public View preflightModel(String sessionId, String repairId, long draftRevision) {
+        if (capturedPrivacy == null) return snapshot().preflightModel(sessionId, repairId, draftRevision);
         synchronized (store) {
             Draft draft = requireEditable(sessionId, repairId, draftRevision);
             WikiStore.VersionedEntry target = requireUnchangedTarget(draft);
@@ -166,6 +205,7 @@ public final class WikiRepairService {
     }
 
     public View edit(String sessionId, String repairId, long draftRevision, Candidate candidate) {
+        if (capturedPrivacy == null) return snapshot().edit(sessionId, repairId, draftRevision, candidate);
         synchronized (store) {
             Draft old = requireEditable(sessionId, repairId, draftRevision);
             WikiStore.VersionedEntry target = requireUnchangedTarget(old);
@@ -188,6 +228,7 @@ public final class WikiRepairService {
     }
 
     public View rebase(String sessionId, String repairId, long draftRevision, Candidate candidate) {
+        if (capturedPrivacy == null) return snapshot().rebase(sessionId, repairId, draftRevision, candidate);
         synchronized (store) {
             Draft old = requireEditable(sessionId, repairId, draftRevision);
             WikiStore.VersionedEntry target = requireTarget(old.targetId());
@@ -200,6 +241,7 @@ public final class WikiRepairService {
     }
 
     public View confirm(String sessionId, String repairId, long draftRevision, List<Integer> taskIndexes) {
+        if (capturedPrivacy == null) return snapshot().confirm(sessionId, repairId, draftRevision, taskIndexes);
         if (taskIndexes == null || taskIndexes.isEmpty() || taskIndexes.size() > WikiEvidencePolicy.MAX_SEGMENTS)
             throw new WikiRepairException("WIKI_REPAIR_CONFIRMATION_REQUIRED");
         synchronized (store) {
@@ -216,7 +258,7 @@ public final class WikiRepairService {
                 if (task.title().isBlank() || task.summary().isBlank()) throw new WikiRepairException("WIKI_REPAIR_EMPTY_TASK");
                 Statement statement = new Statement("user_statement:" + UUID.randomUUID(), old.targetId(),
                         "local:" + old.id() + ":" + nextRevision + ":" + index,
-                        WikiEvidencePolicy.confirmedText(task.title(), task.summary(), privacy.get()), index,
+                        WikiEvidencePolicy.confirmedText(task.title(), task.summary(), capturedPrivacy), index,
                         nextRevision, clock.instant());
                 statements.put(index, statement);
                 List<String> ids = new ArrayList<>(task.evidenceFactIds().stream().filter(id -> !id.startsWith("user_statement:")).toList());
@@ -233,6 +275,7 @@ public final class WikiRepairService {
     }
 
     public View validate(String sessionId, String repairId, long draftRevision) {
+        if (capturedPrivacy == null) return snapshot().validate(sessionId, repairId, draftRevision);
         synchronized (store) {
             Draft old = requireEditable(sessionId, repairId, draftRevision);
             WikiStore.VersionedEntry target = requireUnchangedTarget(old);
@@ -254,6 +297,7 @@ public final class WikiRepairService {
     }
 
     public View commit(String sessionId, String repairId, long draftRevision, String idempotencyKey) {
+        if (capturedPrivacy == null) return snapshot().commit(sessionId, repairId, draftRevision, idempotencyKey);
         boundedId(idempotencyKey);
         synchronized (store) {
             Draft draft = requireDraft(sessionId, repairId, draftRevision);
@@ -272,6 +316,7 @@ public final class WikiRepairService {
     public void deleteSession(String sessionId) { boundedId(sessionId); store.deleteUncommittedRepairs(sessionId); }
 
     public String sanitizeUserText(String value) {
+        if (capturedPrivacy == null) return snapshot().sanitizeUserText(value);
         return normalizeText(value, 4000, false);
     }
 
@@ -281,7 +326,7 @@ public final class WikiRepairService {
             if (statement.taskIndex() < 0 || statement.taskIndex() >= tasks.size())
                 throw new WikiRepairException("WIKI_REPAIR_CONFIRMATION_CHANGED");
             WikiEntry.TaskSegment task = tasks.get(statement.taskIndex());
-            if (!statement.text().equals(WikiEvidencePolicy.confirmedText(task.title(), task.summary(), privacy.get())))
+            if (!statement.text().equals(WikiEvidencePolicy.confirmedText(task.title(), task.summary(), capturedPrivacy)))
                 throw new WikiRepairException("WIKI_REPAIR_CONFIRMATION_CHANGED");
             rebound.add(new Statement(statement.id(), statement.targetId(), statement.sourceId(), statement.text(),
                     statement.taskIndex(), revision, statement.confirmedAt()));
@@ -300,7 +345,7 @@ public final class WikiRepairService {
                 new WikiEvidencePolicy.UserStatement(statement.id(), statement.targetId(), statement.sourceId(), statement.text(),
                         statement.taskIndex(), statement.draftRevision(), statement.confirmedAt())).toList();
         return WikiEvidencePolicy.validateRepair(candidate.summary(), candidate.primaryTask(), candidate.taskSegments(),
-                facts, draft.targetId(), draft.draftRevision(), statements, privacy.get());
+                facts, draft.targetId(), draft.draftRevision(), statements, capturedPrivacy);
     }
 
     private Candidate normalize(Candidate candidate) {
@@ -322,9 +367,9 @@ public final class WikiRepairService {
 
     private String normalizeText(String value, int limit, boolean allowEmpty) {
         if (value != null && value.length() > Math.max(32768, limit * 8)) throw new WikiRepairException("WIKI_REPAIR_TOO_LARGE");
-        if (value != null && privacy.get().excludedTitle(value)) throw new WikiRepairException("WIKI_REPAIR_PRIVACY_EXCLUDED");
-        String text = WikiEvidencePolicy.normalizeText(value == null ? "" : value, privacy.get());
-        if (privacy.get().excludedTitle(text)) throw new WikiRepairException("WIKI_REPAIR_PRIVACY_EXCLUDED");
+        if (value != null && capturedPrivacy.excludedTitle(value)) throw new WikiRepairException("WIKI_REPAIR_PRIVACY_EXCLUDED");
+        String text = WikiEvidencePolicy.normalizeText(value == null ? "" : value, capturedPrivacy);
+        if (capturedPrivacy.excludedTitle(text)) throw new WikiRepairException("WIKI_REPAIR_PRIVACY_EXCLUDED");
         if ((!allowEmpty && text.isBlank()) || text.codePointCount(0, text.length()) > limit)
             throw new WikiRepairException("WIKI_REPAIR_LENGTH");
         return text;
@@ -360,7 +405,7 @@ public final class WikiRepairService {
 
     private WikiFactBuilder.WikiFacts facts(WikiEntry entry) {
         var children = completeChildren(store, entry);
-        WikiFactBuilder.WikiFacts facts = factsProvider.apply(entry);
+        WikiFactBuilder.WikiFacts facts = factsProvider.apply(entry, capturedPrivacy);
         if (facts == null || !facts.period().start().equals(entry.periodStart()) || !facts.period().end().equals(entry.periodEnd())
                 || facts.period().level() != entry.level() || !facts.period().timezone().equals(entry.timezone()))
             throw new WikiRepairException("WIKI_REPAIR_FACT_SCOPE");
@@ -377,7 +422,7 @@ public final class WikiRepairService {
     private String fingerprint(WikiFactBuilder.WikiFacts facts) {
         try {
             // Configuration stamps must include privacy and generation settings. The current permitted evidence is hashed, never copied into audit.
-            String content = JSON.writeValueAsString(facts) + "\n" + configurationStamp.get();
+            String content = JSON.writeValueAsString(facts) + "\n" + capturedConfiguration;
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception error) { throw new WikiRepairException("WIKI_REPAIR_INPUT_UNAVAILABLE"); }
     }

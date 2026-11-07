@@ -100,6 +100,7 @@ public final class SummaryRepairChatService {
     }
 
     public String complete(String sessionId, String userMessageId, BooleanSupplier cancelled) {
+        WikiRepairService repairs = this.repairs.snapshot();
         var view = repairs.bySession(sessionId);
         if (view == null) throw new IllegalArgumentException("REPAIR_SESSION_UNBOUND");
         ChatSessionStore.Session chat = chats.getSession(sessionId);
@@ -124,7 +125,7 @@ public final class SummaryRepairChatService {
             } else if (sessions == null || generations == null) {
                 throw new LlmUnavailableException();
             } else {
-                response = generate(sessionId, userMessageId, chat, view, cancelled);
+                response = generate(repairs, sessionId, userMessageId, chat, view, cancelled);
             }
         } catch (SelfAnalystAgent.ChatCancelledException cancelledTurn) {
             throw cancelledTurn;
@@ -168,10 +169,10 @@ public final class SummaryRepairChatService {
         return new RepairTurnFailure(status, message);
     }
 
-    private String generate(String sessionId, String userMessageId, ChatSessionStore.Session chat,
+    private String generate(WikiRepairService repairs, String sessionId, String userMessageId, ChatSessionStore.Session chat,
             WikiRepairService.View view, BooleanSupplier cancelled) {
         view = repairs.preflightModel(sessionId, view.draft().id(), view.draft().draftRevision());
-        String prompt = prompt(chat, userMessageId, view);
+        String prompt = prompt(repairs, chat, userMessageId, view);
         try (var model = sessions.get()) {
             model.preflight(); // Existing global budget and model availability, before reservation.
             if (prompt.length() + model.overheadChars() > MAX_PROMPT_CHARS) {
@@ -215,12 +216,12 @@ public final class SummaryRepairChatService {
         }
     }
 
-    private String prompt(ChatSessionStore.Session chat, String userMessageId, WikiRepairService.View view) {
+    private String prompt(WikiRepairService repairs, ChatSessionStore.Session chat, String userMessageId, WikiRepairService.View view) {
         Map<String, Object> facts = new LinkedHashMap<>();
         facts.put("target", view.target());
         // Drafts survive privacy configuration changes; sanitize their text again at the
         // model boundary and omit previously derived app/evidence presentation strings.
-        facts.put("candidate", modelCandidate(view.draft().candidate()));
+        facts.put("candidate", modelCandidate(repairs, view.draft().candidate()));
         facts.put("issues", view.draft().issues());
         facts.put("evidence", view.evidence());
         List<String> instructions = new ArrayList<>();
@@ -256,20 +257,20 @@ public final class SummaryRepairChatService {
                 """.formatted("en".equals(lang.code()) ? "English" : "Chinese", data);
     }
 
-    private Object modelCandidate(WikiRepairService.Candidate candidate) {
+    private Object modelCandidate(WikiRepairService repairs, WikiRepairService.Candidate candidate) {
         Map<String, Object> output = new LinkedHashMap<>();
-        output.put("summary", sanitizeDraftText(candidate.summary()));
-        output.put("primaryTask", sanitizeDraftText(candidate.primaryTask()));
+        output.put("summary", sanitizeDraftText(repairs, candidate.summary()));
+        output.put("primaryTask", sanitizeDraftText(repairs, candidate.primaryTask()));
         List<Object> tasks = new ArrayList<>();
         for (var task : candidate.taskSegments()) {
-            tasks.add(Map.of("title", sanitizeDraftText(task.title()), "summary", sanitizeDraftText(task.summary()),
+            tasks.add(Map.of("title", sanitizeDraftText(repairs, task.title()), "summary", sanitizeDraftText(repairs, task.summary()),
                     "evidenceFactIds", task.evidenceFactIds(), "claimType", task.claimType(), "confidence", task.confidence()));
         }
         output.put("taskSegments", tasks);
         return output;
     }
 
-    private String sanitizeDraftText(String text) {
+    private String sanitizeDraftText(WikiRepairService repairs, String text) {
         return text == null || text.isBlank() ? "" : repairs.sanitizeUserText(text);
     }
 

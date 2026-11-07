@@ -92,7 +92,8 @@ public class DesktopAgentController {
                                   WikiStore wikiStore) {
         this.summaryService = summaryService;
         this.adviceService = adviceService;
-        this.promptService = new SummaryPromptService();
+        this.promptService = new SummaryPromptService(summaryService == null
+                ? com.selfanalyst.wiki.WikiPrivacyPolicy::none : summaryService::privacyPolicy);
         this.agent = agent;
         this.taskStore = taskStore;
         this.config = config;

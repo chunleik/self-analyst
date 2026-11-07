@@ -190,7 +190,7 @@ public class DesktopServer {
         DesktopDocumentController documentController = null;
         try {
             var documents = new com.selfanalyst.document.DocumentService(memoryDir, chatSessionStore);
-            documents.setDataSources(new com.selfanalyst.document.DocumentDataSources(config, eventStore, fileWatchStore, wikiStore));
+            documents.setDataSources(new com.selfanalyst.document.DocumentDataSources(config, eventStore, fileWatchStore, wikiStore, privacy));
             documentController = new DesktopDocumentController(documents, config);
             if (agent != null) agent.registerDocumentTools(documents);
         } catch (Exception failure) {
@@ -200,8 +200,8 @@ public class DesktopServer {
         var repairFacts = eventStore == null ? null : new com.selfanalyst.wiki.WikiFactBuilder(
                 eventStore, config.wikiPromptMaxContentChars(), () -> 0L, privacy);
         var repairs = wikiStore == null || repairFacts == null ? null : new com.selfanalyst.wiki.WikiRepairService(
-                wikiStore, entry -> com.selfanalyst.wiki.WikiRepairService.buildRepairFacts(wikiStore, repairFacts, entry),
-                privacy, () -> repairConfigurationStamp(config, agent, privacy.get()));
+                wikiStore, (entry, policy) -> com.selfanalyst.wiki.WikiRepairService.buildRepairFacts(wikiStore, repairFacts, entry, policy),
+                privacy, policy -> repairConfigurationStamp(config, agent, policy));
         this.repairCtrl = new DesktopSummaryRepairController(repairs, chatSessionStore);
         var repairChat = repairs == null ? null : new com.selfanalyst.desktop.service.SummaryRepairChatService(
                 repairs, chatSessionStore, generationStore,

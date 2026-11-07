@@ -12,10 +12,10 @@
 
 ## 3. 模型可见路径改用运行时策略
 
-- [ ] 3.1 `WikiFactBuilder`/`WikiWorker`、`SummaryService`、`OntologySources` 增加 `Supplier<WikiPrivacyPolicy>` 构造器并在每次处理开始时取快照；`AppSession`、`DesktopServer` 改为注入 `PrivacyRuntime.modelPolicy()`，缓存指纹改用快照；`WikiFactBuilder` 相关测试或 `SummaryServiceTest` 补充“仅采集排除的历史事件不进入模型输入”和“替换策略后下一次处理生效”回归；仅过滤行为建议发给模型的证据（本机展示不变），摘要修复单次请求固定策略，并补齐建议过滤与修复并发切换回归
+- [x] 3.1 `WikiFactBuilder`/`WikiWorker`、`SummaryService`、`OntologySources` 增加 `Supplier<WikiPrivacyPolicy>` 构造器并在每次处理开始时取快照；`AppSession`、`DesktopServer` 改为注入 `PrivacyRuntime.modelPolicy()`，缓存指纹改用快照；`WikiFactBuilder` 相关测试或 `SummaryServiceTest` 补充“仅采集排除的历史事件不进入模型输入”和“替换策略后下一次处理生效”回归；仅过滤行为建议发给模型的证据（本机展示不变），摘要修复单次请求固定策略，并补齐建议过滤与修复并发切换回归
 - [x] 3.2 新增 `EventPrivacyFilter`，递归移除数组中 `data` 命中策略的事件对象，非 JSON 输入返回结构化错误；新增 `EventPrivacyFilterTest` 覆盖嵌套数组、`context_title`、`url_host`、`private_browsing`、非事件对象保持与空策略原样
 - [x] 3.3 `EventQueryTools` 接收策略 supplier，在 `queryEvents`、`executeAQL` 成功响应上先过滤再截断，工具描述补充聚合数值说明；`SelfAnalystAgent` 注入运行时策略；`EventQueryToolsTest` 用本地 HTTP 桩验证过滤、预算顺序与两次调用间策略切换
-- [ ] 3.4 `DocumentDataSources` 接收策略 supplier，`projection` 导出跳过命中事件并写入 `privacyFilteredCount`；`DocumentDataSourceTest` 断言导出行、`recordCount` 与过滤计数
+- [x] 3.4 `DocumentDataSources` 接收策略 supplier，`projection` 导出跳过命中事件并写入 `privacyFilteredCount`；`DocumentDataSourceTest` 断言导出行、`recordCount` 与过滤计数
 
 ## 4. 隐私设置接口与页签
 

@@ -105,7 +105,10 @@ class ConfigResolverTest {
         var snapshot = ConfigResolver.resolve(user, Map.of());
         assertEquals("http://localhost:5810/api/0", snapshot.config().eventsBaseUrl());
         assertEquals("events.port", snapshot.values().get("events.base-url").inheritedFrom());
-        assertEquals(19, SupportedKeys.defaults().keySet().stream().filter(k -> k.startsWith("events.")).count());
+        assertEquals(20, SupportedKeys.defaults().keySet().stream().filter(k -> k.startsWith("events.")).count());
+        assertTrue(SupportedKeys.defaults().containsKey("events.collection.excludeApps"));
+        assertEquals("", SupportedKeys.defaults().get("events.collection.excludeApps"));
+        assertEquals("", snapshot.config().collectionExcludeApps());
         assertFalse(snapshot.publicValues().keySet().stream().anyMatch(k -> k.startsWith("aw.")));
         for (EventSetting setting : eventSettings()) {
             assertTrue(ConfigPolicy.requiresRestart(setting.key()));

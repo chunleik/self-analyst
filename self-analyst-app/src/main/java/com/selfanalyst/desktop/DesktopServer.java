@@ -53,6 +53,7 @@ public class DesktopServer {
     private final DesktopAgentController agentCtrl;
     private final DesktopSummaryRepairController repairCtrl;
     private final DesktopConfigController configCtrl;
+    private final DesktopPrivacyController privacyCtrl;
     private final DesktopLlmSettingsController llmSettings;
     private final DesktopChatGptController chatGpt;
     private final com.selfanalyst.chatgpt.ChatGptSessionService chatGptSessions;
@@ -267,6 +268,7 @@ public class DesktopServer {
         this.configCtrl = new DesktopConfigController(config, userConfigStore);
         this.configCtrl.setChatGptSessions(chatGptSessions);
         var configuration = userConfigStore.application(config);
+        this.privacyCtrl = new DesktopPrivacyController(configuration, eventStore);
         this.neo4jSync = new com.selfanalyst.ontology.Neo4jSyncService(ontology,
                 () -> com.selfanalyst.config.Neo4jConfigResolver.from(configuration.saved().properties()),
                 System::getenv);
@@ -355,6 +357,8 @@ public class DesktopServer {
 
         // ── Config tab ───────────────────────────────────────
         app.get("/desktop/config", configCtrl::getConfig);
+        app.get("/desktop/privacy", privacyCtrl::getPrivacy);
+        app.put("/desktop/privacy", privacyCtrl::putPrivacy);
         app.before("/desktop/*", ctx -> ctx.attribute("selfanalyst.language", language));
         app.get("/desktop/config/effective", configCtrl::getEffectiveConfig);
         app.get("/desktop/llm-settings", llmSettings::get);

@@ -19,7 +19,7 @@
 
 ## 4. 隐私设置接口与页签
 
-- [ ] 4.1 新增 `DesktopPrivacyController` 与路由 `GET`/`PUT /desktop/privacy`：读取两键合成清单（冲突显示为 capture）、近 30 天窗口桶候选（前 100、剔除已在清单、空白与 unknown 排除）、校验与去重后经 `ConfigApplicationService.update` 保存；新增 `DesktopPrivacyControllerTest` 覆盖载荷、候选排序与剔除、非法应用名拒绝、保存后运行策略已更新
+- [x] 4.1 新增 `DesktopPrivacyController` 与路由 `GET`/`PUT /desktop/privacy`：读取两键合成清单（冲突显示为 capture）、近 30 天窗口桶候选（前 100、剔除已在清单、空白与 unknown 排除）、校验与去重后经 `ConfigApplicationService.update` 保存；新增 `DesktopPrivacyControllerTest` 覆盖载荷、候选排序与剔除、非法应用名拒绝、保存后运行策略已更新
 - [ ] 4.2 新增 `privacy-settings.js`、`privacy-settings.css`，在 `index.html` 增加“隐私”页签并在 `ui.js` 的 `switchConfigView` 挂载；实现可搜索候选下拉（键盘选择、手动输入）、每行模式下拉与移除、网站 chip、保存提示与脏状态放弃确认
 - [ ] 4.3 在 `locales/zh.json`、`locales/en.json` 增加全部文案（含“不采集期间不留本地记录、已生成摘要与会话中已看到内容不追溯”说明）；新增 `src/test/js/privacy-settings.test.mjs` 覆盖渲染、添加/切换/移除、保存载荷、候选失败降级，并确保 `i18n-catalog.test.mjs` 通过
 

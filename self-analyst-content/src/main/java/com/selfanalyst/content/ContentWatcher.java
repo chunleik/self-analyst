@@ -162,11 +162,13 @@ public class ContentWatcher extends Thread {
         PlatformCapture.ForegroundWindow foreground =
                 platform.getForegroundWindowInfo();
         long handle = foreground != null ? foreground.handle() : 0;
-        if (handle == 0 || captureExcluded.test(foreground.app())) {
+        boolean excluded = foreground != null && captureExcluded.test(foreground.app());
+        if (handle == 0 || excluded) {
             observedHandle = 0;
             observedApp = null;
             observedTitle = null;
-            discardCapture();
+            if (excluded) discardCapture();
+            else invalidateSnapshot();
             return;
         }
 
@@ -219,6 +221,8 @@ public class ContentWatcher extends Thread {
                 platform.getForegroundWindowInfo();
         if (captureExcluded.test(app) || (confirmed != null && captureExcluded.test(confirmed.app()))) {
             discardCapture();
+        } else if (confirmed == null || confirmed.handle() == 0) {
+            invalidateSnapshot();
         } else if (generation == captureGeneration.get()
                 && sameWindow(handle, app, title, confirmed)) {
             latest = new Snapshot(generation, handle, app, title, titleResult);
@@ -230,8 +234,12 @@ public class ContentWatcher extends Thread {
     void heartbeatOnce() {
         heartbeatDelivery.discardExcluded(captureExcluded);
         PlatformCapture.ForegroundWindow current = platform.getForegroundWindowInfo();
-        if (current == null || current.handle() == 0 || captureExcluded.test(current.app())) {
+        if (current != null && captureExcluded.test(current.app())) {
             discardCapture();
+            return;
+        }
+        if (current == null || current.handle() == 0) {
+            invalidateSnapshot();
             return;
         }
         Snapshot snap = latest;
@@ -243,9 +251,14 @@ public class ContentWatcher extends Thread {
         }
     }
 
-    private void discardCapture() {
+    private void invalidateSnapshot() {
+        // A transient foreground gap invalidates in-flight UIA, not pending delivery.
         captureGeneration.incrementAndGet();
         latest = null;
+    }
+
+    private void discardCapture() {
+        invalidateSnapshot();
         heartbeatDelivery.resetContinuity();
     }
 
@@ -302,8 +315,12 @@ public class ContentWatcher extends Thread {
             Map<String, Object> pendingData = (Map<String, Object>) body.get("data");
             PlatformCapture.ForegroundWindow current = platform.getForegroundWindowInfo();
             if (captureExcluded.test((String) pendingData.get("app"))
-                    || current == null || captureExcluded.test(current.app())) {
+                    || (current != null && captureExcluded.test(current.app()))) {
                 discardCapture();
+                return;
+            }
+            if (current == null || current.handle() == 0) {
+                invalidateSnapshot();
                 return;
             }
             if (snap.generation != captureGeneration.get()

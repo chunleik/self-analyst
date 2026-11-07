@@ -6,7 +6,7 @@
 
     <groupId>com.selfanalyst</groupId>
     <artifactId>self-analyst</artifactId>
-    <version>0.6.1-beta.12</version>
+    <version>0.6.1-beta.13</version>
     <packaging>pom</packaging>
 
     <name>SelfAnalyst</name>

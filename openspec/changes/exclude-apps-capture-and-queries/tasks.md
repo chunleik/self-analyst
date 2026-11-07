@@ -26,5 +26,5 @@
 ## 5. 文档与验证
 
 - [x] 5.1 同步更新 `README.md`（英文）、`README.zh-CN.md`（中文）的配置与隐私说明以及 `PRIVACY.md`，介绍隐私页签、两种模式、热生效与不追溯边界；检查完整差异确认英文版无中文段落
-- [ ] 5.2 运行 `mvn test` 与 `openspec validate exclude-apps-capture-and-queries --strict`，记录结果；按需截取隐私页签截图供 PR 使用
-- [ ] 5.3 使用 `openspec-sync-specs` 将增量同步到 `title-capture`、`event-query-tools`、`agent-document-generation`、`llm-wiki`、`user-configuration` 主规格，并再次严格校验
+- [x] 5.2 运行 `mvn test` 与 `openspec validate exclude-apps-capture-and-queries --strict`，记录结果；按需截取隐私页签截图供 PR 使用
+- [x] 5.3 使用 `openspec-sync-specs` 将增量同步到 `title-capture`、`event-query-tools`、`agent-document-generation`、`llm-wiki`、`user-configuration` 主规格，并再次严格校验

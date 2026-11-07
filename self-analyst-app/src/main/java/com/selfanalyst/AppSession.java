@@ -4,6 +4,7 @@ import com.selfanalyst.agent.SelfAnalystAgent;
 import com.selfanalyst.events.EventServer;
 import com.selfanalyst.events.watcher.WatcherManager;
 import com.selfanalyst.config.Config;
+import com.selfanalyst.config.PrivacyRuntime;
 import com.selfanalyst.content.ContentWatcher;
 import com.selfanalyst.desktop.DesktopServer;
 import com.selfanalyst.desktop.controller.DesktopFileController;
@@ -28,6 +29,7 @@ public class AppSession implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(AppSession.class);
     private final Config config;
+    private final PrivacyRuntime privacyRuntime;
     private UsageMeter usageMeter;
     private SelfAnalystAgent agent;
     private EventServer eventServer;
@@ -113,6 +115,9 @@ public class AppSession implements AutoCloseable {
         this.desktopShutdownSignal =
                 desktopShutdownSignal != null ? desktopShutdownSignal : () -> {};
         this.config = initialConfig;
+        this.privacyRuntime = new PrivacyRuntime(config);
+        userConfigStore.application(config).attachPrivacy(next -> privacyRuntime.apply(
+                next.collectionExcludeApps(), next.wikiExcludeApps(), next.wikiExcludeSites()));
         try {
             this.usageMeter = new UsageMeter(config, config.memoryDir());
             if (config.eventsEmbedded()) {
@@ -323,7 +328,7 @@ public class AppSession implements AutoCloseable {
             eventServer.start(config.eventsPort());
             log.info("嵌入式 AW 服务已启动 (端口 {})", config.eventsPort());
             watcherManager = new WatcherManager(
-                    "http://localhost:" + config.eventsPort());
+                    "http://localhost:" + config.eventsPort(), privacyRuntime.captureExcluded());
             if (config.collectWindow()) {
                 watcherManager.addWindowWatcher();
             }
@@ -334,7 +339,7 @@ public class AppSession implements AutoCloseable {
             try {
                 if (config.collectTitle() && contentPersistenceReady) {
                     contentWatcher = new ContentWatcher("http://localhost:" + config.eventsPort(),
-                            config.titlePollIntervalMs());
+                            config.titlePollIntervalMs(), privacyRuntime.captureExcluded());
                     contentWatcher.start();
                     log.info("上下文标题识别已启动 (UIA)");
                 } else if (!contentPersistenceReady) {

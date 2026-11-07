@@ -6,9 +6,9 @@
 
 ## 2. 采集层排除
 
-- [ ] 2.1 `WatcherManager`/`WindowWatcher` 接收排除谓词：命中时 `collect()` 返回 `null` 并重置连续性；新增 `WindowWatcherTest` 覆盖命中不发事件、切回开始新事件、部分名称不匹配、谓词变化后下一轮生效
-- [ ] 2.2 `ContentWatcher` 新增带排除谓词的构造器：命中时清空快照、不发 heartbeat、不查询无障碍树；`ContentWatcherTest` 覆盖命中、切回与运行中切换
-- [ ] 2.3 `AppSession` 创建 `PrivacyRuntime`，传给两个采集器并 `attachPrivacy`；运行 `mvn -pl self-analyst-app -am '-Dtest=ConfigTest,PrivacyRuntimeTest,ContentWatcherTest,WindowWatcherTest' '-Dsurefire.failIfNoSpecifiedTests=false' test` 通过
+- [x] 2.1 `WatcherManager`/`WindowWatcher` 接收排除谓词：命中时 `collect()` 返回 `null` 并重置连续性；新增 `WindowWatcherTest` 覆盖命中不发事件、切回开始新事件、部分名称不匹配、谓词变化后下一轮生效
+- [x] 2.2 `ContentWatcher` 新增带排除谓词的构造器：命中时清空快照、不发 heartbeat、不查询无障碍树；`ContentWatcherTest` 覆盖命中、切回与运行中切换
+- [x] 2.3 `AppSession` 创建 `PrivacyRuntime`，传给两个采集器并 `attachPrivacy`；运行 `mvn -pl self-analyst-app -am '-Dtest=ConfigTest,PrivacyRuntimeTest,ContentWatcherTest,WindowWatcherTest' '-Dsurefire.failIfNoSpecifiedTests=false' test` 通过
 
 ## 3. 模型可见路径改用运行时策略
 

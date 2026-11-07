@@ -104,6 +104,11 @@ public abstract class Watcher implements Runnable {
                             event, UUID.randomUUID().toString(), 0);
                 } else discontinuity = true;
             }
+            if (pendingHeartbeat != null && !heartbeatAllowed(pendingHeartbeat.event())) {
+                pendingHeartbeat = null;
+                discontinuity = true;
+                resetContinuity(observed);
+            }
             if (pendingHeartbeat != null) {
                 if (sendHeartbeat(pendingHeartbeat.event(), pendingHeartbeat.sourceEventId())) {
                     pendingHeartbeat = null;
@@ -126,6 +131,9 @@ public abstract class Watcher implements Runnable {
                     name, e.getClass().getSimpleName());
         }
     }
+
+    /** Collector-side delivery check, including pending retries. */
+    protected boolean heartbeatAllowed(Event event) { return true; }
 
     protected abstract Event collect();
 

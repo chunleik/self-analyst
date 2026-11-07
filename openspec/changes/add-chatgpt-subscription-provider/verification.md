@@ -90,3 +90,31 @@
 - Maven 内全套 Node：332 项，300 通过、32 跳过、0 失败；ChatGPT/settings/packaging 三个定向文件另跑 37/37 通过。
 - `openspec validate --all --strict`：39/39 通过；`git diff --check` 通过。
 - 最新提交的标准 Java 21 编译、Windows 全量验证与其它必需 GitHub Actions 检查需在合并前另行确认。真实账户端到端验收仍未完成，不归档该 change。
+
+## 2026-11-07 Windows 真实账户 HTTP 400 修复（任务 7.1–7.3）
+
+本节补充并更新上述历史验证限制：本次在 Windows 11、Oracle JDK 21.0.9、Maven 3.9.11 下使用原样 `--release 21` 编译，无 wrapper。用户明确授权测试当前 SelfAnalyst 的 ChatGPT 连接；仅使用该应用自身的已保存账户，固定短提示，不发送真实会话、活动记录或文件信息，不输出或保存令牌。
+
+### 真实服务定位
+
+- 当前模型 `gpt-6.1-sol`：单轮用户输入 HTTP 200，收到 `response.completed`，文本 `OK`。
+- 添加 `role=assistant`、`content.type=input_text` 的合成历史：稳定返回 HTTP 400，`code=invalid_value`，`param=input[1].content[0]`；诊断说明该位置仅支持 `output_text` 和 `refusal`。
+- 只将助手文本类型改成 `output_text`：HTTP 200、`response.completed`、文本 `OK`。系统/开发者、用户与工具结果文本仍使用 `input_text`。
+- 实际 Java 适配器进一步复现 `PROTOCOL`：官方 Responses 端点返回 HTTP 200 和完整 SSE，但缺少 Content-Type。修复允许缺省头的正文进入既有有界 SSE 校验，显式错误类型仍拒绝；有效完成事件仍是成功前提。
+- 官方历史消息转换示例也按角色区分内容类型：https://developers.openai.com/api/docs/assistants/migration 。
+
+### 回归与真实复测
+
+- 先运行旧实现：两个新增历史编码测试失败，均为 expected output_text / actual input_text；新增无 Content-Type 的完整流测试在兼容修复前以 PROTOCOL 失败。
+- 定向测试命令（本机使用 Maven 镜像）：`mvn -pl self-analyst-app -am '-Dtest=ChatGpt*Test,ChatImageModelTest,LlmHotReloadIntegrationTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`。
+- Java 共 91 项，88 通过、3 按平台条件跳过、0 失败或错误。ChatGptResponsesModelTest 18/18 通过，覆盖真实 AgentScope 聚合后的第二轮、混合文本/工具顺序、缺省响应头、显式错误类型、普通 JSON、HTML、失败事件和截断流。Maven 内 Node 共 334 项，333 通过、1 跳过、0 失败。
+- 同步主分支 `7595410` 后保留 #141 已有的 SSE 修复及回归，用同一命令复验。Java 仍为 91 项（88 通过、3 跳过，ChatGptResponsesModelTest 18/18），Node 345 项（344 通过、1 跳过），两者均无失败。
+- 修复后的 Java 适配器使用真实账户执行连续两轮固定提示，两轮均完整结束并返回 `OK`；使用最终本机修复 JAR 再次执行同一测试，两轮同样成功。
+- `openspec validate add-chatgpt-subscription-provider --strict` 通过；`openspec validate --specs --strict` 35/35 通过。主规格同步新增两个协议场景，用户指南增加连接测试与续聊故障说明。
+
+### 本机应用验证与交付边界
+
+- 保留已安装版本其余内容，只更新 `com/selfanalyst/chatgpt/ChatGptResponsesModel.class`；安装前比较类接口并逐项核对 JAR，唯一变化是该 class。
+- 原 JAR 备份为 `%LOCALAPPDATA%/SelfAnalyst/self-analyst-app.jar.before-chatgpt-400-20261107`。停止并重新启动专属应用进程后，后端和桌面正常启动；未修改用户配置、OAuth 凭据或聊天数据。
+- 在重启后的真实桌面模型设置点击“测试生成连接”，显示“验证成功 (3083 ms)”，配置保持无未保存更改。
+- 上述真实账户和桌面测试使用本机修复包。完整浏览器 OAuth、账户切换、刷新及断开验收仍属于任务 4.2、4.5、4.6 的验证范围，现有 change 保持活动。

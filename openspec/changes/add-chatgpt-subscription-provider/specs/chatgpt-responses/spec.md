@@ -15,6 +15,10 @@ ChatGPT 连接 SHALL 使用服务端允许的 Responses 端点及当前 OAuth ac
 - **WHEN** 已连接 ChatGPT 时用户编辑其它 API Key 连接地址
 - **THEN** ChatGPT 令牌不会被发送到该地址，模型请求只使用对应认证方式允许的目标
 
+#### Scenario: 续聊包含助手历史文本
+- **WHEN** 下一轮请求包含此前的助手文本回答，或助手文本与函数调用混合出现
+- **THEN** 助手文本以 Responses 的 output_text 表达，系统/开发者、用户及工具结果文本保持 input_text，原有内容和工具顺序保持不变，不因复用用户输入类型导致服务端拒绝
+
 ### Requirement: SPEC-CGRESP-002 流式文本与工具调用保真
 Responses 适配 SHALL 将文本增量和最终结果转换为既有聊天事件，并将函数名称、调用标识、完整参数及工具结果保真传递给既有串行工具执行流程。跨 SSE 帧拆分的参数 SHALL 在完成后组装为单一有效调用，MUST NOT 重复执行同一完成调用。plain、摘要及压缩调用 SHALL 返回完整最终文本，即使上游通过 SSE 提供结果。错误、取消、不完整或缺少终止结果的流 MUST NOT 被报告为成功完成。
 
@@ -29,6 +33,10 @@ Responses 适配 SHALL 将文本增量和最终结果转换为既有聊天事件
 #### Scenario: 流提前结束
 - **WHEN** 上游在有效完成事件前关闭连接或返回失败事件
 - **THEN** 当前工作报告失败并释放连接，不将已收到的部分文本误报为完整成功
+
+#### Scenario: 完整事件流省略媒体类型响应头
+- **WHEN** 受信任 Responses 端点返回 HTTP 200 但未提供 Content-Type
+- **THEN** 系统仅在正文通过有界 SSE 协议校验并收到有效完成事件时报告成功；显式错误媒体类型、普通 JSON、HTML、失败事件或截断正文均不得报告生成成功
 
 #### Scenario: 工具续轮需要加密推理项
 - **WHEN** 服务端完成结果包含工具续轮需要的不透明加密 reasoning 项

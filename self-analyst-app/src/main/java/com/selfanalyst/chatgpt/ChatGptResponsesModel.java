@@ -192,7 +192,11 @@ public final class ChatGptResponsesModel implements Model, AutoCloseable {
                     ArrayNode values = output.putArray("output");
                     for (ContentBlock value : result.getOutput()) values.add(inputContent(value));
                 } else if (!(block instanceof ThinkingBlock)) {
-                    content.add(inputContent(block));
+                    // Assistant history is model output, even when replayed in a new request.
+                    // Responses rejects input_text in an assistant message with HTTP 400.
+                    content.add("assistant".equals(role) && block instanceof TextBlock text
+                            ? JSON.createObjectNode().put("type", "output_text").put("text", text.getText())
+                            : inputContent(block));
                 }
             }
             flushMessage(input, content, role);

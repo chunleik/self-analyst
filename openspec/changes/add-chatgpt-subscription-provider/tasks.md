@@ -42,6 +42,12 @@
 - [x] 6.2 为进程内及跨进程刷新锁共享一个 90 秒等待期限，超时保留凭据并返回可重试错误，支持中断；补充独立 JVM 持锁、状态读取及释放后恢复回归测试。
 - [x] 6.3 运行 ChatGPT Java 定向测试、相关 Node 测试和 OpenSpec strict 校验，记录本地环境限制。证据：Java 85 项（82 通过、3 Windows-only 跳过）、Node 定向 37/37、全部 OpenSpec 39/39；标准编译与 Windows 验证仍以最新提交 CI 为准。
 
+## 7. 真实账户 HTTP 400 修复
+
+- [x] 7.1 用当前已授权账户和固定短提示对照首轮、助手历史 input_text 与 output_text，记录脱敏错误码和完成事件；不发送真实聊天或活动内容。
+- [x] 7.2 修复 ChatGptResponsesModel 的助手历史文本编码，用户、系统及工具结果保持各自输入类型；在 ChatGptResponsesModelTest 覆盖普通续聊及文本与工具混合历史。同步主分支时保留 #141 的 SSE 兼容实现和回归。
+- [x] 7.3 运行相关 Java 回归、真实账户 Java 适配器多轮测试及 OpenSpec strict 校验，同步主规格并记录验证边界。同步主分支后 Java 91 项（88 通过、3 跳过），Node 345 项（344 通过、1 跳过）；本机真实两轮及安装后 UI 生成测试成功，详见 verification.md。
+
 ## 当前验证状态
 
 Java 定向 98/98 通过；全量 Maven 的 Surefire XML 合计 1173 项，1169 通过、4 跳过、0 失败或错误。Maven 内 Node 为 332 项，300 通过、32 跳过、0 失败。由于环境缺少 ct.sym，Java 使用临时 wrapper 将 --release 21 转为 -source 21 -target 21，并非原样 --release 编译；仓库构建配置未为此改变。用户文档已验收，五项主规格已同步且全部 35 项主规格 strict 验证通过。Rust、浏览器可视、真实账户及 Windows 打包/必需检查仍未完成，因此 3.2、4.2、4.5、4.6 保持未完成且 change 不归档。详细证据与限制见 verification.md。

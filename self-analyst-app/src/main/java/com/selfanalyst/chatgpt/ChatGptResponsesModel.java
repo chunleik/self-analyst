@@ -110,8 +110,12 @@ public final class ChatGptResponsesModel implements Model, AutoCloseable {
                     try (InputStream input = response.body()) {
                         if (sink.isCancelled() || closed.get()) return;
                         if (response.statusCode() != 200) throw httpFailure(response.statusCode(), input);
-                        if (!response.headers().firstValue("Content-Type").orElse("")
-                                .split(";", 2)[0].trim().equalsIgnoreCase("text/event-stream")) throw failure(Code.PROTOCOL);
+                        // The ChatGPT direct route may omit Content-Type on a valid SSE response.
+                        // An absent header still requires the strict parser and a completed event;
+                        // an explicitly incompatible media type remains a protocol failure.
+                        String contentType = response.headers().firstValue("Content-Type").orElse(null);
+                        if (contentType != null && !contentType.split(";", 2)[0].trim()
+                                .equalsIgnoreCase("text/event-stream")) throw failure(Code.PROTOCOL);
                         read(input, sink, request.names());
                     }
                 } catch (Exception error) {

@@ -63,6 +63,25 @@
 - OpenSpec：change strict 与全部主规格 strict 校验通过。
 - 未运行：跨模块完整 `mvn test`、Windows 必需检查和真实账户验收，仍按 4.2、4.5、4.6 处理。本机可原样 `--release 21` 编译仅说明此次环境，不替代 4.2 的完整 Windows 验证。
 
+## ChatGPT 生成测试协议错误回归（2026-11-07，任务 2.4）
+
+- 用户截图中的模型配置已保存，最小生成测试返回 `protocol`。定位当前安装版本后，使用其自身 `ChatGptSessionService` 与原请求构造逻辑发送固定 `Reply OK.` 提示；仅输出 HTTP 状态、事件类型、数量和本地解析结果，不输出或保存令牌、账户信息或生成正文。
+- 两次诊断均观察到 HTTP 200、缺少 Content-Type、有效文本事件及 `response.completed`，完成对象包含一项输出且无错误。把相同响应正文交给原有严格解析器可正常完成，确认失败发生在解析前的响应头校验。没有把所有 `protocol` 错误归因于模型权限或模型 ID。
+- 修复仅允许缺失 Content-Type 的响应进入原有严格 SSE 解析器；明确的非 SSE 媒体类型仍拒绝。普通 JSON、HTML、空响应、仅文本增量、失败事件和不完整事件仍不能报告成功，保留超时、响应大小及单次请求限制。实现保持 SPEC-CGRESP-002/003/004 的既有契约，无需改变主规格。
+- 新增两项 `ChatGptResponsesModelTest` 回归，模拟缺失头成功及六种无效正文、明确错误媒体类型。旧安装类与修复前 Maven 测试均复现 `ChatGPT request failed: PROTOCOL`（响应头校验位置）；修复后通过。
+- JDK 21 原样编译及定向验证：`mvn -pl self-analyst-app -am '-Dtest=ChatGptResponsesModelTest,ChatGptInferenceGateTest,ChatGptRuntimeTimeoutTest,ChatGptModelCatalogTest,DesktopLlmSettingsControllerTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`，Java 23/23 通过，附带 Node 335 项（334 通过、1 跳过），BUILD SUCCESS。初次 Maven 编译与编辑同时发生导致缓存旧类，更新源文件时间戳后重新编译验证通过，未修改构建配置。
+- 使用 `javac --release 21` 编译的修复类覆盖诊断进程的类路径，复用已安装应用依赖和自身授权组件，以 `gpt-6.1-sol` 进行一次最小生成验证：有效文本、完成状态和 usage 均存在。此验证没有替换安装文件或重启用户应用；只证明本次模型生成链路，不代替登录、刷新、断开、工具续轮或全部账户套餐验收。
+- `openspec validate add-chatgpt-subscription-provider --strict` 与 `git diff --check` 通过。其它未完成任务保持原状态，change 不归档。
+- 协议核对参考：[模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[Responses 流式事件](https://developers.openai.com/api/reference/resources/responses/streaming-events)。缺失 Content-Type 是本次实测结果，并非宣称官方文档保证该响应头缺省。
+
+## 模型设置错误文案回归（2026-11-07，任务 3.1）
+
+- 截图中的 ChatGPT 模型 ID 为空，`LlmSettingsService` 按既有规格拒绝保存；前后端正式语言资源均缺少 `error.llmSettings.chatgptModel`，导致界面显示内部错误键。同类 `provider` 和 `chatgptAccount` 校验资源也缺失。
+- 补齐桌面 UI 与服务端 `messages` 的中英文资源，模型提示明确指引填写 ID 或加载列表后选择。保持非空校验、显式发现模型及不自动保存的契约，无需修改主规格。
+- 新增 `i18n.test.mjs` 回归，通过实际 API 错误处理与模型设置状态机验证两种语言的三个错误码、前后端文案一致及失败后草稿保留。修复前复现 `操作失败：error.llmSettings.chatgptModel`，修复后通过。
+- `node --test self-analyst-app/src/test/js/i18n.test.mjs self-analyst-app/src/test/js/i18n-catalog.test.mjs self-analyst-app/src/test/js/llm-settings.test.mjs`：18/18 通过；`node --test self-analyst-app/src/test/js/chatgpt-settings.test.mjs`：26/26 通过。
+- `openspec validate add-chatgpt-subscription-provider --strict` 与 `git diff --check` 通过。本次仅语言资源和测试修复，未重新打包运行中的桌面应用，也未执行真实账户生成验证；原有未完成验收任务保持未完成，change 不归档。
+
 ## PR #137 追加评审修复验证（任务 6.1–6.3）
 
 - 成功重新登录清除旧 pendingIdToken，并保护新凭据不被迟到的旧身份校验失败清除。两项新增会话回归先在未修复实现上分别复现 `chatgpt_refresh_failed` 与 `chatgpt_sign_in_required`，修复后通过。

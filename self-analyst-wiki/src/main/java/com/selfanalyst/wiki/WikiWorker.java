@@ -37,7 +37,7 @@ public class WikiWorker {
     private final boolean backfillEnabled;
     private final WikiEmbeddingWorker embeddingWorker;
     private final Supplier<Instant> nowSupplier;
-    private final WikiPrivacyPolicy privacy;
+    private final Supplier<WikiPrivacyPolicy> privacy;
 
     private final ScheduledExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -55,6 +55,14 @@ public class WikiWorker {
     WikiWorker(WikiStore store, WikiFactBuilder factBuilder, WikiSummarizer summarizer,
                ZoneId timezone, Duration timeout, int intervalSeconds, boolean backfillEnabled,
                WikiEmbeddingWorker embeddingWorker, Supplier<Instant> nowSupplier) {
+        this(store, factBuilder, summarizer, timezone, timeout, intervalSeconds, backfillEnabled,
+                embeddingWorker, nowSupplier, factBuilder == null ? WikiPrivacyPolicy::none : factBuilder::privacy);
+    }
+
+    public WikiWorker(WikiStore store, WikiFactBuilder factBuilder, WikiSummarizer summarizer,
+                      ZoneId timezone, Duration timeout, int intervalSeconds, boolean backfillEnabled,
+                      WikiEmbeddingWorker embeddingWorker, Supplier<Instant> nowSupplier,
+                      Supplier<WikiPrivacyPolicy> privacy) {
         this.store = store;
         this.factBuilder = factBuilder;
         this.summarizer = summarizer;
@@ -64,7 +72,7 @@ public class WikiWorker {
         this.backfillEnabled = backfillEnabled;
         this.embeddingWorker = embeddingWorker;
         this.nowSupplier = nowSupplier;
-        this.privacy = factBuilder == null ? WikiPrivacyPolicy.none() : factBuilder.privacy();
+        this.privacy = java.util.Objects.requireNonNull(privacy);
         this.executor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "wiki-worker");
             t.setDaemon(true);
@@ -123,7 +131,8 @@ public class WikiWorker {
 
         reconcileNewPeriods();
         if (backfillEnabled) discoverOlderStatistics();
-        try { store.redactPrivacy(privacy, 20); }
+        // Existing text-only redaction is independent of runtime exclusion changes.
+        try { store.redactPrivacy(WikiPrivacyPolicy.none(), 20); }
         catch (Exception e) { log.warn("Wiki privacy redaction failed: {}", e.getClass().getSimpleName()); }
 
         try {
@@ -248,6 +257,7 @@ public class WikiWorker {
     }
 
     private void processEntry(WikiEntry requested) {
+        WikiPrivacyPolicy privacy = java.util.Objects.requireNonNull(this.privacy.get());
         WikiStore.VersionedEntry snapshot = store.versionedEntry(requested.id());
         if (snapshot == null || !snapshot.entry().updatedAt().equals(requested.updatedAt())
                 || snapshot.entry().status() == WikiStatus.SUMMARIZED || snapshot.entry().status() == WikiStatus.SKIPPED) return;
@@ -264,14 +274,14 @@ public class WikiWorker {
 
             if (needsRawEvents(entry.level())) {
                 facts = summarizer instanceof WikiSummaryPipeline
-                        ? factBuilder.buildCompleteFacts(period) : factBuilder.buildFacts(period);
+                        ? factBuilder.buildCompleteFacts(period, privacy) : factBuilder.buildFacts(period, privacy);
             } else {
                 WikiLevel childLevel = childLevel(entry.level());
                 List<WikiEntry> children = completedExpectedChildren(entry, childLevel);
                 if (children == null) {
                     throw new IllegalStateException("Parent dependencies are incomplete for " + id);
                 }
-                facts = factBuilder.buildFactsFromChildren(children, period);
+                facts = factBuilder.buildFactsFromChildren(children, period, privacy);
             }
 
             if (isEmpty(facts)) {

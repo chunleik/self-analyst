@@ -22,7 +22,7 @@ public class WikiFactBuilder {
     private final String hostname;
     private final int maxContentChars;
     private final java.util.function.Supplier<Long> projectionLagSeconds;
-    private final WikiPrivacyPolicy privacy;
+    private final java.util.function.Supplier<WikiPrivacyPolicy> privacy;
 
     public WikiFactBuilder(EventStore eventStore, int maxContentChars) {
         this(eventStore, maxContentChars, () -> null);
@@ -36,14 +36,21 @@ public class WikiFactBuilder {
     public WikiFactBuilder(EventStore eventStore, int maxContentChars,
                            java.util.function.Supplier<Long> projectionLagSeconds,
                            WikiPrivacyPolicy privacy) {
+        this(eventStore, maxContentChars, projectionLagSeconds,
+                () -> privacy == null ? WikiPrivacyPolicy.none() : privacy);
+    }
+
+    public WikiFactBuilder(EventStore eventStore, int maxContentChars,
+                           java.util.function.Supplier<Long> projectionLagSeconds,
+                           java.util.function.Supplier<WikiPrivacyPolicy> privacy) {
         this.eventStore = eventStore;
         this.hostname = resolveHostname();
         this.maxContentChars = maxContentChars;
         this.projectionLagSeconds = projectionLagSeconds;
-        this.privacy = privacy == null ? WikiPrivacyPolicy.none() : privacy;
+        this.privacy = Objects.requireNonNull(privacy);
     }
 
-    public WikiPrivacyPolicy privacy() { return privacy; }
+    public WikiPrivacyPolicy privacy() { return Objects.requireNonNull(privacy.get()); }
 
     public java.util.Optional<Instant> earliestEvent() {
         List<String> buckets = new ArrayList<>();
@@ -55,15 +62,23 @@ public class WikiFactBuilder {
     }
 
     public WikiFacts buildFacts(WikiPeriod period) {
-        return buildFacts(period, maxContentChars);
+        return buildFacts(period, privacy());
     }
 
     /** Full metadata facts for bounded multi-stage synthesis; do not truncate before partitioning. */
     public WikiFacts buildCompleteFacts(WikiPeriod period) {
-        return buildFacts(period, Integer.MAX_VALUE);
+        return buildCompleteFacts(period, privacy());
     }
 
-    private WikiFacts buildFacts(WikiPeriod period, int titleBudget) {
+    public WikiFacts buildFacts(WikiPeriod period, WikiPrivacyPolicy privacy) {
+        return buildFacts(period, maxContentChars, privacy);
+    }
+
+    public WikiFacts buildCompleteFacts(WikiPeriod period, WikiPrivacyPolicy privacy) {
+        return buildFacts(period, Integer.MAX_VALUE, privacy);
+    }
+
+    private WikiFacts buildFacts(WikiPeriod period, int titleBudget, WikiPrivacyPolicy privacy) {
         List<String> buckets = new ArrayList<>();
         for (String kind : List.of("window", "afk", "content")) {
             buckets.add("watcher-" + kind + "_" + hostname);
@@ -103,10 +118,14 @@ public class WikiFactBuilder {
                         "conflictSeconds", stats.conflictSeconds(), "activeSecondsExact", stats.activeSeconds(),
                         "afkSecondsExact", stats.afkSeconds(), "appSecondsExact", stats.apps(),
                         "titleSampling", sampled.coverage(),
-                        "privacyExcludedApps", excludedApps(stats.apps().keySet())), sampled);
+                        "privacyExcludedApps", excludedApps(stats.apps().keySet(), privacy)), sampled);
     }
 
     public WikiFacts buildFactsFromChildren(List<WikiEntry> childEntries, WikiPeriod period) {
+        return buildFactsFromChildren(childEntries, period, privacy());
+    }
+
+    public WikiFacts buildFactsFromChildren(List<WikiEntry> childEntries, WikiPeriod period, WikiPrivacyPolicy privacy) {
         long activeSeconds = 0;
         long afkSeconds = 0;
         int switchCount = 0;
@@ -135,7 +154,7 @@ public class WikiFactBuilder {
                     appTotals.merge(ad.app(), (double) ad.seconds(), Double::sum);
                 }
             }
-            if (child.status() == WikiStatus.SUMMARIZED && !localEmpty(child)) addChildFacts(child, childFacts, summaries, provenance);
+            if (child.status() == WikiStatus.SUMMARIZED && !localEmpty(child)) addChildFacts(child, childFacts, summaries, provenance, privacy);
         }
 
         List<WikiEntry.AppDuration> topApps = appTotals.entrySet().stream()
@@ -148,7 +167,7 @@ public class WikiFactBuilder {
         childEntries.forEach(child -> child.sourceCoverage().forEach((key, value) -> coverage.merge(key, value,
                 (a, b) -> "complete".equals(a.status()) ? b : a)));
         totals.put("appSecondsExact", appTotals);
-        totals.put("privacyExcludedApps", excludedApps(appTotals.keySet()));
+        totals.put("privacyExcludedApps", excludedApps(appTotals.keySet(), privacy));
         totals.put("sourceEntryIds", childEntries.stream().map(WikiEntry::id).toList());
         if (!provenance.isEmpty()) totals.put(WikiEvidencePolicy.PROVENANCE_KEY, provenance);
         activeSeconds = ((Number) totals.getOrDefault("activeSecondsExact", 0)).longValue();
@@ -160,7 +179,7 @@ public class WikiFactBuilder {
                 WikiTitleSampler.fromFacts(period, childFacts, Map.of("candidateFacts", childFacts.size())));
     }
 
-    private List<String> excludedApps(Collection<String> apps) {
+    private static List<String> excludedApps(Collection<String> apps, WikiPrivacyPolicy privacy) {
         return apps.stream().filter(privacy::excludedApp).sorted().toList();
     }
 
@@ -171,9 +190,12 @@ public class WikiFactBuilder {
     }
 
     private void addChildFacts(WikiEntry child, List<WikiTitleSampler.Fact> facts, List<String> summaries,
-                               Map<String, WikiEvidencePolicy.ConfirmedSource> provenance) {
+                               Map<String, WikiEvidencePolicy.ConfirmedSource> provenance, WikiPrivacyPolicy privacy) {
         List<WikiEntry.TaskSegment> tasks = child.taskSegments();
         if (tasks.isEmpty()) {
+            // Legacy summaries with no segments must not reappear under a synthetic Wiki app.
+            if (child.metrics() != null && !child.metrics().topApps().isEmpty()
+                    && child.metrics().topApps().stream().allMatch(app -> privacy.excludedApp(app.app()))) return;
             String app = child.metrics() == null ? "Wiki" : child.metrics().topApps().stream()
                     .map(WikiEntry.AppDuration::app).filter(name -> !privacy.excludedApp(name))
                     .findFirst().orElse("Wiki");

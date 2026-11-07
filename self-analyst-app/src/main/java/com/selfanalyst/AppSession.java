@@ -237,8 +237,7 @@ public class AppSession implements AutoCloseable {
                     wikiGenerationStore = new WikiGenerationStore(config.memoryDir().resolve("wiki-generation.db"));
                     WikiFactBuilder factBuilder = new WikiFactBuilder(
                             eventServer.eventStore(), config.wikiPromptMaxContentChars(), () -> 0L,
-                            com.selfanalyst.wiki.WikiPrivacyPolicy.of(
-                                    config.wikiExcludeApps(), config.wikiExcludeSites()));
+                            privacyRuntime.modelPolicy());
                     SelfAnalystAgent summaryAgent = a;
                     wikiSummaryPipeline = new WikiSummaryPipeline(() -> {
                         SelfAnalystAgent.PlainTask task = summaryAgent.plainTask();
@@ -263,7 +262,7 @@ public class AppSession implements AutoCloseable {
                             Duration.ofMinutes(3),
                             config.wikiWorkerIntervalSeconds(),
                             config.wikiBackfillEnabled(),
-                            wikiEmbeddingWorker);
+                            wikiEmbeddingWorker, java.time.Instant::now, privacyRuntime.modelPolicy());
                     wikiWorker.start();
                     log.info("WikiWorker 已启动");
                 } catch (Exception e) {
@@ -293,7 +292,7 @@ public class AppSession implements AutoCloseable {
                         watcherManager, contentWatcher,
                         contentPersistenceReady, contentMigrationError,
                         fileWatchStore, this::fileCollectorState, this::applyFileWatchSettings,
-                        userConfigStore, wikiStore, wikiGenerationStore);
+                        userConfigStore, wikiStore, wikiGenerationStore, privacyRuntime);
                 desktopServer.statusController().setRawStatusSupplier(eventServer::rawStatus);
                 desktopServer.start();
                 eventServer.registerWebUi();

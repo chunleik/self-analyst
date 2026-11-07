@@ -31,6 +31,19 @@ public final class WikiPrivacyPolicy {
         return new WikiPrivacyPolicy(split(appsCsv), split(sitesCsv));
     }
 
+    /** Stable content identity for local caches, without exposing excluded names. */
+    public String fingerprint() {
+        String canonical = "apps:" + apps.stream().sorted().map(value -> value.length() + ":" + value)
+                .collect(Collectors.joining()) + "|sites:"
+                + sites.stream().sorted().map(value -> value.length() + ":" + value).collect(Collectors.joining());
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 unavailable", error);
+        }
+    }
+
     /** A captured title naming an account-verification page is replaced as a whole. */
     public String redact(String title) {
         if (title == null || title.isBlank()) return title;

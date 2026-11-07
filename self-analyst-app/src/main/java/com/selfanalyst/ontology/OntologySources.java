@@ -18,13 +18,18 @@ public final class OntologySources implements Supplier<Snapshot> {
     private static final int ASSERTION_LIMIT = 100000;
     private final WikiStore wiki;
     private final Supplier<GrowthProfile> memory;
-    private final WikiPrivacyPolicy privacy;
+    private final Supplier<WikiPrivacyPolicy> privacy;
 
     public OntologySources(WikiStore wiki, Supplier<GrowthProfile> memory, WikiPrivacyPolicy privacy) {
-        this.wiki = wiki; this.memory = memory; this.privacy = privacy;
+        this(wiki, memory, () -> privacy == null ? WikiPrivacyPolicy.none() : privacy);
+    }
+
+    public OntologySources(WikiStore wiki, Supplier<GrowthProfile> memory, Supplier<WikiPrivacyPolicy> privacy) {
+        this.wiki = wiki; this.memory = memory; this.privacy = Objects.requireNonNull(privacy);
     }
 
     @Override public Snapshot get() {
+        WikiPrivacyPolicy privacy = Objects.requireNonNull(this.privacy.get());
         Map<String, Entity> entities = new LinkedHashMap<>();
         List<Assertion> assertions = new ArrayList<>();
         Map<String, String> coverage = new LinkedHashMap<>();
@@ -32,7 +37,7 @@ public final class OntologySources implements Supplier<Snapshot> {
         if (memory == null) coverage.put("memory", "unavailable");
         else {
             GrowthProfile profile = Objects.requireNonNull(memory.get());
-            addMemory(profile, entities, assertions);
+            addMemory(privacy, profile, entities, assertions);
             coverage.put("memory", "current");
         }
         if (wiki == null) coverage.put("wiki", "unavailable");
@@ -53,25 +58,25 @@ public final class OntologySources implements Supplier<Snapshot> {
                 boolean used = false;
                 for (var task : entry.taskSegments()) {
                     if (entities.size() + 13 > ENTITY_LIMIT || assertions.size() + 12 > ASSERTION_LIMIT) { entityLimit = true; break; }
-                    if (!safe(task.title()) || !safe(task.summary()) || task.apps().stream().anyMatch(privacy::excludedApp)) { filtered++; continue; }
-                    String title = clean(task.title(), 300);
+                    if (!safe(privacy, task.title()) || !safe(privacy, task.summary()) || task.apps().stream().anyMatch(privacy::excludedApp)) { filtered++; continue; }
+                    String title = clean(privacy, task.title(), 300);
                     if (title.isBlank()) continue;
                     String activityId = stableId("activity", entry.id() + "\n" + task.title() + "\n" + task.summary());
-                    List<Evidence> evidence = evidence(entry, task);
+                    List<Evidence> evidence = evidence(privacy, entry, task);
                     Map<String, String> attrs = new LinkedHashMap<>();
                     attrs.put("level", entry.level().name()); attrs.put("periodMeaning", "summary-period-not-task-duration");
                     attrs.put("claimType", Objects.toString(task.claimType(), "legacy"));
                     attrs.put("confidence", Objects.toString(task.confidence(), "unknown"));
                     attrs.put("sourceCoverage", clip(entry.sourceCoverage().toString(), 1000));
                     attrs.put("evidenceOmitted", Integer.toString(Math.max(0, task.evidenceFactIds().size() - 12)));
-                    Entity activity = new Entity(activityId, "activity", title, clean(task.summary(), 2000), List.of(), "wiki",
+                    Entity activity = new Entity(activityId, "activity", title, clean(privacy, task.summary(), 2000), List.of(), "wiki",
                             clip(entry.id(), 512), entry.periodStart(), entry.periodEnd(), evidence, attrs);
                     entities.put(activityId, activity); used = true;
                     // Deduplicate apps and cap independently, keeping snapshot size bounded.
                     for (String app : task.apps().stream().filter(Objects::nonNull).distinct().limit(12).toList()) {
-                        if (!safe(app) || app.isBlank()) continue;
+                        if (!safe(privacy, app) || app.isBlank()) continue;
                         String appId = stableId("application", normalize(app));
-                        entities.putIfAbsent(appId, new Entity(appId, "application", clean(app, 300), "", List.of(), "wiki", "",
+                        entities.putIfAbsent(appId, new Entity(appId, "application", clean(privacy, app, 300), "", List.of(), "wiki", "",
                                 null, null, List.of(), Map.of()));
                         assertions.add(new Assertion(activityId, "uses", appId, "inferred", "wiki", "accepted",
                                 entry.periodStart(), entry.periodEnd(), evidence));
@@ -89,54 +94,54 @@ public final class OntologySources implements Supplier<Snapshot> {
         return new Snapshot(new ArrayList<>(entities.values()), assertions, coverage);
     }
 
-    private List<Evidence> evidence(WikiEntry entry, WikiEntry.TaskSegment task) {
+    private List<Evidence> evidence(WikiPrivacyPolicy privacy, WikiEntry entry, WikiEntry.TaskSegment task) {
         JsonNode catalog = JSON.valueToTree(entry.metrics() == null || entry.metrics().extra() == null
                 ? List.of() : entry.metrics().extra().getOrDefault("evidenceFacts", List.of()));
         List<Evidence> result = new ArrayList<>();
         for (String id : task.evidenceFactIds().stream().distinct().limit(12).toList()) {
             JsonNode found = null;
             if (catalog.isArray()) for (JsonNode fact : catalog) if (id.equals(fact.path("id").asText())) { found = fact; break; }
-            boolean available = found != null && safe(found.path("title").asText()) && !privacy.excludedApp(found.path("app").asText());
+            boolean available = found != null && safe(privacy, found.path("title").asText()) && !privacy.excludedApp(found.path("app").asText());
             result.add(new Evidence("wiki:" + clip(entry.id(), 300) + "/fact:" + clip(id, 150),
-                    available ? clean(found.path("app").asText() + " — " + found.path("title").asText(), 800) : "", available));
+                    available ? clean(privacy, found.path("app").asText() + " — " + found.path("title").asText(), 800) : "", available));
         }
         return List.copyOf(result);
     }
 
-    private void addMemory(GrowthProfile profile, Map<String, Entity> entities, List<Assertion> assertions) {
+    private void addMemory(WikiPrivacyPolicy privacy, GrowthProfile profile, Map<String, Entity> entities, List<Assertion> assertions) {
         for (var m : profile.getMemories()) {
             if (!"active".equals(m.status()) || m.sensitive() || !Set.of("project", "goal", "pattern").contains(m.type())
-                    || !safe(m.content()) || !safe(m.evidence())) continue;
-            addMemoryEntity(entities, stableId("memory", m.id()), m.type(), m.content(), m.evidence(), "memory:" + m.id(), Map.of("confidence", Integer.toString(m.confidence())));
+                    || !safe(privacy, m.content()) || !safe(privacy, m.evidence())) continue;
+            addMemoryEntity(privacy, entities, stableId("memory", m.id()), m.type(), m.content(), m.evidence(), "memory:" + m.id(), Map.of("confidence", Integer.toString(m.confidence())));
         }
         Set<String> goals = new HashSet<>();
-        for (var g : profile.getGoals()) if (g.active() && safe(g.description())) {
+        for (var g : profile.getGoals()) if (g.active() && safe(privacy, g.description())) {
             String id = stableId("goal", g.id());
-            addMemoryEntity(entities, id, "goal", g.description(), "", "goal:" + g.id(), Map.of()); goals.add(id);
+            addMemoryEntity(privacy, entities, id, "goal", g.description(), "", "goal:" + g.id(), Map.of()); goals.add(id);
         }
-        for (var p : profile.getPatterns()) if (safe(p.description()) && safe(p.evidence())) {
-            addMemoryEntity(entities, stableId("pattern", p.description() + "\n" + p.confirmedAt()), "pattern", p.description(), p.evidence(),
+        for (var p : profile.getPatterns()) if (safe(privacy, p.description()) && safe(privacy, p.evidence())) {
+            addMemoryEntity(privacy, entities, stableId("pattern", p.description() + "\n" + p.confirmedAt()), "pattern", p.description(), p.evidence(),
                     "pattern:" + stableId("record", p.description() + "\n" + p.confirmedAt()), Map.of("confidence", Integer.toString(p.confidence())));
         }
-        for (var log : profile.getLogs()) if (safe(log.action()) && safe(log.outcome())) {
+        for (var log : profile.getLogs()) if (safe(privacy, log.action()) && safe(privacy, log.outcome())) {
             String id = stableId("improvement", log.goalId() + "\n" + log.action() + "\n" + log.outcome() + "\n" + log.observedAt());
             String goal = stableId("goal", Objects.toString(log.goalId(), ""));
             boolean linked = goals.contains(goal);
-            addMemoryEntity(entities, id, "improvement", log.action(), log.outcome(), id,
+            addMemoryEntity(privacy, entities, id, "improvement", log.action(), log.outcome(), id,
                     Map.of("observedAt", Objects.toString(log.observedAt(), ""), "goalSource", linked ? "available" : "missing"));
             if (linked && entities.containsKey(id)) assertions.add(new Assertion(id, "tracks", goal, "observed", "memory", "accepted",
                     null, null, entities.get(id).evidence()));
         }
     }
-    private void addMemoryEntity(Map<String, Entity> entities, String id, String type, String content, String evidence,
+    private void addMemoryEntity(WikiPrivacyPolicy privacy, Map<String, Entity> entities, String id, String type, String content, String evidence,
                                  String ref, Map<String, String> attrs) {
         if (content == null || content.isBlank()) return;
         if (entities.size() >= ENTITY_LIMIT) throw new IllegalStateException("Memory projection exceeds limit");
-        entities.put(id, new Entity(id, type, clean(content, 300), clean(content, 2000), List.of(), "memory", clip(ref, 512),
-                null, null, List.of(new Evidence(clip(ref, 512), clean(evidence, 800), true)), attrs));
+        entities.put(id, new Entity(id, type, clean(privacy, content, 300), clean(privacy, content, 2000), List.of(), "memory", clip(ref, 512),
+                null, null, List.of(new Evidence(clip(ref, 512), clean(privacy, evidence, 800), true)), attrs));
     }
-    private boolean safe(String text) {
+    private boolean safe(WikiPrivacyPolicy privacy, String text) {
         return !LongTermMemoryService.containsForbiddenContent(text) && !privacy.excludedTitle(text);
     }
-    private String clean(String text, int max) { return clip(privacy.redactText(text), max); }
+    private String clean(WikiPrivacyPolicy privacy, String text, int max) { return clip(privacy.redactText(text), max); }
 }

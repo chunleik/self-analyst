@@ -133,6 +133,7 @@ public class SummaryPromptService {
         String goal = facts.goalContext() == null ? "" : facts.goalContext();
         if (goal.length() > 512) goal = goal.substring(0, 512);
         Map<String, Object> samplingCoverage = new LinkedHashMap<>(facts.titleFacts().coverage());
+        samplingCoverage.remove("privacyFingerprint");
         samplingCoverage.remove("appSeconds"); // Local cache metadata does not consume the title prompt budget.
         return Messages.text(lang, "summary.prompt").formatted(facts.titleFacts().jsonLines(),
                         samplingCoverage, goal)

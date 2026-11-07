@@ -39,7 +39,7 @@ public class SummaryService implements SummaryFactSource {
     private final String windowBucket;
     private final String afkBucket;
     private final String contentBucket;
-    private final com.selfanalyst.wiki.WikiPrivacyPolicy privacy;
+    private final java.util.function.Supplier<com.selfanalyst.wiki.WikiPrivacyPolicy> privacy;
 
     public SummaryService(EventStore eventStore, MemoryStore memoryStore) { this(eventStore, memoryStore, com.selfanalyst.i18n.Lang.chinese()); }
     public SummaryService(EventStore eventStore, MemoryStore memoryStore, com.selfanalyst.i18n.Lang lang) {
@@ -48,10 +48,16 @@ public class SummaryService implements SummaryFactSource {
 
     public SummaryService(EventStore eventStore, MemoryStore memoryStore, com.selfanalyst.i18n.Lang lang,
                           com.selfanalyst.wiki.WikiPrivacyPolicy privacy) {
+        this(eventStore, memoryStore, lang,
+                () -> privacy == null ? com.selfanalyst.wiki.WikiPrivacyPolicy.none() : privacy);
+    }
+
+    public SummaryService(EventStore eventStore, MemoryStore memoryStore, com.selfanalyst.i18n.Lang lang,
+                          java.util.function.Supplier<com.selfanalyst.wiki.WikiPrivacyPolicy> privacy) {
         this.lang = lang;
         this.eventStore = eventStore;
         this.memoryStore = memoryStore;
-        this.privacy = privacy == null ? com.selfanalyst.wiki.WikiPrivacyPolicy.none() : privacy;
+        this.privacy = Objects.requireNonNull(privacy);
         String host = getHostname();
         this.windowBucket = "watcher-window_" + host;
         this.afkBucket = "watcher-afk_" + host;
@@ -226,6 +232,7 @@ public class SummaryService implements SummaryFactSource {
     }
 
     private LocalFacts computeFacts(Instant start, Instant end, String label, boolean includeTitles) {
+        var privacy = Objects.requireNonNull(this.privacy.get());
         var ranges = queryRanges(start, end, includeTitles);
         var statistics = statistics(ranges, start, end);
         WikiTitleSampler.Selection titleFacts = includeTitles
@@ -235,6 +242,7 @@ public class SummaryService implements SummaryFactSource {
                 : emptyTitleFacts();
         if (includeTitles) {
             Map<String, Object> titleCoverage = new LinkedHashMap<>(titleFacts.coverage());
+            titleCoverage.put("privacyFingerprint", privacy.fingerprint());
             titleCoverage.put("contentStatus", ranges.get(contentBucket).status());
             Map<String, Double> appSeconds = new LinkedHashMap<>();
             statistics.apps().entrySet().stream()

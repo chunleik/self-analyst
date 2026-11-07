@@ -24,6 +24,8 @@
 1. **运行时隐私快照：`PrivacyRuntime`（app 模块）。** 持有 `AtomicReference<Snapshot>`，`Snapshot` 包含采集排除集合与模型可见 `WikiPrivacyPolicy`（应用为两个列表并集，网站为 `excludeSites`）。对外提供 `Predicate<String> captureExcluded()`（每次调用读取当前快照）和 `Supplier<WikiPrivacyPolicy> modelPolicy()`，以及 `apply(String collectionApps, String wikiApps, String sites)` 原子替换。备选方案是让 `WikiPrivacyPolicy` 内部可变，但它在 wiki 模块被当作值对象使用、测试众多，改为可变会扩大影响面，因此不采用。
    - wiki 模块消费者（`WikiFactBuilder`、`WikiWorker`）与 `SummaryService`、`OntologySources` 增加接收 `Supplier<WikiPrivacyPolicy>` 的构造器，原固定策略构造器包装为常量 supplier 保留兼容；每个时间块或每次请求开始时取一次快照，保证单次处理内规则一致。
    - `DesktopServer` 缓存指纹改为使用快照内容，配置变化后看板当前窗缓存自然失效。
+   - 实施审查发现行为建议把应用名嵌入证据后传给模型。保留本机建议与统计的原有载荷，另构建同一快照过滤后的模型证据；不得直接过滤本机展示数据。
+   - 摘要修复的一次请求固定使用开始时的隐私快照，并传递至事实读取、用户确认内容校验与生成步骤；避免一次请求内重复读取 supplier 而混用热更新前后的规则。下一次请求使用新规则，不重写已生成摘要。以上两点于实施时经用户确认补充，保持既有 AtomicReference 快照设计。
 
 2. **采集排除放在采集器，而不是事件服务 heartbeat 入口。** 事件服务是通用兼容 API，入口丢弃会让服务端依赖应用配置，也会让 `ContentWatcher` 投递状态误判。
    - `WatcherManager` 接收 `Predicate<String>`（默认永不排除）传给 `WindowWatcher`：命中时 `collect()` 返回 `null` 并清空 `lastApp`/`lastTitle`，使切回时以当前时间开始新事件。

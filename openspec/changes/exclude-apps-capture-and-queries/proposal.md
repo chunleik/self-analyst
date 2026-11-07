@@ -6,7 +6,7 @@
 
 - 新增配置键 `events.collection.excludeApps`（可执行文件名列表，不区分大小写，完整匹配，默认空）。前台为这些应用时，窗口采集器和标题采集器 MUST NOT 发送 heartbeat，本地事件库不产生对应窗口或内容事件；AFK 采集不受影响。
 - 会话 Agent 的 `queryEvents`、`executeAQL` 和 `export_data` 的合并事件来源，在把结果交给模型或写入导出文件前，按与 Wiki 相同的隐私策略移除命中排除应用、排除网站或无痕标记的事件。
-- 对模型隐藏的应用集合定义为 `wiki.privacy.excludeApps` 与 `events.collection.excludeApps` 的并集，Wiki 摘要、知识图谱、看板摘要和 Agent 查询统一使用。
+- 对模型隐藏的应用集合定义为 `wiki.privacy.excludeApps` 与 `events.collection.excludeApps` 的并集，Wiki 摘要、知识图谱、看板摘要和 Agent 查询统一使用；行为建议仅过滤发给模型的证据，摘要修复单次请求固定同一份策略。
 - 配置弹窗新增“隐私”页签：一张应用清单，通过可搜索下拉添加应用（候选为近 30 天使用过的应用，按时长排序，也可手动输入），每个应用通过模式下拉选择“不采集”或“仅对模型隐藏”，并可移除；另有排除网站的手动输入。新增对应的桌面后端读取与保存接口。
 - **行为修改**：`events.collection.excludeApps`、`wiki.privacy.excludeApps`、`wiki.privacy.excludeSites` 改为热生效。无论从隐私页签、高级配置还是结构化接口保存，提交成功后采集与模型可见过滤立即采用新值，不再报告需重启。
 - 键名保持不变；`wiki.privacy.*` 的配置说明从“不进入摘要”调整为“对模型隐藏”。三个键仍不加入 Agent 配置工具的可写范围。
@@ -22,7 +22,7 @@
 - `title-capture`: 新增采集层排除应用要求，并规定配置保存后在下一个采集周期内生效。
 - `event-query-tools`: 新增事件查询结果的隐私过滤要求，每次调用使用最新保存的策略。
 - `agent-document-generation`: 合并事件直接导出按隐私策略过滤，并在元数据中记录过滤条数。
-- `llm-wiki`: 摘要输入的排除应用集合扩展为两个配置列表的并集，并对之后生成的摘要热生效。
+- `llm-wiki`: 摘要输入的排除应用集合扩展为两个配置列表的并集，并对之后生成的摘要热生效；行为建议的模型证据和摘要修复使用同一隐私边界，不改变本机展示或已有摘要。
 - `user-configuration`: 新增 `events.collection.excludeApps` 键、三个隐私键的热生效语义，以及隐私页签的交互契约。
 
 ## Impact

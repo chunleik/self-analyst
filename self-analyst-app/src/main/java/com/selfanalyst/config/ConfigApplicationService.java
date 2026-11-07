@@ -20,6 +20,7 @@ public final class ConfigApplicationService implements AutoCloseable {
     private Function<LlmSettings, Pending> prepareRuntime;
     private Supplier<Map<String, Object>> runtimeStatus;
     private Supplier<LlmSettings> runtimeSettings;
+    private Consumer<Config> applyPrivacy;
 
     private interface Pending extends AutoCloseable {
         void publish();
@@ -58,6 +59,10 @@ public final class ConfigApplicationService implements AutoCloseable {
             runtimeSettings = runtime::settings;
             runtimeStatus = runtime::status;
         }
+    }
+    /** 回调只发布内存快照，不执行 I/O；与配置提交共用串行锁。 */
+    public void attachPrivacy(Consumer<Config> callback) {
+        synchronized (lock) { applyPrivacy = Objects.requireNonNull(callback); }
     }
     public ConfigResolver.Snapshot resolve(Properties user) { return ConfigResolver.resolve(user, environment); }
     public ConfigResolver.Snapshot saved() {
@@ -140,6 +145,10 @@ public final class ConfigApplicationService implements AutoCloseable {
             if (prepareRuntime != null && !llm.equals(runtimeSettings.get())) pending = prepareRuntime.apply(llm);
             store.saveRaw(text);
             if (pending != null) pending.publish();
+            if (applyPrivacy != null) {
+                applyPrivacy.accept(proposed.config());
+                ConfigPolicy.PRIVACY.forEach(key -> running.put(key, proposed.values().get(key).value()));
+            }
             revision++;
             if (runtimeSettings != null) running.putAll(runtimeSettings.get().properties());
             return result(proposed, flat.keySet());

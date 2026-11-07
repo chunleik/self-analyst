@@ -12,6 +12,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConfigToolsTest {
 
     @Test
+    void privacyKeysCannotBeChangedByAgent(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        store.saveRaw("# existing configuration\n");
+        String before = store.readRaw();
+        ConfigTools tools = new ConfigTools(store);
+        for (String key : java.util.List.of("events.collection.excludeApps",
+                "wiki.privacy.excludeApps", "wiki.privacy.excludeSites")) {
+            assertTrue(tools.setConfigValue(key, "secret.exe").contains("不支持修改"));
+            org.junit.jupiter.api.Assertions.assertEquals(before, store.readRaw());
+        }
+    }
+
+
+    @Test
     void titleSwitchUsesNewNameWithoutExpandingWritableKeys(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
         ConfigTools tools = new ConfigTools(store);

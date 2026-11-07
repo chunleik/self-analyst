@@ -85,6 +85,7 @@ public record Config(
         double budgetWarnRatio,
         String appLanguage,
         Lang effectiveLanguage,
+        String collectionExcludeApps,
         String wikiExcludeApps,
         String wikiExcludeSites,
         String llmProvider,
@@ -361,7 +362,7 @@ public record Config(
                 agentCompactionKeepTokens, desktopSummaryMaxTimelineLlm,
                 budgetMode, budgetDailyTokens, budgetWarnRatio,
                 appLanguage, LangResolver.resolve(appLanguage, Locale.getDefault()),
-                wikiExcludeApps, wikiExcludeSites, provider, chatgptAccount, chatgptModel);
+                values.get("events.collection.excludeApps", ""), wikiExcludeApps, wikiExcludeSites, provider, chatgptAccount, chatgptModel);
     }
 
     /**
@@ -392,7 +393,7 @@ public record Config(
                 8, false, 30, 60000, 10, 12000,
                 4, "warn", 100000000L, 0.8,
                 "auto", LangResolver.resolve("auto", Locale.getDefault()),
-                "", "", "api-key", "", "");
+                "", "", "", "api-key", "", "");
     }
 
     /** Load the classpath {@code application.properties} defaults (empty if absent). */

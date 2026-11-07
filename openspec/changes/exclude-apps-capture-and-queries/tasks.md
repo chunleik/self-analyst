@@ -1,8 +1,8 @@
 ## 1. 配置与运行时隐私快照
 
-- [ ] 1.1 在 `SupportedKeys` 新增 `events.collection.excludeApps`（STRING，默认空）及双语说明，并把 `wiki.privacy.excludeApps`/`excludeSites` 说明改为“对模型隐藏”；`ConfigTest` 断言默认值与 `[events.collection]` 表拍平，`ConfigToolsTest` 断言三个键均被 Agent 配置工具拒绝
-- [ ] 1.2 新增 `PrivacyRuntime`（采集排除谓词 + 模型可见策略 supplier，原子替换），`Config` 增加 `collectionExcludeApps` 字段；新增 `PrivacyRuntimeTest` 覆盖并集、逗号/分号分隔、空白、大小写与替换后谓词立即变化
-- [ ] 1.3 `ConfigPolicy` 新增 `PRIVACY` 集合并从需重启中排除；`ConfigApplicationService` 新增 `attachPrivacy`，写入成功后回调并更新 `running`；`ConfigApplicationServiceTest`（或现有配置保存测试）覆盖 raw 保存热应用、不报需重启、校验失败时回调不触发
+- [x] 1.1 在 `SupportedKeys` 新增 `events.collection.excludeApps`（STRING，默认空）及双语说明，并把 `wiki.privacy.excludeApps`/`excludeSites` 说明改为“对模型隐藏”；`ConfigTest` 断言默认值与 `[events.collection]` 表拍平，`ConfigToolsTest` 断言三个键均被 Agent 配置工具拒绝
+- [x] 1.2 新增 `PrivacyRuntime`（采集排除谓词 + 模型可见策略 supplier，原子替换），`Config` 增加 `collectionExcludeApps` 字段；新增 `PrivacyRuntimeTest` 覆盖并集、逗号/分号分隔、空白、大小写与替换后谓词立即变化
+- [x] 1.3 `ConfigPolicy` 新增 `PRIVACY` 集合并从需重启中排除；`ConfigApplicationService` 新增 `attachPrivacy`，写入成功后回调并更新 `running`；`ConfigApplicationServiceTest`（或现有配置保存测试）覆盖 raw 保存热应用、不报需重启、校验失败时回调不触发
 
 ## 2. 采集层排除
 

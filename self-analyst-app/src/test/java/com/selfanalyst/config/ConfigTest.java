@@ -20,6 +20,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConfigTest {
 
     @Test
+    void collectionExclusionsHaveStringDefaultAndFlattenFromTable() {
+        assertEquals("", SupportedKeys.defaults().get("events.collection.excludeApps"));
+        assertEquals(TomlSupport.KeyType.STRING, SupportedKeys.types().get("events.collection.excludeApps"));
+        assertEquals("PotPlayer.exe; vlc.exe", TomlSupport.parseAndFlatten(
+                "[events.collection]\nexcludeApps = 'PotPlayer.exe; vlc.exe'\n")
+                .get("events.collection.excludeApps"));
+    }
+
+
+    @Test
     void explicitTomlWinsAndDeletionRestoresEnvironment(@TempDir Path dir) throws Exception {
         var environment = java.util.Map.of(
                 "OPENAI_API_KEY", "env-key", "LLM_MODEL", "env-model",

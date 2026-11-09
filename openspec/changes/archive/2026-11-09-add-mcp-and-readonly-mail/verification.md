@@ -31,7 +31,7 @@
 - 全库 `openspec validate --specs --strict`：30 通过、7 失败。将 HEAD 原始规格复制到隔离目录只读验证得到 28 通过、相同 7 失败，证明新增两项均通过，没有新增失败集合。
 - 既有失败：`agent-runtime`、`chatgpt-auth`、`desktop-help`、`desktop-shell`、`event-query-tools`、`llm-wiki`、`user-configuration`。严格模式把既有长文本等警告视为失败；不修改无关规格来消除基线问题。
 
-## 未执行和交付边界
+## 本地实施阶段未执行和交付边界（后续远端结果见末节）
 
 - Windows Credential Manager 的真实合成读写测试已编写，Linux 上明确跳过；不能把会话凭据和 mock 测试当成 Windows 验收。
 - 真实 Windows/Tauri UI、真实 QQ/163 账户及必需 Windows CI 未运行。
@@ -47,3 +47,18 @@
 - 修正连接文档保存/凭据/测试顺序及 UI 测试状态、认证/TLS/服务商限制分类。
 - 最后复核后的标准 `mvn test`：233 类、1,372 项 Java 测试，0 失败、0 错误、8 项条件跳过；Node 386 项、354 通过、32 项既有平台/opt-in 跳过；全部 7 模块 BUILD SUCCESS。定向 Java 9 项和 UI/国际化 26 项均通过。
 - 独立只读安全复核未发现新增阻断。真实邮箱和桌面视觉仍未验收，保持 beta 边界与未归档状态。
+
+
+## 远端交付与归档前核对
+
+归档核对日期：2026-11-09。基线为版本合并提交 `6659af6492438bd38de0475294df5f03394c21d6`。
+
+- [功能 PR #151](https://github.com/chunleik/self-analyst/pull/151) 正常合并为 `f8c09caac0f8f29ef09b0cddf1076c65ed670d78`；精确 head `843fb5298d1c38a777fd6c3033c3423563c737cf` 的 [CI 42606077559](https://github.com/chunleik/self-analyst/actions/runs/42606077559) 五项必需检查全部成功。
+- [版本 PR #152](https://github.com/chunleik/self-analyst/pull/152) 的精确 head `2ccacce672af5daca3cc69c4f07e57d5697d29a9` 通过 [CI 42608339239](https://github.com/chunleik/self-analyst/actions/runs/42608339239) 五项必需检查后正常合并，未绕过保护。
+- [v0.6.1-beta.15](https://github.com/chunleik/self-analyst/releases/tag/v0.6.1-beta.15) 已于 2026-11-09 11:56:05 UTC 公开为预发布，tag 指向上述版本合并提交；稳定 latest 仍为 v0.6.0。
+- [Windows Release 42610237881](https://github.com/chunleik/self-analyst/actions/runs/42610237881) 全部步骤成功：OpenSpec 44/44；Java 1,372 项零失败/错误、8 项条件跳过；Node 386 项全部通过；Rust 测试/Clippy 和合成 UIA 通过。
+- Windows Credential Manager 原生合成测试实际完成读写、目标绑定和删除，1 项通过、无跳过。便携包与安装布局均实际执行包内 Java 的 IMAPS/MIME 探针及 JAR 冒烟；NSIS 安装、重装、资源、桌面启动、后端与卸载验证通过。上述检查均由远端 Windows 执行，不是本地打包或用户电脑验收。
+- 四个资产已下载独立核对大小、SHA-256 与 GitHub digest；ZIP/JAR CRC、beta.15 版本、新 UI/IMAPS/activation 服务和 Java 21.0.13 runtime 均复核。敏感文件名/目录筛查未发现用户数据、数据库、日志或凭据配置文件；这不是内容秘密扫描。完整大小与哈希见发布页。
+- 六项主规格逐条核对，35 条增量需求与对应主规格完全一致，无待同步修改。归档前 change 严格校验及全量严格校验通过。归档不重写主规格。
+
+任务 7.2 依据上述证据补记完成。任务 7.3 保持未完成：合成协议、权限与 Node 夹具分别通过，但新增连接/确认界面的完整端到端和人工视觉验收仍缺；真实 QQ/163 账户互通未验证。用户在明确知晓这些缺口后要求归档，因此带此警告归档，不将未完成项改成通过。

@@ -45,6 +45,9 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 - [summary-quality-evaluation.md](summary-quality-evaluation.md) — 摘要合成数据评测、正式调用参数和覆盖指标边界
 - [summary-quality-results.md](summary-quality-results.md) — 摘要优化的分阶段验证结果与剩余语义问题
 
+- [MCP 连接与工具](integrations.md)
+- [QQ/163 只读邮箱](mail-integration.md)
+
 ## OpenSpec 主规格（现行权威）
 
 | Capability | 主规格 | 历史来源 |

@@ -42,6 +42,7 @@ var state = {
   configOpen: false,
   configView: "llm",
   llmSettingsView: null,
+  integrationsView: null,
   configLoadGeneration: 0,
   chatSessions: [],
   chatSessionsLoaded: false,

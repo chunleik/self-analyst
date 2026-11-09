@@ -39,6 +39,7 @@ For an ended hourly, half-day, or daily summary that failed or exhausted its per
 - **Optional Neo4j sync**: Manually publish the current, corrected knowledge graph to a Neo4j database you configure. It is off by default and requires destination, namespace, and data-scope confirmation for every sync. Local storage remains authoritative. See the [setup and read-only query guide (Chinese)](docs/neo4j-sync.md).
 - **Images in chat**: Select or paste PNG/JPEG images for a model that supports image input, up to 4 images per turn, each limited to 5 MiB and 20 megapixels. This does not enable background screenshots.
 - **Generated files**: Ask for spreadsheets, documents, presentations, or HTML/SVG, then save or download them from file cards in chat. See the [document generation guide (Chinese)](docs/document-generation.md).
+- **Connections and tools**: Add HTTPS Streamable HTTP MCP servers with tool review and per-call confirmation, or use built-in read-only QQ/163 mail. Mail credentials default to session-only storage; Windows persistence is opt-in. Mail data requires model-destination consent and may remain in chat history. Mail-origin chats do not automatically create long-term memories. See the [integration](docs/integrations.md) and [mail](docs/mail-integration.md) guides (Chinese).
 - **Long-term memory**: Useful information is retained automatically; credentials, sensitive inferences, and one-off activity are filtered out. Ask the assistant in chat to correct or forget a memory.
 - **Help and updates**: The **Help** menu provides the user guide, **Documentation**, **Personal knowledge guide**, issue reporting, **Check for updates**, and **Project website** (the GitHub repository, opened in your default browser on desktop). Checks run only when requested; the app never downloads or installs updates automatically. **About SelfAnalyst** shows the installed desktop version and its exact release publication time in your local timezone (including beta releases). It uses cached public metadata when available; if the timestamp cannot be retrieved and no matching cache exists, it shows an unavailable notice. Debug builds show a development label.
 - **Interface language**: Chinese and English, following the system language by default. Change it in Settings or with `app.language` (`auto`, `zh`, or `en`), then restart the app.
@@ -62,10 +63,11 @@ chosen database; it can include private titles, descriptions, and evidence. See 
 
 ## Configuration
 
-Settings has five tabs: **Model settings** (one active API Key or ChatGPT connection, with model
+Settings has six tabs: **Model settings** (one active API Key or ChatGPT connection, with model
 discovery and a generation test), **Privacy** (application modes and hidden sites),
 **Advanced configuration** (the raw TOML editor), **Runtime data** (directories, storage usage,
-and migration backup cleanup), and **Neo4j sync** (optional, manually confirmed graph sharing).
+and migration backup cleanup), **Neo4j sync** (optional, manually confirmed graph sharing),
+and **Connections and tools** (MCP servers and read-only mail).
 
 In **Privacy**, search recent applications or enter an executable name manually, choose a mode,
 and save. Candidates come from the last 30 days of local window activity, with up to 100 entries
@@ -162,6 +164,7 @@ The following documents are maintained in Simplified Chinese:
 - [Documentation and specification index](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [Optional Neo4j sync and read-only queries](docs/neo4j-sync.md)
+- [MCP connections and read-only QQ/163 mail](docs/integrations.md)
 - [Testing and integration verification](docs/testing.md)
 - [Summary quality evaluation](docs/summary-quality-evaluation.md)
 - [Website preview and deployment](docs/website.md)

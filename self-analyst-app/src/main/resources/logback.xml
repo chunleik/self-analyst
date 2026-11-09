@@ -21,10 +21,9 @@
         </encoder>
     </appender>
 
-    <!-- MCP Streamable HTTP 传输:服务器对可选的 GET/SSE 流回 405 是协议允许的正常降级,
-         但 SDK 会以 WARN+完整堆栈记录;同时这个 logger 还会打印整段 server instructions。
-         压到 ERROR 消噪,不影响 web_search/web_fetch 注册。 -->
-    <logger name="io.modelcontextprotocol.client.LifecycleInitializer" level="ERROR"/>
+    <!-- MCP SDK may log untrusted structuredContent, server instructions and notifications,
+         including values a remote server echoes. Use only our classified integration status. -->
+    <logger name="io.modelcontextprotocol" level="OFF"/>
 
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>

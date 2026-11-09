@@ -103,6 +103,8 @@ public class DesktopChatSessionController {
         this.agent = agent;
         this.config = config;
         this.memoryExtractionService = memoryExtractionService;
+        if (memoryExtractionService != null) memoryExtractionService.setMailSessionPolicy(
+                new com.selfanalyst.integrations.policy.MailSessionPolicy(store));
         this.deletionCoordinator = deletionCoordinator;
     }
 
@@ -392,8 +394,8 @@ public class DesktopChatSessionController {
             boolean llmAvailable = agent != null && agent.isLlmAvailable()
                     && !agent.isBudgetBlocked();
             String summary;
-            try (var task = llmAvailable ? agent.plainTask() : null) {
-                SummaryPromptService.SummaryTextClient client = task != null && task.available() ? task::complete : null;
+            try (var task = llmAvailable ? agent.plainTask(id) : null) {
+                SummaryPromptService.SummaryTextClient client = task != null && task.available() ? task : null;
                 summary = summaryService.summarize(session, client);
             }
             if (summary != null && !summary.isBlank()) {
@@ -407,11 +409,12 @@ public class DesktopChatSessionController {
 
     private void scheduleMemoryExtraction(String sessionId, String assistantMessageId) {
         if (memoryExtractionService == null || repairBound(sessionId)) return;
+        if (!memoryExtractionService.automaticAllowed(store.getSession(sessionId))) return;
         memoryPool.submit(() -> {
             try {
                 if (repairBound(sessionId)) return;
                 ChatSessionStore.Session session = store.getSession(sessionId);
-                if (session == null || session.messages == null) return;
+                if (session == null || session.messages == null || !memoryExtractionService.automaticAllowed(session)) return;
                 ChatSessionStore.Message assistant = null;
                 ChatSessionStore.Message user = null;
                 for (int i = 0; i < session.messages.size(); i++) {
@@ -429,8 +432,8 @@ public class DesktopChatSessionController {
                     }
                 }
                 if (assistant == null || user == null) return;
-                try (var task = llmAvailable() ? agent.plainTask() : null) {
-                    SummaryPromptService.SummaryTextClient client = task != null && task.available() ? task::complete : null;
+                try (var task = llmAvailable() ? agent.plainTask(sessionId) : null) {
+                    SummaryPromptService.SummaryTextClient client = task != null && task.available() ? task : null;
                     memoryExtractionService.extractAfterAssistantSent(session, user, assistant, client);
                 }
             } catch (Exception e) {

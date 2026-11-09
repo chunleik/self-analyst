@@ -1,0 +1,25 @@
+.integrations-settings { display: flex; flex-direction: column; min-height: 0; width: 100%; flex: 1; }
+.integrations-settings p { line-height: 1.6; overflow-wrap: anywhere; }
+.integrations-actions, .integrations-list { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.integrations-list button { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.integrations-list [aria-pressed="true"] { border-color: var(--accent); background: var(--config-wash); }
+.integrations-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+.integrations-editor > h4, .integrations-editor > p, .integrations-editor > .integrations-actions { grid-column: 1 / -1; }
+.integrations-field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; min-width: 0; }
+.integrations-field:has(input[type="checkbox"]) { flex-direction: row-reverse; justify-content: flex-end; align-items: flex-start; }
+.integrations-field input:not([type="checkbox"]), .integrations-field select, .integrations-field textarea {
+  width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 7px;
+  padding: 10px; font: inherit; background: var(--bg-input, white); color: inherit;
+}
+.integrations-field input[type="checkbox"] { flex-shrink: 0; margin-top: 2px; }
+.integrations-hint { color: var(--text-secondary); font-size: 12px; }
+.integrations-disclosure { padding: 12px; background: var(--config-wash, #f3f6f0); border-radius: 8px; font-size: 13px; }
+.integrations-error { color: var(--danger, #ba3030); }
+.integrations-error:empty { display: none; }
+.integration-approvals { flex-shrink: 0; max-height: 45vh; overflow: auto; padding: 12px 18px; border-bottom: 1px solid var(--border-color); }
+.integration-approvals[hidden] { display: none; }
+.integration-approval, .integration-tool { border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin: 8px 0; }
+.integration-approval h5 { font-size: 14px; margin: 0 0 8px; }
+.integration-approval p { overflow-wrap: anywhere; }
+.integration-approval pre, .integration-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }
+@media (max-width: 600px) { .integrations-editor { grid-template-columns: 1fr; } .integration-approvals { padding: 10px; } }

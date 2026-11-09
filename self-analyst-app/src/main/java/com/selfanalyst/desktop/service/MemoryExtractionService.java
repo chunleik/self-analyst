@@ -22,6 +22,23 @@ public class MemoryExtractionService {
 
     private final LongTermMemoryService memoryService;
     private final Lang lang;
+    private volatile com.selfanalyst.integrations.policy.MailSessionPolicy mailPolicy;
+
+    public void setMailSessionPolicy(com.selfanalyst.integrations.policy.MailSessionPolicy policy) {
+        mailPolicy = java.util.Objects.requireNonNull(policy);
+    }
+    public boolean automaticAllowed(ChatSessionStore.Session session) {
+        if (session == null || session.mailOrigin) return false;
+        var policy = mailPolicy;
+        return policy == null || policy.automaticMemoryAllowed(session.id);
+    }
+    private boolean withoutMail(ChatSessionStore.Session session, Runnable work) {
+        var policy = mailPolicy;
+        if (policy != null) return policy.withoutMail(session.id, work);
+        if (!automaticAllowed(session)) return false;
+        work.run();
+        return true;
+    }
 
     public MemoryExtractionService(LongTermMemoryService memoryService, Lang lang) {
         this.memoryService = memoryService;
@@ -34,16 +51,17 @@ public class MemoryExtractionService {
                                           SummaryPromptService.SummaryTextClient client) {
         if (session == null) return;
         try {
-            if ("off".equals(session.memoryPolicy) || client == null) return;
+            if ("off".equals(session.memoryPolicy) || client == null || !automaticAllowed(session)) return;
             if (memoryService.hasSourceMessageId(assistant != null ? assistant.id : null)) return;
             if (containsForbiddenChatText(user, assistant)) return;
-            String raw = client.complete(buildPrompt(session, user, assistant), EXTRACTION_TIMEOUT);
-            for (Candidate candidate : parseCandidates(raw)) {
-                try {
-                    saveCandidate(session, user, assistant, candidate);
-                } catch (Exception ignored) {
-                    // Skip one malformed/sensitive candidate without dropping later valid ones.
-                }
+            java.util.concurrent.atomic.AtomicReference<String> raw = new java.util.concurrent.atomic.AtomicReference<>();
+            // The shared provenance monitor prevents marking/exposure between check and send.
+            if (!withoutMail(session, () -> raw.set(client.complete(buildPrompt(session, user, assistant), EXTRACTION_TIMEOUT)))) return;
+            for (Candidate candidate : parseCandidates(raw.get())) {
+                if (!withoutMail(session, () -> {
+                    try { saveCandidate(session, user, assistant, candidate); }
+                    catch (Exception ignored) { /* Discard malformed candidates independently. */ }
+                })) return;
             }
         } catch (Exception ignored) {
             // Extraction is best-effort and must never affect the chat response path.

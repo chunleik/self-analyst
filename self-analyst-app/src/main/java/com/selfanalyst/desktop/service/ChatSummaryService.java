@@ -48,7 +48,7 @@ public class ChatSummaryService {
      */
     public String summarize(ChatSessionStore.Session session,
                             SummaryPromptService.SummaryTextClient client) {
-        if (client == null) {
+        if (client == null || session != null && session.mailOrigin && !client.permitsMailOrigin(session.id)) {
             return deterministicFallback(session, lang);
         }
         try {

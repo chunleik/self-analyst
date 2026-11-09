@@ -119,6 +119,7 @@ function switchTab(tab) {
   if (knowledgeTab) knowledgeTab.classList.toggle("active", tab === "knowledge");
   if (tab === "knowledge" && typeof openKnowledge === "function") openKnowledge();
 
+  if (typeof syncChatIntegrationApprovals === "function") syncChatIntegrationApprovals();
   if (tab === "chat") {
     // ensureActiveChatSession may create a session asynchronously; re-render
     // once it resolves so a freshly created session shows up (SPEC-CSP-FE-002).
@@ -146,12 +147,13 @@ function openConfigModal(focusKey) {
 }
 
 function switchConfigView(view, focusKey) {
-  if (state.configSaving || state.configRestarting) return Promise.resolve();
-  if (["llm", "raw", "storage", "neo4j", "privacy"].indexOf(view) < 0) return Promise.resolve();
+  if (state.configSaving || state.configRestarting || (state.integrationsView && state.integrationsView.saving())) return Promise.resolve();
+  if (["llm", "raw", "storage", "neo4j", "privacy", "integrations"].indexOf(view) < 0) return Promise.resolve();
   if (state.configView === view && !focusKey && state.dom.configModal.dataset.view === view) return Promise.resolve();
-  if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()))
+  if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()) || (state.integrationsView && state.integrationsView.dirty()))
       && !window.confirm(t("config.confirmDiscardClose"))) return Promise.resolve();
   if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
+  if (state.integrationsView) { state.integrationsView.destroy(); state.integrationsView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
   if (typeof stopNeo4jSync === "function") stopNeo4jSync();
@@ -173,6 +175,10 @@ function switchConfigView(view, focusKey) {
     state.llmSettingsView = mountLlmSettings(state.dom.configGrid);
     return Promise.resolve();
   }
+  if (view === "integrations") {
+    state.integrationsView = mountIntegrations(state.dom.configGrid);
+    return Promise.resolve();
+  }
   if (view === "privacy") return mountPrivacySettings(state.dom.configGrid);
   if (view === "neo4j") {
     state.dom.configGrid.innerHTML = "";
@@ -188,15 +194,16 @@ function switchConfigView(view, focusKey) {
 }
 
 function closeConfigModal() {
-  if (state.configSaving || state.configRestarting) return;
+  if (state.configSaving || state.configRestarting || (state.integrationsView && state.integrationsView.saving())) return;
   // Guard against losing unsaved edits. SPEC-CFGUI-UI-004a.
-  if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty())) && !window.confirm(t("config.confirmDiscardClose"))) {
+  if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()) || (state.integrationsView && state.integrationsView.dirty())) && !window.confirm(t("config.confirmDiscardClose"))) {
     return;
   }
   state.configOpen = false;
   delete state.dom.configModal.dataset.view;
   state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
   if (state.llmSettingsView) { state.llmSettingsView.destroy(); state.llmSettingsView = null; }
+  if (state.integrationsView) { state.integrationsView.destroy(); state.integrationsView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
   if (typeof stopNeo4jSync === "function") stopNeo4jSync();

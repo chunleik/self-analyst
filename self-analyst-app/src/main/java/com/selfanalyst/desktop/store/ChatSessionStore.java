@@ -142,6 +142,85 @@ public class ChatSessionStore implements AutoCloseable {
         this.documentDeletion = java.util.Objects.requireNonNull(deletion);
     }
 
+    /** Kept outside client-updatable session JSON; normal edits cannot clear provenance/grants. */
+    public record MailProvenance(boolean containsMail, Set<String> modelTargets) {}
+    // Fixed stripes avoid retaining deleted session ids. Never hold the database monitor while waiting.
+    private final Object[] mailOriginLocks = java.util.stream.IntStream.range(0, 64).mapToObj(i -> new Object()).toArray();
+    public Object mailOriginLock(String sessionId) {
+        requireValidSessionId(sessionId);
+        return mailOriginLocks[Math.floorMod(sessionId.hashCode(), mailOriginLocks.length)];
+    }
+
+    public synchronized MailProvenance mailProvenance(String sessionId) {
+        ensureReady();
+        requireValidSessionId(sessionId);
+        try (Connection connection = connect()) {
+            requireMailSession(connection, sessionId);
+            boolean marked;
+            try (PreparedStatement query = connection.prepareStatement(
+                    "SELECT 1 FROM mail_session_origins WHERE session_id=?")) {
+                query.setString(1, sessionId);
+                try (ResultSet rows = query.executeQuery()) { marked = rows.next(); }
+            }
+            Set<String> targets = new TreeSet<>();
+            try (PreparedStatement query = connection.prepareStatement(
+                    "SELECT target FROM mail_model_targets WHERE session_id=?")) {
+                query.setString(1, sessionId);
+                try (ResultSet rows = query.executeQuery()) { while (rows.next()) targets.add(rows.getString(1)); }
+            }
+            return new MailProvenance(marked, Set.copyOf(targets));
+        } catch (SQLException failure) { throw new IllegalStateException("MAIL_PROVENANCE_UNAVAILABLE", failure); }
+    }
+
+    public synchronized void consentMailTarget(String sessionId, String target) {
+        requireValidSessionId(sessionId);
+        String normalized = com.selfanalyst.integrations.policy.ModelRecipient.normalize(target);
+        documentTransaction(connection -> {
+            requireMailSession(connection, sessionId);
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT OR IGNORE INTO mail_model_targets(session_id,target) VALUES(?,?)")) {
+                insert.setString(1, sessionId); insert.setString(2, normalized); insert.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    /** Atomic grant recheck + sticky marker; return only after synchronous=FULL transaction commit. */
+    public void markMailOrigin(String sessionId, String target) {
+        synchronized (mailOriginLock(sessionId)) { markMailOriginLocked(sessionId, target); }
+    }
+    private synchronized void markMailOriginLocked(String sessionId, String target) {
+        requireValidSessionId(sessionId);
+        String normalized = com.selfanalyst.integrations.policy.ModelRecipient.normalize(target);
+        documentTransaction(connection -> {
+            requireMailSession(connection, sessionId);
+            try (PreparedStatement query = connection.prepareStatement(
+                    "SELECT 1 FROM mail_model_targets WHERE session_id=? AND target=?")) {
+                query.setString(1, sessionId); query.setString(2, normalized);
+                try (ResultSet rows = query.executeQuery()) {
+                    if (!rows.next()) throw new com.selfanalyst.integrations.policy.MailSessionPolicy.ModelConsentRequiredException();
+                }
+            }
+            try (PreparedStatement insert = connection.prepareStatement(
+                    "INSERT OR IGNORE INTO mail_session_origins(session_id) VALUES(?)")) {
+                insert.setString(1, sessionId); insert.executeUpdate();
+            }
+            return null;
+        });
+    }
+
+    private static void requireMailSession(Connection connection, String sessionId) throws SQLException {
+        try (PreparedStatement query = connection.prepareStatement("""
+                SELECT 1 FROM sessions WHERE id=? AND NOT EXISTS
+                (SELECT 1 FROM pending_deletions WHERE session_id=?)
+                """)) {
+            query.setString(1, sessionId); query.setString(2, sessionId);
+            try (ResultSet rows = query.executeQuery()) {
+                if (!rows.next()) throw new IllegalStateException("MAIL_SESSION_UNAVAILABLE");
+            }
+        }
+    }
+
     /** Server-only receipt. Client message/context updates cannot create or alter a paid turn. */
     public record RepairTurnReceipt(String state, String reply, int status) {}
 
@@ -311,6 +390,8 @@ public class ChatSessionStore implements AutoCloseable {
         try {
             return initializeDatabase(dbFile);
         } catch (IllegalStateException corrupt) {
+            // An unreadable/unknown provenance schema must never be silently removed by repair.
+            if (corrupt instanceof MailProvenanceStorageException) throw corrupt;
             log.warn("chat.db is unreadable ({}); preserving a backup", corrupt.getMessage());
             preserveCorruptDatabase();
             Path legacyDir = dir.resolve("legacy");
@@ -322,8 +403,18 @@ public class ChatSessionStore implements AutoCloseable {
             } else {
                 log.error("No legacy backup available; starting with an empty chat.db");
             }
-            return initializeDatabase(dbFile);
+            boolean initialized = initializeDatabase(dbFile);
+            // Legacy recovery can coexist with newer AgentState files. Unknown historical origin
+            // is conservatively mail-derived, with no recipient grant, rather than silently clean.
+            try (Connection connection = openConnection(dbFile); Statement statement = connection.createStatement()) {
+                statement.executeUpdate("INSERT OR IGNORE INTO mail_session_origins(session_id) SELECT id FROM sessions");
+            } catch (SQLException failure) { throw new MailProvenanceStorageException("MAIL_PROVENANCE_RECOVERY_FAILED"); }
+            return initialized;
         }
+    }
+
+    private static final class MailProvenanceStorageException extends IllegalStateException {
+        MailProvenanceStorageException(String code) { super(code); }
     }
 
     private static boolean initializeDatabase(Path database) {
@@ -438,6 +529,26 @@ public class ChatSessionStore implements AutoCloseable {
                       requested_at TEXT NOT NULL
                     )
                     """);
+            String mailVersion = metadata(conn, "mail_provenance_version");
+            if (mailVersion != null) {
+                if (!"1".equals(mailVersion)) throw new MailProvenanceStorageException("MAIL_PROVENANCE_VERSION_UNSUPPORTED");
+                try (ResultSet rows = statement.executeQuery("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('mail_session_origins','mail_model_targets')")) {
+                    if (!rows.next() || rows.getInt(1) != 2) throw new MailProvenanceStorageException("MAIL_PROVENANCE_UNAVAILABLE");
+                }
+            }
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS mail_session_origins(
+                      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE
+                    )
+                    """);
+            statement.execute("""
+                    CREATE TABLE IF NOT EXISTS mail_model_targets(
+                      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                      target TEXT NOT NULL,
+                      PRIMARY KEY(session_id,target)
+                    )
+                    """);
+            if (mailVersion == null) setMetadata(conn, "mail_provenance_version", "1");
             String version = metadata(conn, "schema_version");
             if (version == null) {
                 setMetadata(conn, "schema_version", Integer.toString(SCHEMA_VERSION));
@@ -933,6 +1044,10 @@ public class ChatSessionStore implements AutoCloseable {
                 session.contextSnapshot = parseJson(row.getString("context_snapshot"));
                 session.memoryPolicy = row.getString("memory_policy");
                 session.summary = row.getString("summary");
+            }
+            try (PreparedStatement origin = conn.prepareStatement("SELECT 1 FROM mail_session_origins WHERE session_id=?")) {
+                origin.setString(1, id);
+                try (ResultSet rows = origin.executeQuery()) { session.mailOrigin = rows.next(); }
             }
             session.messages = new ArrayList<>();
             try (PreparedStatement messages = conn.prepareStatement("""
@@ -1944,6 +2059,8 @@ public class ChatSessionStore implements AutoCloseable {
         public String source;          // manual | agent_context | task_context
         public String contextLabel;
         public Object contextSnapshot; // opaque, round-tripped (SPEC-CSP-MODEL-003)
+        @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+        public boolean mailOrigin;
         public String memoryPolicy; // smart | confirm_all | off
         public String summary;
         public List<Message> messages = new ArrayList<>();
@@ -1982,6 +2099,8 @@ public class ChatSessionStore implements AutoCloseable {
 
         public String source;
         public String contextLabel;
+        @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+        public boolean mailOrigin;
         public String memoryPolicy; // smart | confirm_all | off
         public String summary;
         public String lastMessagePreview;
@@ -2011,6 +2130,8 @@ public class ChatSessionStore implements AutoCloseable {
         public String source;
         public String contextLabel;
         public Object contextSnapshot;
+        @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.READ_ONLY)
+        public boolean mailOrigin;
         public String memoryPolicy; // smart | confirm_all | off
         public List<Message> initialMessages;
     }

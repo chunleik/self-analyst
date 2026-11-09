@@ -65,6 +65,8 @@ public class DesktopServer {
     private final DesktopMemoryController memoryCtrl;
     private final ChatSessionStore chatSessionStore;
     private final DesktopDocumentController documentCtrl;
+    private final com.selfanalyst.mcp.McpManager integrations;
+    private final DesktopIntegrationController integrationCtrl;
     private com.selfanalyst.ontology.OntologyService ontology;
     private final com.selfanalyst.ontology.Neo4jSyncService neo4jSync;
 
@@ -220,6 +222,22 @@ public class DesktopServer {
             throw recoveryFailure;
         }
         this.chatSessionStore = chatSessionStore;
+        var mailPolicy = new com.selfanalyst.integrations.policy.MailSessionPolicy(chatSessionStore);
+        try {
+            var integrationStore = new com.selfanalyst.integrations.IntegrationStore(Config.resolveConfigDir().toAbsolutePath().normalize().getParent());
+            integrations = new com.selfanalyst.mcp.McpManager(integrationStore,
+                    new com.selfanalyst.integrations.IntegrationCredentialStore(), mailPolicy, config,
+                    new com.selfanalyst.integrations.PinnedHttpsClient(), new com.selfanalyst.mcp.ApprovalRegistry());
+            integrationCtrl = new DesktopIntegrationController(integrations,
+                    () -> agent == null ? "" : agent.currentModelTarget());
+            if (agent != null) {
+                agent.setMailSessionPolicy(mailPolicy);
+                agent.setIntegrationGateway(integrations);
+            }
+        } catch (java.io.IOException failure) {
+            chatSessionStore.close();
+            throw new IllegalStateException("Integration configuration unavailable", failure);
+        }
         SummaryService summaryService = new SummaryService(eventStore, memoryStore, config.effectiveLanguage(),
                 privacy);
         BehaviorAdviceService adviceService = new BehaviorAdviceService(config.effectiveLanguage());
@@ -300,6 +318,7 @@ public class DesktopServer {
      * Call this <b>before</b> {@code EventServer.start()}.
      */
     public void start() {
+        integrationCtrl.register(app);
         new DesktopOntologyController(ontology).register(app);
         new DesktopNeo4jController(neo4jSync).register(app);
         var imageCtrl = new com.selfanalyst.desktop.controller.DesktopChatImageController(chatSessionStore.images());
@@ -431,6 +450,7 @@ public class DesktopServer {
     }
 
     public void shutdown() {
+        integrations.close();
         closeOntology();
         stopSummaryEnhancement();
         if (pendingMemoryReview != null) pendingMemoryReview.close();

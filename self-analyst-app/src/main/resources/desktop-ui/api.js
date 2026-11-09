@@ -104,6 +104,23 @@ function consumeChatSseResponse(response, onEvent) {
 }
 
 var api = {
+  integrations: function (path, method, body, signal) {
+    return fetch(API_BASE + "/desktop/integrations" + (path || ""), {
+      method: method || "GET", signal: signal,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok) {
+          // Do not echo remote transport errors, response text, or credentials.
+          var error = new Error("Integration request failed");
+          error.code = response.status === 409 ? "conflict" : payload.errorCode || payload.code || payload.error || "unavailable";
+          error.status = response.status; throw error;
+        }
+        return payload;
+      });
+    });
+  },
   summaryRepair: function (path, method, body) {
     return fetch(API_BASE + "/desktop/summary-repairs" + (path || ""), {
       method: method || "GET",

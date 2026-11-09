@@ -28,6 +28,8 @@ public class SummaryPromptService {
     @FunctionalInterface
     public interface SummaryTextClient {
         String complete(String prompt, Duration timeout);
+        /** True only for a session-scoped client checking its actual leased model recipient. */
+        default boolean permitsMailOrigin(String sessionId) { return false; }
     }
 
     public interface SummaryTextSession extends SummaryTextClient, AutoCloseable {

@@ -341,3 +341,15 @@ DesktopServer 创建本体服务，注册 `/desktop/ontology` 的受认证 API �
 错误只返回分类代码。
 本地来源失效后远端旧内容在下次成功手工同步时清理；关闭功能或更换命名空间不擦除旧副本。
 无事件/Wiki/向量迁移，不新增模型调用；部署与查询说明见 [Neo4j 同步指南](neo4j-sync.md)。
+
+## 11. MCP 与进程内邮箱
+
+`IntegrationStore` 在数据根准入之后管理独立版本化 JSON 与 revision CAS，`IntegrationCredentialStore` 提供默认 session 与显式 Windows 保险库实现，凭据绑定精确目标。原 `websearch.*` 保留唯一 TOML 权威，由 `McpManager` 的保留入口消费，不再由 Agent 自行注册未经审阅的客户端。
+
+管理器异步发现启用连接，运行目录在每轮独占聊天门内生成快照，当前运行与后续模型版本使用同一策略。旧快照调用前仍检查配置、工具摘要与撤权。真实确认保存在 `ApprovalRegistry`，绑定 session/turn/参数，等待期间不持有配置锁；取消关闭收回记录与网络操作。
+
+`PinnedMcpTransport` 复用 MCP SDK 的协议语义，通过受限 `PinnedHttpsClient` 连接已校验 DNS 地址，校验原始 TLS 主机名，限制绝对截止时间、头部/消息体和并发，不重定向、不重试不确定调用。仅支持有限 JSON/SSE POST 交换，不提供后台订阅或 stdio。
+
+`ReadOnlyMailService` 为进程内服务，经相同 Agent 工具入口发布四个邮箱能力，没有对外 MCP 监听端口。固定 QQ/163 预设、Angus IMAP、READ_ONLY/PEEK、UIDVALIDITY 引用、有界 MIME 与取消共同约束其读取边界。
+
+`MailSessionPolicy` 在 chat.db 保存来源和接收目标。Agent 模型包装、会话摘要、压缩及修复模型租约在实际发送时检查目标；源标记优先于自动记忆策略。原生工具采用本地只读 allowlist，拒绝 embedding 出口，确认后才能写设置或记忆。新管理接口要求 managedDesktop，不沿用无 token 本机兼容访问。用户说明与回滚边界见 `docs/integrations.md`、`docs/mail-integration.md` 和 `PRIVACY.md`。

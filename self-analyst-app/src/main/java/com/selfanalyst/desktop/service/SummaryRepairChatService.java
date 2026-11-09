@@ -61,11 +61,17 @@ public final class SummaryRepairChatService {
         this.lang = Objects.requireNonNull(lang);
     }
 
+    /** Session-aware factory keeps repair requests under the same actual-lease mail policy. */
+    public interface SessionFactory extends Supplier<WikiSummaryPipeline.Session> {
+        WikiSummaryPipeline.Session forSession(String sessionId);
+        @Override default WikiSummaryPipeline.Session get() { return forSession(null); }
+    }
+
     /** PlainTask owns global admission and real usage; this adapter adds no hidden model calls. */
     public static Supplier<WikiSummaryPipeline.Session> modelSessions(SelfAnalystAgent agent) {
         if (agent == null) return null;
-        return () -> {
-            SelfAnalystAgent.PlainTask task = agent.plainTask();
+        return (SessionFactory) sessionId -> {
+            SelfAnalystAgent.PlainTask task = sessionId == null ? agent.plainTask() : agent.plainTask(sessionId);
             return new WikiSummaryPipeline.Session() {
                 public String complete(String prompt, Duration timeout) { return task.complete(prompt, timeout); }
                 public WikiSummaryPipeline.Completion completeDetailed(String prompt, Duration timeout) {
@@ -173,7 +179,9 @@ public final class SummaryRepairChatService {
             WikiRepairService.View view, BooleanSupplier cancelled) {
         view = repairs.preflightModel(sessionId, view.draft().id(), view.draft().draftRevision());
         String prompt = prompt(repairs, chat, userMessageId, view);
-        try (var model = sessions.get()) {
+        if (chat.mailOrigin && !(sessions instanceof SessionFactory))
+            throw new com.selfanalyst.integrations.policy.MailSessionPolicy.ModelConsentRequiredException();
+        try (var model = sessions instanceof SessionFactory factory ? factory.forSession(sessionId) : sessions.get()) {
             model.preflight(); // Existing global budget and model availability, before reservation.
             if (prompt.length() + model.overheadChars() > MAX_PROMPT_CHARS) {
                 throw new IllegalArgumentException("REPAIR_INPUT_LIMIT");

@@ -673,6 +673,7 @@ function getLatestAssistantTurnIndex(messages) {
 // ---- Render ----
 
 function renderChatTab() {
+  if (typeof syncChatIntegrationApprovals === "function") syncChatIntegrationApprovals();
   if (typeof renderChatImages === "function") renderChatImages();
   renderChatSessionList();
   renderChatThread();
@@ -1007,6 +1008,7 @@ function sendChatTabMessage(request) {
           request.onExecutionStart(session.id, savedUser.id);
         }
 
+        if (typeof startChatIntegrationApprovals === "function") startChatIntegrationApprovals(session.id, savedUser.id);
         var executionRequest = deepChatRequest && request.streaming && api.postChatStream
           ? api.postChatStream(text, context, session.id, savedUser.id, {
               signal: request.signal,
@@ -1017,7 +1019,9 @@ function sendChatTabMessage(request) {
               },
             })
           : api.postChat(text, context, session.id, savedUser.id);
-        return requireChatExecutionResponse(executionRequest).then(function (execution) {
+        return requireChatExecutionResponse(executionRequest).finally(function () {
+          if (typeof stopChatIntegrationApprovals === "function") stopChatIntegrationApprovals(session.id, savedUser.id);
+        }).then(function (execution) {
           var resp = execution.payload;
           if (typeof acceptSummaryRepairResponse === "function" && resp.repair) acceptSummaryRepairResponse(session.id, resp.repair);
           var content = execution.content;
@@ -1114,6 +1118,7 @@ function retryChatMessage(msgId, options) {
     noteChatSessionMutation();
     mergeMessageFields(pendingMsg, updated);
     var streamedContent = "";
+    if (typeof startChatIntegrationApprovals === "function") startChatIntegrationApprovals(session.id, userMsg.id);
     var retryRequest = options && options.streaming && api.postChatStream
       ? api.postChatStream(
           userMsg.content,
@@ -1134,7 +1139,9 @@ function retryChatMessage(msgId, options) {
           userMsg.contextSnapshot || buildChatContext(session),
           session.id,
           userMsg.id);
-    return requireChatExecutionResponse(retryRequest).then(function (execution) {
+    return requireChatExecutionResponse(retryRequest).finally(function () {
+      if (typeof stopChatIntegrationApprovals === "function") stopChatIntegrationApprovals(session.id, userMsg.id);
+    }).then(function (execution) {
       var resp = execution.payload;
       var content = execution.content;
       var tasks = normalizeSuggestedTasks(

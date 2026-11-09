@@ -36,6 +36,12 @@ if (-not (Test-Path -LiteralPath $JavaPath -PathType Leaf)) {
     throw "缺少 Java 运行时: $JavaPath"
 }
 
+# Force lazy mail provider/activation loading from this exact JAR and runtime, without networking.
+& $JavaPath -cp $JarPath com.selfanalyst.mail.MailRuntimeCheck
+if ($LASTEXITCODE -ne 0) {
+    throw "打包后的 IMAPS/MIME 服务加载检查失败，退出码: $LASTEXITCODE"
+}
+
 $TempBase = [System.IO.Path]::GetFullPath((Join-Path $Root ".tmp")).TrimEnd('\')
 New-Item -ItemType Directory -Path $TempBase -Force | Out-Null
 $SmokeRoot = Join-Path $TempBase ("self-analyst-packaged-jar-smoke-" + [guid]::NewGuid().ToString("N"))

@@ -134,6 +134,11 @@ final class RuntimeStorageCompatibility {
                 regular(file);
                 if (kind.equals("root") && Set.of("app.lock", "storage-format.json.tmp").contains(name)) continue;
                 if (kind.equals("config") && name.equals("config.toml")) continue;
+                if (kind.equals("config") && Set.of("integrations.json", "integrations.json.bak").contains(name)) {
+                    com.selfanalyst.integrations.IntegrationStore.readConfig(file); continue;
+                }
+                if (kind.equals("config") && name.equals(".integrations.lock")) continue;
+                if (kind.equals("config") && name.matches("\\.integrations-[a-f0-9-]{36}\\.tmp")) continue;
                 if (kind.equals("chat") && name.equals(".writer.lock")) continue;
                 // A crashed VACUUM may leave an incomplete staging file; it is never used as a rollback backup.
                 if (kind.equals("memory") && name.matches("llm-wiki\\.db\\.before-summary-repair-v5\\.bak\\.[0-9a-f-]{36}\\.tmp")) continue;
@@ -270,6 +275,27 @@ final class RuntimeStorageCompatibility {
             columns(connection, "sessions", "id,title,created_at,updated_at,source,context_label,context_snapshot,memory_policy,summary,last_message_preview,message_count");
             columns(connection, "messages", "id,session_id,seq,role,content,created_at,status,error,context_snapshot,suggested_tasks");
             columns(connection, "pending_deletions", "session_id,requested_at");
+            int mailTables;
+            try (var rows = statement.executeQuery("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('mail_session_origins','mail_model_targets')")) {
+                mailTables = rows.next() ? rows.getInt(1) : -1;
+            }
+            if (mailTables == 0) {
+                // Unmodified schema-2 backups predate mail support and remain admissible.
+                scalar(connection, "SELECT count(*) FROM metadata WHERE key='mail_provenance_version'", "0");
+            } else if (mailTables == 2) {
+                scalar(connection, "SELECT value FROM metadata WHERE key='mail_provenance_version'", "1");
+                columns(connection, "mail_session_origins", "session_id");
+                columns(connection, "mail_model_targets", "session_id,target");
+                scalar(connection, "SELECT count(*) FROM mail_session_origins m LEFT JOIN sessions s ON s.id=m.session_id WHERE s.id IS NULL", "0");
+                scalar(connection, "SELECT count(*) FROM mail_model_targets m LEFT JOIN sessions s ON s.id=m.session_id WHERE s.id IS NULL", "0");
+                try (var rows = statement.executeQuery("SELECT DISTINCT target FROM mail_model_targets")) {
+                    while (rows.next()) {
+                        String target = rows.getString(1);
+                        if (!com.selfanalyst.integrations.policy.ModelRecipient.normalize(target).equals(target))
+                            throw invalid("邮箱模型目标无法确认");
+                    }
+                }
+            } else throw invalid("邮箱来源存储不完整");
         } else if (kind.equals("memory") && (name.equals("llm-wiki.db") || (name.equals("llm-wiki.db.before-statistics-v4.bak") || name.equals("llm-wiki.db.before-summary-repair-v5.bak")))) {
             int wikiVersion;
             try (var versionRows = statement.executeQuery("PRAGMA user_version")) {

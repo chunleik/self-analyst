@@ -12,6 +12,7 @@ SelfAnalyst 采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。项
 | [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) | SQLite JDBC 驱动 | Apache-2.0 |
 | [JNA / JNA Platform](https://github.com/java-native-access/jna) | 窗口与 AFK 状态的原生调用 | Apache-2.0 / LGPL-2.1 双许可证；本项目按 Apache-2.0 使用 |
 | [Jackson](https://github.com/FasterXML/jackson) | JSON 序列化 | Apache-2.0 |
+| [Jakarta Mail API](https://jakarta.ee/specifications/mail/) / [Eclipse Angus Mail](https://eclipse-ee4j.github.io/angus-mail/) | QQ/163 的只读 IMAP 与 MIME | EPL-2.0 / GPL-2.0 with Classpath Exception；按各组件随附许可使用 |
 | [jsoup](https://jsoup.org/) | HTML 静态解析与格式检查 | MIT |
 | [Apache Lucene](https://lucene.apache.org) | 本地向量/KNN 语义索引 | Apache-2.0 |
 | [Neo4j Java Driver 5.28.15](https://github.com/neo4j/neo4j-java-driver) | 可选 Neo4j 手工同步的运行时 Bolt 驱动 | Apache-2.0 |

@@ -31,6 +31,8 @@ public final class IntegrationCredentialStore implements CredentialStore {
         return windows;
     }
     private void checkOpen() throws IOException { if (closed) throw new IOException("credential_store_closed"); }
+    @Override public synchronized boolean cleanupPending() { return windows != null && windows.cleanupPending(); }
+    @Override public synchronized boolean retryCleanup() { return windows == null || windows.retryCleanup(); }
     @Override public synchronized void close() {
         session.close(); if (windows != null) windows.close(); closed = true;
     }

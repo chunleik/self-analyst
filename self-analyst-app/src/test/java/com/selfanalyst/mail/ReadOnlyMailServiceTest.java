@@ -185,23 +185,31 @@ class ReadOnlyMailServiceTest {
         CountDownLatch block;
         long validity = 1;
         boolean missing;
+        List<String> folders = List.of("INBOX", "Other");
+        final AtomicInteger folderLists = new AtomicInteger();
+        final List<String> openedFolders = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Runnable afterSearch = () -> { };
+        Runnable afterRead = () -> { };
         @Override public Connection connect(MailAccount account, char[] secret, MailCancellation cancellation, MailLimits limits) {
             connections.incrementAndGet();
             maxActive.accumulateAndGet(active.incrementAndGet(), Math::max);
             return new Connection() {
                 public List<String> listFolders() {
+                    folderLists.incrementAndGet();
                     entered.countDown();
                     if (block != null) try { block.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); cancellation.check(); }
-                    return List.of("INBOX", "Other");
+                    return folders;
                 }
                 public Mailbox openReadOnly(String folder) {
+                    openedFolders.add(folder);
                     return new Mailbox() {
                         public long uidValidity() { return validity; }
                         public SearchBatch search(ReadOnlyMailService.SearchRequest request, Long beforeUid, int maxExamined) {
+                            afterSearch.run();
                             return new SearchBatch(List.of(envelope(20), envelope(10)), 1, 2, false);
                         }
                         public Envelope envelope(long uid) { return missing ? null : new Envelope(uid, "subject", List.of("source@example.invalid"), List.of(), Instant.parse("2026-11-09T00:00:00Z"), true, "synthetic", 4); }
-                        public MailBodyReader.Body readBody(long uid, MailLimits limits) { bodyReads.incrementAndGet(); return new MailBodyReader.Body("body", false, List.of(), List.of()); }
+                        public MailBodyReader.Body readBody(long uid, MailLimits limits) { bodyReads.incrementAndGet(); afterRead.run(); return new MailBodyReader.Body("body", false, List.of(), List.of()); }
                         public void close() { }
                     };
                 }

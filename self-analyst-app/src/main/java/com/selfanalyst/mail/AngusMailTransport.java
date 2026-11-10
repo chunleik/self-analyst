@@ -163,11 +163,12 @@ public final class AngusMailTransport implements MailTransport {
             try {
                 cancellation.check();
                 Folder[] folders = store.getDefaultFolder().list("*");
-                if (folders.length > 256) throw new MailException(MailException.Code.LIMIT_EXCEEDED);
+                if (folders.length > MailLimits.MAX_LISTED_FOLDERS) throw new MailException(MailException.Code.LIMIT_EXCEEDED);
                 List<String> result = new ArrayList<>();
-                for (Folder folder : folders) if ((folder.getType() & Folder.HOLDS_MESSAGES) != 0) {
-                    if (folder.getFullName().length() > 256) throw new MailException(MailException.Code.LIMIT_EXCEEDED);
-                    result.add(folder.getFullName());
+                for (Folder folder : folders) {
+                    if (folder.getFullName().length() > MailLimits.MAX_FOLDER_NAME_LENGTH) throw new MailException(MailException.Code.LIMIT_EXCEEDED);
+                    if (!MailAccount.validFolderName(folder.getFullName())) throw new MailException(MailException.Code.PROTOCOL_UNAVAILABLE);
+                    if ((folder.getType() & Folder.HOLDS_MESSAGES) != 0) result.add(folder.getFullName());
                 }
                 return List.copyOf(result);
             } catch (Exception e) { cancellation.check(); throw classify(e); }

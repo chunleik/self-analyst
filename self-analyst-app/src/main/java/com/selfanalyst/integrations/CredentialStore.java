@@ -9,6 +9,9 @@ public interface CredentialStore extends AutoCloseable {
     String write(CredentialTarget target, char[] secret, String storageMode) throws IOException;
     Optional<char[]> read(String reference, CredentialTarget target) throws IOException;
     void delete(String reference) throws IOException;
+    /** Failed write verification may leave an uncommitted vault item; never hide cleanup failure. */
+    default boolean cleanupPending() { return false; }
+    default boolean retryCleanup() { return !cleanupPending(); }
     default boolean configured(String reference, CredentialTarget target) {
         if (reference == null) return false;
         try {

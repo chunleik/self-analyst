@@ -4,6 +4,9 @@ import java.time.Duration;
 
 public record MailLimits(int maxSearchMessages, int maxBodyCodePoints, int maxDecodedBytes,
                          int maxMimeParts, int maxMimeDepth, int maxWireBytes, Duration timeout) {
+    public static final int MAX_LISTED_FOLDERS = 256;
+    public static final int MAX_FOLDER_NAME_LENGTH = 256;
+
     public static MailLimits defaults() {
         return new MailLimits(500, 20_000, 256_000, 64, 12, 2_000_000, Duration.ofSeconds(30));
     }

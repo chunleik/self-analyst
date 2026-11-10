@@ -41,13 +41,48 @@ class DesktopIntegrationControllerTest {
             assertEquals(200,request(server,"PUT","",body,"integration-test-token").statusCode());
             assertEquals(409,request(server,"PUT","",body,"integration-test-token").statusCode());
             var secret=request(server,"POST","/credential","{\"kind\":\"mail\",\"id\":\"qq\",\"secret\":\"synthetic-private-code\",\"persist\":false,\"expectedRevision\":1}","integration-test-token");
-            assertEquals(200,secret.statusCode()); assertFalse(secret.body().contains("synthetic-private-code"));
+            assertEquals(400,secret.statusCode()); assertTrue(secret.body().contains("mail_activation_required"));
+            assertFalse(secret.body().contains("synthetic-private-code"));
             var exported=request(server,"GET","/export",null,"integration-test-token");
             assertEquals(200,exported.statusCode()); assertFalse(exported.body().contains("synthetic-private-code"));
             assertFalse(exported.body().contains("session:"));
             assertEquals(400,request(server,"POST","/test","{\"kind\":\"mail\",\"id\":\"qq\",\"hostname\":\"127.0.0.1\"}","integration-test-token").statusCode());
-            var error=request(server,"POST","/credential","{\"kind\":\"mail\",\"id\":\"missing\",\"secret\":\"synthetic-private-code\",\"persist\":false,\"expectedRevision\":2}","integration-test-token");
+            var error=request(server,"POST","/credential","{\"kind\":\"mail\",\"id\":\"missing\",\"secret\":\"synthetic-private-code\",\"persist\":false,\"expectedRevision\":1}","integration-test-token");
             assertEquals(400,error.statusCode()); assertFalse(error.body().contains("synthetic-private-code"));
+        }
+    }
+    @Test void mailScopeManagementRoutesRejectDuplicateAndTrailingAuthorizationBeforeTreeNormalization() throws Exception {
+        var server = new EventServer(root.resolve("events"), 0, "integration-test-token");
+        try (AutoCloseable cleanup = server::stop; var sessions = new ChatSessionStore(root.resolve("memory"));
+             var manager = new McpManager(new IntegrationStore(root), new SessionCredentialStore(), new MailSessionPolicy(sessions),
+                     Config.testDefaults(root.resolve("memory")), new PinnedHttpsClient(), new ApprovalRegistry())) {
+            new DesktopIntegrationController(manager, () -> "https://model.example.com/v1").register(server.app()); server.start(0);
+            var account = new IntegrationConfig.MailAccount("qq", "qq", "12345@qq.com", "Synthetic", false,
+                    "selected", List.of("INBOX"), false, null, "session", 0);
+            String json = new ObjectMapper().writeValueAsString(new IntegrationConfig(1, 0, List.of(), List.of(account), List.of()));
+            String body = "{\"expectedRevision\":0,\"config\":" + json + "}";
+            for (String invalid : List.of(
+                    body.replace("\"folderScope\":\"selected\"", "\"folderScope\":\"selected\",\"folderScope\":\"all\""),
+                    body.replace("\"bodyAccess\":false", "\"bodyAccess\":false,\"bodyAccess\":true"),
+                    body.replace("\"expectedRevision\":0", "\"expectedRevision\":0,\"expectedRevision\":0"),
+                    body + " {}", body.replace("\"folderScope\":\"selected\"", "\"folderScope\":null"),
+                    body.replace("\"folderScope\":\"selected\"", "\"folderScope\":7"),
+                    body.replace("\"folderScope\":\"selected\"", "\"folderScope\":\"unknown\""))) {
+                for (String route : List.of("", "/import")) {
+                    var response = request(server, route.isEmpty() ? "PUT" : "POST", route, invalid, "integration-test-token");
+                    assertEquals(400, response.statusCode(), route + ": " + invalid);
+                    assertEquals(0, manager.config().revision()); assertTrue(manager.config().mailAccounts().isEmpty());
+                }
+            }
+            String legacy = body.replace("\"folderScope\":\"selected\",", "");
+            var accepted = request(server, "PUT", "", legacy, "integration-test-token");
+            assertEquals(200, accepted.statusCode());
+            assertEquals("selected", manager.config().mailAccounts().getFirst().folderScope());
+            String explicitAll = body.replace("\"folderScope\":\"selected\"", "\"folderScope\":\"all\"")
+                    .replace("\"expectedRevision\":0", "\"expectedRevision\":1").replace("\"revision\":0", "\"revision\":1");
+            assertEquals(200, request(server, "PUT", "", explicitAll, "integration-test-token").statusCode());
+            assertEquals("all", manager.config().mailAccounts().getFirst().folderScope());
+            assertFalse(manager.config().mailAccounts().getFirst().bodyAccess());
         }
     }
     private static HttpResponse<String> request(EventServer server,String method,String suffix,String body,String token) throws Exception {

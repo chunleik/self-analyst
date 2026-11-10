@@ -41,9 +41,9 @@ public final class ReadOnlyMailService implements AutoCloseable {
     public record SearchRequest(String accountId, String folder, Instant after, Instant before,
                                 String from, String subject, Boolean unread, int pageSize, String cursor) {
         public SearchRequest {
-            folder = folder == null || folder.isBlank() ? "INBOX" : folder;
+            folder = folder == null ? "INBOX" : folder;
             pageSize = pageSize == 0 ? 20 : pageSize;
-            if (pageSize < 1 || pageSize > 50 || folder.length() > 256
+            if (pageSize < 1 || pageSize > 50 || !MailAccount.validFolderName(folder)
                     || invalidFilter(from) || invalidFilter(subject)
                     || (after != null && before != null && !after.isBefore(before))) {
                 throw new MailException(MailException.Code.SEARCH_UNSUPPORTED);
@@ -102,16 +102,19 @@ public final class ReadOnlyMailService implements AutoCloseable {
             if (!account.enabled()) continue;
             try { authorization.authorize(context, account, null, false); }
             catch (MailException e) { if (e.code() == MailException.Code.ACCESS_DENIED) continue; throw e; }
+            validate(account, null, false, context);
             authorization.beforeResult(context, account);
+            validate(account, null, false, context);
             result.add(account);
         }
+        for (MailAccount account : result) validate(account, null, false, context);
         check(context);
         return List.copyOf(result);
     }
     public List<String> listFolders(String accountId, CallContext context) {
         MailAccount account = resolve(accountId);
-        return operate(account, null, false, context, (connection) -> connection.listFolders().stream()
-                .filter(account.allowedFolders()::contains).limit(32).toList());
+        return operate(account, null, false, context, (connection) -> validateFolders(connection.listFolders()).stream()
+                .filter(account::allowsFolder).toList());
     }
     public SearchResult searchMessages(SearchRequest request, CallContext context) {
         Objects.requireNonNull(request);
@@ -169,7 +172,7 @@ public final class ReadOnlyMailService implements AutoCloseable {
         try {
             return timed(draft.id(), cancellation == null ? new MailCancellation() : cancellation, local -> {
                 try (MailTransport.Connection connection = transport.connect(draft, copy, local, limits)) {
-                    List<String> folders = connection.listFolders();
+                    List<String> folders = validateFolders(connection.listFolders());
                     try (MailTransport.Mailbox box = connection.openReadOnly("INBOX")) {
                         box.uidValidity();
                         return new ConnectionTest(true, List.copyOf(folders), true, "unknown");
@@ -191,18 +194,33 @@ public final class ReadOnlyMailService implements AutoCloseable {
                 local.check();
                 validate(account, folder, body, context);
                 authorization.beforeResult(context, account);
+                validate(account, folder, body, context);
                 local.check();
                 return result;
             } finally { Arrays.fill(secret, '\0'); }
         });
     }
     private void validate(MailAccount expected, String folder, boolean body, CallContext context) {
+        validateSnapshot(expected, folder, body);
+        authorization.authorize(context, expected, folder, body);
+        // The boundary can wait for user consent. Recheck without another consent callback.
+        validateSnapshot(expected, folder, body);
+    }
+    private void validateSnapshot(MailAccount expected, String folder, boolean body) {
         MailAccount latest = resolve(expected.id());
-        if (!latest.equals(expected) || (folder != null && !latest.allowedFolders().contains(folder))) {
+        if (!latest.equals(expected) || (folder != null && !latest.allowsFolder(folder))) {
             throw new MailException(MailException.Code.ACCESS_DENIED);
         }
         if (body && !latest.bodyAccess()) throw new MailException(MailException.Code.BODY_ACCESS_DENIED);
-        authorization.authorize(context, latest, folder, body);
+    }
+    private static List<String> validateFolders(List<String> folders) {
+        if (folders == null) throw new MailException(MailException.Code.PROTOCOL_UNAVAILABLE);
+        if (folders.size() > MailLimits.MAX_LISTED_FOLDERS
+                || folders.stream().anyMatch(f -> f != null && f.length() > MailLimits.MAX_FOLDER_NAME_LENGTH))
+            throw new MailException(MailException.Code.LIMIT_EXCEEDED);
+        if (folders.stream().anyMatch(f -> !MailAccount.validFolderName(f)))
+            throw new MailException(MailException.Code.PROTOCOL_UNAVAILABLE);
+        return List.copyOf(folders);
     }
     private List<MailAccount> currentAccounts() {
         List<MailAccount> result = List.copyOf(accounts.accounts());

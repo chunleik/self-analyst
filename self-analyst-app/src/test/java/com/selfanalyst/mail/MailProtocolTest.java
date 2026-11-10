@@ -2,6 +2,7 @@ package com.selfanalyst.mail;
 
 import jakarta.mail.Session;
 import org.eclipse.angus.mail.imap.IMAPStore;
+import org.eclipse.angus.mail.imap.protocol.BASE64MailboxEncoder;
 import org.junit.jupiter.api.Test;
 
 import javax.net.ssl.SSLHandshakeException;
@@ -61,6 +62,47 @@ class MailProtocolTest {
             assertTrue(server.commands().stream().noneMatch(c -> c.contains("BODY.PEEK[2]")), server.commands().toString());
             assertReadOnly(server.commands());
             assertFalse(server.seen);
+        }
+    }
+    @Test void allScopeListsAndReadsNestedUnicodeAndNewFoldersUsingReadOnlyCommands() throws Exception {
+        var account = new MailAccount("mail-1", MailAccount.Provider.QQ, "synthetic@qq.com", "Synthetic", true,
+                "all", Set.of("INBOX"), true, 1);
+        try (Fixture server = new Fixture(); var service = service(server, account)) {
+            server.folders = java.util.stream.IntStream.range(0, 40).mapToObj(i -> "Projects/项目/" + i).toList();
+            server.noSelectFolders = List.of("Projects");
+            assertEquals(server.folders, service.listFolders("mail-1", ReadOnlyMailServiceTest.context()));
+            var expanded = new ArrayList<>(server.folders); expanded.add("归档/新增/收件");
+            server.folders = List.copyOf(expanded);
+            assertEquals(expanded, service.listFolders("mail-1", ReadOnlyMailServiceTest.context()));
+            for (String folder : List.of("Projects/项目/0", "归档/新增/收件")) {
+                var request = new ReadOnlyMailService.SearchRequest("mail-1", folder, null, null, null, null, null, 20, null);
+                var result = service.searchMessages(request, ReadOnlyMailServiceTest.context());
+                assertEquals(2, result.messages().size());
+                var message = service.getMessage(result.messages().getFirst().reference(), ReadOnlyMailServiceTest.context());
+                assertEquals("Hello mail!", message.body().text()); assertTrue(message.message().unread());
+                assertEquals(1, message.body().attachments().size());
+                assertTrue(server.commands().stream().anyMatch(c -> c.contains(" EXAMINE ")
+                        && c.contains(BASE64MailboxEncoder.encode(folder))), server.commands().toString());
+            }
+            assertTrue(server.commands().stream().anyMatch(c -> c.contains(" LIST ") && c.contains("*")));
+            assertTrue(server.commands().stream().noneMatch(c -> c.contains("BODY.PEEK[2]")));
+            assertFalse(server.seen); assertReadOnly(server.commands());
+        }
+    }
+    @Test void actualListResponseHonorsDirectoryAndNameBudgetsWithoutTruncation() throws Exception {
+        var account = new MailAccount("mail-1", MailAccount.Provider.QQ, "synthetic@qq.com", "Synthetic", true,
+                "all", Set.of(), false, 1);
+        try (Fixture server = new Fixture(); var service = service(server, account)) {
+            server.folders = java.util.stream.IntStream.range(0, 256).mapToObj(i -> "Projects/" + i).toList();
+            assertEquals(256, service.listFolders("mail-1", ReadOnlyMailServiceTest.context()).size());
+            // A no-select directory still consumes the protocol directory budget.
+            server.noSelectFolders = List.of("Projects");
+            assertEquals(MailException.Code.LIMIT_EXCEEDED, assertThrows(MailException.class,
+                    () -> service.listFolders("mail-1", ReadOnlyMailServiceTest.context())).code());
+            server.noSelectFolders = List.of(); server.folders = List.of("x".repeat(257));
+            assertEquals(MailException.Code.LIMIT_EXCEEDED, assertThrows(MailException.class,
+                    () -> service.listFolders("mail-1", ReadOnlyMailServiceTest.context())).code());
+            assertReadOnly(server.commands());
         }
     }
     @Test void missingIdUnsafeLoginAndBadAuthorizationAreClassifiedAndNotRetried() throws Exception {
@@ -191,6 +233,8 @@ class MailProtocolTest {
         volatile boolean badCharset;
         volatile boolean stall;
         volatile boolean seen;
+        volatile List<String> folders = List.of("INBOX", "Other");
+        volatile List<String> noSelectFolders = List.of();
         final CountDownLatch stalled = new CountDownLatch(1);
         Fixture() throws IOException {
             server = new ServerSocket(0, 16, InetAddress.getLoopbackAddress());
@@ -218,7 +262,11 @@ class MailProtocolTest {
                     else if (upper.startsWith("ID ")) { identified = true; send(output, "* ID (\"name\" \"Synthetic IMAP\")\r\n" + tag + " OK id\r\n"); }
                     else if (upper.startsWith("LIST")) {
                         if (stall) { stalled.countDown(); while (input.read() != -1) { } return; }
-                        send(output, "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\HasNoChildren) \"/\" \"Other\"\r\n" + tag + " OK list\r\n");
+                        for (String folder : noSelectFolders) send(output, "* LIST (\\Noselect \\HasChildren) \"/\" \""
+                                + BASE64MailboxEncoder.encode(folder) + "\"\r\n");
+                        for (String folder : folders) send(output, "* LIST (\\HasNoChildren) \"/\" \""
+                                + BASE64MailboxEncoder.encode(folder) + "\"\r\n");
+                        send(output, tag + " OK list\r\n");
                     } else if (upper.startsWith("EXAMINE")) {
                         if (unsafe || (requireId && !identified)) send(output, tag + " NO Unsafe Login\r\n");
                         else send(output, "* FLAGS (\\Seen \\Deleted)\r\n* " + messageCount + " EXISTS\r\n* 0 RECENT\r\n* OK [UIDVALIDITY 7]\r\n* OK [UIDNEXT 3]\r\n" + tag + " OK [" + (readWrite ? "READ-WRITE" : "READ-ONLY") + "] examine\r\n");

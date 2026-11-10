@@ -12,6 +12,7 @@
   padding: 10px; font: inherit; background: var(--bg-input, white); color: inherit;
 }
 .integrations-field input[type="checkbox"] { flex-shrink: 0; margin-top: 2px; }
+.integrations-field textarea:disabled { opacity: .65; cursor: not-allowed; }
 .integrations-hint { color: var(--text-secondary); font-size: 12px; }
 .integrations-disclosure { padding: 12px; background: var(--config-wash, #f3f6f0); border-radius: 8px; font-size: 13px; }
 .integrations-error { color: var(--danger, #ba3030); }

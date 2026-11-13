@@ -249,19 +249,7 @@ function setupEvents() {
     scheduleChatSessionSearch(this.value);
   });
 
-  // Legacy composer fallback used by unit tests and deployments where the
-  // vendored web component cannot be upgraded.
-  if (state.dom.chatTabSendBtn) {
-    state.dom.chatTabSendBtn.addEventListener("click", sendChatTabMessage);
-  }
-  if (state.dom.chatTabInput) {
-    state.dom.chatTabInput.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        sendChatTabMessage();
-      }
-    });
-  }
+  if (typeof bindChatComposer === "function") bindChatComposer();
 
   // Context toggles
   var toggles = state.dom.chatContextToggles.querySelectorAll("input[type=checkbox]");

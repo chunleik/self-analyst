@@ -497,6 +497,8 @@ fn create_main_window(
         WebviewUrl::External(backend_url(port, "/desktop-ui/").parse().unwrap()),
     )
     .title("SelfAnalyst")
+    // Let the web composer receive DOM File drops; no native path reads.
+    .disable_drag_drop_handler()
     .decorations(false)
     .inner_size(1200.0, 800.0)
     .min_inner_size(800.0, 600.0)

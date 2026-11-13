@@ -1267,3 +1267,19 @@ test("a failed sent PUT returns to error and remains retryable", async () => {
   sandbox.renderChatThread();
   assert.match(thread.innerHTML, /class="msg-retry" data-mid="assistant-01"/);
 });
+
+test("failed preparation never restores the originating draft into another session", async () => {
+  const preparation = deferred();
+  const { sandbox, session } = createChatSandbox({ status: "sent" });
+  sandbox.state.dom.chatTabInput = { value: "original draft" };
+  sandbox.renderChatTab = () => {};
+  sandbox.ensureActiveChatSession = () => preparation.promise;
+  const send = sandbox.sendChatTabMessage({ source: "deep-chat", text: "original draft", streaming: true });
+  sandbox.state.chatSessions.push({ id: "other", messagesLoaded: true, messages: [] });
+  sandbox.state.activeChatSessionId = "other";
+  sandbox.state.dom.chatTabInput.value = "";
+  preparation.reject(Error("failed before append"));
+  await send;
+  assert.equal(sandbox.state.dom.chatTabInput.value, "");
+  assert.equal(session.messages.length, 2);
+});

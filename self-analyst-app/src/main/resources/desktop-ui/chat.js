@@ -913,6 +913,7 @@ function renderChatContextPanel() {
 }
 
 function updateChatInputState() {
+  if (typeof updateChatComposerState === "function") { updateChatComposerState(); return; }
   var llmOk = state.status && state.status.llm && state.status.llm.configured;
   var session = getActiveChatSession();
   var sessionReady = session && session.messagesLoaded && !session.messagesLoading;
@@ -947,6 +948,7 @@ function requireChatExecutionResponse(executionRequest) {
 function sendChatTabMessage(request) {
   if (typeof chatImageLoading !== "undefined" && chatImageLoading) return Promise.resolve({ skipped: true });
   if (state.chatSending) return Promise.resolve({ skipped: true });
+  var originatingSessionId = state.activeChatSessionId;
   var deepChatRequest = request && request.source === "deep-chat";
   var input = state.dom.chatTabInput;
   var text = deepChatRequest
@@ -1005,7 +1007,7 @@ function sendChatTabMessage(request) {
         backfillSessionTitle(session, text);
 
         if (deepChatRequest && request.onExecutionStart) {
-          request.onExecutionStart(session.id, savedUser.id);
+          request.onExecutionStart(session.id, savedUser.id, savedPending);
         }
 
         if (typeof startChatIntegrationApprovals === "function") startChatIntegrationApprovals(session.id, savedUser.id);
@@ -1059,7 +1061,8 @@ function sendChatTabMessage(request) {
       });
   }).catch(function (err) {
     if (!outcome.error) outcome.error = err;
-    if (!inputPersisted && input && !input.value) input.value = text;
+    if (!inputPersisted && input && !input.value &&
+        state.activeChatSessionId === (outcome.sessionId || originatingSessionId)) input.value = text;
     if (!deepChatRequest) {
       alert(t("chat.sendFailed", { msg: (err && err.message ? err.message : err) }));
     }
@@ -1087,6 +1090,7 @@ function backfillSessionTitle(session, text) {
 }
 
 function retryChatMessage(msgId, options) {
+  if (typeof retryChatComposer === "function" && !(options && options.composerOwned)) return retryChatComposer(msgId);
   if (state.chatSending) return;
   var session = getActiveChatSession();
   if (!session) return;
@@ -1119,6 +1123,7 @@ function retryChatMessage(msgId, options) {
     mergeMessageFields(pendingMsg, updated);
     var streamedContent = "";
     if (typeof startChatIntegrationApprovals === "function") startChatIntegrationApprovals(session.id, userMsg.id);
+    if (options && options.onExecutionStart) options.onExecutionStart(session.id, userMsg.id);
     var retryRequest = options && options.streaming && api.postChatStream
       ? api.postChatStream(
           userMsg.content,

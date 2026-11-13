@@ -157,12 +157,16 @@
               <p class="chat-welcome-hint" data-i18n="chat.welcomeHint">可以追问当前状态、记录想法、生成待办</p>
             </div>
           </div>
-          <div class="chat-composer">
-            <textarea id="chat-tab-input" placeholder="输入消息... (Enter 发送, Shift+Enter 换行)" data-i18n-placeholder="chat.composerPlaceholder" rows="2" disabled></textarea>
-            <button id="chat-tab-send-btn" class="btn btn-primary" disabled data-i18n="chat.send">发送</button>
-          </div>
         </div>
-        <div id="chat-image-composer" class="chat-image-composer" aria-live="polite"></div>
+        <div id="chat-composer" class="chat-composer">
+          <textarea id="chat-tab-input" placeholder="输入消息..." data-i18n-placeholder="chat.composerPlaceholder" rows="3" aria-label="输入消息" aria-describedby="chat-composer-hint chat-composer-status" disabled></textarea>
+          <div class="chat-composer-toolbar">
+            <div id="chat-image-composer" class="chat-image-composer"></div>
+            <button id="chat-tab-send-btn" class="btn btn-primary" type="button" disabled data-i18n="chat.send">发送</button>
+          </div>
+          <div id="chat-composer-hint" class="chat-composer-hint" data-i18n="chat.composerReadyHint">Enter 发送 · Shift+Enter 换行</div>
+          <div id="chat-composer-status" class="chat-composer-status" role="status" aria-live="polite"></div>
+        </div>
       </section>
 
       <!-- RIGHT: context panel -->
@@ -288,6 +292,7 @@
 <script src="agent.js"></script>
 <script src="deep-chat-adapter.js"></script>
 <script src="chat-images.js"></script>
+<script src="chat-composer.js"></script>
 <script src="session-delete-dialog.js"></script>
 <script src="chat.js"></script>
 <script src="documents.js"></script>

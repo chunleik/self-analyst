@@ -65,3 +65,7 @@ PR #157 首轮 Linux CI 的开发者观测浏览器场景通过；MCP tools 弹�
 新增实际 ReAct/PlanMiddleware/MCP SDK 与真实 loopback OTLP HTTP 的 4 场景联合测试，覆盖来源选中/未选、typed image 降级、审批期间撤销、父子 span/usage 和协议接受。全量 Java 1412（8 跳过）、Node 453（32 跳过），零失败。后台摘要/压缩/界面联合端到端及真实 Langfuse 索引仍不在该证据范围。
 
 两轮远端浏览器真实暴露的 Tab 边界与禁用发现按钮失焦问题均已生产修复并补回归；观测 UI 场景及已下载截图复核通过，另修复会话按钮不合理的拉伸。最终 head 所有必需检查含 Windows 仍待核实，未合并或发版。
+
+## 最终功能交付事实
+
+PR #157 最终 head `2c90ab10ae1ef532861a77c23f6ae627a772e73f` 的五项 CI（含 Windows 全量）均成功，已正常合并为 `c4ab210c48e985bfbcfeba85fed92da9b6f19270`。最终浏览器截图已实际复核；Windows 原生凭据、MCP 联合链路与 JAR 冒烟均非跳过。细项和剩余验收见 tasks.md。beta.17 通过独立版本 change/PR 准备，发布资产尚待远端流程验证，不本地打包、不自动归档。

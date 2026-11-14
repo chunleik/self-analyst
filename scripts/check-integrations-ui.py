@@ -183,9 +183,10 @@ def check_browser(server, output, executable):
                 assert page.evaluate('window.fixtureXss === undefined')
                 dialog.locator('summary').click()
                 expect(dialog.locator('pre')).to_contain_text('query')
-                for _ in range(12):
-                    page.keyboard.press('Tab')
-                    assert page.evaluate('document.querySelector("dialog.integration-tools-dialog").contains(document.activeElement)')
+                for key in ['Tab', 'Shift+Tab']:
+                    for _ in range(12):
+                        page.keyboard.press(key)
+                        assert page.evaluate('document.querySelector("dialog.integration-tools-dialog").contains(document.activeElement)')
                 for width, height in [(1280, 1000), (800, 600), (390, 700)]:
                     page.set_viewport_size({'width': width, 'height': height})
                     page.screenshot(path=str(output / f'mcp-tools-{lang}-{width}x{height}.png'))

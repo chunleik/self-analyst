@@ -16,6 +16,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 class ObservabilityControllerTest {
     @TempDir Path root;
+    @org.junit.jupiter.api.BeforeEach void canonicalTemporaryRoot() throws Exception {
+        root = root.toRealPath();
+    }
 
     @Test
     void managedAuthenticationStrictJsonAndNoCredentialReadRoute() throws Exception {

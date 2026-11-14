@@ -46,3 +46,9 @@
 新增真实本地合成 TLS socket 正/负验证（可信私有 CA、错误主机、不受信 CA），仅假密钥；凭据故障、队列溢出/有限重试、DNS/阻塞写取消、来源身份复用、授权文案均有回归。源码未在本地打包。
 
 浏览器场景改由 PR 的 Linux CI 执行，1.4/4.4 未先行勾选；Windows 原生凭据 round-trip、PowerShell 与发布包冒烟等以精确提交的 CI 为准。4.2 的完整 SDK 联合端到端仍非现有分类器/helper/OTLP 组件测试所能替代；真实用户 Langfuse/QQ/163、Windows/Tauri 人工视觉验收未运行。未自动归档。
+
+## OTLP 协议追加核查
+
+按官方 OTLP HTTP 规范仅将 HTTP 200、JSON Content-Type、非空合法 JSON 对象作为协议接受；204/207、格式错误或正数 rejectedSpans 不计 accepted，零拒绝的 warning 不误算整批失败且不保存原文。仅 429/502/503/504 及受控瞬态网络错误有限重试。新增响应/重试矩阵后，完整 Maven 再次七模块通过：Java 1408（8 跳过），Node 448（32 跳过），0 失败；观测定向 26 项通过。测试临时根路径规范化后同组再次通过。协议接受仍不等于真实 Langfuse 入库/索引。
+
+PR #157 首轮 Linux CI 的开发者观测浏览器场景通过；MCP tools 弹窗 Tab 焦点断言失败，正在修复，不以该旧 head 作为合并依据。

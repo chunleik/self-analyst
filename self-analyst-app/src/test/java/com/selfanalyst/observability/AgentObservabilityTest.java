@@ -15,6 +15,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AgentObservabilityTest {
     @TempDir Path directory;
+    @org.junit.jupiter.api.BeforeEach void canonicalTemporaryRoot() throws Exception {
+        directory = directory.toRealPath();
+    }
     static class Transport extends ObservabilityTransport {
         final List<byte[]> bodies = new CopyOnWriteArrayList<>();
         Transport() { super(new ObservabilityEndpointPolicy()); }

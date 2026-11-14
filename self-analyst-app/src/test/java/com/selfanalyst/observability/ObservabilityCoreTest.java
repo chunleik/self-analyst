@@ -19,6 +19,9 @@ import java.util.concurrent.atomic.*;
 
 class ObservabilityCoreTest {
     @TempDir Path root;
+    @org.junit.jupiter.api.BeforeEach void canonicalTemporaryRoot() throws Exception {
+        root = root.toRealPath();
+    }
 
     static class Vault implements CredentialStore {
         final Map<String, char[]> values = new HashMap<>();
@@ -163,8 +166,14 @@ class ObservabilityCoreTest {
 
     @Test
     void endpointRejectsMetadataAndPublicToPrivateRebinding() throws Exception {
-        for (String special : List.of("2002:c000:0201::", "2001:0:4136:e378:8000:63bf:3fff:fdd2", "2001:db8::1", "192.88.99.1")) {
-            assertThrows(IllegalArgumentException.class,
+        for (String special :
+                List.of(
+                        "2002:c000:0201::",
+                        "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+                        "2001:db8::1",
+                        "192.88.99.1")) {
+            assertThrows(
+                    IllegalArgumentException.class,
                     () -> ObservabilityEndpointPolicy.category(InetAddress.getByName(special)));
         }
         assertThrows(
@@ -313,7 +322,9 @@ class ObservabilityCoreTest {
                                                     .getBytes();
                                     socket.getOutputStream()
                                             .write(
-                                                    ("HTTP/1.1 200 OK\r\nContent-Length: "
+                                                    ("HTTP/1.1 200 OK\r\n"
+                                                         + "Content-Type: application/json\r\n"
+                                                         + "Content-Length: "
                                                                     + body.length
                                                                     + "\r\n\r\n")
                                                             .getBytes());
@@ -337,6 +348,119 @@ class ObservabilityCoreTest {
                                                     approved, "Basic synthetic", "{}".getBytes()))
                             .getMessage());
             response.get(3, TimeUnit.SECONDS);
+        } finally {
+            policy.close();
+        }
+    }
+
+    @Test
+    void retriesOnlyExplicitOtlpRetryableStatuses() throws Exception {
+        AtomicInteger status = new AtomicInteger(500), calls = new AtomicInteger();
+        var policy = new ObservabilityEndpointPolicy();
+        var transport =
+                new ObservabilityTransport(policy) {
+                    @Override
+                    public int send(
+                            ObservabilityEndpointPolicy.ApprovedEndpoint endpoint,
+                            String auth,
+                            byte[] body,
+                            java.util.function.BooleanSupplier authorized) {
+                        calls.incrementAndGet();
+                        return status.get();
+                    }
+                };
+        try (var service = new ObservabilityService(root, new Vault(), true, policy, transport)) {
+            service.save(0, config("http://127.0.0.1:12345", "metadata", Set.of()));
+            service.credential(1, "synthetic-secret".toCharArray());
+            service.enable(2, 1, (String) service.preview(2).get("confirmationToken"));
+            var worker = ObservabilityService.class.getDeclaredField("worker");
+            worker.setAccessible(true);
+            ((ScheduledExecutorService) worker.get(service)).shutdownNow();
+            for (int code : new int[] {200, 204, 207, 400, 401, 500, 501, 429, 502, 503, 504}) {
+                status.set(code);
+                calls.set(0);
+                service.begin("model.generation", "s", Context.root())
+                        .finish("success", 1, 1, "actual", null);
+                service.drain();
+                assertEquals(
+                        Set.of(429, 502, 503, 504).contains(code) ? 3 : 1,
+                        calls.get(),
+                        "status=" + code);
+            }
+            assertEquals(1L, ((Map<?, ?>) service.snapshot().get("status")).get("accepted"));
+        }
+    }
+
+    @Test
+    void successRequiresHttp200AndJsonObjectResponse() throws Exception {
+        assertEquals(200, response(200, "application/json", "{}"));
+        assertEquals(200, response(200, "application/json; charset=utf-8", "{}"));
+        assertEquals(200, response(200, "application/json", "{\"futureField\":true}"));
+        assertEquals(
+                200,
+                response(
+                        200,
+                        "application/json",
+                        "{\"partialSuccess\":{\"rejectedSpans\":\"0\",\"errorMessage\":\"warning"
+                                + " must not be stored\"}}"));
+        for (int code : new int[] {204, 207})
+            assertEquals(
+                    "invalid_response",
+                    assertThrows(IOException.class, () -> response(code, "application/json", "{}"))
+                            .getMessage());
+        for (String body : new String[] {"", " ", "[]", "not json"})
+            assertThrows(IOException.class, () -> response(200, "application/json", body));
+        assertThrows(IOException.class, () -> response(200, null, "{}"));
+        assertThrows(IOException.class, () -> response(200, "text/html", "{}"));
+    }
+
+    private static int response(int status, String type, String payload) throws Exception {
+        var policy = new ObservabilityEndpointPolicy();
+        try (var server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                var transport = new ObservabilityTransport(policy)) {
+            var responder =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try (var socket = server.accept()) {
+                                    var input =
+                                            new BufferedReader(
+                                                    new InputStreamReader(socket.getInputStream()));
+                                    while (!input.readLine().isEmpty()) {}
+                                    byte[] body =
+                                            payload.getBytes(
+                                                    java.nio.charset.StandardCharsets.UTF_8);
+                                    String headers =
+                                            "HTTP/1.1 "
+                                                    + status
+                                                    + " Test\r\n"
+                                                    + (type == null
+                                                            ? ""
+                                                            : "Content-Type: " + type + "\r\n")
+                                                    + "Content-Length: "
+                                                    + body.length
+                                                    + "\r\n\r\n";
+                                    socket.getOutputStream()
+                                            .write(
+                                                    (headers + payload)
+                                                            .getBytes(
+                                                                    java.nio.charset
+                                                                            .StandardCharsets
+                                                                            .UTF_8));
+                                } catch (IOException failure) {
+                                    throw new RuntimeException(failure);
+                                }
+                            });
+            var endpoint =
+                    policy.approve(
+                            config(
+                                    "http://127.0.0.1:" + server.getLocalPort(),
+                                    "metadata",
+                                    Set.of()));
+            try {
+                return transport.send(endpoint, "Basic synthetic", "{}".getBytes());
+            } finally {
+                responder.get(3, TimeUnit.SECONDS);
+            }
         } finally {
             policy.close();
         }

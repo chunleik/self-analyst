@@ -166,11 +166,16 @@ public class ObservabilityTransport implements AutoCloseable {
             int total = 0;
             int length = -1;
             boolean chunked = false;
+            String contentType = null;
             String header;
             while (!(header = line(in)).isEmpty()) {
                 total += header.length();
                 if (total > 16384) throw new IOException("invalid_response");
                 String lower = header.toLowerCase(Locale.ROOT);
+                if (lower.startsWith("content-type:")) {
+                    if (contentType != null) throw new IOException("invalid_response");
+                    contentType = lower.substring(13).trim();
+                }
                 if (lower.startsWith("content-length:")) {
                     if (length != -1) throw new IOException("invalid_response");
                     try {
@@ -190,16 +195,27 @@ public class ObservabilityTransport implements AutoCloseable {
                     throw new IOException("invalid_response");
             }
             if (code >= 300 && code < 400) throw new IOException("redirect_rejected");
-            if (code >= 200 && code < 300) {
+            if (code >= 200 && code < 300 && code != 200) throw new IOException("invalid_response");
+            if (code == 200) {
+                if (contentType == null
+                        || !contentType.split(";", 2)[0].trim().equals("application/json"))
+                    throw new IOException("invalid_response");
                 if (chunked && length >= 0) throw new IOException("invalid_response");
                 byte[] response =
                         chunked
                                 ? chunks(in)
                                 : length < 0 ? in.readNBytes(65537) : in.readNBytes(length);
-                if (response.length > 65536 || length >= 0 && response.length != length)
+                if (response.length == 0
+                        || response.length > 65536
+                        || length >= 0 && response.length != length)
                     throw new IOException("invalid_response");
                 if (response.length > 0) {
-                    var json = ObservabilityStore.JSON.readTree(response);
+                    com.fasterxml.jackson.databind.JsonNode json;
+                    try {
+                        json = ObservabilityStore.JSON.readTree(response);
+                    } catch (com.fasterxml.jackson.core.JsonProcessingException malformed) {
+                        throw new IOException("invalid_response");
+                    }
                     if (json == null || !json.isObject()) throw new IOException("invalid_response");
                     var partial = json.path("partialSuccess");
                     if (!partial.isMissingNode() && !partial.isObject())
@@ -213,8 +229,7 @@ public class ObservabilityTransport implements AutoCloseable {
                     var message = partial.path("errorMessage");
                     if (!message.isMissingNode() && !message.isTextual())
                         throw new IOException("invalid_response");
-                    if (partial.path("rejectedSpans").asLong(0) != 0
-                            || !partial.path("errorMessage").asText("").isEmpty())
+                    if (partial.path("rejectedSpans").asLong(0) != 0)
                         throw new IOException("receiver_partial_rejection");
                 }
             }

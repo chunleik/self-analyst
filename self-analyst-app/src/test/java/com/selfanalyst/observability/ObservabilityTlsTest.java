@@ -62,7 +62,7 @@ class ObservabilityTlsTest {
                     if (request != null) receivedHttp.set(true);
                     String line;
                     while ((line = reader.readLine()) != null && !line.isEmpty()) { }
-                    socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}".getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}".getBytes(StandardCharsets.US_ASCII));
                 } catch (IOException expectedHandshakeFailure) { }
             });
             var settings = new ObservabilityConfig(1, 0, "https://" + host + ":" + server.getLocalPort(),

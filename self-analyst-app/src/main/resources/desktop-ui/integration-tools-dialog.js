@@ -43,7 +43,10 @@ function createIntegrationToolsDialog(options) {
     error.textContent = String(current.error || "");
     discover.textContent = t(current.known ? "integrations.catalog.refresh" : "integrations.catalog.discover");
     discover.disabled = busy || !current.canDiscover;
+    var focusedTool = list.contains(document.activeElement);
     list.replaceChildren();
+    // Refreshing the directory removes summary/schema nodes. Keep focus inside the modal.
+    if (focusedTool) closeButton.focus();
     var tools = Array.isArray(current.tools) ? current.tools : [];
     if (!current.known) {
       list.appendChild(element("p", t(tools.length ? "integrations.catalog.stale" : "integrations.catalog.undiscovered"), "integrations-hint"));
@@ -60,7 +63,8 @@ function createIntegrationToolsDialog(options) {
       details.appendChild(summary);
       var schema = tool.inputSchema == null ? t("integrations.catalog.noSchema")
         : typeof tool.inputSchema === "string" ? tool.inputSchema : JSON.stringify(tool.inputSchema, null, 2);
-      details.appendChild(element("pre", schema)); card.appendChild(details); list.appendChild(card);
+      var parameters = element("pre", schema); parameters.tabIndex = 0;
+      details.appendChild(parameters); card.appendChild(details); list.appendChild(card);
     });
   }
   function finish() {
@@ -79,7 +83,16 @@ function createIntegrationToolsDialog(options) {
   closeButton.addEventListener("click", close);
   dialog.addEventListener("cancel", function (event) { event.preventDefault(); close(); });
   dialog.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (event.key !== "Tab" || !active) return;
+    // Native dialog inertness does not stop Chromium from moving Tab focus to browser chrome.
+    // Recompute after every render so disabled discovery and collapsed schemas are skipped.
+    var focusable = Array.from(dialog.querySelectorAll("button, [href], input, select, textarea, summary, [tabindex]"))
+      .filter(function (node) { return !node.disabled && !node.hidden && node.tabIndex >= 0 && node.getClientRects().length > 0; });
+    event.preventDefault(); event.stopPropagation();
+    var index = focusable.indexOf(document.activeElement), step = event.shiftKey ? -1 : 1;
+    var next = index < 0 ? event.shiftKey ? focusable.length - 1 : 0 : (index + step + focusable.length) % focusable.length;
+    (focusable[next] || closeButton).focus();
   });
   dialog.addEventListener("close", function () { if (!dialog.open) finish(); });
   discover.addEventListener("click", function () {

@@ -17,6 +17,9 @@ import java.util.concurrent.atomic.*;
 
 class ObservabilityFailureTest {
     @TempDir Path root;
+    @org.junit.jupiter.api.BeforeEach void canonicalTemporaryRoot() throws Exception {
+        root = root.toRealPath();
+    }
 
     static class Vault implements CredentialStore {
         record Entry(CredentialTarget target, char[] secret) {}

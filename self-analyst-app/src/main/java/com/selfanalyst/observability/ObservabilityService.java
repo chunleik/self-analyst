@@ -390,7 +390,7 @@ public final class ObservabilityService implements AutoCloseable {
                             test.authorization(),
                             body,
                             () -> test.epoch() == epoch.get() && !closed);
-            if (status < 200 || status >= 300)
+            if (status != 200)
                 throw new IOException(
                         status == 401 || status == 403
                                 ? "authentication_required"
@@ -690,7 +690,7 @@ public final class ObservabilityService implements AutoCloseable {
                                     live.authorization(),
                                     bytes,
                                     () -> grant == live && !closed);
-                    if (status >= 200 && status < 300) {
+                    if (status == 200) {
                         accepted.addAndGet(batch.size());
                         lastError = "";
                         return;
@@ -699,7 +699,7 @@ public final class ObservabilityService implements AutoCloseable {
                             status == 401 || status == 403
                                     ? "authentication_required"
                                     : "receiver_rejected";
-                    if (status != 429 && status < 500) break;
+                    if (!Set.of(429, 502, 503, 504).contains(status)) break;
                 } catch (IOException failure) {
                     lastError = ObservabilityTransport.safe(failure);
                     if (!Set.of("timeout", "connection_failed").contains(lastError)) break;

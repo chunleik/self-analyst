@@ -191,3 +191,94 @@ test('provider errors keep distinct safe localized diagnoses', () => {
   for (const [code, category] of Object.entries({ tls_failure: 'tls', provider_restricted: 'unsafeLogin', authentication_required: 'authentication' }))
     assert.equal(context.integrationErrorText({ code, message: 'SYNTHETIC-SECRET' }), `integrations.error.${category}`);
 });
+
+function deletionSnapshot() {
+  const data = snapshot();
+  data.config.mcpServers = [
+    { id: 'first', name: 'First', endpoint: 'https://first.example/mcp', enabled: false, authType: 'bearer', credentialRef: 'session:synthetic', storageMode: 'session', transport: 'streamable-http', budget: {} },
+    { id: 'second', name: 'Second', endpoint: 'https://second.example/mcp', enabled: false, authType: 'anonymous', credentialRef: null, storageMode: 'session', transport: 'streamable-http', budget: {} }
+  ];
+  data.config.toolApprovals = [{ sourceId: 'first', toolName: 'one', definitionDigest: 'a'.repeat(64), approvedRevision: 4 },
+    { sourceId: 'second', toolName: 'two', definitionDigest: 'b'.repeat(64), approvedRevision: 4 }];
+  return data;
+}
+function deletedSnapshot(id = 'first') {
+  const result = deletionSnapshot(); result.config.revision++;
+  result.config.mcpServers = result.config.mcpServers.filter(item => item.id !== id);
+  result.config.toolApprovals = result.config.toolApprovals.filter(item => item.sourceId !== id);
+  return result;
+}
+
+test('draft deletion requires confirmation, is local and preserves every other draft', async () => {
+  const h = setup(); await h.model.load(); h.model.add('mcp'); const id = h.model.entry().id;
+  h.model.add('mcp'); const other = h.model.entry().id; h.model.select('mcp', id);
+  h.model.setSecret('synthetic-private'); await h.model.remove(() => false);
+  assert.equal(h.model.draft.mcpServers.length, 2); assert.equal(h.model.secret, 'synthetic-private');
+  await h.model.remove(value => { assert.equal(value.saved, false); assert.equal(value.entry.id, id); return true; });
+  assert.deepEqual(plain(h.model.draft.mcpServers.map(item => item.id)), [other]);
+  assert.equal(h.model.draft.mailAccounts.length, 1); assert.equal(h.model.secret, '');
+  assert.equal(h.calls.length, 1); assert.equal(h.model.notice, 'draftDeleted'); assert.equal(h.model.selected, null);
+});
+
+test('saved deletion uses saved identity, only id/kind/revision and preserves unrelated unsaved edits', async () => {
+  const pending = deferred(); const h = setup(path => path === '/delete' ? pending.promise : Promise.resolve(deletionSnapshot()));
+  await h.model.load(); h.model.select('mcp', 'second'); h.model.change('name', 'Keep unsaved');
+  h.model.add('mail'); const draftId = h.model.entry().id;
+  h.model.select('mcp', 'first'); h.model.change('name', 'Changed identity'); h.model.setSecret('never-send');
+  const deleting = h.model.remove(value => { assert.equal(value.saved, true); assert.equal(value.entry.name, 'First'); return true; });
+  await h.model.remove(() => { throw new Error('must not confirm twice'); });
+  h.model.add('mcp'); h.model.change('name', 'must not edit'); await h.model.refresh();
+  assert.deepEqual(plain(h.calls.at(-1).slice(0, 3)), ['/delete', 'POST', { kind: 'mcp', id: 'first', expectedRevision: 4 }]);
+  assert.equal(h.model.secret, ''); assert.equal(h.model.busy, 'delete');
+  pending.resolve(deletedSnapshot()); await deleting;
+  assert.equal(h.model.snapshot.config.revision, 5); assert.equal(h.model.draft.revision, 5);
+  assert.equal(h.model.draft.mcpServers[0].name, 'Keep unsaved');
+  assert.equal(h.model.draft.mailAccounts.at(-1).id, draftId); assert.equal(h.model.metadataDirty(), true);
+  assert.equal(h.model.draft.toolApprovals.length, 1); assert.equal(h.model.draft.toolApprovals[0].sourceId, 'second');
+  assert.equal(h.model.snapshot.config.mcpServers[0].name, 'Second');
+  assert.equal(h.model.notice, 'deleted'); assert.equal(h.calls.length, 2);
+});
+
+test('saved deletion cancellation and revision conflict preserve selected metadata and other entries', async () => {
+  const h = setup(path => path === '/delete' ? Promise.reject({ code: 'conflict', status: 409 }) : Promise.resolve(deletionSnapshot()));
+  await h.model.load(); h.model.select('mcp', 'first'); h.model.change('name', 'Draft');
+  await h.model.remove(() => false); assert.equal(h.calls.length, 1);
+  await h.model.remove(() => true);
+  assert.equal(h.model.entry().name, 'Draft'); assert.equal(h.model.draft.mcpServers.length, 2);
+  assert.equal(h.model.snapshot.config.revision, 4); assert.equal(h.model.error, 'integrations.error.conflict');
+  assert.equal(h.model.outcomeUnknown, false);
+});
+
+test('unknown deletion outcomes lock writes and keep drafts until successful explicit reload', async () => {
+  for (const outcome of [() => Promise.reject(new TypeError('response lost')), () => Promise.reject({ status: 400, code: 'integration_operation_failed' }),
+    () => Promise.resolve({}), () => { const r = deletedSnapshot(); r.config.mcpServers[0].name = 'unexpected'; return Promise.resolve(r); }]) {
+    let reading = deletionSnapshot(); const h = setup(path => path === '/delete' ? outcome() : Promise.resolve(reading));
+    await h.model.load(); h.model.select('mcp', 'first'); h.model.change('name', 'Keep draft');
+    await h.model.remove(() => true); assert.equal(h.model.outcomeUnknown, true); assert.equal(h.model.entry().name, 'Keep draft');
+    await h.model.remove(() => { throw new Error('do not repeat confirmation'); });
+    await h.model.save(); await h.model.action('test'); h.model.add('mail'); h.model.change('name', 'Wrong'); h.model.setSecret('forbidden');
+    assert.equal(h.calls.length, 2); assert.equal(h.model.entry().name, 'Keep draft'); assert.equal(h.model.secret, '');
+    reading = deletedSnapshot(); await h.model.load();
+    assert.equal(h.model.outcomeUnknown, false); assert.equal(h.model.draft.mcpServers.length, 1); assert.equal(h.model.metadataDirty(), false);
+  }
+});
+
+test('cleanup pending is not reported as complete secret deletion; closed late replies cannot resurrect drafts', async () => {
+  const result = deletedSnapshot(); result.credentialCleanupPending = true;
+  const h = setup(path => path === '/delete' ? Promise.resolve(result) : Promise.resolve(deletionSnapshot()));
+  await h.model.load(); h.model.select('mcp', 'first'); await h.model.remove(() => true);
+  assert.equal(h.model.notice, 'cleanupPending'); assert.equal(h.model.snapshot.credentialCleanupPending, true);
+  const pending = deferred(); const closed = setup(path => path === '/delete' ? pending.promise : Promise.resolve(deletionSnapshot()));
+  await closed.model.load(); closed.model.select('mcp', 'first'); const deleting = closed.model.remove(() => true);
+  closed.model.destroy(); pending.resolve(deletedSnapshot()); await deleting;
+  assert.equal(closed.model.draft, null); assert.equal(closed.model.snapshot, null);
+});
+
+test('legacy cannot be deleted and deleting a saved mailbox preserves MCP servers', async () => {
+  const result = deletionSnapshot(); result.config.mailAccounts = []; result.config.revision++;
+  const h = setup(path => path === '/delete' ? Promise.resolve(result) : Promise.resolve(deletionSnapshot()));
+  await h.model.load(); h.model.select('legacy', 'legacy-websearch');
+  await h.model.remove(() => { throw new Error('legacy not deletable'); }); assert.equal(h.calls.length, 1);
+  h.model.select('mail', 'mail-one'); await h.model.remove(() => true);
+  assert.equal(h.model.draft.mailAccounts.length, 0); assert.equal(h.model.draft.mcpServers.length, 2);
+});

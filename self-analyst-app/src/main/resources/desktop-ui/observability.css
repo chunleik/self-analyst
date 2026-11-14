@@ -1,0 +1,16 @@
+.observability-settings { display: flex; flex-direction: column; min-height: 0; width: 100%; flex: 1; }
+.observability-settings p { line-height: 1.6; overflow-wrap: anywhere; }
+.observability-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin: 12px 0; }
+.observability-field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; min-width: 0; }
+.observability-field input, .observability-field select, .observability-field textarea { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 7px; padding: 10px; font: inherit; background: var(--bg-input, white); color: inherit; }
+.observability-field textarea { min-height: 100px; }
+.observability-settings fieldset { border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin: 12px 0; min-width: 0; }
+.observability-choice { display: flex; gap: 8px; margin: 10px 0; align-items: flex-start; overflow-wrap: anywhere; }
+.observability-choice input { flex-shrink: 0; margin-top: 3px; }
+.observability-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.observability-hint { color: var(--text-secondary); font-size: 12px; }
+.observability-disclosure { padding: 12px; background: var(--config-wash, #f3f6f0); border-radius: 8px; font-size: 13px; }
+.observability-error { color: var(--danger, #ba3030); }
+.observability-error:empty { display: none; }
+.observability-settings :focus-visible { outline: 2px solid var(--accent, #447044); outline-offset: 3px; }
+@media (max-width: 600px) { .observability-grid { grid-template-columns: 1fr; } }

@@ -1,6 +1,9 @@
 package com.selfanalyst.desktop.controller;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.selfanalyst.integrations.IntegrationStore;
 import com.selfanalyst.mcp.McpManager;
 import io.javalin.Javalin;
@@ -11,6 +14,9 @@ import java.util.function.Supplier;
 
 /** Sensitive setup is available only through the authenticated managed desktop, not legacy localhost. */
 public final class DesktopIntegrationController {
+    private static final ObjectMapper JSON = DesktopChatJson.MAPPER.copy()
+            .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     private final McpManager manager;
     private final Supplier<String> modelTarget;
     public DesktopIntegrationController(McpManager manager, Supplier<String> modelTarget) {
@@ -32,6 +38,13 @@ public final class DesktopIntegrationController {
         app.post(base + "/disconnect", ctx -> run(ctx, () -> {
             JsonNode body = body(ctx, "kind", "id", "expectedRevision");
             manager.disconnect(revision(body), string(body,"id")); snapshot(ctx);
+        }));
+        app.post(base + "/delete", ctx -> run(ctx, () -> {
+            JsonNode body = body(ctx, "kind", "id", "expectedRevision");
+            synchronized (manager) {
+                manager.delete(revision(body), string(body, "kind"), string(body, "id"));
+                snapshot(ctx);
+            }
         }));
         app.post(base + "/test", ctx -> run(ctx, () -> {
             JsonNode body = body(ctx, "kind", "id"); manager.test(string(body,"kind"), string(body,"id")); snapshot(ctx);
@@ -60,10 +73,14 @@ public final class DesktopIntegrationController {
         }));
     }
     private void snapshot(Context ctx) {
-        ctx.json(Map.of("config", manager.config(), "statuses", manager.statuses(),
-                "persistentCredentialsSupported", com.sun.jna.Platform.isWindows(),
-                "credentialCleanupPending", manager.credentialCleanupPending(),
-                "modelTarget", Objects.toString(modelTarget.get(), ""), "legacyWebsearch", manager.legacyStatus()));
+        Map<String, Object> snapshot;
+        synchronized (manager) {
+            snapshot = Map.of("config", manager.config(), "statuses", manager.statuses(),
+                    "persistentCredentialsSupported", com.sun.jna.Platform.isWindows(),
+                    "credentialCleanupPending", manager.credentialCleanupPending(),
+                    "modelTarget", Objects.toString(modelTarget.get(), ""), "legacyWebsearch", manager.legacyStatus());
+        }
+        ctx.json(snapshot);
     }
     @FunctionalInterface private interface Action { void run() throws IOException; }
     private static void run(Context ctx, Action action) {
@@ -81,7 +98,7 @@ public final class DesktopIntegrationController {
         catch (RuntimeException failure) { ctx.status(400).json(Map.of("error", "integration_operation_failed")); }
     }
     private static JsonNode body(Context ctx, String... allowed) throws IOException {
-        var node = DesktopChatJson.MAPPER.readTree(DesktopChatJson.readBoundedBody(ctx));
+        var node = JSON.readTree(DesktopChatJson.readBoundedBody(ctx));
         if (node == null || !node.isObject()) throw new IllegalArgumentException();
         Set<String> fields = Set.of(allowed);
         node.fieldNames().forEachRemaining(name -> { if (!fields.contains(name)) throw new IllegalArgumentException(); });

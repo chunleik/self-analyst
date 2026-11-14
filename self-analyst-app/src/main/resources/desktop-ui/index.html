@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="ontology.css">
 <link rel="stylesheet" href="llm-settings.css">
 <link rel="stylesheet" href="integrations.css">
+<link rel="stylesheet" href="observability.css">
 <link rel="stylesheet" href="config-layout.css">
 <link rel="stylesheet" href="privacy-settings.css">
 <link rel="stylesheet" href="titlebar-help.css">
@@ -238,6 +239,7 @@
       <nav class="config-view-tabs" id="config-view-tabs" aria-labelledby="config-modal-title">
         <button type="button" class="btn btn-sm is-active" data-config-view="llm" data-i18n="llm.title">模型设置</button>
         <button type="button" class="btn btn-sm" data-config-view="integrations" data-i18n="integrations.title">连接与工具</button>
+        <button type="button" class="btn btn-sm" data-config-view="developer" data-i18n="observability.developer">开发者功能</button>
         <button type="button" class="btn btn-sm" data-config-view="privacy" data-i18n="privacy.title">隐私</button>
         <button type="button" class="btn btn-sm" data-config-view="raw" data-i18n="llm.advanced">高级配置</button>
         <button type="button" class="btn btn-sm" data-config-view="storage" data-i18n="storage.title">运行数据</button>
@@ -301,7 +303,9 @@
 <script src="config.js"></script>
 <script src="runtime-storage.js"></script>
 <script src="llm-settings.js"></script>
+<script src="integration-tools-dialog.js"></script>
 <script src="integrations.js"></script>
+<script src="observability.js"></script>
 <script src="integration-approvals.js"></script>
 <script src="files.js"></script>
 <script src="ontology.js"></script>

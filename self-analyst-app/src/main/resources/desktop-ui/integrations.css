@@ -23,3 +23,24 @@
 .integration-approval p { overflow-wrap: anywhere; }
 .integration-approval pre, .integration-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }
 @media (max-width: 600px) { .integrations-editor { grid-template-columns: 1fr; } .integration-approvals { padding: 10px; } }
+
+.integration-tools-dialog {
+  box-sizing: border-box; width: min(760px, calc(100vw - 32px)); max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px); overflow: auto; padding: 20px;
+  border: 1px solid var(--border-color); border-radius: 12px;
+  background: var(--bg-primary, white); color: var(--text-primary, #222);
+}
+.integration-tools-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.integration-tools-dialog h3 { margin-top: 0; }
+.integration-tools-dialog p, .integration-tools-dialog h4, .integration-tools-dialog summary { overflow-wrap: anywhere; }
+.integration-tools-dialog p { line-height: 1.6; }
+.integration-catalog-identity { font-weight: 600; }
+.integration-catalog-endpoint, .integration-catalog-approval { font-size: 12px; }
+.integration-tools-dialog .integration-tool { min-width: 0; }
+.integration-tools-dialog .integration-tool h4 { margin: 0 0 8px; }
+.integration-tools-dialog summary { cursor: pointer; padding: 6px 0; }
+.integration-tools-dialog :focus-visible { outline: 2px solid var(--accent, #447044); outline-offset: 3px; }
+.integration-tools-dialog .integrations-actions { position: sticky; bottom: -20px; background: var(--bg-primary, white); padding: 12px 0; margin-bottom: 0; }
+@media (max-width: 600px) { .integration-tools-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 14px; } .integration-tools-dialog .integrations-actions { bottom: -14px; } }
+
+.integration-delete { color: var(--danger, #ba3030); border-color: var(--danger, #ba3030); }

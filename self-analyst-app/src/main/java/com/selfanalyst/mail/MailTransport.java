@@ -8,9 +8,14 @@ public interface MailTransport {
     Connection connect(MailAccount account, char[] authorizationCode, MailCancellation cancellation, MailLimits limits);
     interface Connection extends AutoCloseable {
         List<String> listFolders();
+        /** Management discovery preserves the server's actual hierarchy separator. */
+        default List<FolderInfo> listFolderDetails() {
+            return listFolders().stream().map(name -> new FolderInfo(name, "", true)).toList();
+        }
         Mailbox openReadOnly(String folder);
         @Override void close();
     }
+    record FolderInfo(String name, String separator, boolean selectable) { }
     interface Mailbox extends AutoCloseable {
         long uidValidity();
         SearchBatch search(ReadOnlyMailService.SearchRequest request, Long beforeUid, int maxExamined);

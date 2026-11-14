@@ -160,15 +160,19 @@ public final class AngusMailTransport implements MailTransport {
             this.store = store; this.sockets = sockets; this.cancellation = cancellation;
         }
         @Override public List<String> listFolders() {
+            return listFolderDetails().stream().map(MailTransport.FolderInfo::name).toList();
+        }
+        @Override public List<MailTransport.FolderInfo> listFolderDetails() {
             try {
                 cancellation.check();
                 Folder[] folders = store.getDefaultFolder().list("*");
                 if (folders.length > MailLimits.MAX_LISTED_FOLDERS) throw new MailException(MailException.Code.LIMIT_EXCEEDED);
-                List<String> result = new ArrayList<>();
-                for (Folder folder : folders) {
+                List<MailTransport.FolderInfo> result = new ArrayList<>();
+                for (Folder folder : folders) if ((folder.getType() & Folder.HOLDS_MESSAGES) != 0) {
+                    cancellation.check();
                     if (folder.getFullName().length() > MailLimits.MAX_FOLDER_NAME_LENGTH) throw new MailException(MailException.Code.LIMIT_EXCEEDED);
-                    if (!MailAccount.validFolderName(folder.getFullName())) throw new MailException(MailException.Code.PROTOCOL_UNAVAILABLE);
-                    if ((folder.getType() & Folder.HOLDS_MESSAGES) != 0) result.add(folder.getFullName());
+                    char separator = folder.getSeparator();
+                    result.add(new MailTransport.FolderInfo(folder.getFullName(), separator == 0 ? "" : String.valueOf(separator), true));
                 }
                 return List.copyOf(result);
             } catch (Exception e) { cancellation.check(); throw classify(e); }

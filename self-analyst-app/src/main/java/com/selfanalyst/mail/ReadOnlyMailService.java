@@ -166,6 +166,30 @@ public final class ReadOnlyMailService implements AutoCloseable {
             }
         });
     }
+    /** Desktop setup only: no account enablement, message access, provenance or model callback. */
+    public List<MailTransport.FolderInfo> discoverFolders(MailAccount draft, char[] authorizationCode, MailCancellation cancellation) {
+        char[] copy = authorizationCode == null ? null : authorizationCode.clone();
+        try {
+            return timed(draft.id(), cancellation == null ? new MailCancellation() : cancellation, local -> {
+                try (MailTransport.Connection connection = transport.connect(draft, copy, local, limits)) {
+                    List<MailTransport.FolderInfo> folders = connection.listFolderDetails();
+                    if (folders == null) throw new MailException(MailException.Code.PROTOCOL_UNAVAILABLE);
+                    if (folders.size() > MailLimits.MAX_LISTED_FOLDERS) throw new MailException(MailException.Code.LIMIT_EXCEEDED);
+                    var names = new java.util.HashSet<String>();
+                    for (var folder : folders) {
+                        if (folder != null && folder.name() != null && folder.name().length() > MailLimits.MAX_FOLDER_NAME_LENGTH)
+                            throw new MailException(MailException.Code.LIMIT_EXCEEDED);
+                        if (folder == null || !MailAccount.validFolderName(folder.name()) || !folder.selectable()
+                                || folder.separator() == null || folder.separator().length() > 1
+                                || folder.separator().chars().anyMatch(Character::isISOControl)
+                                || !names.add(folder.name())) throw new MailException(MailException.Code.PROTOCOL_UNAVAILABLE);
+                    }
+                    local.check();
+                    return List.copyOf(folders);
+                }
+            });
+        } finally { if (copy != null) Arrays.fill(copy, '\0'); }
+    }
     /** Draft testing never asks the credential repository to save or enables an account. */
     public ConnectionTest testConnection(MailAccount draft, char[] authorizationCode, MailCancellation cancellation) {
         char[] copy = authorizationCode == null ? null : authorizationCode.clone();

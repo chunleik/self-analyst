@@ -96,6 +96,23 @@ class RuntimeStorageCompatibilityTest {
         assertEquals("unknown", Files.readString(root.resolve("memory/unknown.bin")));
     }
 
+    @Test void optionalObservabilityFilesArePreservedWithoutEnablingOrRepairing() throws Exception {
+        Path config = Files.createDirectories(root.resolve("config"));
+        Files.writeString(config.resolve("observability.json"), "{broken optional configuration");
+        Files.writeString(config.resolve(".observability.lock"), "");
+        Files.writeString(config.resolve(".observability-00000000-0000-0000-0000-000000000000.tmp"), "interrupted write");
+        Map<String, byte[]> before = snapshot();
+        RuntimeStorageCompatibility.verify(root);
+        Map<String, byte[]> after = snapshot();
+        assertEquals(before.keySet(), after.keySet());
+        before.forEach((name, bytes) -> assertArrayEquals(bytes, after.get(name), name));
+        try (var service = new com.selfanalyst.observability.ObservabilityService(root)) {
+            assertEquals(false, service.snapshot().get("enabled"));
+            assertEquals("config_unavailable", ((Map<?, ?>) service.snapshot().get("status")).get("lastError"));
+        }
+        assertEquals("{broken optional configuration", Files.readString(config.resolve("observability.json")));
+    }
+
     @Test void refusesUnknownOrCorruptGenerationStoreWithoutChangingBytes() throws Exception {
         Path database = root.resolve("memory/wiki-generation.db");
         try (var generation = new WikiGenerationStore(database)) { }

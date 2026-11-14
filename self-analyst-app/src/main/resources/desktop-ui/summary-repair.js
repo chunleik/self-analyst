@@ -35,10 +35,7 @@ function repairRange(target) {
 function preserveRepairComposer() {
   var session = getActiveChatSession();
   if (!session) return;
-  var element = typeof deepChatElement === "function" && deepChatElement();
-  var input = element && element.shadowRoot && element.shadowRoot.querySelector
-    && element.shadowRoot.querySelector("#text-input");
-  session.composerDraft = input ? input.innerText || input.textContent : state.dom.chatTabInput && state.dom.chatTabInput.value || "";
+  session.composerDraft = state.dom.chatTabInput && state.dom.chatTabInput.value || "";
 }
 
 function restoreRepairComposer(session) {

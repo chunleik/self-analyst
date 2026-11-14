@@ -29,22 +29,14 @@ class MailFolderScopeConfigTest {
     }
     private static ObjectNode mail(ObjectNode document) { return (ObjectNode) document.path("mailAccounts").get(0); }
 
-    @Test void legacyReadIsSideEffectFreeAndUnrelatedSaveKeepsExactScope() throws Exception {
-        var legacy = document("selected", List.of("INBOX", "Projects/2026", "*"));
-        mail(legacy).remove("folderScope");
+    @Test void missingScopeIsRejectedWithoutMigrationOrRewriting() throws Exception {
+        var document = document("selected", List.of("INBOX", "Projects/2026", "*"));
+        mail(document).remove("folderScope");
         Path file = root.resolve("config/integrations.json"); Files.createDirectories(file.getParent());
-        String original = JSON.writeValueAsString(legacy); Files.writeString(file, original);
-        try (var store = new IntegrationStore(root)) {
-            var read = store.snapshot();
-            assertEquals("selected", read.mailAccounts().getFirst().folderScope());
-            assertEquals(List.of("INBOX", "Projects/2026", "*"), read.mailAccounts().getFirst().allowedFolders());
-            assertEquals(original, Files.readString(file));
-            assertFalse(Files.exists(file.resolveSibling("integrations.json.bak")));
-            var saved = store.save(0, new IntegrationConfig(1, 0, List.of(IntegrationStoreTest.server(null)), read.mailAccounts(), List.of()));
-            assertEquals(read.mailAccounts(), saved.mailAccounts());
-            assertEquals("selected", store.snapshot().mailAccounts().getFirst().folderScope());
-            assertTrue(Files.readString(file).contains("\"folderScope\" : \"selected\""));
-        }
+        String original = JSON.writeValueAsString(document); Files.writeString(file, original);
+        assertThrows(IOException.class, () -> new IntegrationStore(root));
+        assertEquals(original, Files.readString(file));
+        assertFalse(Files.exists(file.resolveSibling("integrations.json.bak")));
     }
 
     @Test void strictScopeRejectsNullTypesUnknownValuesAndStillRejectsOtherMissingFields() throws Exception {
@@ -54,7 +46,7 @@ class MailFolderScopeConfigTest {
             var invalid = valid.deepCopy(); mail(invalid).set("folderScope", JSON.readTree(value));
             assertThrows(IOException.class, () -> IntegrationStore.parse(JSON.writeValueAsString(invalid)), value);
         }
-        for (String field : List.of("allowedFolders", "enabled", "bodyAccess", "credentialRef", "storageMode", "disclosureVersion")) {
+        for (String field : List.of("folderScope", "allowedFolders", "enabled", "bodyAccess", "credentialRef", "storageMode", "disclosureVersion")) {
             var invalid = valid.deepCopy(); mail(invalid).remove(field);
             assertThrows(IOException.class, () -> IntegrationStore.parse(JSON.writeValueAsString(invalid)), field);
         }
@@ -70,11 +62,11 @@ class MailFolderScopeConfigTest {
         assertEquals(List.of("INBOX"), account("all", List.of("INBOX")).allowedFolders());
         assertThrows(IllegalArgumentException.class, () -> account("selected", List.of()));
         assertThrows(IllegalArgumentException.class, () -> account(null, List.of("INBOX")));
-        List<String> maximum = IntStream.range(0, 32).mapToObj(i -> "Projects/" + i).toList();
+        List<String> maximum = IntStream.range(0, 256).mapToObj(i -> "Projects/" + i).toList();
         assertEquals(maximum, account("selected", maximum).allowedFolders());
         for (String scope : List.of("all", "selected")) {
             for (List<String> folders : List.of(List.of("INBOX", "INBOX"), List.of("x".repeat(257)),
-                    List.of("Bad\nName"), List.of(" "), IntStream.range(0, 33).mapToObj(i -> "F" + i).toList())) {
+                    List.of("Bad\nName"), List.of(" "), IntStream.range(0, 257).mapToObj(i -> "F" + i).toList())) {
                 assertThrows(IllegalArgumentException.class, () -> account(scope, folders));
             }
         }
@@ -82,7 +74,7 @@ class MailFolderScopeConfigTest {
         assertThrows(IOException.class, () -> IntegrationStore.parse(JSON.writeValueAsString(oldEmpty)));
     }
 
-    @Test void portableRoundTripsAllAndLegacyScopesWithoutReenablingOrCredentials() throws Exception {
+    @Test void portableRoundTripsExplicitScopesWithoutReenablingOrCredentials() throws Exception {
         for (String scope : List.of("all", "selected")) {
             try (var store = new IntegrationStore(root.resolve(scope))) {
                 var original = account(scope, List.of("INBOX", "Archive/2026")).withCredential(
@@ -97,7 +89,7 @@ class MailFolderScopeConfigTest {
                 assertEquals(portable, imported);
                 if (scope.equals("selected")) {
                     var old = JSON.readTree(exported); ((ObjectNode) old.path("mailAccounts").get(0)).remove("folderScope");
-                    assertEquals(portable, store.importMetadata(2, JSON.writeValueAsString(old)).mailAccounts().getFirst());
+                    assertThrows(IOException.class, () -> store.importMetadata(2, JSON.writeValueAsString(old)));
                 }
                 assertTrue(JSON.writeValueAsString(store.publicMetadata(new SessionCredentialStore())).contains("\"folderScope\":\"" + scope + "\""));
             }

@@ -41,7 +41,7 @@ public record MailAccount(String id, Provider provider, String email, String dis
             throw new MailException(MailException.Code.INVALID_ACCOUNT);
         }
         allowedFolders = allowedFolders == null ? Set.of("INBOX") : Set.copyOf(allowedFolders);
-        if (("selected".equals(folderScope) && allowedFolders.isEmpty()) || allowedFolders.size() > 32
+        if (("selected".equals(folderScope) && allowedFolders.isEmpty()) || allowedFolders.size() > 256
                 || allowedFolders.stream().anyMatch(f -> !validFolderName(f))) {
             throw new MailException(MailException.Code.INVALID_ACCOUNT);
         }

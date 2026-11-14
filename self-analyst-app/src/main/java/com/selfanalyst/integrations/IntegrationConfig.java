@@ -99,7 +99,7 @@ public record IntegrationConfig(int schemaVersion, long revision, List<McpServer
             if (!"all".equals(folderScope) && !"selected".equals(folderScope))
                 throw new IllegalArgumentException("invalid_folder_scope");
             allowedFolders = List.copyOf(allowedFolders);
-            if (("selected".equals(folderScope) && allowedFolders.isEmpty()) || allowedFolders.size() > 32
+            if (("selected".equals(folderScope) && allowedFolders.isEmpty()) || allowedFolders.size() > 256
                     || new HashSet<>(allowedFolders).size() != allowedFolders.size())
                 throw new IllegalArgumentException("invalid_folders");
             for (String folder : allowedFolders) text(folder, 256, "invalid_folder");

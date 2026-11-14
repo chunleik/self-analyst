@@ -62,14 +62,6 @@ public final class IntegrationStore implements AutoCloseable {
         try {
             var document = JSON.readTree(bytes);
             if (document == null || !document.isObject()) throw new IOException("invalid_configuration");
-            // Schema 1 predates folderScope. Only absence has legacy semantics; explicit null,
-            // invalid types, unknown fields and all other missing fields still fail strict binding.
-            if (document.path("mailAccounts").isArray()) {
-                for (var account : document.path("mailAccounts")) {
-                    if (account.isObject() && !account.has("folderScope"))
-                        ((com.fasterxml.jackson.databind.node.ObjectNode) account).put("folderScope", "selected");
-                }
-            }
             return JSON.treeToValue(document, IntegrationConfig.class);
         }
         catch (Exception invalid) { throw new IOException("invalid_or_unsupported_configuration"); }

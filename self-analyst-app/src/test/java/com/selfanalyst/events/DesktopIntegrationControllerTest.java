@@ -25,6 +25,8 @@ class DesktopIntegrationControllerTest {
             new DesktopIntegrationController(manager,()->"https://model.example.com/v1").register(server.app()); server.start(0);
             var response=request(server,"GET","",null,null);
             assertEquals(403,response.statusCode()); assertTrue(response.body().contains("managed_desktop_required"));
+            assertEquals(403, request(server, "POST", "/delete",
+                    "{\"kind\":\"mcp\",\"id\":\"missing\",\"expectedRevision\":0}", null).statusCode());
         }
     }
     @Test void strictConfigCasWriteOnlyCredentialsAndPortableExport() throws Exception {
@@ -76,15 +78,58 @@ class DesktopIntegrationControllerTest {
             }
             String legacy = body.replace("\"folderScope\":\"selected\",", "");
             var accepted = request(server, "PUT", "", legacy, "integration-test-token");
-            assertEquals(200, accepted.statusCode());
-            assertEquals("selected", manager.config().mailAccounts().getFirst().folderScope());
+            assertEquals(400, accepted.statusCode());
+            assertTrue(manager.config().mailAccounts().isEmpty());
             String explicitAll = body.replace("\"folderScope\":\"selected\"", "\"folderScope\":\"all\"")
-                    .replace("\"expectedRevision\":0", "\"expectedRevision\":1").replace("\"revision\":0", "\"revision\":1");
+                    ;
             assertEquals(200, request(server, "PUT", "", explicitAll, "integration-test-token").statusCode());
             assertEquals("all", manager.config().mailAccounts().getFirst().folderScope());
             assertFalse(manager.config().mailAccounts().getFirst().bodyAccess());
         }
     }
+    @Test void deleteRequiresAuthenticationExactIdentityAndStrictVersionedBody() throws Exception {
+        var server = new EventServer(root.resolve("events"), 0, "integration-test-token");
+        try (AutoCloseable cleanup = server::stop; var sessions = new ChatSessionStore(root.resolve("memory"));
+             var manager = new McpManager(new IntegrationStore(root), new SessionCredentialStore(),
+                     new MailSessionPolicy(sessions), Config.testDefaults(root.resolve("memory")),
+                     new PinnedHttpsClient(), new ApprovalRegistry())) {
+            var one = new IntegrationConfig.McpServer("one", "One", false, "streamable-http",
+                    "https://example.com/one", "anonymous", null, "session", IntegrationConfig.Budget.defaults());
+            var two = new IntegrationConfig.McpServer("two", "Two", false, "streamable-http",
+                    "https://example.com/two", "anonymous", null, "session", IntegrationConfig.Budget.defaults());
+            var before = manager.save(0, new IntegrationConfig(1, 0, List.of(one, two), List.of(), List.of()));
+            new DesktopIntegrationController(manager, () -> "https://model.example.com/v1").register(server.app());
+            server.start(0);
+            String valid = "{\"kind\":\"mcp\",\"id\":\"one\",\"expectedRevision\":1}";
+            assertEquals(401, request(server, "POST", "/delete", valid, null).statusCode());
+            for (String invalid : List.of(
+                    valid.replace("\"mcp\"", "\"mail\""),
+                    valid.replace("\"one\"", "\"missing\""),
+                    valid.replace("\"one\"", "\"legacy-websearch\""),
+                    valid.replace("\"mcp\"", "\"legacy\""),
+                    valid.replace("\"kind\":\"mcp\",", ""),
+                    valid.replace("\"id\":\"one\"", "\"id\":4"),
+                    valid.replace(":1}", ":\"1\"}"),
+                    valid.replace(":1}", ":-1}"),
+                    valid.replace("}", ",\"config\":{}}"),
+                    valid.replace("}", ",\"id\":\"two\"}"),
+                    valid + " {}")) {
+                assertEquals(400, request(server, "POST", "/delete", invalid, "integration-test-token").statusCode(), invalid);
+                assertEquals(before, manager.config());
+            }
+            assertEquals(409, request(server, "POST", "/delete", valid.replace(":1}", ":0}"), "integration-test-token").statusCode());
+            var response = request(server, "POST", "/delete", valid, "integration-test-token");
+            assertEquals(200, response.statusCode());
+            var json = new ObjectMapper().readTree(response.body());
+            assertEquals(2, json.path("config").path("revision").asLong());
+            assertEquals("two", json.path("config").path("mcpServers").get(0).path("id").asText());
+            assertEquals(1, json.path("config").path("mcpServers").size());
+            assertFalse(json.path("statuses").has("one"));
+            assertEquals(409, request(server, "POST", "/delete", valid, "integration-test-token").statusCode());
+            assertEquals(List.of(two), manager.config().mcpServers());
+        }
+    }
+
     private static HttpResponse<String> request(EventServer server,String method,String suffix,String body,String token) throws Exception {
         var builder=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+server.port()+"/desktop/integrations"+suffix));
         if (token!=null) builder.header("X-SelfAnalyst-Token",token);

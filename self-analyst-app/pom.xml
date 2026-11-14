@@ -7,7 +7,7 @@
     <parent>
         <groupId>com.selfanalyst</groupId>
         <artifactId>self-analyst</artifactId>
-        <version>0.6.1-beta.15</version>
+        <version>0.6.1-beta.17</version>
     </parent>
 
     <artifactId>self-analyst-app</artifactId>
@@ -17,6 +17,11 @@
     <description>SelfAnalyst app — embedded AW server, LLM agent, desktop UI API</description>
 
     <dependencies>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+            <version>1.68.0</version>
+        </dependency>
         <dependency>
             <groupId>jakarta.mail</groupId>
             <artifactId>jakarta.mail-api</artifactId>
@@ -145,6 +150,9 @@
                         <manifest>
                             <mainClass>com.selfanalyst.App</mainClass>
                         </manifest>
+                        <manifestEntries>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                        </manifestEntries>
                     </archive>
                 </configuration>
             </plugin>
@@ -195,6 +203,9 @@
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer"/>
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                             <mainClass>com.selfanalyst.App</mainClass>
+                            <manifestEntries>
+                                <Implementation-Version>${project.version}</Implementation-Version>
+                            </manifestEntries>
                         </transformer>
                         <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                     </transformers>

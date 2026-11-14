@@ -1,22 +1,28 @@
-## 1. 配置和运行时
+## 修订状态
 
-- [x] 1.1 在 IntegrationConfig / IntegrationStore 增加显式 folderScope，旧字段缺省为 selected；以配置解析、导出导入、凭据更新和无关保存测试验证不扩大旧账户范围。
-- [x] 1.2 更新运行时 MailAccount、McpManager 和 ReadOnlyMailService 的范围判定与工具披露；以全部/指定、嵌套/新建、超过 32 个目录、预算及权限撤回测试验证。
-- [x] 1.3 扩展合成 IMAP 协议测试，验证全部模式的嵌套目录读取仍使用只读命令、不设置已读或下载附件；运行邮箱与集成定向 Java 测试。
+2026-11-14：用户批准补充目录发现/选择，并明确不考虑旧邮箱兼容。此前 PR #154 的 11 项实施及测试记录保留在 verification.md 作为历史证据；不能证明本修订完成。用户随后授权实施、PR 与发版；以下按修订后的合同重新验收，任务完成即更新，最终提交的远端检查单独核对。
 
-## 2. 设置与文档
+## 1. 基线与统一配置
 
-- [x] 2.1 更新 integrations.js 和中英文文案，新表单默认全部，旧账户保持指定，完整披露范围、正文、模型及留存；Node 测试覆盖新旧默认、切换、放弃、失败、重复操作及安全渲染。
-- [x] 2.2 更新 docs/mail-integration.md 等受影响文档，说明全目录不等于全历史、自动同步或正文/模型授权，记录兼容及预算以及新的持久化启用流程；检查说明与代码一致。
-- [x] 2.3 按 sync-specs 流程同步 mail-integration 与 user-configuration 主规格，并运行 OpenSpec 严格全量校验。
+- [x] 1.1 获得实施授权后整合最新 main 与 PR #154，核对 AGENTS.md、openspec/config.yaml、两份相关主规格及本 change；保留已发布连接删除、工具弹窗和开发者观测能力，记录最终基线提交。
+- [x] 1.2 修改 IntegrationConfig、IntegrationStore、MailAccount 和运行时映射，要求显式范围，新建默认 all，selected 支持 1–256 项；不做旧邮箱迁移。以配置/导入/非法输入/无关 MCP 回归测试证明行为，不静默改写损坏配置。
 
-## 3. 最终验证
+## 2. 管理端发现与安全边界
 
-- [x] 3.1 串行执行 mvn test 和最终差异审查，不本地打包；记录 Java/Node 结果、测试跳过与 Windows/真实邮箱/人工视觉未验证边界。
-- [x] 3.2 检查无凭据、用户配置或无关文件变更，更新 verification.md 和任务状态；完成实施阶段的本地交付，后续 PR 与远端检查按追加授权进行，不自行合并、发版或归档。
+- [x] 2.1 在 DesktopIntegrationController、McpManager 和邮箱服务/传输层增加受管桌面目录发现，返回完整名称及层级信息，绑定账户/revision；补充未启用与 selected 范围外可发现、Agent 不可越权、跨账户秘密拒绝的 HTTP/服务测试。
+- [x] 2.2 补充临时授权码发现与持久凭据复用，禁止发现写入凭据/启用/读取正文；合成 IMAP 测试检查实际命令、163 ID、TLS/超时/取消/256 项/名称预算及资源清理。
+- [x] 2.3 保留强制系统安全持久化和确认后启用事务，移除旧邮箱 session 迁移路径，不改变外部 MCP；验证写入/回读/提交失败、结果不确定恢复、范围变化停用及返回前撤权复核。
 
-## 4. 简化邮箱启用和安全持久化
+## 3. 目录选择器
 
-- [x] 4.1 增加受管桌面邮箱启用事务，强制系统安全存储、核对披露版本/当前模型目标/revision，权限变化先停用；Java 测试覆盖取消或缺失授权、重复请求、旧入口绕过、写入/回读/提交失败和凭据清理。
-- [x] 4.2 删除邮箱表单的三个指定勾选项，以带账户/范围/正文/模型/留存/持久化说明的明确按钮确认替代，保留断开与独立正文；Node 测试确认控件确实消失且取消、失败、迟到响应和已有凭据复用正确。
-- [x] 4.3 验证旧 session/windows 配置兼容、不同平台持久化失败不降级、断开立即撤权、模型目标变更仍要求确认，并保留 Windows 原生系统库测试的实际平台边界。
+- [x] 3.1 更新 integrations.js/css 及 locales/zh.json、en.json，完成 all/selected、搜索层级复选列表、当前全选/清空、已选数量与不可用项保留；Node 测试覆盖默认、切换、动态新目录、256 项及安全文本渲染。
+- [x] 3.2 配置后与打开已配置账户时自动加载一次，支持临时凭据“连接并加载”和主动刷新；明确保存/启用成功但发现失败的状态。Node/HTTP 测试覆盖缺凭据、失败重试、重复点击、过期 revision、关闭/切换/删除/断开及迟到响应。
+- [x] 3.3 去掉启用/持久化和原处理授权勾选项，保留正文许可及完整确认；测试确认取消不持久化/启用，不把目录发现视作邮件/模型授权，保存失败保留输入。
+- [ ] 3.4 增加键盘/ARIA、浅色/深色、窄窗口视觉验收和截图；沿用未保存离开确认。真实 Windows/Tauri 或邮箱验收未完成时明确记录，不用 DOM 测试替代。
+
+## 4. 文档与验证
+
+- [x] 4.1 更新 docs/mail-integration.md、PRIVACY.md 和 README.md/README.zh-CN.md，说明动态全部与当前全选、自动发现与非后台同步、系统安全存储和限制；检查英文 README 不混中文。
+- [x] 4.2 运行 `node --test self-analyst-app/src/test/js/integrations.test.mjs self-analyst-app/src/test/js/i18n-catalog.test.mjs` 及新增目录界面测试；运行邮箱/配置/受管接口定向 Java 测试，记录实际命令和结果。
+- [x] 4.3 同步 mail-integration 与 user-configuration 主规格，运行 `mvn test`、`openspec validate default-all-mail-folders --strict`、`openspec validate --all --strict`、`git diff --check`，记录最终结果及未验收项，不本地打包。
+- [ ] 4.4 完整差异审查，核对无凭据或真实用户数据；后续获准提交 PR 时等待精确最新提交全部必需 CI，包括 Windows 全量验证；不得沿用旧 PR 检查，不绕过分支保护。只在本次明确授权范围内提交、推送、合并和远端发版，不自动归档。

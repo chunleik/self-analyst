@@ -54,7 +54,15 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
     private final java.util.concurrent.ExecutorService discovery = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
     private final Set<String> discovering = ConcurrentHashMap.newKeySet();
     private final ReadOnlyMailService mail;
+    private record MailDiscovery(String requestId, MailCancellation cancellation) { }
+    private final Map<String, MailDiscovery> mailDiscoveries = new ConcurrentHashMap<>();
+    // A cancel can arrive before its POST on another HTTP connection. Keep short bounded tombstones.
+    private final LinkedHashMap<String, Long> cancelledMailRequests = new LinkedHashMap<>();
+    public record MailFolderDiscovery(String accountId, long revision, boolean complete,
+                                      List<com.selfanalyst.mail.MailTransport.FolderInfo> folders) { }
     private volatile boolean closed;
+    private volatile com.selfanalyst.agent.AgentObservability observability;
+    public void setObservability(com.selfanalyst.agent.AgentObservability value) { observability = value; }
 
     public McpManager(IntegrationStore store, CredentialStore credentials, MailSessionPolicy policy, Config legacy,
                       PinnedHttpsClient http, ApprovalRegistry approvals) {
@@ -64,6 +72,10 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
     }
     McpManager(IntegrationStore store, CredentialStore credentials, MailSessionPolicy policy, Config legacy,
                ApprovalRegistry approvals, ClientFactory clients) {
+        this(store, credentials, policy, legacy, approvals, clients, new com.selfanalyst.mail.AngusMailTransport());
+    }
+    McpManager(IntegrationStore store, CredentialStore credentials, MailSessionPolicy policy, Config legacy,
+               ApprovalRegistry approvals, ClientFactory clients, com.selfanalyst.mail.MailTransport mailTransport) {
         this.store = store; this.credentials = credentials; this.credentialService = new IntegrationCredentialService(store, credentials);
         this.policy = policy; this.legacy = legacy; this.clients = clients; this.approvals = approvals;
         this.mail = new ReadOnlyMailService(this::mailAccounts, this::mailSecret, new ReadOnlyMailService.AuthorizationBoundary() {
@@ -76,8 +88,9 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
             @Override public void beforeResult(ReadOnlyMailService.CallContext context, com.selfanalyst.mail.MailAccount account) {
                 TurnContext turn = active(context.sessionId(), context.turnId());
                 policy.beforeMailResult(turn.sessionId(), turn.modelTarget());
+                if (observability != null) observability.mail(turn.sessionId(), account.id());
             }
-        });
+        }, mailTransport, com.selfanalyst.mail.MailLimits.defaults(), java.time.Clock.systemUTC());
         refreshEnabled();
     }
     public IntegrationConfig config() {
@@ -101,10 +114,16 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
     }
     private Map<String,Object> status(String id, boolean enabled, boolean configured) {
         return Map.of("state", !configured ? "needs_auth" : !enabled ? "disabled" : states.getOrDefault(id, "not_connected"),
-                "credentialConfigured", configured, "tools", toolDefinitions(id));
+                "credentialConfigured", configured, "catalogAvailable", currentCatalog(id) != null, "tools", toolDefinitions(id));
+    }
+    private Catalog currentCatalog(String id) {
+        Catalog catalog = catalogs.get(id);
+        if (catalog == null) return null;
+        try { return catalog.connection().stamp().equals(connection(id).stamp()) ? catalog : null; }
+        catch (RuntimeException missingOrChanged) { return null; }
     }
     public List<ToolDefinition> toolDefinitions(String id) {
-        Catalog catalog = catalogs.get(id);
+        Catalog catalog = currentCatalog(id);
         if (catalog == null) return List.of();
         IntegrationConfig config = config();
         return catalog.tools().stream().map(t -> new ToolDefinition(t.name(), Objects.toString(t.description(), ""),
@@ -148,36 +167,156 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
         }
         for (var old : previous.mailAccounts()) if (accounts.stream().noneMatch(a -> a.id().equals(old.id())) && old.credentialRef() != null)
             discarded.add(old.credentialRef());
-        var committed = store.save(revision, new IntegrationConfig(1, revision, servers, accounts,
-                previous.toolApprovals().stream().filter(a -> !changed.contains(a.sourceId()) && candidate.toolApprovals().contains(a)).toList()));
-        reconcile();
-        for (String ref : discarded) credentialService.discard(ref);
-        return committed;
+        boolean sourceChanged = !previous.mcpServers().equals(servers) || !previous.mailAccounts().equals(accounts);
+        var observer = sourceChanged ? observability : null;
+        if (observer != null) observer.sourceConfigurationChanged();
+        try {
+            var committed = store.save(revision, new IntegrationConfig(1, revision, servers, accounts,
+                    previous.toolApprovals().stream().filter(a -> !changed.contains(a.sourceId()) && candidate.toolApprovals().contains(a)).toList()));
+            reconcile();
+            for (String ref : discarded) credentialService.discard(ref);
+            return committed;
+        } finally {
+            // Also close the preview/enable race during persistence, including uncertain commits.
+            if (observer != null) observer.sourceConfigurationChanged();
+        }
     }
+    /** Deletes exactly one persisted identity, never a caller-supplied draft or the legacy source. */
+    public synchronized IntegrationConfig delete(long revision, String kind, String id) throws IOException {
+        var observer = observability;
+        var span = observer == null ? null : observer.begin("mcp.delete");
+        try {
+            var result = deleteObserved(revision, kind, id);
+            if (span != null) span.finish("success", 0, 0, "unavailable", null);
+            return result;
+        } catch (IOException | RuntimeException failure) {
+            if (span != null) span.finish("error", 0, 0, "unavailable", null);
+            throw failure;
+        }
+    }
+    private IntegrationConfig deleteObserved(long revision, String kind, String id) throws IOException {
+        checkOpen();
+        IntegrationConfig previous = store.snapshot();
+        if (previous.revision() != revision) throw new IOException("revision_conflict");
+        IntegrationConfig.validateId(id); // Includes the reserved legacy identity.
+        boolean exists = switch (kind) {
+            case "mcp" -> previous.mcpServers().stream().anyMatch(server -> server.id().equals(id));
+            case "mail" -> previous.mailAccounts().stream().anyMatch(account -> account.id().equals(id));
+            default -> throw new IllegalArgumentException("invalid_connection_kind");
+        };
+        if (!exists) throw new IllegalArgumentException("unknown_connection");
+        return save(revision, new IntegrationConfig(previous.schemaVersion(), revision,
+                previous.mcpServers().stream().filter(server -> !server.id().equals(id)).toList(),
+                previous.mailAccounts().stream().filter(account -> !account.id().equals(id)).toList(),
+                previous.toolApprovals().stream().filter(approval -> !approval.sourceId().equals(id)).toList()));
+    }
+
     public synchronized IntegrationConfig credential(long revision, String id, char[] secret, boolean persist) throws IOException {
         checkOpen();
+        var observer = observability;
+        if (observer != null) observer.sourceConfigurationChanged();
         try {
             if (store.snapshot().mailAccounts().stream().anyMatch(account -> account.id().equals(id)))
                 throw new IOException("mail_activation_required");
             return credentialService.replace(revision, id, secret, persist ? "windows" : "session").config();
+        } finally {
+            if (secret != null) Arrays.fill(secret, '\0');
+            if (observer != null) observer.sourceConfigurationChanged();
+            reconcile();
         }
-        finally { Arrays.fill(secret, '\0'); reconcile(); }
+
     }
     public synchronized IntegrationConfig activateMail(long revision, String id, int disclosureVersion,
             String shownModelTarget, char[] secret, Supplier<String> currentModelTarget) throws IOException {
         checkOpen();
+        var observer = observability;
+        if (observer != null) observer.sourceConfigurationChanged();
         try { return credentialService.activateMail(revision, id, disclosureVersion, shownModelTarget, secret, currentModelTarget).config(); }
-        finally { if (secret != null) Arrays.fill(secret, '\0'); reconcile(); }
+        finally {
+            if (secret != null) Arrays.fill(secret, '\0');
+            if (observer != null) observer.sourceConfigurationChanged();
+            reconcile();
+        }
     }
     public synchronized IntegrationConfig disconnect(long revision, String id) throws IOException {
-        checkOpen(); var result = credentialService.disconnect(revision, id).config(); reconcile(); return result;
+        checkOpen();
+        var observer = observability;
+        if (observer != null) observer.sourceConfigurationChanged();
+        try { var result = credentialService.disconnect(revision, id).config(); reconcile(); return result; }
+        finally { if (observer != null) observer.sourceConfigurationChanged(); }
     }
     public String exportMetadata() throws IOException { return store.exportMetadata(); }
     public synchronized IntegrationConfig importMetadata(long revision, String json) throws IOException {
-        checkOpen(); var before = config(); var result = store.importMetadata(revision, json); reconcile();
-        for (var s : before.mcpServers()) if (s.credentialRef() != null) credentialService.discard(s.credentialRef());
-        for (var a : before.mailAccounts()) if (a.credentialRef() != null) credentialService.discard(a.credentialRef());
-        return result;
+        checkOpen();
+        var observer = observability;
+        if (observer != null) observer.sourceConfigurationChanged();
+        try {
+            var before = config(); var result = store.importMetadata(revision, json); reconcile();
+            for (var s : before.mcpServers()) if (s.credentialRef() != null) credentialService.discard(s.credentialRef());
+            for (var a : before.mailAccounts()) if (a.credentialRef() != null) credentialService.discard(a.credentialRef());
+            return result;
+        } finally { if (observer != null) observer.sourceConfigurationChanged(); }
+    }
+    /** Privileged management operation, deliberately outside Agent tools and telemetry. */
+    public MailFolderDiscovery discoverMailFolders(long revision, String id, String requestId, char[] inputSecret) throws IOException {
+        MailDiscovery operation = null;
+        char[] secret = null;
+        try {
+            com.selfanalyst.mail.MailAccount account;
+            synchronized (this) {
+                checkOpen(); validateDiscoveryIdentity(id, requestId);
+                pruneMailCancellations();
+                if (cancelledMailRequests.containsKey(id + ":" + requestId))
+                    throw new MailException(MailException.Code.CANCELLED);
+                var current = store.snapshot();
+                if (current.revision() != revision) throw new IOException("revision_conflict");
+                var metadata = current.mailAccounts().stream().filter(a -> a.id().equals(id)).findFirst()
+                        .orElseThrow(() -> new IllegalArgumentException("unknown_connection"));
+                if (inputSecret != null) {
+                    CredentialStore.validateSecret(inputSecret);
+                    secret = inputSecret.clone();
+                } else {
+                    if (!"windows".equals(metadata.storageMode()) || metadata.credentialRef() == null)
+                        throw new IOException("mail_credential_required");
+                    secret = credentials.read(metadata.credentialRef(), metadata.credentialTarget())
+                            .orElseThrow(() -> new IOException("mail_credential_required"));
+                }
+                account = new com.selfanalyst.mail.MailAccount(metadata.id(),
+                        metadata.provider().equals("qq") ? com.selfanalyst.mail.MailAccount.Provider.QQ
+                                : com.selfanalyst.mail.MailAccount.Provider.NETEASE_163,
+                        metadata.email(), metadata.displayName(), metadata.enabled(), metadata.folderScope(),
+                        Set.copyOf(metadata.allowedFolders()), metadata.bodyAccess(), current.revision());
+                operation = new MailDiscovery(requestId, new MailCancellation());
+                if (mailDiscoveries.putIfAbsent(id, operation) != null) throw new IOException("mail_discovery_busy");
+            }
+            var folders = mail.discoverFolders(account, secret, operation.cancellation());
+            synchronized (this) {
+                checkOpen(); operation.cancellation().check();
+                if (store.snapshot().revision() != revision) throw new IOException("revision_conflict");
+                return new MailFolderDiscovery(id, revision, true, folders);
+            }
+        } finally {
+            if (inputSecret != null) Arrays.fill(inputSecret, '\0');
+            if (secret != null) Arrays.fill(secret, '\0');
+            if (operation != null) mailDiscoveries.remove(id, operation);
+        }
+    }
+    public synchronized void cancelMailFolderDiscovery(String id, String requestId) {
+        validateDiscoveryIdentity(id, requestId);
+        pruneMailCancellations();
+        while (cancelledMailRequests.size() >= 256) cancelledMailRequests.remove(cancelledMailRequests.keySet().iterator().next());
+        cancelledMailRequests.put(id + ":" + requestId, System.nanoTime());
+        var operation = mailDiscoveries.get(id);
+        if (operation != null && operation.requestId().equals(requestId)) operation.cancellation().cancel();
+    }
+    private void pruneMailCancellations() {
+        long now = System.nanoTime();
+        cancelledMailRequests.entrySet().removeIf(entry -> now - entry.getValue() > Duration.ofMinutes(1).toNanos());
+    }
+    private static void validateDiscoveryIdentity(String id, String requestId) {
+        IntegrationConfig.validateId(id);
+        if (requestId == null || !requestId.matches("[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"))
+            throw new IllegalArgumentException("invalid_request_id");
     }
     public void test(String kind, String id) {
         checkOpen();
@@ -195,6 +334,13 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
         else throw new IllegalArgumentException("invalid_connection_kind");
     }
     public List<ToolDefinition> discover(String id) {
+        var observer = observability;
+        var span = observer == null ? null : observer.begin("mcp.discover");
+        try { return discoverObserved(id, observer, span); }
+        catch (RuntimeException failure) { if (span != null) span.finish("error", 0, 0, "unavailable", null); throw failure; }
+    }
+    private List<ToolDefinition> discoverObserved(String id, com.selfanalyst.agent.AgentObservability observer,
+            com.selfanalyst.observability.ObservabilityService.SpanHandle span) {
         checkOpen(); Connection connection = connection(id);
         // Explicit discovery is allowed while disabled; use a detached client and publish only if unchanged.
         states.put(id, "testing");
@@ -217,6 +363,7 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
                 checkOpen();
                 if (!connection.stamp().equals(connection(id).stamp())) throw new IllegalStateException("connection_changed");
                 Catalog old = catalogs.put(id, new Catalog(connection, client, List.copyOf(tools.tools())));
+                if (observer != null) observer.catalog(span, id, () -> json(tools.tools()));
                 if (old != null) old.client().close();
                 states.put(id, "ready");
             }
@@ -249,7 +396,7 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
             for (var tool : catalog.tools()) if (approved(config, current.id(), tool)) {
                 String exposed = "mcp_" + hash(current.id() + ":" + tool.name()).substring(0, 20);
                 result.add(tool(exposed, "External MCP " + current.id() + "/" + tool.name() + ": "
-                        + Objects.toString(tool.description(), ""), schema(tool), args -> call(turn, catalog, tool, args)));
+                        + Objects.toString(tool.description(), ""), schema(tool), args -> call(turn, catalog, tool, args), current.id()));
             }
         }
         if (config.mailAccounts().stream().anyMatch(IntegrationConfig.MailAccount::enabled)) {
@@ -370,18 +517,47 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
     private static String json(Object object) { try { return JSON.writeValueAsString(object); } catch (IOException e) { throw new IllegalArgumentException("invalid_value"); } }
     private static String hash(String text) { try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8))); } catch (Exception e) { throw new IllegalStateException(e); } }
     private AgentTool tool(String name, String description, Map<String,Object> schema, java.util.function.Function<Map<String,Object>,Object> function) {
+        return tool(name, description, schema, function, null);
+    }
+    private AgentTool tool(String name, String description, Map<String,Object> schema, java.util.function.Function<Map<String,Object>,Object> function, String sourceId) {
         return new AgentTool() {
             @Override public String getName() { return name; }
             @Override public String getDescription() { return description; }
             @Override public Map<String,Object> getParameters() { return schema; }
             @Override public Mono<ToolResultBlock> callAsync(ToolCallParam parameter) {
-                return Mono.fromCallable(() -> {
+                var observer = observability;
+                String session = parameter.getRuntimeContext() == null ? null : parameter.getRuntimeContext().getSessionId();
+                java.util.function.Supplier<String> action = () -> {
                     Object result = function.apply(parameter.getInput());
-                    return ToolResultBlock.of(TextBlock.builder().text(json(result)).build());
-                }).subscribeOn(Schedulers.boundedElastic()).onErrorResume(error -> Mono.just(
+                    // MCP binary/resource blocks are never eligible telemetry, even tiny base64 payloads.
+                    if (observer != null) {
+                        try { if (containsMedia(JSON.valueToTree(result), 0)) observer.prepare(session, false, false, true); }
+                        catch (RuntimeException unclassified) { observer.tool(session, null); }
+                    }
+                    return json(result);
+                };
+                Mono<String> invocationText = observer == null ? Mono.fromCallable(action::get)
+                        : observer.toolCall(session, sourceId, name.equals("mail_get_message") ? "mailBody" : name.startsWith("mail_") ? "mailHeaders" : "toolText", () -> json(parameter.getInput()), action);
+                Mono<ToolResultBlock> invocation = invocationText.subscribeOn(Schedulers.boundedElastic())
+                        .map(result -> ToolResultBlock.of(TextBlock.builder().text(result).build()));
+                return invocation.onErrorResume(error -> Mono.just(
                         ToolResultBlock.of(TextBlock.builder().text("Integration call failed or needs authorization. Open Connections and tools. No automatic retry.").build())));
             }
         };
+    }
+    private static boolean containsMedia(com.fasterxml.jackson.databind.JsonNode node, int depth) {
+        if (depth > 32) return true;
+        if (node == null || node.isNull()) return false;
+        if (node.isObject()) {
+            String type = node.path("type").asText("").toLowerCase(java.util.Locale.ROOT);
+            if (Set.of("image", "audio", "resource", "resource_link", "file", "attachment", "video").contains(type)
+                    || node.has("mimeType") || node.has("blob") || node.has("data_url") || node.has("image_url")) return true;
+            var fields = node.elements();
+            while (fields.hasNext()) if (containsMedia(fields.next(), depth + 1)) return true;
+        } else if (node.isArray()) {
+            for (var item : node) if (containsMedia(item, depth + 1)) return true;
+        }
+        return false;
     }
     /** Publish ready connections next turn without blocking application startup or local tools. */
     private void refreshEnabled() {
@@ -398,6 +574,7 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
     }
     private synchronized void reconcile() {
         approvals.cancelAll(); cancellations.values().forEach(MailCancellation::cancel);
+        mailDiscoveries.values().forEach(operation -> operation.cancellation().cancel());
         for (var entry : List.copyOf(catalogs.entrySet())) {
             boolean retain;
             try { retain = entry.getValue().connection().stamp().equals(connection(entry.getKey()).stamp()); }
@@ -408,6 +585,7 @@ public final class McpManager implements AgentIntegrationGateway, AutoCloseable 
     }
     private synchronized void invalidate() {
         approvals.cancelAll(); cancellations.values().forEach(MailCancellation::cancel);
+        mailDiscoveries.values().forEach(operation -> operation.cancellation().cancel());
         for (var catalog : catalogs.values()) catalog.client().close(); catalogs.clear(); states.clear();
     }
     private void checkOpen() { if (closed) throw new IllegalStateException("integrations_closed"); }

@@ -3,7 +3,7 @@
    ============================================================ */
 "use strict";
 
-// Deep Chat owns only the message surface and composer. SelfAnalyst remains
+// Deep Chat owns only the message surface. SelfAnalyst owns the composer and remains
 // the source of truth for sessions, message ids, persistence and retries.
 var deepChatAdapterState = {
   configuredElement: null,
@@ -156,6 +156,7 @@ function configureDeepChat(element) {
     backgroundColor: "var(--bg-primary)",
     fontFamily: "inherit",
   };
+  element.inputAreaStyle = { display: "none" };
   element.requestBodyLimits = { maxMessages: 1, totalMessagesMaxCharLength: 20000 };
   element.maxVisibleMessages = 200;
   element.scrollButton = true;
@@ -409,6 +410,7 @@ function applyDeepChatDraft(element, text, sessionId) {
 }
 
 function deepChatSetDraft(text) {
+  if (typeof setChatComposerDraft === "function") { setChatComposerDraft(text); return; }
   var element = deepChatElement();
   if (!element) return;
   applyDeepChatDraft(element, text, state.activeChatSessionId);
@@ -539,6 +541,11 @@ function renderDeepChatThread() {
 }
 
 function updateDeepChatInputState(enabled, placeholder) {
+  if (typeof updateChatComposerState === "function") {
+    var sharedElement = deepChatElement();
+    if (sharedElement) configureDeepChat(sharedElement);
+    return !!sharedElement;
+  }
   var element = deepChatElement();
   if (!element) return false;
   if (deepChatAdapterState.requestSessionId) return true;
@@ -564,6 +571,10 @@ function updateDeepChatInputState(enabled, placeholder) {
 }
 
 function focusChatComposer() {
+  if (typeof setChatComposerDraft === "function" && state.dom.chatTabInput) {
+    state.dom.chatTabInput.focus();
+    return;
+  }
   var element = deepChatElement();
   if (element && typeof element.focusInput === "function") {
     element.focusInput();

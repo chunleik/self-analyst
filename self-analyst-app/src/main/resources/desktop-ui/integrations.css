@@ -24,3 +24,34 @@
 .integration-approval p { overflow-wrap: anywhere; }
 .integration-approval pre, .integration-tool pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font-size: 12px; }
 @media (max-width: 600px) { .integrations-editor { grid-template-columns: 1fr; } .integration-approvals { padding: 10px; } }
+
+.integration-tools-dialog {
+  margin: auto;
+  box-sizing: border-box; width: min(760px, calc(100vw - 32px)); max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px); overflow: auto; padding: 20px;
+  border: 1px solid var(--border-color); border-radius: 12px;
+  background: var(--bg-primary, white); color: var(--text-primary, #222);
+}
+.integration-tools-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.integration-tools-dialog h3 { margin-top: 0; }
+.integration-tools-dialog p, .integration-tools-dialog h4, .integration-tools-dialog summary { overflow-wrap: anywhere; }
+.integration-tools-dialog p { line-height: 1.6; }
+.integration-catalog-identity { font-weight: 600; }
+.integration-catalog-endpoint, .integration-catalog-approval { font-size: 12px; }
+.integration-tools-dialog .integration-tool { min-width: 0; }
+.integration-tools-dialog .integration-tool h4 { margin: 0 0 8px; }
+.integration-tools-dialog summary { cursor: pointer; padding: 6px 0; }
+.integration-tools-dialog :focus-visible { outline: 2px solid var(--accent, #447044); outline-offset: 3px; }
+.integration-tools-dialog .integrations-actions { position: sticky; bottom: -20px; background: var(--bg-primary, white); padding: 12px 0; margin-bottom: 0; }
+@media (max-width: 600px) { .integration-tools-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); padding: 14px; } .integration-tools-dialog .integrations-actions { bottom: -14px; } }
+
+.integration-delete { color: var(--danger, #ba3030); border-color: var(--danger, #ba3030); }
+
+.integration-folder-picker { grid-column: 1 / -1; min-width: 0; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; }
+.integration-folder-list { max-height: 300px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.integration-folder-row { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; }
+.integration-folder-row:hover, .integration-folder-row:focus-within { background: var(--config-wash); }
+.integration-folder-row input { flex-shrink: 0; margin-top: 3px; }
+.integration-folder-path { overflow-wrap: anywhere; min-width: 0; flex: 1; }
+.integration-folder-nested { margin-inline-start: 16px; border-inline-start: 2px solid var(--border-color); }
+.integration-folder-picker :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

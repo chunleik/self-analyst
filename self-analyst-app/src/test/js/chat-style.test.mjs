@@ -50,3 +50,15 @@ assert.ok(
   Number(maxHeight[1]) >= 180,
   "chat composer textarea max-height should allow comfortable expansion",
 );
+
+const html = fs.readFileSync(new URL("../../main/resources/desktop-ui/index.html", import.meta.url), "utf8");
+const adapter = fs.readFileSync(new URL("../../main/resources/desktop-ui/deep-chat-adapter.js", import.meta.url), "utf8");
+const shell = fs.readFileSync(new URL("../../../../self-analyst-desktop/src-tauri/src/lib.rs", import.meta.url), "utf8");
+assert.equal((html.match(/id="chat-tab-input"/g) || []).length, 1, "one shared textarea");
+assert.match(html, /id="chat-composer" class="chat-composer"/);
+assert.ok(html.indexOf('id="chat-composer"') > html.indexOf('id="chat-fallback-thread"'));
+assert.match(adapter, /inputAreaStyle = \{ display: "none" \}/, "component composer hidden through supported API");
+assert.match(cssRule(".chat-composer"), /flex-direction:\s*column/);
+assert.match(cssRule(".chat-image-composer input[type=file][hidden]"), /display:\s*none/);
+assert.match(styles, /:focus-visible/);
+assert.match(shell, /disable_drag_drop_handler\(\)/, "Windows DOM file drop must not be intercepted");

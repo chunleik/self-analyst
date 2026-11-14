@@ -104,6 +104,22 @@ function consumeChatSseResponse(response, onEvent) {
 }
 
 var api = {
+  observability: function (path, method, body, signal) {
+    return fetch(API_BASE + "/desktop/observability" + (path || ""), {
+      method: method || "GET", signal: signal,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok) {
+          var error = new Error("Observability request failed");
+          error.code = response.status === 409 ? "revision_conflict" : payload.code || payload.error || "unavailable";
+          error.status = response.status; throw error;
+        }
+        return payload;
+      });
+    });
+  },
   integrations: function (path, method, body, signal) {
     var mailActivation = path === "/mail/activate" && method === "POST";
     return fetch(API_BASE + "/desktop/integrations" + (path || ""), {

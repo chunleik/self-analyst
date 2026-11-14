@@ -37,6 +37,18 @@ public final class DesktopIntegrationController {
             if (secret.isEmpty() || secret.length() > 2048) throw new IllegalArgumentException();
             manager.credential(revision(body), string(body,"id"), secret.toCharArray(), bool(body,"persist")); snapshot(ctx);
         }));
+        app.post(base + "/mail/folders", ctx -> run(ctx, () -> {
+            JsonNode body = body(ctx, "id", "expectedRevision", "requestId", "secret");
+            String secret = body.has("secret") ? string(body, "secret") : null;
+            if (secret != null && (secret.isEmpty() || secret.length() > 2048)) throw new IllegalArgumentException();
+            ctx.json(manager.discoverMailFolders(revision(body), string(body, "id"), string(body, "requestId"),
+                    secret == null ? null : secret.toCharArray()));
+        }));
+        app.post(base + "/mail/folders/cancel", ctx -> run(ctx, () -> {
+            JsonNode body = body(ctx, "id", "requestId");
+            manager.cancelMailFolderDiscovery(string(body, "id"), string(body, "requestId"));
+            ctx.json(Map.of("cancelled", true));
+        }));
         app.post(base + "/mail/activate", ctx -> run(ctx, () -> {
             JsonNode body = body(ctx, "id", "expectedRevision", "disclosureVersion", "modelTarget", "secret");
             JsonNode disclosure = body.get("disclosureVersion");
@@ -51,6 +63,13 @@ public final class DesktopIntegrationController {
         app.post(base + "/disconnect", ctx -> run(ctx, () -> {
             JsonNode body = body(ctx, "kind", "id", "expectedRevision");
             manager.disconnect(revision(body), string(body,"id")); snapshot(ctx);
+        }));
+        app.post(base + "/delete", ctx -> run(ctx, () -> {
+            JsonNode body = body(ctx, "kind", "id", "expectedRevision");
+            synchronized (manager) {
+                manager.delete(revision(body), string(body, "kind"), string(body, "id"));
+                snapshot(ctx);
+            }
         }));
         app.post(base + "/test", ctx -> run(ctx, () -> {
             JsonNode body = body(ctx, "kind", "id"); manager.test(string(body,"kind"), string(body,"id")); snapshot(ctx);
@@ -102,10 +121,10 @@ public final class DesktopIntegrationController {
             Set<String> safe = Set.of("revision_conflict", "mail_activation_confirmation_required",
                     "mail_activation_required", "mail_metadata_authorization_immutable", "model_target_unavailable",
                     "model_target_changed", "mail_credential_required", "persistent_credentials_unavailable",
-                    "mail_activation_outcome_uncertain",
+                    "mail_activation_outcome_uncertain", "mail_discovery_busy",
                     "credential_write_failed", "credential_read_failed", "credential_verification_failed",
                     "invalid_credential", "credential_limit");
-            ctx.status(Set.of("revision_conflict", "model_target_changed").contains(code) ? 409 : 400)
+            ctx.status(Set.of("revision_conflict", "model_target_changed", "mail_discovery_busy").contains(code) ? 409 : 400)
                     .json(Map.of("error", safe.contains(code) ? code : "integration_operation_failed",
                             "credentialCleanupPending", manager.credentialCleanupPending()));
         } catch (com.selfanalyst.mail.MailException failure) {

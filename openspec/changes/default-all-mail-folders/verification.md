@@ -65,3 +65,18 @@
 ## 验证边界
 
 本次云端 Linux 检查不替代 Windows 必需 CI、Windows 桌面端到端验证、分发包验证或真实 QQ/163 联调。此前 beta.15 的检查结果不能当成本分支的验证结果。全部文件夹授权也不保证服务商开放了全部历史邮件，不改变正文预算、附件不下载、模型接收方确认或现有聊天留存边界。
+
+## 2026-11-14 目录发现与选择器修订
+
+用户追加要求自动加载完整邮箱目录供选择，并明确不用考虑旧邮箱兼容；随后授权实施、PR、正常合并与远端发版。此次在独立 worktree 基于 PR #154 的 `4182c6c`，正常整合已发布 beta.17/main `826e1c5`，保留连接删除、工具弹窗及开发者观测，未强推或本地打包。
+
+- 统一显式 all/selected 配置，移除旧格式自动默认，selected 提升至 256 项；不迁移真实配置。
+- 管理端发现仅 LIST，返回完整名称/服务端分隔符，支持临时授权码或匹配系统凭据；不读取信封/正文，不启用，不进入模型/观测。requestId 取消端点、有界短期取消 tombstone、单配置快照、返回前复核及资源清理已覆盖。
+- 前端默认动态全部、配置后自动加载、搜索/复选/当前全选/清空/刷新、失效目录保留、失败与保存结果分离；去掉三个旧开关，保留安全启用确认及独立正文许可。
+- 两份主规格已同步；README 英文仅保留中文版本链接，不含新增中文说明。历史本文件中的旧邮箱兼容验证不再代表现行设计。
+- 定向 Java：`mvn -pl self-analyst-app -am '-Dtest=MailFolderDiscoveryTest,MailProtocolTest,MailFolderScopeConfigTest,MailFolderScopeServiceTest,DesktopIntegrationControllerTest,MailActivationTransactionTest,DesktopMailActivationControllerTest,McpManagerTest,McpManagerDeleteTest,IntegrationStoreTest' '-Dsurefire.failIfNoSpecifiedTests=false' test-compile surefire:test`，81 项全部通过。
+- 定向 Node（integrations、integration-tools-dialog、i18n-catalog）94 项全部通过。独立只读审查发现并修复身份/凭据混合快照竞态，前后端无剩余审查阻断项。
+- 最终本地 `mvn --batch-mode test`：7 个 reactor 成功，Java 1471 项（1463 通过、8 项既有条件跳过），0 失败/错误；Node 507 项（475 通过、32 Windows 条件跳过），0 失败。
+- OpenSpec 1.11.0：`validate default-all-mail-folders --strict` 通过；`validate --all --strict` 49/49；`git diff --check` 通过。
+- `check-integrations-ui.py` 扩展合成邮箱目录与键盘、失败重试、中文/英文、浅/深系统偏好及窄窗口场景；本地 Chromium 因 socket 权限限制无法启动，没有本地截图。等待 CI 真浏览器验证与工件，不能把 Node 测试视为视觉验收。现有生产 CSS 没有独立深色配色，深色系统偏好测试不宣称新增暗色主题。
+- 未使用真实 QQ/163、真实授权码或用户电脑；Windows/Tauri 人工视觉及真实邮箱端到端仍未验收。远端必需 CI 与发布验证将在精确提交生成后另外记录。

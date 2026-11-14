@@ -56,9 +56,12 @@ class AgentIntegrationBridgeTest {
             assertTrue(runtime(agent).getToolkit().getToolNames().contains("mcp_test_2"));
             assertThrows(RuntimeException.class, () -> agent.chat("legacy").block());
             assertFalse(runtime(agent).getToolkit().getToolNames().contains("mcp_test_2"));
+            AgentTool originalNative = runtime(agent).getToolkit().getTool("listBuckets");
             agent.setIntegrationGateway(new Gateway() { public List<AgentTool> snapshot(TurnContext t) { return List.of(MailNativeToolGuardTest.tool("listBuckets",invoked)); }});
             assertThrows(IllegalStateException.class, () -> agent.chat(SESSION, TURN, "hello").block());
-            assertTrue(runtime(agent).getToolkit().getTool("listBuckets") instanceof MailNativeToolGuard);
+            // The observation decorator is transparent: a conflicting snapshot must preserve
+            // the exact guarded native tool, not replace it with an integration tool.
+            assertSame(originalNative, runtime(agent).getToolkit().getTool("listBuckets"));
         }
     }
     @Test void changedRecipientProducesManagedConsentBeforeSnapshotAndCancellationCleansIt() throws Exception {
@@ -89,7 +92,7 @@ class AgentIntegrationBridgeTest {
             ReActAgent after=runtime(agent); assertNotSame(before,after);
             assertTrue(after.getToolkit().getToolNames().contains("mcp_generation_2"));
             assertFalse(after.getToolkit().getToolNames().contains("mcp_generation_1"));
-            assertTrue(after.getToolkit().getTool("setConfigValue") instanceof MailNativeToolGuard);
+            assertSame(before.getToolkit().getTool("setConfigValue"), after.getToolkit().getTool("setConfigValue"));
         }
     }
     private static ReActAgent runtime(SelfAnalystAgent a) throws Exception { var field=SelfAnalystAgent.class.getDeclaredField("agent");field.setAccessible(true);return (ReActAgent)field.get(a); }

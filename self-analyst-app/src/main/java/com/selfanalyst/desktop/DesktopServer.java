@@ -67,6 +67,8 @@ public class DesktopServer {
     private final DesktopDocumentController documentCtrl;
     private final com.selfanalyst.mcp.McpManager integrations;
     private final DesktopIntegrationController integrationCtrl;
+    private final com.selfanalyst.observability.ObservabilityService observability;
+    private final DesktopObservabilityController observabilityCtrl;
     private com.selfanalyst.ontology.OntologyService ontology;
     private final com.selfanalyst.ontology.Neo4jSyncService neo4jSync;
 
@@ -238,6 +240,13 @@ public class DesktopServer {
             chatSessionStore.close();
             throw new IllegalStateException("Integration configuration unavailable", failure);
         }
+        // Telemetry is optional: invalid configuration disables it, never the desktop or chat.
+        observability = new com.selfanalyst.observability.ObservabilityService(
+                Config.resolveConfigDir().toAbsolutePath().normalize().getParent());
+        observabilityCtrl = new DesktopObservabilityController(observability);
+        var observation = new com.selfanalyst.agent.AgentObservability(observability);
+        integrations.setObservability(observation);
+        if (agent != null) agent.setObservability(observation);
         SummaryService summaryService = new SummaryService(eventStore, memoryStore, config.effectiveLanguage(),
                 privacy);
         BehaviorAdviceService adviceService = new BehaviorAdviceService(config.effectiveLanguage());
@@ -319,6 +328,7 @@ public class DesktopServer {
      */
     public void start() {
         integrationCtrl.register(app);
+        observabilityCtrl.register(app);
         new DesktopOntologyController(ontology).register(app);
         new DesktopNeo4jController(neo4jSync).register(app);
         var imageCtrl = new com.selfanalyst.desktop.controller.DesktopChatImageController(chatSessionStore.images());
@@ -450,6 +460,7 @@ public class DesktopServer {
     }
 
     public void shutdown() {
+        observability.close();
         integrations.close();
         closeOntology();
         stopSummaryEnhancement();

@@ -44,6 +44,24 @@ class MailProtocolTest {
             assertReadOnly(commands);
         }
     }
+    @Test void desktopDiscoveryListsFullHierarchyBeforeEnablementWithoutOpeningOrFetching() throws Exception {
+        var account = new MailAccount("mail-1", MailAccount.Provider.NETEASE_163, "synthetic@163.com", "Synthetic", false,
+                "selected", Set.of("INBOX"), false, 1);
+        try (Fixture server = new Fixture(); var service = service(server, account)) {
+            server.requireId = true;
+            server.folders = List.of("INBOX", "项目/客户A", "Archive/2026");
+            server.noSelectFolders = List.of("项目", "Archive");
+            var folders = service.discoverFolders(account, "synthetic-secret".toCharArray(), new MailCancellation());
+            assertEquals(server.folders, folders.stream().map(MailTransport.FolderInfo::name).toList());
+            assertTrue(folders.stream().allMatch(f -> f.selectable() && f.separator().equals("/")));
+            var commands = server.commands();
+            assertTrue(commands.stream().anyMatch(c -> c.contains(" ID ")));
+            assertTrue(commands.stream().anyMatch(c -> c.contains(" LIST ")));
+            assertTrue(commands.stream().noneMatch(c -> c.contains(" EXAMINE ") || c.contains(" SELECT ")
+                    || c.contains("FETCH") || c.contains("SEARCH")), commands.toString());
+            assertReadOnly(commands);
+        }
+    }
     @Test void searchAndReadUsePeekAndNeverFetchAttachmentOrChangeUnread() throws Exception {
         try (Fixture server = new Fixture(); var service = service(server, ReadOnlyMailServiceTest.account())) {
             var request = new ReadOnlyMailService.SearchRequest("mail-1", "INBOX", null, null, null, "subject", true, 20, null);

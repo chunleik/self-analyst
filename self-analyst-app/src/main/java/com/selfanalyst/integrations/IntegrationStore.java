@@ -59,7 +59,11 @@ public final class IntegrationStore implements AutoCloseable {
     }
     private static IntegrationConfig parse(byte[] bytes) throws IOException {
         if (bytes.length > MAX_CONFIG_BYTES) throw new IOException("configuration_limit");
-        try { return JSON.readValue(bytes, IntegrationConfig.class); }
+        try {
+            var document = JSON.readTree(bytes);
+            if (document == null || !document.isObject()) throw new IOException("invalid_configuration");
+            return JSON.treeToValue(document, IntegrationConfig.class);
+        }
         catch (Exception invalid) { throw new IOException("invalid_or_unsupported_configuration"); }
     }
     public static IntegrationConfig readConfig(Path path) throws IOException {
@@ -71,6 +75,11 @@ public final class IntegrationStore implements AutoCloseable {
         }
     }
     public IntegrationConfig save(long expectedRevision, IntegrationConfig candidate) throws IOException {
+        return save(expectedRevision, candidate, () -> {});
+    }
+    @FunctionalInterface public interface CommitGuard { void check() throws IOException; }
+    /** Trusted application guard is rechecked at the atomic commit boundary, never supplied by JSON. */
+    public IntegrationConfig save(long expectedRevision, IntegrationConfig candidate, CommitGuard guard) throws IOException {
         if (candidate == null || candidate.revision() != expectedRevision) throw new IOException("revision_conflict");
         lock.lock();
         try {
@@ -103,6 +112,7 @@ public final class IntegrationStore implements AutoCloseable {
                             atomicMove(backupTemp, backup);
                         } finally { Files.deleteIfExists(backupTemp); }
                     }
+                    guard.check();
                     replace.move(temporary, file); // No non-atomic fallback on unsupported filesystems.
                     return committed;
                 } finally { Files.deleteIfExists(temporary); }

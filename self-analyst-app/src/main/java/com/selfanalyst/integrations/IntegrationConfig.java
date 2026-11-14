@@ -44,7 +44,7 @@ public record IntegrationConfig(int schemaVersion, long revision, List<McpServer
                 mcpServers.stream().map(s -> new McpServer(s.id(), s.name(), false, s.transport(), s.endpoint(),
                         s.authType(), null, "session", s.budget())).toList(),
                 mailAccounts.stream().map(a -> new MailAccount(a.id(), a.provider(), a.email(), a.displayName(),
-                        false, a.allowedFolders(), a.bodyAccess(), null, "session", 0)).toList(), List.of());
+                        false, a.folderScope(), a.allowedFolders(), a.bodyAccess(), null, "session", 0)).toList(), List.of());
     }
 
     public record Budget(int connectTimeoutSeconds, int requestTimeoutSeconds, int maxTools,
@@ -79,8 +79,15 @@ public record IntegrationConfig(int schemaVersion, long revision, List<McpServer
     }
 
     public record MailAccount(String id, String provider, String email, String displayName, boolean enabled,
-                              List<String> allowedFolders, boolean bodyAccess, String credentialRef,
+                              String folderScope, List<String> allowedFolders, boolean bodyAccess, String credentialRef,
                               String storageMode, int disclosureVersion) {
+        /** Existing Java callers retain the same exact-folder authorization. */
+        public MailAccount(String id, String provider, String email, String displayName, boolean enabled,
+                           List<String> allowedFolders, boolean bodyAccess, String credentialRef,
+                           String storageMode, int disclosureVersion) {
+            this(id, provider, email, displayName, enabled, "selected", allowedFolders, bodyAccess,
+                    credentialRef, storageMode, disclosureVersion);
+        }
         public MailAccount {
             validateId(id); text(displayName, 128, "invalid_name");
             if (!Set.of("qq", "163").contains(provider)) throw new IllegalArgumentException("unsupported_provider");
@@ -89,8 +96,10 @@ public record IntegrationConfig(int schemaVersion, long revision, List<McpServer
             String domain = provider.equals("qq") ? "qq.com" : "163.com";
             if (!email.matches("[a-z0-9][a-z0-9._+\\-]{0,63}@" + domain.replace(".", "\\.")))
                 throw new IllegalArgumentException("invalid_email");
+            if (!"all".equals(folderScope) && !"selected".equals(folderScope))
+                throw new IllegalArgumentException("invalid_folder_scope");
             allowedFolders = List.copyOf(allowedFolders);
-            if (allowedFolders.isEmpty() || allowedFolders.size() > 32
+            if (("selected".equals(folderScope) && allowedFolders.isEmpty()) || allowedFolders.size() > 256
                     || new HashSet<>(allowedFolders).size() != allowedFolders.size())
                 throw new IllegalArgumentException("invalid_folders");
             for (String folder : allowedFolders) text(folder, 256, "invalid_folder");
@@ -104,10 +113,18 @@ public record IntegrationConfig(int schemaVersion, long revision, List<McpServer
         public int port() { return 993; }
         public CredentialTarget credentialTarget() { return CredentialTarget.mail(id, provider, email); }
         public MailAccount withCredential(String ref, String mode) {
-            return new MailAccount(id, provider, email, displayName, enabled, allowedFolders, bodyAccess, ref, mode, disclosureVersion);
+            return new MailAccount(id, provider, email, displayName, enabled, folderScope, allowedFolders, bodyAccess, ref, mode, disclosureVersion);
+        }
+        public MailAccount awaitingActivation() {
+            return new MailAccount(id, provider, email, displayName, false, folderScope, allowedFolders, bodyAccess,
+                    credentialRef, storageMode, 0);
+        }
+        public MailAccount activated(String reference) {
+            return new MailAccount(id, provider, email, displayName, true, folderScope, allowedFolders, bodyAccess,
+                    reference, "windows", 1);
         }
         public MailAccount disconnected() {
-            return new MailAccount(id, provider, email, displayName, false, allowedFolders, bodyAccess, null, "session", disclosureVersion);
+            return new MailAccount(id, provider, email, displayName, false, folderScope, allowedFolders, bodyAccess, null, "session", disclosureVersion);
         }
     }
 

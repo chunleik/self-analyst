@@ -5,7 +5,7 @@ import java.util.Set;
 
 /** Public account metadata. Secrets and caller-supplied endpoints are intentionally absent. */
 public record MailAccount(String id, Provider provider, String email, String displayName,
-                          boolean enabled, Set<String> allowedFolders, boolean bodyAccess,
+                          boolean enabled, String folderScope, Set<String> allowedFolders, boolean bodyAccess,
                           long permissionRevision) {
     public enum Provider {
         QQ("imap.qq.com", "qq.com"), NETEASE_163("imap.163.com", "163.com");
@@ -15,6 +15,11 @@ public record MailAccount(String id, Provider provider, String email, String dis
         public String host() { return host; }
         public int port() { return 993; }
         public String domain() { return domain; }
+    }
+    /** Existing callers keep selected-folder semantics, including the default INBOX. */
+    public MailAccount(String id, Provider provider, String email, String displayName,
+                       boolean enabled, Set<String> allowedFolders, boolean bodyAccess, long permissionRevision) {
+        this(id, provider, email, displayName, enabled, "selected", allowedFolders, bodyAccess, permissionRevision);
     }
     public MailAccount {
         if (id == null || !id.matches("[A-Za-z0-9_-]{1,80}") || provider == null
@@ -32,10 +37,21 @@ public record MailAccount(String id, Provider provider, String email, String dis
         if (displayName.length() > 160 || displayName.chars().anyMatch(Character::isISOControl)) {
             throw new MailException(MailException.Code.INVALID_ACCOUNT);
         }
-        allowedFolders = allowedFolders == null ? Set.of("INBOX") : Set.copyOf(allowedFolders);
-        if (allowedFolders.isEmpty() || allowedFolders.size() > 32 || allowedFolders.stream().anyMatch(
-                f -> f == null || f.isBlank() || f.length() > 256 || f.chars().anyMatch(Character::isISOControl))) {
+        if (!"all".equals(folderScope) && !"selected".equals(folderScope)) {
             throw new MailException(MailException.Code.INVALID_ACCOUNT);
         }
+        allowedFolders = allowedFolders == null ? Set.of("INBOX") : Set.copyOf(allowedFolders);
+        if (("selected".equals(folderScope) && allowedFolders.isEmpty()) || allowedFolders.size() > 256
+                || allowedFolders.stream().anyMatch(f -> !validFolderName(f))) {
+            throw new MailException(MailException.Code.INVALID_ACCOUNT);
+        }
+    }
+    /** A full IMAP name is an exact name, never a pattern or a stale enumeration. */
+    public boolean allowsFolder(String folder) {
+        return validFolderName(folder) && ("all".equals(folderScope) || allowedFolders.contains(folder));
+    }
+    static boolean validFolderName(String folder) {
+        return folder != null && !folder.isBlank() && folder.length() <= MailLimits.MAX_FOLDER_NAME_LENGTH
+                && folder.codePoints().noneMatch(Character::isISOControl);
     }
 }

@@ -121,16 +121,24 @@ var api = {
     });
   },
   integrations: function (path, method, body, signal) {
+    var mailActivation = path === "/mail/activate" && method === "POST";
     return fetch(API_BASE + "/desktop/integrations" + (path || ""), {
       method: method || "GET", signal: signal,
       headers: { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then(function (response) {
-      return response.json().catch(function () { return {}; }).then(function (payload) {
+      return response.json().catch(function () {
+        if (mailActivation) throw { code: "mail_activation_outcome_uncertain" };
+        return {};
+      }).then(function (payload) {
+        if (mailActivation && (!payload || typeof payload !== "object" || Array.isArray(payload))) {
+          throw { code: "mail_activation_outcome_uncertain" };
+        }
         if (!response.ok) {
           // Do not echo remote transport errors, response text, or credentials.
           var error = new Error("Integration request failed");
-          error.code = response.status === 409 ? "conflict" : payload.errorCode || payload.code || payload.error || "unavailable";
+          error.code = payload.errorCode || payload.code || payload.error || (response.status === 409 ? "conflict" : "unavailable");
+          error.credentialCleanupPending = payload.credentialCleanupPending === true;
           error.status = response.status; throw error;
         }
         return payload;

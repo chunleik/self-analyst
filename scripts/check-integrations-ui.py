@@ -116,6 +116,18 @@ def check_browser(server, output, executable):
             status, result = 200, database
             if suffix == '/approvals':
                 result = {'approvals': []}
+            elif suffix == '/mail/folders':
+                if mode.get('folders') == 'error':
+                    status, result = 400, {'error': 'timeout'}
+                else:
+                    result = {'accountId': body['id'], 'revision': database['config']['revision'], 'complete': True,
+                              'folders': [{'name': name, 'separator': '/', 'selectable': True} for name in
+                                          ['INBOX', '工作/客户 A', '账单', '<script>window.mailXss = true</script>']]}
+            elif suffix == '/mail/folders/cancel':
+                result = {'cancelled': True}
+            elif suffix == '' and request.method == 'PUT':
+                assert body['expectedRevision'] == database['config']['revision']
+                database['config'] = copy.deepcopy(body['config']); database['config']['revision'] += 1
             elif suffix == '/delete':
                 if mode['delete'] == 'conflict':
                     status, result = 409, {'error': 'revision_conflict'}
@@ -251,16 +263,58 @@ def check_browser(server, output, executable):
                 expect(page.locator('.integrations-settings')).to_contain_text(text('integrations.notice.cleanupPending'))
                 expect(page.locator('.integrations-list button')).to_have_count(2)
                 checks.append(f'{lang}: revision conflict, unknown outcome write lock/reload, credential cleanup warning')
+                # Folder discovery is a local setup operation, not a mail tool or an activation.
+                reset()
+                database['config']['mailAccounts'] = [{'id': 'mail-fixture', 'provider': '163', 'email': 'synthetic@163.com',
+                    'displayName': 'Synthetic mailbox', 'enabled': False, 'folderScope': 'all', 'allowedFolders': ['INBOX'],
+                    'bodyAccess': False, 'disclosureVersion': 0, 'storageMode': 'windows',
+                    'credentialRef': 'windows:00000000-0000-0000-0000-000000000001'}]
+                database['statuses']['mail-fixture'] = {'state': 'not_connected', 'credentialConfigured': True}
+                database['persistentCredentialsSupported'] = True
+                button('config.discard').click(); select('Synthetic mailbox')
+                choices = page.locator('.integration-folder-list input[type=checkbox]')
+                expect(choices).to_have_count(4)
+                assert len([c for c in calls if c['path'] == '/mail/folders']) == 1
+                assert not [c for c in calls if c['path'] == '/mail/activate']
+                expect(page.locator('#integration-enabled, #integration-persist, #integration-disclosureVersion, #integration-allowedFolders')).to_have_count(0)
+                expect(page.locator('#integration-bodyAccess')).not_to_be_checked()
+                assert page.locator('.integration-folder-list script, .integration-folder-list img').count() == 0
+                assert page.evaluate('window.mailXss === undefined')
+                target = page.locator('.integration-folder-list input[data-folder-name="工作/客户 A"]')
+                target.focus(); page.keyboard.press('Space')
+                expect(page.locator('#integration-folderScope')).to_have_value('selected')
+                expect(target).not_to_be_checked(); expect(target).to_be_focused()
+                page.locator('#integration-folder-search').fill('INBOX'); expect(choices).to_have_count(1)
+                page.locator('#integration-folder-search').fill(''); expect(choices).to_have_count(4)
+                button('config.saveChanges').click()
+                expect(button('config.saveChanges')).to_be_disabled()
+                assert database['config']['mailAccounts'][0]['allowedFolders'] == ['INBOX', '账单', '<script>window.mailXss = true</script>']
+                expect(target).not_to_be_checked()
+                mode['folders'] = 'error'; button('integrations.folders.refresh').click()
+                expect(page.locator('.integration-folder-picker')).to_contain_text(text('integrations.error.timeout'))
+                expect(target).not_to_be_checked(); expect(button('integrations.folders.selectCurrent')).to_be_disabled()
+                mode['folders'] = 'success'; button('integrations.folders.refresh').click()
+                expect(button('integrations.folders.selectCurrent')).to_be_enabled()
+                for scheme in ['light', 'dark']:
+                    page.emulate_media(color_scheme=scheme)
+                    for width, height in [(1280, 1000), (390, 800)]:
+                        page.set_viewport_size({'width': width, 'height': height})
+                        page.locator('.integration-folder-picker').scroll_into_view_if_needed()
+                        assert page.locator('.integration-folder-picker').evaluate('e => e.scrollWidth <= e.clientWidth + 2')
+                        page.screenshot(path=str(output / f'mail-folders-{lang}-{scheme}-{width}x{height}.png'))
+                checks.append(f'{lang}: mail auto-discovery, explicit selection, safe text, Space/focus, search preservation, save/refresh/error recovery, light/dark media and narrow screenshots')
+                page.emulate_media(color_scheme='light')
+
             assert not errors, errors
             assert not external, external
             (output / 'validation.json').write_text(json.dumps({'syntheticData': True, 'productionAssets': str(UI.relative_to(REPO)),
                 'checks': checks, 'pageErrors': errors, 'externalRequests': external,
-                'limitations': ['No real backend, MCP service, mailbox, Windows or Tauri validation.']}, ensure_ascii=False, indent=2) + '\n')
+                'limitations': ['No real backend, MCP service, mailbox, Windows or Tauri validation.', 'Dark media preference is exercised; production theme currently remains its shared light palette.']}, ensure_ascii=False, indent=2) + '\n')
         except Exception:
             page.screenshot(path=str(output / 'failure.png')); raise
         finally:
             context.close(); browser.close()
-    print('PASS: synthetic connection deletion and tools dialog, EN/ZH, keyboard, late responses, narrow screenshots. No real services or packaging.')
+    print('PASS: synthetic connection deletion, tools dialog and mailbox folder picker, EN/ZH, keyboard, late responses, light/dark media and narrow screenshots. No real services or packaging.')
 
 
 def main():

@@ -41,6 +41,47 @@ class McpManagerTest {
             assertTrue(manager.statuses().toString().contains("needs_auth"));
         }
     }
+    @Test void mailScopeSurvivesManagedSaveCredentialTargetChangeAndAccountToolMapping() throws Exception {
+        try (var store = new IntegrationStore(root); var credentials = new SessionCredentialStore();
+             var sessions = ChatSessionStore.openExclusive(root.resolve("memory"));
+             var approvals = new ApprovalRegistry()) {
+            var policy = new MailSessionPolicy(sessions);
+            try (var manager = new McpManager(store, credentials, policy, Config.testDefaults(root.resolve("memory")),
+                    approvals, (endpoint, timeout, initialization, maximum, bearer) -> { throw new AssertionError("No external MCP connection expected"); })) {
+                var account = new IntegrationConfig.MailAccount("mail-one", "qq", "synthetic@qq.com", "Synthetic", true,
+                        "all", List.of("INBOX", "Projects/项目"), false, null, "session", 1);
+                // Seed a legacy enabled/session account: the new managed route intentionally cannot create it.
+                String legacyReference = credentials.write(account.credentialTarget(), "synthetic-secret".toCharArray(), "session");
+                var credentialed = store.save(0, new IntegrationConfig(1, 0, List.of(),
+                        List.of(account.withCredential(legacyReference, "session")), List.of()));
+                var kept = manager.save(1, new IntegrationConfig(1, 1, List.of(server("https://example.com/mcp", null)),
+                        credentialed.mailAccounts(), List.of())).mailAccounts().getFirst();
+                assertEquals("all", kept.folderScope()); assertEquals(account.allowedFolders(), kept.allowedFolders());
+                assertNotNull(kept.credentialRef()); assertFalse(kept.bodyAccess());
+                var session = sessions.create(new ChatSessionStore.CreateRequest());
+                var turn = new com.selfanalyst.agent.AgentIntegrationGateway.TurnContext(session.id, "a".repeat(12), true, "https://model.example.com/v1");
+                policy.consentTarget(session.id, turn.modelTarget());
+                var tool = manager.snapshot(turn).stream().filter(t -> t.getName().equals("mail_list_accounts")).findFirst().orElseThrow();
+                assertTrue(tool.getDescription().contains("allowedFolders limits access only when folderScope=selected"));
+                var result = tool.callAsync(io.agentscope.core.tool.ToolCallParam.builder().input(Map.of()).build()).block();
+                var text = (io.agentscope.core.message.TextBlock) result.getOutput().getFirst();
+                var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(text.getText());
+                assertEquals("all", json.get(0).path("folderScope").asText());
+                var exposedFolders = new HashSet<String>();
+                json.get(0).path("allowedFolders").forEach(folder -> exposedFolders.add(folder.asText()));
+                assertEquals(Set.of("INBOX", "Projects/项目"), exposedFolders);
+                assertFalse(json.get(0).path("bodyAccess").asBoolean());
+                assertFalse(text.getText().contains("credential")); assertTrue(policy.containsMail(session.id));
+                var changed = new IntegrationConfig.MailAccount("mail-one", "163", "synthetic@163.com", "Synthetic", true,
+                        "all", account.allowedFolders(), false, kept.credentialRef(), "session", 1);
+                var saved = manager.save(2, new IntegrationConfig(1, 2, List.of(), List.of(changed), List.of())).mailAccounts().getFirst();
+                assertEquals("all", saved.folderScope()); assertEquals(account.allowedFolders(), saved.allowedFolders());
+                assertNull(saved.credentialRef()); assertFalse(saved.enabled()); assertEquals(0, saved.disclosureVersion());
+                assertFalse(credentials.configured(kept.credentialRef(), kept.credentialTarget()));
+                manager.endTurn(turn);
+            }
+        }
+    }
     @Test void savingEnabledMetadataDoesNotStartDiscovery() throws Exception {
         var connections = new java.util.concurrent.atomic.AtomicInteger();
         try (var store = new IntegrationStore(root); var sessions = ChatSessionStore.openExclusive(root.resolve("memory"));

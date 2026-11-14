@@ -18,11 +18,13 @@
 - [x] 3.1 更新 integrations.js/css 及 locales/zh.json、en.json，完成 all/selected、搜索层级复选列表、当前全选/清空、已选数量与不可用项保留；Node 测试覆盖默认、切换、动态新目录、256 项及安全文本渲染。
 - [x] 3.2 配置后与打开已配置账户时自动加载一次，支持临时凭据“连接并加载”和主动刷新；明确保存/启用成功但发现失败的状态。Node/HTTP 测试覆盖缺凭据、失败重试、重复点击、过期 revision、关闭/切换/删除/断开及迟到响应。
 - [x] 3.3 去掉启用/持久化和原处理授权勾选项，保留正文许可及完整确认；测试确认取消不持久化/启用，不把目录发现视作邮件/模型授权，保存失败保留输入。
-- [ ] 3.4 增加键盘/ARIA、浅色/深色、窄窗口视觉验收和截图；沿用未保存离开确认。真实 Windows/Tauri 或邮箱验收未完成时明确记录，不用 DOM 测试替代。
+- [x] 3.4 增加键盘/ARIA、浅色/深色系统偏好、窄窗口浏览器验收和截图；沿用未保存离开确认。Linux run `43600644616` 的工件 `14115978669` 已由发布协调者实看中英文宽窄截图；不宣称新增深色主题。真实 Windows/Tauri 人工或真实邮箱验收仍未完成，见 verification.md。
 
 ## 4. 文档与验证
 
 - [x] 4.1 更新 docs/mail-integration.md、PRIVACY.md 和 README.md/README.zh-CN.md，说明动态全部与当前全选、自动发现与非后台同步、系统安全存储和限制；检查英文 README 不混中文。
 - [x] 4.2 运行 `node --test self-analyst-app/src/test/js/integrations.test.mjs self-analyst-app/src/test/js/i18n-catalog.test.mjs` 及新增目录界面测试；运行邮箱/配置/受管接口定向 Java 测试，记录实际命令和结果。
 - [x] 4.3 同步 mail-integration 与 user-configuration 主规格，运行 `mvn test`、`openspec validate default-all-mail-folders --strict`、`openspec validate --all --strict`、`git diff --check`，记录最终结果及未验收项，不本地打包。
-- [ ] 4.4 完整差异审查，核对无凭据或真实用户数据；后续获准提交 PR 时等待精确最新提交全部必需 CI，包括 Windows 全量验证；不得沿用旧 PR 检查，不绕过分支保护。只在本次明确授权范围内提交、推送、合并和远端发版，不自动归档。
+- [x] 4.4 完整差异审查，核对无凭据或真实用户数据；后续获准提交 PR 时等待精确最新提交全部必需 CI，包括 Windows 全量验证；不得沿用旧 PR 检查，不绕过分支保护。只在本次明确授权范围内提交、推送、合并和远端发版，不自动归档。
+
+最终远端验证：PR #154 最新 head `4810920` 的五项必需 CI 全部成功，包含 Windows 全量验证；run `43600644616` 浏览器验证通过且截图已复核。正常合并 main `3a51619e563d2b9ee9e40b078f0628e19925fa6c`。版本发布另由 release-0-6-1-beta-18 跟踪，本 change 不自动归档。

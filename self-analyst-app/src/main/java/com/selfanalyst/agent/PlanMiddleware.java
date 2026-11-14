@@ -32,6 +32,10 @@ public final class PlanMiddleware implements MiddlewareBase {
     /** Nullable when token metering is disabled. */
     private final UsageMeter usageMeter;
 
+    private java.util.function.Supplier<AgentObservability> observability = () -> null;
+    public PlanMiddleware(UsageMeter usageMeter, java.util.function.Supplier<AgentObservability> observability) {
+        this(usageMeter); this.observability = observability;
+    }
     public PlanMiddleware(UsageMeter usageMeter) {
         this.usageMeter = usageMeter;
     }
@@ -46,6 +50,9 @@ public final class PlanMiddleware implements MiddlewareBase {
             log.debug("Agent 正在思考...");
             return next.apply(input)
                     .concatWith(Flux.defer(this::afterReasoning));
+        }).transformDeferred(source -> {
+            var observer = observability.get();
+            return observer == null ? source : observer.trace("agent.reason", ctx == null ? null : ctx.getSessionId(), () -> source);
         });
     }
 

@@ -13,7 +13,7 @@ function integrationErrorText(error) {
 
 function createIntegrationsModel(request, changed) {
   var model = { snapshot: null, draft: null, selected: null, loading: false, busy: "", error: "", notice: "",
-    secret: "", persist: false, diagnostic: null, tools: [] };
+    secret: "", persist: false, diagnostic: null, tools: [], outcomeUnknown: false };
   var alive = true, generation = 0, controller = null, readGeneration = 0;
   function copy(value) { return JSON.parse(JSON.stringify(value)); }
   function emit() { if (alive) changed(model); }
@@ -33,7 +33,7 @@ function createIntegrationsModel(request, changed) {
     controller = new AbortController();
     return request("", "GET", undefined, controller.signal).then(function (snapshot) {
       if (!alive || current !== generation) return;
-      model.snapshot = snapshot; model.draft = copy(snapshot.config); model.selected = null; model.notice = "";
+      model.snapshot = snapshot; model.draft = copy(snapshot.config); model.selected = null; model.notice = ""; model.outcomeUnknown = false;
     }).catch(function (error) { if (alive && current === generation) model.error = integrationErrorText(error); })
       .finally(function () { if (alive && current === generation) { model.loading = false; emit(); } });
   };
@@ -42,7 +42,7 @@ function createIntegrationsModel(request, changed) {
     invalidate(); clearSecret(); model.selected = { kind: kind, id: id }; model.error = ""; model.notice = ""; emit();
   };
   model.add = function (kind) {
-    if (!model.draft || model.busy) return;
+    if (!model.draft || model.busy || model.loading || model.outcomeUnknown) return;
     var id = (kind === "mail" ? "mail-" : "mcp-") + crypto.randomUUID();
     var entry = kind === "mail" ? { id: id, provider: "qq", email: "", displayName: "", enabled: false,
       allowedFolders: ["INBOX"], bodyAccess: false, credentialRef: null, storageMode: "session", disclosureVersion: 0 }
@@ -51,7 +51,7 @@ function createIntegrationsModel(request, changed) {
     model.draft[kind === "mail" ? "mailAccounts" : "mcpServers"].push(entry); model.select(kind, id);
   };
   model.change = function (field, value) {
-    var entry = model.entry(); if (!entry || model.busy || model.selected.kind === "legacy") return;
+    var entry = model.entry(); if (!entry || model.busy || model.outcomeUnknown || model.selected.kind === "legacy") return;
     var allowed = model.selected.kind === "mail"
       ? ["provider", "email", "displayName", "enabled", "allowedFolders", "bodyAccess", "disclosureVersion"]
       : ["name", "endpoint", "authType", "enabled"];
@@ -69,10 +69,10 @@ function createIntegrationsModel(request, changed) {
     }
     emit();
   };
-  model.setSecret = function (value) { if (!model.busy && model.entry()) { invalidate(); model.secret = value; model.error = ""; emit(); } };
-  model.setPersist = function (value) { if (!model.busy) { model.persist = !!value && !!model.snapshot.persistentCredentialsSupported; emit(); } };
+  model.setSecret = function (value) { if (!model.busy && !model.outcomeUnknown && model.entry()) { invalidate(); model.secret = value; model.error = ""; emit(); } };
+  model.setPersist = function (value) { if (!model.busy && !model.outcomeUnknown) { model.persist = !!value && !!model.snapshot.persistentCredentialsSupported; emit(); } };
   model.save = function () {
-    if (!model.snapshot || model.busy || !metadataDirty()) return Promise.resolve();
+    if (!model.snapshot || model.busy || model.outcomeUnknown || !metadataDirty()) return Promise.resolve();
     var invalid = model.draft.mailAccounts.some(function (item) { return item.enabled && item.disclosureVersion !== 1; });
     if (invalid) { model.error = t("integrations.consentRequired"); emit(); return Promise.resolve(); }
     invalidate(); var current = generation; model.busy = "save"; model.error = ""; emit();
@@ -84,7 +84,7 @@ function createIntegrationsModel(request, changed) {
       .finally(function () { if (alive && current === generation) { model.busy = ""; emit(); } });
   };
   model.action = function (action, tool) {
-    if (model.busy || metadataDirty() || !model.entry()) return Promise.resolve();
+    if (model.busy || model.outcomeUnknown || metadataDirty() || !model.entry()) return Promise.resolve();
     if (model.selected.kind === "legacy" && ["discover", "tools/approve"].indexOf(action) < 0) return Promise.resolve();
     if (action === "credential" && !model.secret) return Promise.resolve();
     invalidate(); var current = generation, selected = copy(model.selected);
@@ -105,13 +105,60 @@ function createIntegrationsModel(request, changed) {
     }).catch(function (error) { if (alive && current === generation) model.error = integrationErrorText(error); })
       .finally(function () { body.secret = undefined; if (alive && current === generation) { model.busy = ""; emit(); } });
   };
+  model.savedEntry = function () {
+    if (!model.selected || !model.snapshot || model.selected.kind === "legacy") return null;
+    return model.snapshot.config[model.selected.kind === "mail" ? "mailAccounts" : "mcpServers"]
+      .find(function (item) { return item.id === model.selected.id; }) || null;
+  };
+  model.remove = function (confirmDelete) {
+    if (model.busy || model.loading || model.outcomeUnknown || !model.entry() || model.selected.kind === "legacy") return Promise.resolve();
+    var selected = copy(model.selected), saved = model.savedEntry(), identity = copy(saved || model.entry());
+    if (typeof confirmDelete !== "function" || !confirmDelete({ saved: !!saved, kind: selected.kind, entry: identity })) return Promise.resolve();
+    invalidate(); clearSecret(); var current = generation;
+    var collection = selected.kind === "mail" ? "mailAccounts" : "mcpServers";
+    function removeFrom(config) {
+      config[collection] = config[collection].filter(function (item) { return item.id !== selected.id; });
+      config.toolApprovals = config.toolApprovals.filter(function (item) { return item.sourceId !== selected.id; });
+    }
+    if (!saved) {
+      removeFrom(model.draft); model.selected = null; model.error = ""; model.notice = "draftDeleted"; emit(); return Promise.resolve();
+    }
+    var previous = copy(model.snapshot.config), keptDraft = copy(model.draft), expected = copy(previous);
+    removeFrom(expected); expected.revision++;
+    // Canonical comparison ensures an unrelated or malformed success cannot silently discard drafts.
+    function canonical(value) {
+      if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+      if (value && typeof value === "object") return "{" + Object.keys(value).sort().map(function (key) {
+        return JSON.stringify(key) + ":" + canonical(value[key]);
+      }).join(",") + "}";
+      return JSON.stringify(value);
+    }
+    model.busy = "delete"; model.error = ""; model.notice = ""; emit();
+    return request("/delete", "POST", { kind: selected.kind, id: selected.id, expectedRevision: previous.revision })
+      .then(function (snapshot) {
+        if (!alive || current !== generation) return;
+        if (!snapshot || !snapshot.config || canonical(snapshot.config) !== canonical(expected)) throw new Error("unverified_delete");
+        removeFrom(keptDraft); keptDraft.revision = snapshot.config.revision;
+        model.snapshot = snapshot; model.draft = keptDraft; model.selected = null;
+        model.notice = snapshot.credentialCleanupPending ? "cleanupPending" : "deleted";
+      }).catch(function (error) {
+        if (!alive || current !== generation) return;
+        var code = error && error.code;
+        if (code === "conflict" || code === "revision_conflict" || error && (error.status === 401 || error.status === 403)) {
+          model.error = integrationErrorText(error);
+        } else {
+          model.outcomeUnknown = true; model.error = t("integrations.deleteUnknown");
+        }
+      }).finally(function () { if (alive && current === generation) { model.busy = ""; emit(); } });
+  };
   model.revoke = function (tool) {
-    if (model.busy || !model.entry()) return;
+    if (model.busy || model.outcomeUnknown || !model.entry()) return;
     var id = model.selected.id;
     model.draft.toolApprovals = model.draft.toolApprovals.filter(function (item) { return item.sourceId !== id || item.toolName !== tool.name; });
     invalidate(); model.notice = "revocationPending"; emit();
   };
   model.refresh = function () {
+    if (model.busy || model.outcomeUnknown) return Promise.resolve();
     var version = ++readGeneration, current = generation;
     return request("", "GET").then(function (snapshot) {
       if (!alive || version !== readGeneration || current !== generation) return;
@@ -137,6 +184,30 @@ function integrationButton(text, action) {
 
 function mountIntegrations(root) {
   var model = createIntegrationsModel(api.integrations, render), builtFor = null, controls = {}, status, error, notice, list, editor, tools, footer, connectionState;
+  var catalogOpen = false, catalog = createIntegrationToolsDialog({
+    onDiscover: function () { return model.action("discover"); },
+    onClose: function () { catalogOpen = false; if (model.busy === "discover") model.cancel(); }
+  });
+  function catalogView() {
+    var entry = model.entry(), kind = model.selected && model.selected.kind;
+    if (!entry) return null;
+    var live = model.snapshot.statuses && model.snapshot.statuses[entry.id] || {};
+    var legacy = model.snapshot.legacyWebsearch || {};
+    return { id: entry.id, kind: kind, name: kind === "legacy" ? t("integrations.kind.legacy") : entry.name || t("integrations.untitled"),
+      endpoint: kind === "legacy" ? legacy.endpoint || "" : entry.endpoint || "", state: live.state || "not_connected",
+      tools: model.metadataDirty() ? [] : model.tools.length ? model.tools : live.tools || [],
+      known: !model.metadataDirty() && (live.catalogAvailable === true || live.state === "ready" || model.notice === "discovered"),
+      busy: model.busy === "discover", error: model.error, canDiscover: !model.busy && !model.loading && !model.outcomeUnknown && !model.metadataDirty(),
+      hint: model.metadataDirty() ? t("integrations.catalog.saveFirst") : "" };
+  }
+  function openCatalog(trigger) { catalogOpen = true; catalog.open(catalogView(), trigger); }
+  function confirmRemoval(value) {
+    var item = value.entry, name = value.kind === "mail" ? item.displayName || item.email : item.name || item.endpoint;
+    var target = value.kind === "mail" ? item.email : item.endpoint;
+    return window.confirm(t(value.saved ? "integrations.confirmDeleteSaved" : "integrations.confirmDeleteDraft", {
+      name: name || t("integrations.untitled"), target: target || t("integrations.untitled"), id: item.id
+    }));
+  }
   root.replaceChildren();
   var section = integrationElement("section", null, "integrations-settings");
   var scroller = integrationElement("div", null, "config-scroll-area"); section.appendChild(scroller);
@@ -156,7 +227,7 @@ function mountIntegrations(root) {
   notice = integrationElement("p"); notice.setAttribute("role", "status"); notice.tabIndex = -1;
   scroller.appendChild(error); scroller.appendChild(notice);
   footer = integrationElement("div", null, "config-action-bar integrations-actions");
-  var discard = integrationButton(t("config.discard"), function () { if (!model.dirty() || window.confirm(t("config.confirmDiscardClose"))) model.load(); });
+  var discard = integrationButton(t("config.discard"), function () { if (!(model.dirty() || model.outcomeUnknown) || window.confirm(t("config.confirmDiscardClose"))) model.load(); });
   var save = integrationButton(t("config.saveChanges"), function () { model.save().then(function () { (model.error ? error : notice).focus(); }); });
   footer.appendChild(discard); footer.appendChild(save); section.appendChild(footer); root.appendChild(section);
   function field(name, label, type, choices) {
@@ -182,7 +253,9 @@ function mountIntegrations(root) {
     if (kind === "legacy") {
       editor.appendChild(integrationElement("p", t("integrations.legacy"), "integrations-hint"));
       var discover = integrationButton(t("integrations.action.discover"), function () { model.action("discover"); });
-      controls.discover = discover; editor.appendChild(discover); return;
+      controls.discover = discover; editor.appendChild(discover);
+      var legacyCatalog = integrationButton(t("integrations.catalog.open"), function () { openCatalog(legacyCatalog); });
+      controls.catalog = legacyCatalog; editor.appendChild(legacyCatalog); return;
     }
     if (kind === "mail") {
       field("provider", "integrations.provider", "text", [["qq", "QQ"], ["163", "163"]]);
@@ -210,14 +283,21 @@ function mountIntegrations(root) {
         model.action(action);
       }); controls[action] = button; row.appendChild(button);
     });
+    var remove = integrationButton(t("integrations.action.delete"), function () {
+      model.remove(confirmRemoval).then(function () { (model.error ? error : notice).focus(); });
+    }); controls.delete = remove; remove.classList.add("integration-delete"); row.appendChild(remove);
+    if (kind === "mcp") {
+      var viewTools = integrationButton(t("integrations.catalog.open"), function () { openCatalog(viewTools); });
+      controls.catalog = viewTools; row.appendChild(viewTools);
+    }
     var cancel = integrationButton(t("action.cancel"), function () { model.cancel(); }); controls.cancel = cancel; row.appendChild(cancel); editor.appendChild(row);
     editor.appendChild(integrationElement("p", t("integrations.saveFirst"), "integrations-hint"));
   }
   function render(data) {
     status.textContent = data.loading ? t("common.loading") : data.snapshot ? t("integrations.revision", { revision: data.snapshot.config.revision }) : "";
-    error.textContent = data.error; notice.textContent = data.snapshot && data.snapshot.credentialCleanupPending ? t("integrations.notice.cleanupPending") : data.notice ? t("integrations.notice." + data.notice) : "";
-    discard.disabled = !!data.busy; save.disabled = !!data.busy || !data.metadataDirty();
-    actions.querySelectorAll("button").forEach(function (el) { el.disabled = !data.snapshot || !!data.busy; });
+    error.textContent = data.outcomeUnknown ? t("integrations.deleteUnknown") : data.error; notice.textContent = data.snapshot && data.snapshot.credentialCleanupPending ? t("integrations.notice.cleanupPending") : data.notice ? t("integrations.notice." + data.notice) : "";
+    discard.disabled = !!data.busy || data.loading; save.disabled = !!data.busy || data.outcomeUnknown || !data.metadataDirty();
+    actions.querySelectorAll("button").forEach(function (el) { el.disabled = !data.snapshot || data.loading || data.outcomeUnknown || !!data.busy; });
     if (!data.draft) return;
     list.replaceChildren();
     ["mail", "mcp"].forEach(function (kind) {
@@ -249,14 +329,21 @@ function mountIntegrations(root) {
     }
     if (entry) Object.keys(controls).forEach(function (name) {
       var input = controls[name];
-      if (input.tagName === "BUTTON") { input.disabled = name === "cancel" ? data.busy !== "test" && data.busy !== "discover"
-        : !!data.busy || data.metadataDirty() || name === "credential" && !data.secret; return; }
-      input.disabled = !!data.busy || name === "persist" && !data.snapshot.persistentCredentialsSupported
+      if (input.tagName === "BUTTON") {
+        if (name === "catalog") { input.disabled = !!data.busy; return; }
+        if (name === "delete") { input.disabled = !!data.busy || data.loading || data.outcomeUnknown; return; }
+        input.disabled = name === "cancel" ? data.busy !== "test" && data.busy !== "discover"
+        : !!data.busy || data.outcomeUnknown || data.metadataDirty() || name === "credential" && !data.secret; return; }
+      input.disabled = !!data.busy || data.outcomeUnknown || name === "persist" && !data.snapshot.persistentCredentialsSupported
         || (name === "secret" || name === "persist") && data.selected.kind === "mcp" && entry.authType === "anonymous";
       var value = name === "secret" ? data.secret : name === "persist" ? data.persist : entry[name];
       if (input.type === "checkbox") input.checked = name === "disclosureVersion" ? value === 1 : !!value;
       else { value = Array.isArray(value) ? value.join("\n") : value == null ? "" : String(value); if (input.value !== value) input.value = value; }
     });
+    if (catalogOpen) {
+      var view = catalogView();
+      if (!view || view.kind === "mail") catalog.close(); else catalog.update(view);
+    }
     tools.replaceChildren();
     if (data.diagnostic) tools.appendChild(integrationElement("p", data.diagnostic.ok ? t("integrations.testSuccess") : integrationErrorText(data.diagnostic)));
     var visibleTools = data.tools.length ? data.tools : entry && !data.metadataDirty() && data.snapshot.statuses
@@ -269,7 +356,7 @@ function mountIntegrations(root) {
       var button = integrationButton(t(approved ? "integrations.revokeTool" : "integrations.approveTool"), function () {
         if (approved) model.revoke(tool); else model.action("tools/approve", tool);
       });
-      button.disabled = !!data.busy || data.metadataDirty() || !tool.digest; card.appendChild(button); tools.appendChild(card);
+      button.disabled = !!data.busy || data.outcomeUnknown || data.metadataDirty() || !tool.digest; card.appendChild(button); tools.appendChild(card);
     });
   }
   var approvalsRoot = integrationElement("section", null, "integration-approvals");
@@ -277,6 +364,6 @@ function mountIntegrations(root) {
   var approvals = typeof mountIntegrationApprovals === "function" ? mountIntegrationApprovals(approvalsRoot) : null;
   model.load();
   return { dirty: model.dirty, saving: function () { return !!model.busy && model.busy !== "test" && model.busy !== "discover"; }, destroy: function () {
-    model.destroy(); if (approvals) approvals.destroy(true); Object.keys(controls).forEach(function (key) { if (controls[key].type === "password") controls[key].value = ""; }); root.replaceChildren();
+    catalog.destroy(); model.destroy(); if (approvals) approvals.destroy(true); Object.keys(controls).forEach(function (key) { if (controls[key].type === "password") controls[key].value = ""; }); root.replaceChildren();
   } };
 }

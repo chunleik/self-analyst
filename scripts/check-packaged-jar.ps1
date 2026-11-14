@@ -197,6 +197,23 @@ try {
         $response.Dispose()
     }
 
+    # Optional developer tracing must load from the shaded JAR without enabling a receiver.
+    $response = Send-SmokeRequest -Method ([System.Net.Http.HttpMethod]::Get) `
+        -Path "/desktop/observability" -Authenticated
+    try {
+        if ([int]$response.StatusCode -ne 200) {
+            throw "开发者观测接口返回 $([int]$response.StatusCode)"
+        }
+        $observationJson = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        $observation = $observationJson | ConvertFrom-Json -ErrorAction Stop
+        if ($observation.enabled -ne $false -or $observation.credentialConfigured -ne $false -or
+            $observation.config.captureMode -ne "metadata" -or $observationJson.Contains("secretRef")) {
+            throw "全新运行数据中的观测必须关闭、无凭据且仅元数据默认"
+        }
+    } finally {
+        $response.Dispose()
+    }
+
     $response = Send-SmokeRequest -Method ([System.Net.Http.HttpMethod]::Get) `
         -Path "/desktop-ui/index.html"
     try {
@@ -206,6 +223,9 @@ try {
         $html = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
         if (-not $html.Contains("SelfAnalyst")) {
             throw "桌面入口不包含预期产品标识"
+        }
+        if (-not $html.Contains("observability.js") -or -not $html.Contains("integration-tools-dialog.js")) {
+            throw "桌面入口缺少开发者观测或 MCP tools 弹窗资源"
         }
     } finally {
         $response.Dispose()

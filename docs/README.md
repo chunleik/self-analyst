@@ -61,6 +61,7 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 | `chatgpt-responses` | [spec](../openspec/specs/chatgpt-responses/spec.md) | [连接指南](llm-settings.md) |
 | `content-event-persistence` | [spec](../openspec/specs/content-event-persistence/spec.md) | Git 历史 |
 | `desktop-chat` | [spec](../openspec/specs/desktop-chat/spec.md) | Git 历史 |
+| `developer-observability` | [spec](../openspec/specs/developer-observability/spec.md) | [开发者观测指南](developer-observability.md) |
 | `desktop-shell` | [spec](../openspec/specs/desktop-shell/spec.md) | Git 历史 |
 | `event-query-tools` | [spec](../openspec/specs/event-query-tools/spec.md) | [旧文档](archive/legacy-specs/core.md) |
 | `file-metadata-collection` | [spec](../openspec/specs/file-metadata-collection/spec.md) | Git 历史 |
@@ -89,3 +90,5 @@ SelfAnalyst 在此之上增加标题采集、文件元数据、嵌入式合并�
 - [archive/legacy-specs/](archive/legacy-specs/) — 未逐项纳入主规格的旧实施决策、测试条目和稳定 ID
 
 旧 `raw-event-retention` 能力已退役，原 Purpose 与 SPEC-RAW-001～013 的背景保留在 [历史变更](../openspec/changes/archive/2026-09-04-retain-raw-events-permanently/proposal.md) 和 Git 历史中。
+
+- [开发者 Langfuse 观测](developer-observability.md)：自定接收端、元数据/隐私内容授权、安全存储和保留边界。

@@ -8,6 +8,7 @@ SelfAnalyst 采用 Apache License 2.0，完整文本见 [LICENSE](LICENSE)。项
 | 组件 | 用途 | 许可证 |
 |------|------|--------|
 | [AgentScope Java](https://github.com/agentscope-ai/agentscope-java) | LLM Agent 框架 | Apache-2.0 |
+| [OpenTelemetry Java](https://github.com/open-telemetry/opentelemetry-java) | 开发者观测 API/SDK；使用受限 OTLP HTTP/JSON 导出 | Apache-2.0 |
 | [Javalin](https://javalin.io) | 嵌入式 HTTP 服务 | Apache-2.0 |
 | [sqlite-jdbc](https://github.com/xerial/sqlite-jdbc) | SQLite JDBC 驱动 | Apache-2.0 |
 | [JNA / JNA Platform](https://github.com/java-native-access/jna) | 窗口与 AFK 状态的原生调用 | Apache-2.0 / LGPL-2.1 双许可证；本项目按 Apache-2.0 使用 |

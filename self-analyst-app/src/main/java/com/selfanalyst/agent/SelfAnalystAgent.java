@@ -68,6 +68,8 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 public class SelfAnalystAgent implements AutoCloseable {
+    private volatile AgentObservability observability;
+    public void setObservability(AgentObservability value) { observability = value; }
 
     private static final Logger log = LoggerFactory.getLogger(SelfAnalystAgent.class);
     private static final String DESKTOP_USER_ID = "desktop";
@@ -133,7 +135,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         Toolkit discovered = new Toolkit(ToolkitConfig.builder().parallel(false).build());
         discovered.registerTool(toolObject);
         for (String name : discovered.getToolNames()) {
-            var guarded = new MailNativeToolGuard(discovered.getTool(name), () -> mailSessionPolicy, () -> integrationGateway);
+            var guarded = AgentObservability.nativeTool(new MailNativeToolGuard(discovered.getTool(name), () -> mailSessionPolicy, () -> integrationGateway), () -> observability);
             toolkit.registerAgentTool(guarded);
             if (agent != null && agent.getToolkit() != toolkit) agent.getToolkit().registerAgentTool(guarded);
         }
@@ -285,13 +287,13 @@ public class SelfAnalystAgent implements AutoCloseable {
             builtAgent = ReActAgent.builder()
                     .name("SelfAnalyst")
                     .sysPrompt(buildSystemPrompt())
-                    .model(new ChatImageModel(new MailGuardedModel(chatModel, () -> requireChatModelTarget(settings)), config.memoryDir()))
+                    .model(AgentObservability.model(new ChatImageModel(new MailGuardedModel(chatModel, () -> requireChatModelTarget(settings)), config.memoryDir()), () -> observability, "model.generation"))
                     .toolkit(toolkit)
                     .middlewares(List.of(
                             new ConversationContextMiddleware(),
                             new DynamicMemoryContextMiddleware(
                                     lang, () -> memory.profile().buildContextSummary()),
-                            new PlanMiddleware(usageMeter)))
+                            new PlanMiddleware(usageMeter, () -> observability)))
                     .stateStore(agentStateStore)
                     .defaultSessionId(LEGACY_SESSION_ID)
                     .maxIters(config.agentMaxIters())
@@ -304,8 +306,8 @@ public class SelfAnalystAgent implements AutoCloseable {
         TransactionalAgentStateCompactor compactor;
         try {
         if (config.agentCompactionEnabled()) {
-            io.agentscope.core.model.Model compactionModel = new UsageMeteredModel(
-                    new MailGuardedModel(builtPlainModel, () -> requireChatModelTarget(settings)), usageMeter, UsageMeter.Category.SUMMARY);
+            io.agentscope.core.model.Model compactionModel = AgentObservability.model(new UsageMeteredModel(
+                    new MailGuardedModel(builtPlainModel, () -> requireChatModelTarget(settings)), usageMeter, UsageMeter.Category.SUMMARY), () -> observability, "context.compact");
             CompactionConfig compactionConfig = CompactionConfig.builder()
                     .triggerMessages(config.agentCompactionTriggerMessages())
                     .triggerTokens(config.agentCompactionTriggerTokens())
@@ -495,6 +497,8 @@ public class SelfAnalystAgent implements AutoCloseable {
         return runExclusiveStream(activeChat, () -> Flux.defer(() -> {
             PersistedDesktopTurn turn = persistedTurnSupplier.get();
             if (turn == null) throw new ChatSessionUnavailableException(sessionId);
+            if (observability != null) observability.prepare(sessionId, turn.existingHistory() != null && !turn.existingHistory().isEmpty(),
+                    mailSessionPolicy != null && !LEGACY_SESSION_ID.equals(sessionId) && mailSessionPolicy.containsMail(sessionId), !turn.images().isEmpty());
             var gateway = integrationGateway;
             var turnContext = new AgentIntegrationGateway.TurnContext(sessionId, userMessageId, turn.managedDesktop(),
                     com.selfanalyst.integrations.policy.ModelRecipient.from(leasedChatSettings));
@@ -598,7 +602,8 @@ public class SelfAnalystAgent implements AutoCloseable {
         }).doOnCancel(() -> {
             var execution = documents.get();
             if (execution != null) execution.closeAndAwait();
-        })).transform(SelfAnalystAgent::requireTerminalChatResult);
+        })).transform(SelfAnalystAgent::requireTerminalChatResult)
+                .transformDeferred(source -> observability == null ? source : observability.trace("selfanalyst.turn", sessionId, () -> source));
     }
 
     private Flux<ChatStreamEvent> repairChat(String sessionId, String userMessageId,
@@ -1124,7 +1129,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         }
         public Completion completeDetailed(String input, Duration timeout) {
             preflight();
-            return completePlainDetailed(lease.resource().plain(), input, timeout);
+            return completePlainDetailed(lease.resource().plain(), input, timeout, sessionId);
         }
         public boolean available() { return connectionAvailable(lease.settings()); }
         public String cacheIdentity() { return plainCacheIdentity(lease.settings(), lang.code(), AgentPrompts.plainCompletionPrompt(lang)); }
@@ -1165,7 +1170,7 @@ public class SelfAnalystAgent implements AutoCloseable {
         try (PlainTask task = plainTask()) { return task.complete(userInput, timeout); }
     }
 
-    private Completion completePlainDetailed(Model plainModel, String userInput, Duration timeout) {
+    private Completion completePlainDetailed(Model plainModel, String userInput, Duration timeout, String sessionId) {
         if (timeout == null || timeout.isZero() || timeout.isNegative())
             throw new CallFailure(FailureKind.INPUT, "WIKI_TIMEOUT_INVALID", true);
         String plainSystemPrompt = AgentPrompts.plainCompletionPrompt(lang);
@@ -1188,7 +1193,13 @@ public class SelfAnalystAgent implements AutoCloseable {
         try {
             // Subscribe only after the caller's preflight. Once entered, a synchronous SDK error
             // is conservatively treated as a possibly dispatched request as well.
-            request = plainModel.stream(messages, List.of(), null).doOnNext(response -> {
+            Flux<ChatResponse> observed = AgentObservability.model(plainModel, () -> observability, "model.generation").stream(messages, List.of(), null);
+            if (observability != null) {
+                observability.prepare(sessionId, true, sessionId != null && mailSessionPolicy != null && mailSessionPolicy.containsMail(sessionId), false);
+                Flux<ChatResponse> original = observed;
+                observed = observability.trace("summary.generate", sessionId, () -> original.timeout(timeout));
+            }
+            request = observed.doOnNext(response -> {
                 receivedText.append(chatResponseText(response));
                 if (response != null && response.getUsage() != null) receivedUsage.set(response.getUsage());
             }).collectList().toFuture();
@@ -1205,6 +1216,7 @@ public class SelfAnalystAgent implements AutoCloseable {
             if (request != null) request.cancel(true);
             throw plainCallFailure(FailureKind.TIMEOUT, "WIKI_MODEL_TIMEOUT", receivedUsage.get());
         } catch (ExecutionException e) {
+            if (e.getCause() instanceof TimeoutException) throw plainCallFailure(FailureKind.TIMEOUT, "WIKI_MODEL_TIMEOUT", receivedUsage.get());
             throw plainTransportFailure(e.getCause(), receivedUsage.get());
         } catch (RuntimeException e) {
             throw plainTransportFailure(e, receivedUsage.get());

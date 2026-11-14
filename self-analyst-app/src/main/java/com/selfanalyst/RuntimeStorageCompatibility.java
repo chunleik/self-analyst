@@ -139,6 +139,11 @@ final class RuntimeStorageCompatibility {
                 }
                 if (kind.equals("config") && name.equals(".integrations.lock")) continue;
                 if (kind.equals("config") && name.matches("\\.integrations-[a-f0-9-]{36}\\.tmp")) continue;
+                // Optional telemetry settings are never adopted, migrated or enabled here.
+                // The service preserves invalid/unknown settings and fails closed independently
+                // so a damaged optional configuration cannot block access to the user's data.
+                if (kind.equals("config") && Set.of("observability.json", ".observability.lock").contains(name)) continue;
+                if (kind.equals("config") && name.matches("\\.observability-[a-f0-9-]{36}\\.tmp")) continue;
                 if (kind.equals("chat") && name.equals(".writer.lock")) continue;
                 // A crashed VACUUM may leave an incomplete staging file; it is never used as a rollback backup.
                 if (kind.equals("memory") && name.matches("llm-wiki\\.db\\.before-summary-repair-v5\\.bak\\.[0-9a-f-]{36}\\.tmp")) continue;

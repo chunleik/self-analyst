@@ -8,7 +8,8 @@ import com.selfanalyst.integrations.*;
 import com.selfanalyst.integrations.policy.MailSessionPolicy;
 import io.agentscope.core.tool.ToolCallParam;
 import io.modelcontextprotocol.client.McpClient;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.*;
@@ -19,7 +20,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class McpApprovalIntegrationTest {
     @TempDir Path root;
     private static final ObjectMapper JSON=new ObjectMapper();
-    @Test void reviewEnableCallFreezeAndRevokeUseRealSdkWithoutNetwork() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void reviewEnableCallFreezeAndRevokeUseRealSdkWithoutNetwork(boolean delete) throws Exception {
         var calls=new AtomicInteger(); var description=new AtomicReference<>("Reviewed description");
         var executed=new AtomicReference<Object>();
         McpManager.ClientFactory factory=(endpoint,timeout,initialization,max,bearer)->McpClient.sync(new PinnedMcpTransport(
@@ -66,7 +69,15 @@ class McpApprovalIntegrationTest {
             assertEquals(1,calls.get());
             // Revocation interrupts a pending receipt and no bytes for tools/call are sent.
             var pending=executor.submit(()->tool.callAsync(ToolCallParam.builder().input(Map.of()).build()).block());
-            waitFor(approvals); manager.disconnect(manager.config().revision(),"fixture"); pending.get(5,TimeUnit.SECONDS);
+            waitFor(approvals);
+            if (delete) manager.delete(manager.config().revision(), "mcp", "fixture");
+            else manager.disconnect(manager.config().revision(), "fixture");
+            pending.get(5,TimeUnit.SECONDS);
+            if (delete) {
+                assertTrue(manager.config().mcpServers().isEmpty());
+                assertTrue(manager.config().toolApprovals().isEmpty());
+                assertTrue(manager.toolDefinitions("fixture").isEmpty());
+            }
             assertEquals(1,calls.get());assertTrue(approvals.pending(null).isEmpty());
             manager.endTurn(turn);
         }

@@ -1015,6 +1015,28 @@ test('saving successfully triggers discovery, and discovery failure cannot turn 
   assert.equal(h.calls.filter(c => c[1] === 'PUT').length, 1);
 });
 
+test('range save retains unchecked folders as stale display data when automatic rediscovery fails', async () => {
+  let fail = false;
+  const h = folderSetup({handler(path) {
+    if (path === '/mail/folders' && fail) return Promise.reject({code: 'timeout'});
+  }});
+  await h.model.load(); await h.model.select('mail', 'mail-one');
+  h.model.toggleFolder('Work/客户', false);
+  const selected = plain(h.model.entry().allowedFolders);
+  fail = true; await h.model.save();
+  assert.equal(h.model.notice, 'saved'); assert.equal(h.model.error, '');
+  assert.deepEqual(plain(h.model.folders.items), folderResult().folders);
+  assert.equal(h.model.folders.stale, true); assert.equal(h.model.folders.error, 'integrations.error.timeout');
+  assert.deepEqual(plain(h.model.entry().allowedFolders), selected);
+  h.model.selectCurrentFolders(false);
+  assert.deepEqual(plain(h.model.entry().allowedFolders), selected);
+  fail = false; await h.model.loadFolders();
+  assert.equal(h.model.folders.stale, false);
+  assert.deepEqual(plain(h.model.entry().allowedFolders), selected);
+  h.model.change('email', 'other@163.com');
+  assert.equal(h.model.folders.items, null); // A different identity must not inherit this snapshot.
+});
+
 test('dynamic all uncheck becomes exact selection; search and refresh preserve absent selected names', async () => {
   let result = folderResult(); const h = folderSetup({ handler(path) { if (path === '/mail/folders') return Promise.resolve(plain(result)); } });
   await h.model.load(); await h.model.select('mail', 'mail-one'); h.model.toggleFolder('Work/客户', false);
@@ -1104,14 +1126,17 @@ test('disconnect cancels in-flight folder loading and ignores a late result', as
 });
 
 test('activation stays committed when its automatic folder loading fails', async () => {
+  let fail = false;
   const h = folderSetup({stored: false, handler(path) {
     if (path === '/mail/activate') { const data = activationSnapshot({stored: true, enabled: true}); data.config.revision = 5; return Promise.resolve(data); }
-    if (path === '/mail/folders') return Promise.reject({code: 'timeout'});
+    if (path === '/mail/folders' && fail) return Promise.reject({code: 'timeout'});
   }});
   await h.model.load(); await h.model.select('mail', 'mail-one'); h.model.setSecret('TEMP-CODE');
+  await h.model.loadFolders(); fail = true;
   await h.model.activateMail(() => true);
   assert.equal(h.model.notice, 'mailActivated'); assert.equal(h.model.error, '');
   assert.equal(h.model.entry().enabled, true); assert.equal(h.model.entry().storageMode, 'windows');
   assert.equal(h.model.folders.error, 'integrations.error.timeout'); assert.equal(h.model.activationNeedsRefresh, false);
+  assert.deepEqual(plain(h.model.folders.items), folderResult().folders); assert.equal(h.model.folders.stale, true);
   assert.equal(h.calls.filter(call => call[0] === '/mail/activate').length, 1);
 });

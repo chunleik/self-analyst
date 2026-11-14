@@ -102,6 +102,12 @@ function createIntegrationsModel(request, changed) {
     model.folders.loading = false;
     if (clear) model.folders = { items: null, loading: false, error: "", stale: false, query: "" };
   }
+  function expireFolders() {
+    // A permission-only save does not change folder identity. Keep the last complete
+    // list for display, but never use it to derive a new all-to-selected grant.
+    cancelFolders(false);
+    model.folders.stale = !!model.folders.items;
+  }
   function maybeLoadFolders() {
     if (alive && model.selected && model.selected.kind === "mail" && !model.activationNeedsRefresh
         && !model.outcomeUnknown && !metadataDirty() && (model.secret || model.hasStoredMailCredential())) return model.loadFolders();
@@ -199,7 +205,7 @@ function createIntegrationsModel(request, changed) {
       if (!account.displayName.trim()) account.displayName = account.email;
     });
     return request("", "PUT", { expectedRevision: model.snapshot.config.revision, config: configuration })
-      .then(function (snapshot) { if (alive && current === generation) { if (!integrationValidSnapshot(snapshot)) throw { code: "invalid_snapshot" }; model.snapshot = snapshot; model.draft = copy(snapshot.config); saved = true; cancelFolders(true); model.notice = snapshot.credentialCleanupPending ? "cleanupPending" : "saved"; } })
+      .then(function (snapshot) { if (alive && current === generation) { if (!integrationValidSnapshot(snapshot)) throw { code: "invalid_snapshot" }; model.snapshot = snapshot; model.draft = copy(snapshot.config); saved = true; expireFolders(); model.notice = snapshot.credentialCleanupPending ? "cleanupPending" : "saved"; } })
       .catch(function (error) { if (alive && current === generation) model.error = integrationErrorText(error); })
       .finally(function () { if (alive && current === generation) { model.busy = ""; emit(); if (saved) return maybeLoadFolders(); } });
   };
@@ -248,7 +254,7 @@ function createIntegrationsModel(request, changed) {
         model.error = integrationErrorText(model.activationNeedsRefresh ? integrationUncertainMailOutcome() : error, true);
         if (error && error.credentialCleanupPending === true) model.notice = "cleanupPending";
       }
-    }).finally(function () { recovery.pending = false; body.secret = undefined; if (alive && current === generation) { model.busy = ""; emit(); if (model.notice === "mailActivated") { cancelFolders(true); return maybeLoadFolders(); } } });
+    }).finally(function () { recovery.pending = false; body.secret = undefined; if (alive && current === generation) { model.busy = ""; emit(); if (model.notice === "mailActivated") { expireFolders(); return maybeLoadFolders(); } } });
   };
   model.action = function (action, tool) {
     if (model.busy || model.outcomeUnknown || metadataDirty() || !model.entry()) return Promise.resolve();

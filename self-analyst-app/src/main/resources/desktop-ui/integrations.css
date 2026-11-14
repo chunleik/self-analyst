@@ -25,6 +25,7 @@
 @media (max-width: 600px) { .integrations-editor { grid-template-columns: 1fr; } .integration-approvals { padding: 10px; } }
 
 .integration-tools-dialog {
+  margin: auto;
   box-sizing: border-box; width: min(760px, calc(100vw - 32px)); max-width: calc(100vw - 32px);
   max-height: calc(100dvh - 32px); overflow: auto; padding: 20px;
   border: 1px solid var(--border-color); border-radius: 12px;

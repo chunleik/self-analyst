@@ -189,6 +189,10 @@ def check_browser(server, output, executable):
                         assert page.evaluate('document.querySelector("dialog.integration-tools-dialog").contains(document.activeElement)')
                 for width, height in [(1280, 1000), (800, 600), (390, 700)]:
                     page.set_viewport_size({'width': width, 'height': height})
+                    bounds = dialog.bounding_box()
+                    assert bounds is not None and bounds['x'] >= 7 and bounds['y'] >= 7
+                    assert abs(bounds['x'] + bounds['width'] / 2 - width / 2) <= 1
+                    assert abs(bounds['y'] + bounds['height'] / 2 - height / 2) <= 1
                     page.screenshot(path=str(output / f'mcp-tools-{lang}-{width}x{height}.png'))
                     assert dialog.evaluate('e => e.scrollWidth <= e.clientWidth + 2'), f'{lang} {width} dialog overflows'
                 page.keyboard.press('Escape'); expect(dialog).not_to_be_visible()

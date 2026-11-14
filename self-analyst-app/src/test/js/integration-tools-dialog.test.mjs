@@ -182,3 +182,9 @@ test('a permission update cannot blur focused discovery into the background', ()
   assert.equal(h.button('discover').disabled, true);
   assert.equal(h.document.activeElement, h.button('close'));
 });
+
+
+test('native tools dialog explicitly restores centering after the global margin reset', () => {
+  const css = fs.readFileSync(new URL('integrations.css', base), 'utf8');
+  assert.match(css, /\.integration-tools-dialog\s*\{[^}]*margin:\s*auto/);
+});

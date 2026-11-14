@@ -42,6 +42,9 @@ function createIntegrationToolsDialog(options) {
     hint.textContent = String(current.hint || ""); hint.hidden = !hint.textContent;
     error.textContent = String(current.error || "");
     discover.textContent = t(current.known ? "integrations.catalog.refresh" : "integrations.catalog.discover");
+    // Chromium blurs a focused button when it becomes disabled. Without a handoff,
+    // Escape is delivered to document/body and can close the underlying settings.
+    if ((busy || !current.canDiscover) && document.activeElement === discover) closeButton.focus();
     discover.disabled = busy || !current.canDiscover;
     var focusedTool = list.contains(document.activeElement);
     list.replaceChildren();

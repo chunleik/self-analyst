@@ -67,3 +67,8 @@ test('consent discloses earlier context in subsequent calls, without claiming hi
  for(const key of ['observability.intro','observability.confirm.enable']) { assert.match(en[key],/earlier conversation context/); assert.match(en[key],/scan or backfill/); assert.doesNotMatch(en[key],/Nothing is uploaded from prior history/); assert.match(zh[key],/先前对话上下文/); assert.match(zh[key],/不会独立扫描或补传历史记录/); }
  assert.match(zh['observability.scope.all-runtime'],/后续调用/);
 });
+test('grid action keeps intrinsic button height beside multiline CA field',()=>{
+ const css=fs.readFileSync(new URL('observability.css',base),'utf8');
+ const rule=css.match(/\.observability-grid > \.btn\s*\{([^}]+)\}/);
+ assert.ok(rule);assert.match(rule[1],/align-self:\s*start/);assert.match(rule[1],/justify-self:\s*start/);assert.match(rule[1],/max-width:\s*100%/);assert.match(rule[1],/white-space:\s*normal/);
+});

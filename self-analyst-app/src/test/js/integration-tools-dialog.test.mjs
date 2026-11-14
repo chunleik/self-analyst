@@ -9,6 +9,11 @@ function setup() {
   let document;
   class Element {
     constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.events = {}; this.attributes = {}; this.textContent = ''; this.open = false; this.disabled = false; this.isConnected = true; this.tabIndex = ['BUTTON', 'SUMMARY', 'INPUT', 'SELECT', 'TEXTAREA'].includes(this.tagName) ? 0 : -1; }
+    get disabled() { return !!this._disabled; }
+    set disabled(value) {
+      this._disabled = !!value;
+      if (this._disabled && document?.activeElement === this) document.activeElement = document.body;
+    }
     appendChild(child) { this.children.push(child); child.parent = this; return child; }
     replaceChildren(...children) { this.children = children; }
     contains(node) { return this === node || this.children.some(child => child.contains(node)); }
@@ -153,4 +158,27 @@ test('directory refresh recovers removed tool focus before subsequent Tab', () =
   assert.equal(h.document.activeElement, h.button('close'));
   h.root.dispatch('keydown', {key: 'Tab'});
   assert.equal(h.document.activeElement, h.button('refresh'));
+});
+
+
+test('disabling the focused discovery action hands focus to Close before browser blur', async () => {
+  const h = setup(); let reject;
+  h.setDiscover(() => new Promise((_, fail) => { reject = fail; }));
+  h.dialog.open(view(), h.trigger); h.button('discover').focus();
+  h.button('discover').dispatch('click');
+  assert.equal(h.button('discover').disabled, true);
+  assert.equal(h.document.activeElement, h.button('close'));
+  await flush(); reject(new Error('synthetic discovery failed')); await flush();
+  assert.equal(h.root.open, true); assert.equal(h.document.activeElement, h.button('close'));
+  const escape = h.root.dispatch('keydown', {key: 'Escape'});
+  assert.equal(escape.stopped, true); assert.equal(escape.prevented, true);
+  assert.equal(h.root.open, false); assert.equal(h.document.activeElement, h.trigger);
+  assert.equal(h.counts().closes, 1);
+});
+
+test('a permission update cannot blur focused discovery into the background', () => {
+  const h = setup(); h.dialog.open(view(), h.trigger); h.button('discover').focus();
+  h.dialog.update(view({canDiscover: false}));
+  assert.equal(h.button('discover').disabled, true);
+  assert.equal(h.document.activeElement, h.button('close'));
 });

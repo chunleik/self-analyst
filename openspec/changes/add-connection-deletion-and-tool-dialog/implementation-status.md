@@ -59,3 +59,9 @@
 按官方 OTLP HTTP 规范仅将 HTTP 200、JSON Content-Type、非空合法 JSON 对象作为协议接受；204/207、格式错误或正数 rejectedSpans 不计 accepted，零拒绝的 warning 不误算整批失败且不保存原文。仅 429/502/503/504 及受控瞬态网络错误有限重试。新增响应/重试矩阵后，完整 Maven 再次七模块通过：Java 1408（8 跳过），Node 448（32 跳过），0 失败；观测定向 26 项通过。测试临时根路径规范化后同组再次通过。协议接受仍不等于真实 Langfuse 入库/索引。
 
 PR #157 首轮 Linux CI 的开发者观测浏览器场景通过；MCP tools 弹窗 Tab 焦点断言失败，正在修复，不以该旧 head 作为合并依据。
+
+## 联合测试与远端浏览器缺陷修复
+
+新增实际 ReAct/PlanMiddleware/MCP SDK 与真实 loopback OTLP HTTP 的 4 场景联合测试，覆盖来源选中/未选、typed image 降级、审批期间撤销、父子 span/usage 和协议接受。全量 Java 1412（8 跳过）、Node 453（32 跳过），零失败。后台摘要/压缩/界面联合端到端及真实 Langfuse 索引仍不在该证据范围。
+
+两轮远端浏览器真实暴露的 Tab 边界与禁用发现按钮失焦问题均已生产修复并补回归；观测 UI 场景及已下载截图复核通过，另修复会话按钮不合理的拉伸。最终 head 所有必需检查含 Windows 仍待核实，未合并或发版。

@@ -210,7 +210,11 @@ def check_browser(server, output, executable):
                 expect(dialog).to_contain_text(text('integrations.catalog.empty'))
                 mode['discover'] = 'error'; dialog.get_by_role('button', name=text('integrations.catalog.refresh'), exact=True).click()
                 expect(dialog.locator('[role="alert"]')).not_to_be_empty()
+                assert page.evaluate('document.querySelector("dialog.integration-tools-dialog").contains(document.activeElement)')
                 page.keyboard.press('Escape')
+                expect(dialog).not_to_be_visible()
+                expect(page.locator('.integrations-settings')).to_be_visible()
+                expect(button('integrations.catalog.open')).to_be_focused()
                 # A disabled connection can still have a cached, genuinely empty catalog.
                 database['statuses']['beta']['state'] = 'disabled'
                 button('config.discard').click(); select('Beta synthetic'); button('integrations.catalog.open').click()

@@ -1,6 +1,7 @@
 .observability-settings { display: flex; flex-direction: column; min-height: 0; width: 100%; flex: 1; }
 .observability-settings p { line-height: 1.6; overflow-wrap: anywhere; }
 .observability-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin: 12px 0; }
+.observability-grid > .btn { align-self: start; justify-self: start; max-width: 100%; white-space: normal; text-align: left; }
 .observability-field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; min-width: 0; }
 .observability-field input, .observability-field select, .observability-field textarea { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--border-color); border-radius: 7px; padding: 10px; font: inherit; background: var(--bg-input, white); color: inherit; }
 .observability-field textarea { min-height: 100px; }

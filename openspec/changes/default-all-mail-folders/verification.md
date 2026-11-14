@@ -80,3 +80,14 @@
 - OpenSpec 1.11.0：`validate default-all-mail-folders --strict` 通过；`validate --all --strict` 49/49；`git diff --check` 通过。
 - `check-integrations-ui.py` 扩展合成邮箱目录与键盘、失败重试、中文/英文、浅/深系统偏好及窄窗口场景；本地 Chromium 因 socket 权限限制无法启动，没有本地截图。等待 CI 真浏览器验证与工件，不能把 Node 测试视为视觉验收。现有生产 CSS 没有独立深色配色，深色系统偏好测试不宣称新增暗色主题。
 - 未使用真实 QQ/163、真实授权码或用户电脑；Windows/Tauri 人工视觉及真实邮箱端到端仍未验收。远端必需 CI 与发布验证将在精确提交生成后另外记录。
+
+## 2026-11-14 PR 浏览器复核与修复
+
+- 首轮真实浏览器 CI 暴露范围保存后原目录快照被清空：随后的目录发现失败时，未选目录从界面消失，不符合失败保留旧列表的预期；不能将首轮失败记为通过。
+- 本地修复提交 `6cceb8e`（协调者对应的远端提交为 `4810920`）将保存/启用后的同身份目录快照标记为 stale 而非清空。过期快照仅供显示，不能用来新增选择或推导 all→selected 授权；身份变化、关闭、切换和删除仍清理/使迟到响应失效。未削弱浏览器断言。
+- 补充范围保存后重新发现失败、启用后重新发现失败保留旧列表的回归测试。独立审查本地 `6cceb8e`，运行 `node --test self-analyst-app/src/test/js/integrations.test.mjs self-analyst-app/src/test/js/integration-tools-dialog.test.mjs`：93/93 通过。
+- Linux GitHub Actions run `43600644616` 的真实浏览器检查通过；发布协调者实际查看工件 `14115978669` 的中文/英文、宽/窄窗口截图。脚本还覆盖键盘和深色系统偏好；生产 CSS 无独立暗色主题，不把系统偏好截图描述为新增主题，也不把浏览器截图描述为 Windows/Tauri 人工验收。
+- 发布协调者已核对 PR #154 最新 head `4810920` 五项必需 CI 全部成功（包含 Windows 全量验证），并正常合并为 main `3a51619e563d2b9ee9e40b078f0628e19925fa6c`。任务 4.4 完成；版本准备仍不代表已发版。未接触真实 QQ/163、真实授权码或用户电脑，相关端到端验收限制仍保留。
+- CI 证据：[GitHub Actions run 43600644616](https://github.com/chunleik/self-analyst/actions/runs/43600644616)；功能 PR：[#154](https://github.com/chunleik/self-analyst/pull/154)。
+
+- 发布协调者完整读取最新 Windows 日志：Java 各模块合计 `151+29+65+268+76+882=1471` 项，8 项条件跳过，0 失败/错误；Node 默认发现 508/508 全通过（本地显式 `*.test.mjs` 为 503 项，辅助模块发现范围不同）；Rust 49 项、独立 UIA 1 项通过，`MAIL_RUNTIME_CHECK_OK` 与 packaged JAR smoke 成功。上述自动化不替代真实邮箱和原生人工验收。

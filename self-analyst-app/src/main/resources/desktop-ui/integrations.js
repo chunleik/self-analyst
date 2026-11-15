@@ -12,7 +12,7 @@ function integrationErrorText(error, mailActivation) {
     unsafe_login: "unsafeLogin", permission_changed: "permission", integration_authorization_required: "permission", managed_desktop_required: "permission", stale_reference: "stale",
     invalid_config: "validation", unsupported_transport: "validation", tls_error: "tls", tls_failure: "tls", provider_restricted: "unsafeLogin", limit_exceeded: "folderLimit", mail_discovery_busy: "folderBusy" };
   code = aliases[code] || (/^(invalid_|unsupported_|disclosure_required)/.test(code) ? "validation" : code);
-  var allowed = ["conflict", "authentication", "storage", "unsafeLogin", "permission", "stale", "validation", "tls", "timeout", "unavailable", "cancelled", "mailStorage", "mailCredential", "reviewRequired", "modelTarget", "mailOutcomeUncertain", "folderLimit", "folderBusy", "folderSelection"];
+  var allowed = ["conflict", "authentication", "storage", "unsafeLogin", "permission", "stale", "validation", "tls", "timeout", "unavailable", "cancelled", "mailStorage", "mailCredential", "reviewRequired", "modelTarget", "mailOutcomeUncertain", "folderLimit", "folderBusy", "folderSelection", "mailScopeUnsupported"];
   return t("integrations.error." + (allowed.indexOf(code) >= 0 ? code : "unavailable"));
 }
 
@@ -38,7 +38,7 @@ function integrationValidSnapshot(snapshot) {
   }
   return config.mailAccounts.every(function (entry) {
     return identity(entry) && ["qq", "163"].indexOf(entry.provider) >= 0 && text(entry.email) && text(entry.displayName)
-      && ["all", "selected"].indexOf(entry.folderScope) >= 0
+      && entry.folderScope === "all"
       && strings(entry.allowedFolders) && typeof entry.bodyAccess === "boolean" && credential(entry)
       && [0, 1].indexOf(entry.disclosureVersion) >= 0 && (!entry.enabled || entry.disclosureVersion === 1);
   }) && config.mcpServers.every(function (entry) {
@@ -85,41 +85,19 @@ function createIntegrationsModel(request, changed) {
   if (integrationMailActivationRecovery) {
     model.snapshot = copy(integrationMailActivationRecovery.snapshot); model.draft = copy(model.snapshot.config);
   }
-  var alive = true, generation = 0, controller = null, readGeneration = 0, folderGeneration = 0, folderRequest = null;
-  model.folders = { items: null, loading: false, error: "", stale: false, query: "" };
+  var alive = true, generation = 0, controller = null, readGeneration = 0;
   function copy(value) { return JSON.parse(JSON.stringify(value)); }
   function emit() { if (alive) changed(model); }
-  function invalidate() { cancelFolders(false); generation++; if (controller) controller.abort(); controller = null; model.diagnostic = null; model.tools = []; }
-  function cancelFolders(clear) {
-    folderGeneration++;
-    if (folderRequest) {
-      var pending = folderRequest; folderRequest = null;
-      // Cancellation is independent of the aborted discovery response and never changes configuration.
-      try { Promise.resolve(request("/mail/folders/cancel", "POST", { id: pending.id, requestId: pending.requestId })).catch(function () {}); }
-      catch (ignored) { /* Backend also expires every operation. */ }
-      pending.controller.abort();
-    }
-    model.folders.loading = false;
-    if (clear) model.folders = { items: null, loading: false, error: "", stale: false, query: "" };
-  }
-  function expireFolders() {
-    // A permission-only save does not change folder identity. Keep the last complete
-    // list for display, but never use it to derive a new all-to-selected grant.
-    cancelFolders(false);
-    model.folders.stale = !!model.folders.items;
-  }
-  function maybeLoadFolders() {
-    if (alive && model.selected && model.selected.kind === "mail" && !model.activationNeedsRefresh
-        && !model.outcomeUnknown && !metadataDirty() && (model.secret || model.hasStoredMailCredential())) return model.loadFolders();
-    return Promise.resolve();
-  }
+  function invalidate() { generation++; if (controller) controller.abort(); controller = null; model.diagnostic = null; model.tools = []; }
   function clearSecret() { model.secret = ""; model.persist = false; }
   function invalidRead() { return model.activationNeedsRefresh || integrationMailActivationRecovery ? integrationUncertainMailOutcome() : { code: "unavailable" }; }
   function acceptRead(snapshot, recovery, wasPending) {
+    if (snapshot && snapshot.config && Array.isArray(snapshot.config.mailAccounts)
+        && snapshot.config.mailAccounts.some(function (entry) { return entry && entry.folderScope === "selected"; }))
+      throw { code: "mailScopeUnsupported" };
     if (!integrationValidSnapshot(snapshot)) throw invalidRead();
     var draft = copy(snapshot.config);
     if (recovery === integrationMailActivationRecovery && !wasPending) integrationMailActivationRecovery = null;
-    if (model.snapshot && model.snapshot.config.revision !== snapshot.config.revision) cancelFolders(true);
     model.snapshot = snapshot; model.draft = draft;
     model.activationNeedsRefresh = !!integrationMailActivationRecovery;
   }
@@ -133,7 +111,7 @@ function createIntegrationsModel(request, changed) {
   };
   model.load = function () {
     if (model.busy) return Promise.resolve();
-    invalidate(); cancelFolders(true); clearSecret(); var current = generation; model.loading = true; model.error = ""; emit();
+    invalidate(); clearSecret(); var current = generation; model.loading = true; model.error = ""; emit();
     controller = new AbortController();
     var recovery = integrationMailActivationRecovery, wasPending = !!(recovery && recovery.pending);
     return request("", "GET", undefined, controller.signal).then(function (snapshot) {
@@ -145,14 +123,13 @@ function createIntegrationsModel(request, changed) {
   };
   model.select = function (kind, id) {
     if (model.busy || model.loading) return;
-    invalidate(); cancelFolders(true); clearSecret(); model.selected = { kind: kind, id: id }; model.error = ""; model.notice = ""; emit();
-    return maybeLoadFolders();
+    invalidate(); clearSecret(); model.selected = { kind: kind, id: id }; model.error = ""; model.notice = ""; emit();
   };
   model.add = function (kind) {
     if (!model.draft || model.loading || model.outcomeUnknown || model.busy || kind === "mail" && model.activationNeedsRefresh) return;
     var id = (kind === "mail" ? "mail-" : "mcp-") + crypto.randomUUID();
     var entry = kind === "mail" ? { id: id, provider: "qq", email: "", displayName: "", enabled: false,
-      folderScope: "all", allowedFolders: ["INBOX"], bodyAccess: false, credentialRef: null, storageMode: "session", disclosureVersion: 0 }
+      folderScope: "all", allowedFolders: [], bodyAccess: false, credentialRef: null, storageMode: "session", disclosureVersion: 0 }
       : { id: id, name: "", enabled: false, transport: "streamable-http", endpoint: "", authType: "anonymous", credentialRef: null, storageMode: "session",
         budget: { connectTimeoutSeconds: 10, requestTimeoutSeconds: 30, maxTools: 64, maxSchemaBytes: 32768, maxResultBytes: 262144 } };
     model.draft[kind === "mail" ? "mailAccounts" : "mcpServers"].push(entry); model.select(kind, id);
@@ -161,17 +138,15 @@ function createIntegrationsModel(request, changed) {
     var entry = model.entry(); if (!entry || model.busy || model.outcomeUnknown || model.selected.kind === "legacy"
       || model.selected.kind === "mail" && model.activationNeedsRefresh) return;
     var allowed = model.selected.kind === "mail"
-      ? ["provider", "email", "displayName", "folderScope", "allowedFolders", "bodyAccess"]
+      ? ["provider", "email", "displayName", "bodyAccess"]
       : ["name", "endpoint", "authType", "enabled"];
     if (allowed.indexOf(field) < 0) return;
     invalidate();
     if (["provider", "email", "endpoint", "authType"].indexOf(field) >= 0) {
-      cancelFolders(true); clearSecret();
+      clearSecret();
       // Mail permission and credential resets belong to the metadata transaction on the server.
       if (model.selected.kind === "mcp") { entry.enabled = false; entry.credentialRef = null; entry.storageMode = "session"; }
     }
-    if (field === "folderScope" && value === "selected" && !entry.allowedFolders.length && model.folders.items && !model.folders.stale)
-      entry.allowedFolders = model.folders.items.filter(function (item) { return item.selectable; }).map(function (item) { return item.name; });
     entry[field] = value; model.error = ""; model.notice = "";
     if (field === "endpoint") {
       try {
@@ -185,7 +160,7 @@ function createIntegrationsModel(request, changed) {
   };
   model.setSecret = function (value) {
     if (!model.busy && !model.outcomeUnknown && model.entry() && !(model.selected.kind === "mail" && model.activationNeedsRefresh)) {
-      invalidate(); cancelFolders(true); model.secret = value; model.error = ""; emit();
+      invalidate(); model.secret = value; model.error = ""; emit();
     }
   };
   model.setPersist = function (value) {
@@ -196,18 +171,17 @@ function createIntegrationsModel(request, changed) {
   model.save = function () {
     if (!model.snapshot || model.busy || model.outcomeUnknown || !metadataDirty()) return Promise.resolve();
     if (model.draft.mailAccounts.some(function (entry) {
-      return ["all", "selected"].indexOf(entry.folderScope) < 0 || entry.allowedFolders.length > 256
-        || entry.folderScope === "selected" && !entry.allowedFolders.length;
-    })) { model.error = t("integrations.error.folderSelection"); emit(); return Promise.resolve(); }
-    invalidate(); var saved = false, current = generation; model.busy = "save"; model.error = ""; emit();
+      return entry.folderScope !== "all";
+    })) { model.error = t("integrations.error.mailScopeUnsupported"); emit(); return Promise.resolve(); }
+    invalidate(); var current = generation; model.busy = "save"; model.error = ""; emit();
     var configuration = copy(model.draft);
     configuration.mailAccounts.forEach(function (account) {
       if (!account.displayName.trim()) account.displayName = account.email;
     });
     return request("", "PUT", { expectedRevision: model.snapshot.config.revision, config: configuration })
-      .then(function (snapshot) { if (alive && current === generation) { if (!integrationValidSnapshot(snapshot)) throw { code: "invalid_snapshot" }; model.snapshot = snapshot; model.draft = copy(snapshot.config); saved = true; expireFolders(); model.notice = snapshot.credentialCleanupPending ? "cleanupPending" : "saved"; } })
+      .then(function (snapshot) { if (alive && current === generation) { if (!integrationValidSnapshot(snapshot)) throw { code: "invalid_snapshot" }; model.snapshot = snapshot; model.draft = copy(snapshot.config); model.notice = snapshot.credentialCleanupPending ? "cleanupPending" : "saved"; } })
       .catch(function (error) { if (alive && current === generation) model.error = integrationErrorText(error); })
-      .finally(function () { if (alive && current === generation) { model.busy = ""; emit(); if (saved) return maybeLoadFolders(); } });
+      .finally(function () { if (alive && current === generation) { model.busy = ""; emit(); } });
   };
   model.hasStoredMailCredential = function () {
     var entry = model.entry(), live = entry && model.snapshot && model.snapshot.statuses && model.snapshot.statuses[entry.id];
@@ -216,6 +190,7 @@ function createIntegrationsModel(request, changed) {
   model.activateMail = function (confirm) {
     var entry = model.entry();
     if (!alive || model.busy || model.outcomeUnknown || metadataDirty() || !entry || model.selected.kind !== "mail") return Promise.resolve();
+    if (entry.folderScope !== "all") { model.error = t("integrations.error.mailScopeUnsupported"); emit(); return Promise.resolve(); }
     var failure = model.activationNeedsRefresh || integrationMailActivationRecovery ? "mailOutcomeUncertain" : !model.snapshot.persistentCredentialsSupported ? "mailStorage"
       : !model.snapshot.modelTarget ? "modelTarget" : !model.secret && !model.hasStoredMailCredential() ? "mailCredential" : "";
     if (failure) { model.error = t("integrations.error." + failure); emit(); return Promise.resolve(); }
@@ -254,23 +229,28 @@ function createIntegrationsModel(request, changed) {
         model.error = integrationErrorText(model.activationNeedsRefresh ? integrationUncertainMailOutcome() : error, true);
         if (error && error.credentialCleanupPending === true) model.notice = "cleanupPending";
       }
-    }).finally(function () { recovery.pending = false; body.secret = undefined; if (alive && current === generation) { model.busy = ""; emit(); if (model.notice === "mailActivated") { expireFolders(); return maybeLoadFolders(); } } });
+    }).finally(function () { recovery.pending = false; body.secret = undefined; if (alive && current === generation) { model.busy = ""; emit(); } });
   };
   model.action = function (action, tool) {
     if (model.busy || model.outcomeUnknown || metadataDirty() || !model.entry()) return Promise.resolve();
     if (model.selected.kind === "mail" && model.activationNeedsRefresh) return Promise.resolve();
     if (model.selected.kind === "legacy" && ["discover", "tools/approve"].indexOf(action) < 0) return Promise.resolve();
     if (action === "credential" && (model.selected.kind === "mail" || !model.secret)) return Promise.resolve();
-    invalidate(); if (action === "disconnect") cancelFolders(true); var current = generation, selected = copy(model.selected);
+    invalidate(); var current = generation, selected = copy(model.selected);
     var body = { kind: selected.kind, id: selected.id };
     if (action === "credential") Object.assign(body, { secret: model.secret, persist: model.persist, expectedRevision: model.snapshot.config.revision });
-    if (action === "disconnect") body.expectedRevision = model.snapshot.config.revision;
+    body.expectedRevision = model.snapshot.config.revision;
     if (action === "discover") body = { serverId: selected.id };
     if (action === "tools/approve") body = { serverId: selected.id, toolName: tool.name, digest: tool.digest, expectedRevision: model.snapshot.config.revision };
     clearSecret(); model.busy = action; model.error = ""; model.notice = ""; controller = new AbortController(); emit();
     return request("/" + action, "POST", body, controller.signal).then(function (result) {
       if (!alive || current !== generation) return;
-      if (result.config) { model.snapshot = result; model.draft = copy(result.config); }
+      if (result.config) {
+        if (Array.isArray(result.config.mailAccounts) && result.config.mailAccounts.some(function (account) { return account.folderScope !== "all"; }))
+          throw { code: "mailScopeUnsupported" };
+        if (!integrationValidSnapshot(result)) throw { code: "invalid_snapshot" };
+        model.snapshot = result; model.draft = copy(result.config);
+      }
       if (action === "test") model.diagnostic = result.config ? { ok: true } : result;
       if (action === "discover") model.tools = Array.isArray(result.tools) ? result.tools : [];
       model.notice = result.credentialCleanupPending ? "cleanupPending" : action === "test" ? "tested" : action === "discover" ? "discovered" : action === "disconnect" ? "disconnected" : "saved";
@@ -288,7 +268,7 @@ function createIntegrationsModel(request, changed) {
     if (model.busy || model.loading || model.outcomeUnknown || model.selected && model.selected.kind === "mail" && model.activationNeedsRefresh || !model.entry() || model.selected.kind === "legacy") return Promise.resolve();
     var selected = copy(model.selected), saved = model.savedEntry(), identity = copy(saved || model.entry());
     if (typeof confirmDelete !== "function" || !confirmDelete({ saved: !!saved, kind: selected.kind, entry: identity })) return Promise.resolve();
-    invalidate(); cancelFolders(true); clearSecret(); var current = generation;
+    invalidate(); clearSecret(); var current = generation;
     var collection = selected.kind === "mail" ? "mailAccounts" : "mcpServers";
     function removeFrom(config) {
       config[collection] = config[collection].filter(function (item) { return item.id !== selected.id; });
@@ -353,65 +333,8 @@ function createIntegrationsModel(request, changed) {
       emit();
     }).catch(function (error) { if (alive && version === readGeneration && current === generation) { model.error = integrationErrorText(model.activationNeedsRefresh ? integrationUncertainMailOutcome() : error); emit(); } });
   };
-  model.loadFolders = function () {
-    var entry = model.entry();
-    if (!alive || model.busy || model.outcomeUnknown || model.activationNeedsRefresh || metadataDirty() || !entry
-        || model.selected.kind !== "mail" || model.folders.loading) return Promise.resolve();
-    if (!model.secret && !model.hasStoredMailCredential()) {
-      model.folders.error = t("integrations.folders.waitingCredential"); emit(); return Promise.resolve();
-    }
-    cancelFolders(false);
-    var current = folderGeneration, id = entry.id, revision = model.snapshot.config.revision;
-    var body = { id: id, expectedRevision: revision, requestId: crypto.randomUUID() };
-    if (model.secret) body.secret = model.secret;
-    var operation = { id: id, requestId: body.requestId, controller: new AbortController() }; folderRequest = operation;
-    model.folders.loading = true; model.folders.error = ""; model.folders.stale = !!model.folders.items; emit();
-    var pending;
-    try { pending = request("/mail/folders", "POST", body, operation.controller.signal); }
-    catch (error) { pending = Promise.reject(error); }
-    return Promise.resolve(pending).then(function (result) {
-      if (!alive || current !== folderGeneration || !model.selected || model.selected.id !== id
-          || model.snapshot.config.revision !== revision) return;
-      var names = [];
-      if (!result || result.accountId !== id || result.revision !== revision || result.complete !== true
-          || !Array.isArray(result.folders) || result.folders.length > 256 || !result.folders.every(function (item) {
-            if (!item || typeof item.name !== "string" || !item.name || item.name.length > 256 || /[\u0000-\u001f\u007f]/.test(item.name)
-                || typeof item.separator !== "string" || item.separator.length > 1 || typeof item.selectable !== "boolean"
-                || names.indexOf(item.name) >= 0) return false;
-            names.push(item.name); return true;
-          })) throw { code: "invalid_folder_response" };
-      model.folders.items = copy(result.folders); model.folders.stale = false;
-    }).catch(function (error) {
-      if (alive && current === folderGeneration) model.folders.error = integrationErrorText(error);
-    }).finally(function () {
-      delete body.secret;
-      if (folderRequest === operation) folderRequest = null;
-      if (alive && current === folderGeneration) { model.folders.loading = false; emit(); }
-    });
-  };
-  model.filterFolders = function (query) { model.folders.query = String(query); emit(); };
-  model.toggleFolder = function (name, checked) {
-    var entry = model.entry();
-    if (!entry || model.selected.kind !== "mail" || model.busy || model.outcomeUnknown || model.activationNeedsRefresh) return;
-    var available = model.folders.items && !model.folders.stale && model.folders.items.filter(function (item) { return item.selectable; });
-    if (entry.folderScope === "all") {
-      if (!available || checked || !available.some(function (item) { return item.name === name; })) return;
-      entry.allowedFolders = available.map(function (item) { return item.name; }); entry.folderScope = "selected";
-    }
-    if (checked && (!available || !available.some(function (item) { return item.name === name; }))) return;
-    var selected = entry.allowedFolders.filter(function (item) { return item !== name; });
-    if (checked) selected.push(name);
-    model.change("allowedFolders", selected);
-  };
-  model.selectCurrentFolders = function (clear) {
-    var entry = model.entry();
-    if (!entry || model.selected.kind !== "mail" || model.busy || model.outcomeUnknown || model.activationNeedsRefresh
-        || !clear && (!model.folders.items || model.folders.stale)) return;
-    entry.folderScope = "selected";
-    model.change("allowedFolders", clear ? [] : model.folders.items.filter(function (item) { return item.selectable; }).map(function (item) { return item.name; }));
-  };
   model.cancel = function () { if (!model.busy || model.busy === "test" || model.busy === "discover") { invalidate(); clearSecret(); model.busy = ""; emit(); } };
-  model.destroy = function () { alive = false; invalidate(); cancelFolders(true); clearSecret(); model.draft = null; model.snapshot = null; };
+  model.destroy = function () { alive = false; invalidate(); clearSecret(); model.draft = null; model.snapshot = null; };
   return model;
 }
 
@@ -436,7 +359,7 @@ function integrationButton(text, action) {
 }
 
 function mountIntegrations(root) {
-  var model = createIntegrationsModel(api.integrations, render), mounted = true, builtFor = null, controls = {}, status, error, notice, list, editor, tools, footer, connectionState, folderList, folderStatus, folderCount, folderSearch, folderLoad, folderAll, folderClear;
+  var model = createIntegrationsModel(api.integrations, render), mounted = true, builtFor = null, controls = {}, status, error, notice, list, editor, tools, footer, connectionState;
   var catalogOpen = false, catalog = createIntegrationToolsDialog({
     onDiscover: function () { return model.action("discover"); },
     onClose: function () { catalogOpen = false; if (model.busy === "discover") model.cancel(); }
@@ -518,23 +441,7 @@ function mountIntegrations(root) {
       providerHelp.id = "integration-provider-help"; providerHelp.target = "_blank"; providerHelp.rel = "noopener noreferrer";
       providerHelp.referrerPolicy = "no-referrer"; editor.appendChild(providerHelp);
       field("email", "integrations.email", "email"); field("displayName", "integrations.displayName");
-      field("folderScope", "integrations.folderScope", "text", [["all", t("integrations.folderScope.all")], ["selected", t("integrations.folderScope.selected")]])
-        .setAttribute("aria-describedby", "integration-folder-scope-hint");
-      var folderHint = integrationElement("p", null, "integrations-hint"); folderHint.id = "integration-folder-scope-hint"; editor.appendChild(folderHint);
-      var picker = integrationElement("section", null, "integration-folder-picker"); picker.setAttribute("aria-label", t("integrations.folders.title"));
-      var searchLabel = integrationElement("label", t("integrations.folders.search"), "integrations-field");
-      folderSearch = integrationElement("input"); folderSearch.type = "search"; folderSearch.id = "integration-folder-search";
-      searchLabel.htmlFor = folderSearch.id; folderSearch.maxLength = 256;
-      folderSearch.addEventListener("input", function () { model.filterFolders(folderSearch.value); }); searchLabel.appendChild(folderSearch); picker.appendChild(searchLabel);
-      folderStatus = integrationElement("p", null, "integrations-hint"); folderStatus.setAttribute("role", "status"); picker.appendChild(folderStatus);
-      folderCount = integrationElement("p", null, "integrations-hint"); folderCount.setAttribute("aria-live", "polite"); picker.appendChild(folderCount);
-      var folderActions = integrationElement("div", null, "integrations-actions");
-      folderLoad = integrationButton(t("integrations.folders.load"), function () { model.loadFolders(); }); folderLoad.id = "integration-folder-load";
-      folderAll = integrationButton(t("integrations.folders.selectCurrent"), function () { model.selectCurrentFolders(false); });
-      folderClear = integrationButton(t("integrations.folders.clear"), function () { model.selectCurrentFolders(true); });
-      folderActions.appendChild(folderLoad); folderActions.appendChild(folderAll); folderActions.appendChild(folderClear); picker.appendChild(folderActions);
-      folderList = integrationElement("div", null, "integration-folder-list"); folderList.setAttribute("role", "group");
-      folderList.setAttribute("aria-label", t("integrations.folders.title")); picker.appendChild(folderList); editor.appendChild(picker);
+      editor.appendChild(integrationElement("p", t("integrations.mailAllFolders"), "integrations-hint"));
       field("bodyAccess", "integrations.bodyAccess", "checkbox");
       editor.appendChild(integrationElement("p", t("integrations.mailDisclosure"), "integrations-disclosure"));
       var recipient = integrationElement("p", null, "integrations-disclosure"); recipient.id = "integration-model-target"; editor.appendChild(recipient);
@@ -571,43 +478,6 @@ function mountIntegrations(root) {
     }
     var cancel = integrationButton(t("action.cancel"), function () { model.cancel(); }); controls.cancel = cancel; row.appendChild(cancel); editor.appendChild(row);
     editor.appendChild(integrationElement("p", t(kind === "mail" ? "integrations.mailSaveFirst" : "integrations.saveFirst"), "integrations-hint"));
-  }
-  function renderFolders(data, entry) {
-    var state = data.folders, locked = !!data.busy || data.outcomeUnknown || data.activationNeedsRefresh;
-    var items = state.items || [], usable = state.items && !state.stale;
-    var waiting = !data.secret && !data.hasStoredMailCredential();
-    folderLoad.textContent = t(state.items ? "integrations.folders.refresh" : "integrations.folders.load");
-    folderLoad.disabled = locked || data.metadataDirty() || state.loading || waiting;
-    folderAll.disabled = locked || !usable; folderClear.disabled = locked;
-    folderSearch.disabled = locked; if (folderSearch.value !== state.query) folderSearch.value = state.query;
-    folderStatus.textContent = state.loading ? t("integrations.folders.loading") : state.error
-      || (data.metadataDirty() ? t("integrations.folders.saveFirst") : waiting ? t("integrations.folders.waitingCredential")
-      : state.items ? t(items.length ? "integrations.folders.loaded" : "integrations.folders.empty") : t("integrations.folders.ready"));
-    if (state.stale) folderStatus.textContent += " " + t("integrations.folders.stale");
-    folderCount.textContent = entry.folderScope === "all" ? t("integrations.folders.dynamicAll")
-      : t("integrations.folders.selectedCount", { count: entry.allowedFolders.length });
-    if (entry.folderScope === "selected" && !entry.allowedFolders.length) folderCount.textContent += " " + t("integrations.error.folderSelection");
-    var rows = items.slice(), present = rows.map(function (item) { return item.name; });
-    if (entry.folderScope === "selected") entry.allowedFolders.forEach(function (name) {
-      if (present.indexOf(name) < 0) rows.push({ name: name, separator: "", selectable: true, unavailable: true });
-    });
-    rows.sort(function (a, b) { return a.name.localeCompare(b.name); });
-    var focusName = document.activeElement && document.activeElement.getAttribute("data-folder-name");
-    folderList.replaceChildren(); folderList.setAttribute("aria-busy", String(state.loading));
-    rows.filter(function (item) { return item.name.toLocaleLowerCase().indexOf(state.query.toLocaleLowerCase()) >= 0; }).forEach(function (item, index) {
-      var row = integrationElement("label", null, "integration-folder-row");
-      if (item.separator && item.name.indexOf(item.separator) >= 0) row.classList.add("integration-folder-nested");
-      var checkbox = integrationElement("input"); checkbox.type = "checkbox"; checkbox.id = "integration-folder-choice-" + index;
-      row.htmlFor = checkbox.id; checkbox.setAttribute("data-folder-name", item.name);
-      checkbox.checked = item.selectable && (entry.folderScope === "all" || entry.allowedFolders.indexOf(item.name) >= 0);
-      checkbox.disabled = locked || !item.selectable || entry.folderScope === "all" && !usable
-        || !checkbox.checked && (!usable || item.unavailable);
-      checkbox.addEventListener("change", function () { model.toggleFolder(item.name, checkbox.checked); }); row.appendChild(checkbox);
-      var text = integrationElement("span", item.name, "integration-folder-path"); row.appendChild(text);
-      if (item.unavailable) row.appendChild(integrationElement("span", t("integrations.folders.unavailable"), "integrations-hint"));
-      if (!item.selectable) row.appendChild(integrationElement("span", t("integrations.folders.container"), "integrations-hint"));
-      folderList.appendChild(row); if (focusName === item.name) checkbox.focus();
-    });
   }
   function render(data) {
     status.textContent = data.loading ? t("common.loading") : data.snapshot ? t("integrations.revision", { revision: data.snapshot.config.revision }) : "";
@@ -656,16 +526,14 @@ function mountIntegrations(root) {
       if (data.hasStoredMailCredential()) storageText += (storageText ? " " : "") + t("integrations.mailStoredCredential");
       editor.querySelector("#integration-mail-storage").textContent = storageText;
       controls.activateMail.textContent = t(!data.secret && data.hasStoredMailCredential() ? "integrations.action.activateStoredMail" : "integrations.action.activateMail");
-      editor.querySelector("#integration-folder-scope-hint").textContent = t(entry.folderScope === "all"
-        ? "integrations.folderScope.allHint" : "integrations.folderScope.selectedHint");
-      renderFolders(data, entry);
+
     }
     if (entry) Object.keys(controls).forEach(function (name) {
       var input = controls[name];
       if (input.tagName === "BUTTON") {
         if (name === "catalog") { input.disabled = !!data.busy; return; }
         if (name === "delete") { input.disabled = !!data.busy || data.loading || data.outcomeUnknown || data.selected.kind === "mail" && data.activationNeedsRefresh; return; }
-        input.disabled = name === "cancel" ? (!!data.busy && data.busy !== "test" && data.busy !== "discover") || (!data.busy && !data.secret && !data.folders.loading)
+        input.disabled = name === "cancel" ? (!!data.busy && data.busy !== "test" && data.busy !== "discover") || (!data.busy && !data.secret)
           : !!data.busy || data.outcomeUnknown || data.metadataDirty() || name === "credential" && !data.secret
           || data.selected.kind === "mail" && data.activationNeedsRefresh && name !== "refreshMail"
           || name === "activateMail" && (data.activationNeedsRefresh || !data.snapshot.persistentCredentialsSupported || !data.snapshot.modelTarget || !data.secret && !data.hasStoredMailCredential());

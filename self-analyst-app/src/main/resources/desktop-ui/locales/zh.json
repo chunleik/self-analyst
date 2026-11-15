@@ -325,7 +325,6 @@
   "chat.welcomeHint": "可以追问当前状态、记录想法、生成待办",
   "chat.imageCount": "{count}/4 张图片",
   "chat.imageDropInvalid": "仅支持本地 PNG/JPEG 图片，不支持文件夹或链接。",
-  "chat.imageHelp": "图片要求",
   "chat.imageRejected": "未添加：{count}",
   "chat.composerPreparing": "正在准备…",
   "chat.composerStop": "停止生成",
@@ -1048,5 +1047,7 @@
   "integrations.folders.container": "仅目录容器",
   "integrations.error.folderLimit": "服务商文件夹列表超过 256 项限制，未静默截断。",
   "integrations.error.folderBusy": "文件夹正在加载，请等待完成或取消。",
-  "integrations.error.folderSelection": "请选择 1 至 256 个文件夹，或切换为全部文件夹。"
+  "integrations.error.folderSelection": "请选择 1 至 256 个文件夹，或切换为全部文件夹。",
+  "integrations.mailAllFolders": "读取全部文件夹（包括以后新增的文件夹），仅在请求时读取邮件，不进行后台同步。",
+  "integrations.error.mailScopeUnsupported": "此版本设置页仅支持全部文件夹，不会自动转换指定范围配置。"
 }

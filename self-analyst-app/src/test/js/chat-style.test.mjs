@@ -62,3 +62,11 @@ assert.match(cssRule(".chat-composer"), /flex-direction:\s*column/);
 assert.match(cssRule(".chat-image-composer input[type=file][hidden]"), /display:\s*none/);
 assert.match(styles, /:focus-visible/);
 assert.match(shell, /disable_drag_drop_handler\(\)/, "Windows DOM file drop must not be intercepted");
+
+assert.ok(html.indexOf('id="chat-image-previews"') < html.indexOf('id="chat-tab-input"'), 'previews precede text input');
+assert.match(html, /id="chat-image-previews"[^>]*hidden/);
+assert.match(cssRule('.chat-image-previews[hidden]'), /display:\s*none/);
+assert.match(cssRule('.chat-image-previews'), /max-height:/);
+assert.doesNotMatch(styles, /\.chat-composer textarea:focus\s*\{[^}]*outline:\s*(?!none)[1-9]/);
+assert.match(cssRule('.chat-composer:has(textarea:focus-visible)'), /outline:\s*2px solid/);
+assert.match(cssRule('.chat-composer:focus-within'), /border-color:/);

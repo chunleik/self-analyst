@@ -325,7 +325,6 @@
   "chat.welcomeHint": "Ask about your current status, capture ideas, and generate to-dos",
   "chat.imageCount": "{count}/4 images",
   "chat.imageDropInvalid": "Use local PNG/JPEG images. Folders and links are not supported.",
-  "chat.imageHelp": "Image requirements",
   "chat.imageRejected": "Not added: {count}",
   "chat.composerPreparing": "Preparing…",
   "chat.composerStop": "Stop generating",
@@ -1048,5 +1047,7 @@
   "integrations.folders.container": "Container only",
   "integrations.error.folderLimit": "The server folder list exceeds the supported limit of 256. It was not silently truncated.",
   "integrations.error.folderBusy": "Folder discovery is already running. Wait for it to finish or cancel it.",
-  "integrations.error.folderSelection": "Select between 1 and 256 folders, or use All folders."
+  "integrations.error.folderSelection": "Select between 1 and 256 folders, or use All folders.",
+  "integrations.mailAllFolders": "Read all folders, including folders added later. Mail is read on request, not synchronized in the background.",
+  "integrations.error.mailScopeUnsupported": "This settings version supports all folders only; selected-folder configurations are not converted automatically."
 }

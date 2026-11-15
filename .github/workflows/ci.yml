@@ -144,6 +144,9 @@ jobs:
       - name: 验证连接删除与 MCP 工具弹窗
         if: ${{ !cancelled() }}
         run: python scripts/check-integrations-ui.py --output-dir artifacts/integrations-ui
+      - name: 验证会话输入与图片预览
+        if: ${{ !cancelled() }}
+        run: python scripts/check-chat-composer-ui.py --output-dir artifacts/chat-composer-ui
       - name: 验证开发者 Langfuse 设置界面
         if: ${{ !cancelled() }}
         run: python scripts/check-observability-ui.py --output-dir artifacts/observability-ui
@@ -169,5 +172,13 @@ jobs:
         with:
           name: observability-ui-screenshots
           path: artifacts/observability-ui/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: 保存会话输入截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-composer-ui-screenshots
+          path: artifacts/chat-composer-ui/
           if-no-files-found: warn
           retention-days: 14

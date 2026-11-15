@@ -26,7 +26,8 @@ def main():
         for language in ['zh', 'en']:
             page = browser.new_page()
             page.route('**/*', lambda route: route.abort())
-            page.set_content('<style>' + (UI / 'styles.css').read_text() + '</style>' + markup)
+            page.set_content('<!doctype html><html><head><meta charset="utf-8"><style>' +
+                             (UI / 'styles.css').read_text() + '</style></head><body>' + markup + '</body></html>')
             page.evaluate('locale => window.locale = locale', json.loads((UI / f'locales/{language}.json').read_text()))
             page.add_script_tag(content='''
               var API_BASE = '', api = {}, session = { messagesLoaded: true, messages: [] };
@@ -40,7 +41,11 @@ def main():
             ''')
             page.add_script_tag(content=(UI / 'chat-composer.js').read_text())
             page.add_script_tag(content=(UI / 'chat-images.js').read_text())
-            page.evaluate('renderChatImages()')
+            page.evaluate('(language) => { document.documentElement.lang = language; }', language)
+            page.evaluate('''() => {
+              document.querySelectorAll('[data-i18n]').forEach(node => { node.textContent = t(node.dataset.i18n); });
+              renderChatImages();
+            }''')
             textarea = page.locator('#chat-tab-input')
             previews = page.locator('#chat-image-previews')
             expect(previews).to_be_hidden()

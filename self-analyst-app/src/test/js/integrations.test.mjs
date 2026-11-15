@@ -919,3 +919,16 @@ test('activation rejects unsupported scope before confirmation or secret transmi
   assert.equal(h.model.error, 'integrations.error.mailScopeUnsupported');
   assert.deepEqual(h.calls.map(call => [call[0], call[1]]), [['', 'GET']]);
 });
+
+
+test('visible mail guidance describes fixed all-folder access without obsolete picker instructions', () => {
+  for (const lang of ['zh', 'en']) {
+    const locale = JSON.parse(fs.readFileSync(new URL('locales/' + lang + '.json', base), 'utf8'));
+    const help = locale['integrations.mailSaveFirst'];
+    assert.match(help, lang === 'zh' ? /全部文件夹.*以后新增目录/ : /all folders, including future folders/);
+    assert.match(help, lang === 'zh' ? /不会自动加载目录或同步邮件/ : /does not automatically load directories or sync mail/);
+    assert.match(help, lang === 'zh' ? /修改正文权限后须重新确认/ : /Body permission changes require activation confirmation/);
+    assert.doesNotMatch(help, /选择范围|并连接加载|folders load automatically|after choosing its scope/);
+    assert.doesNotMatch(locale['integrations.activation.bodyYes'], /所选|selected folder/);
+  }
+});

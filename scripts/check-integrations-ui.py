@@ -272,37 +272,22 @@ def check_browser(server, output, executable):
                 database['statuses']['mail-fixture'] = {'state': 'not_connected', 'credentialConfigured': True}
                 database['persistentCredentialsSupported'] = True
                 button('config.discard').click(); select('Synthetic mailbox')
-                choices = page.locator('.integration-folder-list input[type=checkbox]')
-                expect(choices).to_have_count(4)
-                assert len([c for c in calls if c['path'] == '/mail/folders']) == 1
-                assert not [c for c in calls if c['path'] == '/mail/activate']
-                expect(page.locator('#integration-enabled, #integration-persist, #integration-disclosureVersion, #integration-allowedFolders')).to_have_count(0)
+                expect(page.locator('.integration-folder-picker, #integration-folderScope, #integration-folder-search, #integration-folder-load')).to_have_count(0)
+                assert not [c for c in calls if c['path'] in ['/mail/folders', '/mail/activate']]
                 expect(page.locator('#integration-bodyAccess')).not_to_be_checked()
-                assert page.locator('.integration-folder-list script, .integration-folder-list img').count() == 0
-                assert page.evaluate('window.mailXss === undefined')
-                target = page.locator('.integration-folder-list input[data-folder-name="工作/客户 A"]')
-                target.focus(); page.keyboard.press('Space')
-                expect(page.locator('#integration-folderScope')).to_have_value('selected')
-                expect(target).not_to_be_checked(); expect(target).to_be_focused()
-                page.locator('#integration-folder-search').fill('INBOX'); expect(choices).to_have_count(1)
-                page.locator('#integration-folder-search').fill(''); expect(choices).to_have_count(4)
+                expect(page.locator('.integrations-editor')).to_contain_text(text('integrations.mailAllFolders'))
+                page.locator('#integration-displayName').fill('All folders mailbox')
                 button('config.saveChanges').click()
                 expect(button('config.saveChanges')).to_be_disabled()
-                assert database['config']['mailAccounts'][0]['allowedFolders'] == ['INBOX', '账单', '<script>window.mailXss = true</script>']
-                expect(target).not_to_be_checked()
-                mode['folders'] = 'error'; button('integrations.folders.refresh').click()
-                expect(page.locator('.integration-folder-picker')).to_contain_text(text('integrations.error.timeout'))
-                expect(target).not_to_be_checked(); expect(button('integrations.folders.selectCurrent')).to_be_disabled()
-                mode['folders'] = 'success'; button('integrations.folders.refresh').click()
-                expect(button('integrations.folders.selectCurrent')).to_be_enabled()
+                assert database['config']['mailAccounts'][0]['folderScope'] == 'all'
+                assert not [c for c in calls if c['path'] == '/mail/folders']
                 for scheme in ['light', 'dark']:
                     page.emulate_media(color_scheme=scheme)
                     for width, height in [(1280, 1000), (390, 800)]:
                         page.set_viewport_size({'width': width, 'height': height})
-                        page.locator('.integration-folder-picker').scroll_into_view_if_needed()
-                        assert page.locator('.integration-folder-picker').evaluate('e => e.scrollWidth <= e.clientWidth + 2')
-                        page.screenshot(path=str(output / f'mail-folders-{lang}-{scheme}-{width}x{height}.png'))
-                checks.append(f'{lang}: mail auto-discovery, explicit selection, safe text, Space/focus, search preservation, save/refresh/error recovery, light/dark media and narrow screenshots')
+                        page.locator('#integration-bodyAccess').scroll_into_view_if_needed()
+                        page.screenshot(path=str(output / f'mail-all-{lang}-{scheme}-{width}x{height}.png'))
+                checks.append(f'{lang}: fixed all scope, no picker or automatic discovery, separate body permission, light/dark media and narrow screenshots')
                 page.emulate_media(color_scheme='light')
 
             assert not errors, errors
@@ -314,7 +299,7 @@ def check_browser(server, output, executable):
             page.screenshot(path=str(output / 'failure.png')); raise
         finally:
             context.close(); browser.close()
-    print('PASS: synthetic connection deletion, tools dialog and mailbox folder picker, EN/ZH, keyboard, late responses, light/dark media and narrow screenshots. No real services or packaging.')
+    print('PASS: synthetic connection deletion, tools dialog and fixed all-folder mailbox settings, EN/ZH, keyboard, late responses, light/dark media and narrow screenshots. No real services or packaging.')
 
 
 def main():

@@ -83,7 +83,7 @@ function removeChatImage(key, index) {
   releaseChatImage(draft.splice(index, 1)[0], false);
   delete chatImageErrors[key];
   renderChatImages();
-  var bar = document.getElementById("chat-image-composer");
+  var bar = document.getElementById("chat-composer");
   if (key === chatImageKey() && bar) {
     var next = bar.querySelector('[data-remove-image="' + Math.min(index, draft.length - 1) + '"]') ||
       bar.querySelector("[data-add-image]");
@@ -169,7 +169,8 @@ function renderChatImages() {
   if (typeof updateChatComposerState === "function") updateChatComposerState();
   bindChatImageInputs();
   var bar = document.getElementById("chat-image-composer");
-  if (!bar) return;
+  var previews = document.getElementById("chat-image-previews");
+  if (!bar || !previews) return;
   var deepSurface = typeof deepChatElement === "function" && deepChatElement();
   [document, deepSurface && deepSurface.shadowRoot].filter(Boolean).forEach(function (root) {
     if (root.chatImageErrorsBound || !root.addEventListener) return;
@@ -185,26 +186,27 @@ function renderChatImages() {
   var html = '<div class="chat-image-tools"><button type="button" class="btn btn-sm" data-add-image' + disabled +
     ' aria-label="' + escHtml(t("chat.addImage")) + '" title="' + escHtml(t("chat.addImage")) + '">+</button>' +
     '<input type="file" accept="image/png,image/jpeg" multiple hidden tabindex="-1"' + disabled + '>' +
-    '<details class="chat-image-help"><summary>' + escHtml(t("chat.imageHelp")) + '</summary><span>' +
-    escHtml(t("chat.imageLimits")) + '</span></details>' +
-    (draft.length ? '<span class="chat-image-count">' + escHtml(t("chat.imageCount").replace("{count}", draft.length)) + '</span>' : '') + '</div>' +
-    '<div class="chat-image-previews">' + draft.map(function (item, index) {
-      return '<div><img src="' + escHtml(item.url) + '" alt="' + escHtml(t("chat.imagePreview")) + ' ' + (index + 1) +
+    (draft.length ? '<span class="chat-image-count">' + escHtml(t("chat.imageCount").replace("{count}", draft.length)) + '</span>' : '') + '</div><div class="chat-image-error" role="status" aria-live="polite">' +
+    escHtml(chatImageErrors[key] || "") + '</div>';
+  var previewHtml = draft.map(function (item, index) {
+    return '<div><img src="' + escHtml(item.url) + '" alt="' + escHtml(t("chat.imagePreview")) + ' ' + (index + 1) +
         '"><button type="button" data-remove-image="' + index + '"' + disabled + ' aria-label="' +
         escHtml(t("chat.removeImage")) + ' ' + (index + 1) + '">' + escHtml(t("chat.removeImage")) + ' ' + (index + 1) + '</button></div>';
-    }).join("") + '</div><div class="chat-image-error" role="status" aria-live="polite">' +
-    escHtml(chatImageErrors[key] || "") + '</div>';
-  // Streaming renders must not replace focused controls or collapse the help.
+  }).join("");
+  previews.hidden = !draft.length;
+  if (previews.chatImageSignature !== key + previewHtml) {
+    previews.chatImageSignature = key + previewHtml;
+    previews.innerHTML = previewHtml;
+    previews.querySelectorAll("[data-remove-image]").forEach(function (button) {
+      button.onclick = function () { removeChatImage(key, Number(button.dataset.removeImage)); };
+    });
+  }
+  // Streaming renders must not replace unchanged focused controls.
   if (bar.chatImageSignature === key + html) return;
   bar.chatImageSignature = key + html;
-  var oldHelp = bar.querySelector("details");
-  var helpOpen = oldHelp && oldHelp.open;
   var active = document.activeElement;
   var focusedAdd = active && active === bar.querySelector("[data-add-image]");
-  var focusedHelp = active && active === bar.querySelector("summary");
   bar.innerHTML = html;
-  var help = bar.querySelector("details");
-  if (help) help.open = !!helpOpen;
   var input = bar.querySelector("input");
   var add = bar.querySelector("[data-add-image]");
   add.onclick = function () { input.click(); };
@@ -221,11 +223,7 @@ function renderChatImages() {
     focusComposer();
   };
   input.oncancel = focusComposer;
-  bar.querySelectorAll("[data-remove-image]").forEach(function (button) {
-    button.onclick = function () { removeChatImage(key, Number(button.dataset.removeImage)); };
-  });
   if (focusedAdd && !add.disabled) add.focus();
-  else if (focusedHelp) bar.querySelector("summary").focus();
 }
 
 api.uploadChatImage = function (session, file) {

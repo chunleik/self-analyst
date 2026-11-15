@@ -30,3 +30,26 @@
 
 - 用户授权提交/推送后，按 Conventional Commits 提交功能分支并创建 PR，关联本 change、验证结果和 UI 截图。
 - 必需检查包含 Windows 全量验证，使用最新提交结果；未经用户授权不合并、不发版、不归档。
+
+## 5. 2026-11-15 输入区修订
+
+- [x] 5.1 调整 index.html、chat-images.js 和 styles.css：上方预览、移除图片帮助、单层焦点；保留错误与限额。
+- [x] 5.2 补充图片预览/移除/会话切换/焦点与布局回归，运行 composer、images、style、adapter、session-routing 定向 Node 测试及全量 Node 测试。
+- [x] 5.3 同步两份主规格与中英文 README，严格校验 change/全量 OpenSpec，检查差异；记录真实浏览器/Windows 验收范围，不推送或发版。
+
+### 2026-11-15 修订验证结果
+
+- 基线：最新 `origin/main` / beta.18，提交 `e9838ca`。工作分支 `codex/fix-composer-image-preview`；无兼容旧布局路径。
+- 定向 Node（composer/images/style/deep-chat-adapter/session-routing）：91/91 通过。
+- 全量 `node --test self-analyst-app/src/test/js/*.test.mjs`：504 项，472 通过、32 项既有平台条件跳过、0 失败。
+- `openspec validate improve-chat-composer-ux --strict` 与全量 `--all --strict`：通过（50/50）；两份主规格已同步；`git diff --check` 通过。
+- 新增 `scripts/check-chat-composer-ui.py` 合成 Chromium 用例，但浏览器启动报 `socket() failed: Operation not permitted (1)`；提升运行权限后仍同样失败。故未执行浏览器断言、未生成截图，不能宣称视觉验收通过。脚本语法检查通过。
+- 本次纯前端变更未运行 Maven/Java、Windows/Tauri、真实系统粘贴/中文输入法；未推送、PR、发版或归档。历史 4.2 未完成状态不变。
+
+### 两项 UI 修订整合验证
+
+输入框修订与邮箱固定全部目录修订已在 `codex/fix-composer-image-preview` 工作树整合（基线 `e9838ca`），保留两者 README 与中英文文案改动。整合后全量 Node：490 项，458 通过、32 项平台条件跳过、0 失败；OpenSpec 全量严格校验 50/50，`git diff --check` 通过。未提交或推送，浏览器和真实 Windows 验收限制不变。
+
+### PR 交付前补充
+
+用户已授权提交 PR、合并及远端发版。补充 action 异步配置响应及激活入口的 `all` 范围防御，拒绝异常 `selected` 响应，不静默扩大范围。最终 Node 492 项：460 通过、32 平台条件跳过、0 失败。新增 composer 合成浏览器脚本已接入 Linux UI CI，截图由 CI 产出；本机 socket 限制记录保留，远端结果须以实际新 head 为准。

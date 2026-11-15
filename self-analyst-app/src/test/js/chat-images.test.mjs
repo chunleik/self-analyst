@@ -233,26 +233,28 @@ function installBar(box) {
   let html = '', renders = 0;
   const elements = {};
   const control = (name) => ({ focus() { box.document.activeElement = this; }, click() { this.clicked = true; }, name });
-  const input = control('input'), add = control('add'), help = control('details'), summary = control('summary');
-  elements.input = input; elements['[data-add-image]'] = add; elements.details = help; elements.summary = summary;
+  const input = control('input'), add = control('add');
+  elements.input = input; elements['[data-add-image]'] = add;
   const bar = {
     get innerHTML() { return html; },
     set innerHTML(value) { html = value; renders++; },
     querySelector(selector) { return elements[selector] || null; }, querySelectorAll() { return []; },
   };
+  const previews = { innerHTML: '', querySelectorAll() { return []; } };
   const composer = control('composer');
-  box.document.getElementById = (id) => id === 'chat-image-composer' ? bar : id === 'chat-tab-input' ? composer : null;
-  return { bar, input, add, help, summary, composer, renders: () => renders };
+  box.document.getElementById = (id) => id === 'chat-image-composer' ? bar : id === 'chat-image-previews' ? previews : id === 'chat-composer' ? bar : id === 'chat-tab-input' ? composer : null;
+  return { bar, previews, input, add, composer, renders: () => renders };
 }
 
 test('integrated controls expose safe labels, inline errors, hidden picker, and no duplicate send', async () => {
   const { box } = setup();
   box.escHtml = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-  const { bar, input, add, composer } = installBar(box);
+  const { bar, previews, input, add, composer } = installBar(box);
   await box.addChatImages([file('one')]);
   assert.match(bar.innerHTML, /type="file"[^>]*hidden/);
   assert.match(bar.innerHTML, /aria-label="chat.addImage"/);
-  assert.match(bar.innerHTML, /aria-label="chat.removeImage 1"/);
+  assert.match(previews.innerHTML, /aria-label="chat.removeImage 1"/);
+  assert.doesNotMatch(bar.innerHTML, /<details|chat.imageHelp|<img/);
   assert.doesNotMatch(bar.innerHTML, /data-send-images/);
   box.chatImageErrors[box.chatImageKey()] = '<script>bad</script>';
   box.renderChatImages();
@@ -264,18 +266,38 @@ test('integrated controls expose safe labels, inline errors, hidden picker, and 
   assert.equal(box.chatImageDraft().length, 1);
 });
 
-test('streaming renders retain help state and focus without replacing unchanged controls', () => {
+test('streaming renders retain add-button focus without replacing unchanged controls', () => {
   const { box } = setup();
-  const { help, summary, renders } = installBar(box);
+  const { add, renders } = installBar(box);
   box.renderChatImages();
-  help.open = true;
-  summary.focus();
+  add.focus();
   const count = renders();
   box.renderChatImages(); box.renderChatImages();
   assert.equal(renders(), count);
-  assert.equal(box.document.activeElement, summary);
-  box.state.chatSending = true;
+  assert.equal(box.document.activeElement, add);
+});
+
+test('pasted images render directly in the upper preview region without uploading', async () => {
+  const { box, listeners, uploads } = setup();
+  const { bar, previews } = installBar(box);
   box.renderChatImages();
-  assert.equal(help.open, true);
-  assert.equal(box.document.activeElement, summary);
+  assert.equal(previews.hidden, true);
+  const event = { target: { id: 'chat-tab-input' }, clipboardData: { files: [file('pasted')] },
+    preventDefault() {}, stopImmediatePropagation() {} };
+  listeners.paste[0](event);
+  await box.chatImageQueues[box.chatImageKey()];
+  assert.equal(previews.hidden, false);
+  assert.match(previews.innerHTML, /blob:pasted/);
+  assert.doesNotMatch(bar.innerHTML, /<img|<details/);
+  assert.equal(uploads.length, 0);
+  box.state.activeChatSessionId = 'b'.repeat(32);
+  box.renderChatImages();
+  assert.equal(previews.hidden, true);
+  assert.equal(previews.innerHTML, '');
+  box.state.activeChatSessionId = 'a'.repeat(32);
+  box.renderChatImages();
+  assert.match(previews.innerHTML, /blob:pasted/);
+  box.removeChatImage(box.chatImageKey(), 0);
+  assert.equal(previews.hidden, true);
+  assert.equal(box.document.activeElement, bar.querySelector('[data-add-image]'));
 });

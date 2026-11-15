@@ -11,7 +11,7 @@ const plain = v => JSON.parse(JSON.stringify(v));
 const deferred = () => { let resolve, reject; const promise = new Promise((ok, fail) => { resolve = ok; reject = fail; }); return { promise, resolve, reject }; };
 function snapshot() {
   return { config: { schemaVersion: 1, revision: 4, mcpServers: [], toolApprovals: [], mailAccounts: [
-    { id: 'mail-one', provider: 'qq', email: 'test@qq.com', displayName: 'Test', folderScope: 'selected', allowedFolders: ['INBOX'], bodyAccess: false,
+    { id: 'mail-one', provider: 'qq', email: 'test@qq.com', displayName: 'Test', folderScope: 'all', allowedFolders: [], bodyAccess: false,
       enabled: false, credentialRef: 'session:00000000-0000-0000-0000-000000000000', storageMode: 'session', disclosureVersion: 0 }
   ] }, statuses: { 'mail-one': { state: 'disabled', credentialConfigured: false } }, persistentCredentialsSupported: false, modelTarget: 'https://model.example/v1' };
 }
@@ -31,7 +31,7 @@ test('local load is side-effect free; new mail and MCP metadata starts disabled 
   assert.equal(mcp.credentialRef, null); assert.equal(mcp.budget.maxTools, 64);
   h.model.add('mail'); assert.equal(h.model.entry().disclosureVersion, 0); assert.equal(h.model.entry().enabled, false);
   assert.equal(h.model.entry().folderScope, 'all'); assert.equal(h.model.entry().bodyAccess, false);
-  assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX']);
+  assert.deepEqual(plain(h.model.entry().allowedFolders), []);
   assert.equal(h.calls.filter(call => !call[0].startsWith('/mail/folders')).length, 1);
 });
 
@@ -41,7 +41,7 @@ test('saving sends revision and metadata only; duplicate save and edits are lock
   const saved = h.model.save(); await h.model.save(); h.model.change('displayName', 'Too late');
   assert.equal(h.calls.filter(c => c[1] === 'PUT').length, 1);
   const body = h.calls.at(-1)[2]; assert.equal(body.expectedRevision, 4); assert.equal(body.config.mailAccounts[0].displayName, 'Changed');
-  assert.equal(body.config.mailAccounts[0].folderScope, 'selected');
+  assert.equal(body.config.mailAccounts[0].folderScope, 'all');
   assert.doesNotMatch(JSON.stringify(body), /SYNTHETIC-CODE|statuses|persistentCredentialsSupported/);
   const result = snapshot(); result.config = plain(body.config); result.config.revision = 5; pending.resolve(result); await saved;
   assert.equal(h.model.snapshot.config.revision, 5); assert.equal(h.model.metadataDirty(), false);
@@ -203,76 +203,38 @@ test('snapshots without explicit mailbox scope are rejected instead of migrated'
   assert.equal(h.model.error, 'integrations.error.unavailable');
 });
 
-test('repeated folder scope changes preserve exact selected names and independent authorizations until saved', async () => {
-  const original = snapshot(); Object.assign(original.config.mailAccounts[0], {
-    folderScope: 'selected', allowedFolders: ['INBOX', 'Projects/2026', '*'], enabled: true, bodyAccess: true, disclosureVersion: 1
-  });
-  const h = setup(() => Promise.resolve(plain(original))); await h.model.load(); h.model.select('mail', 'mail-one');
-  for (let i = 0; i < 3; i++) {
-    h.model.change('folderScope', 'all'); assert.equal(h.model.metadataDirty(), true);
-    assert.equal(h.model.snapshot.config.mailAccounts[0].folderScope, 'selected');
-    assert.deepEqual(plain(h.model.entry().allowedFolders), original.config.mailAccounts[0].allowedFolders);
-    h.model.change('folderScope', 'selected'); assert.equal(h.model.metadataDirty(), false);
-  }
-  assert.equal(h.model.entry().enabled, true); assert.equal(h.model.entry().bodyAccess, true);
-  assert.equal(h.model.entry().disclosureVersion, 1); assert.equal(h.calls.filter(call => !call[0].startsWith('/mail/folders')).length, 1);
+test('specified folder snapshots are rejected, not migrated or silently widened', async () => {
+  const original = snapshot(); original.config.mailAccounts[0].folderScope = 'selected';
+  const h = setup(() => Promise.resolve(original)); await h.model.load();
+  assert.equal(h.model.snapshot, null); assert.equal(h.model.draft, null);
+  assert.equal(h.calls.length, 1); assert.equal(h.model.error, 'integrations.error.mailScopeUnsupported');
 });
 
-test('all scope can save an empty backup list; rejected selected scope keeps runtime scope and draft separate', async () => {
-  let saved = snapshot(); saved.config.mailAccounts[0].folderScope = 'all'; saved.config.mailAccounts[0].allowedFolders = [];
-  const h = setup((path, method, body) => {
-    if (method === 'PUT') {
-      if (body.config.mailAccounts[0].folderScope === 'selected') return Promise.reject({ code: 'invalid_config' });
-      saved = { ...saved, config: plain(body.config) }; saved.config.revision++;
-    }
-    return Promise.resolve(plain(saved));
-  });
-  await h.model.load(); h.model.select('mail', 'mail-one'); h.model.change('displayName', 'All folders'); await h.model.save();
-  assert.equal(h.calls.at(-1)[2].config.mailAccounts[0].folderScope, 'all');
-  assert.deepEqual(plain(h.calls.at(-1)[2].config.mailAccounts[0].allowedFolders), []);
-  h.model.change('folderScope', 'selected'); await h.model.save();
-  assert.equal(h.model.error, 'integrations.error.folderSelection'); assert.equal(h.model.dirty(), true);
-  assert.equal(h.model.entry().folderScope, 'selected'); assert.equal(h.model.snapshot.config.mailAccounts[0].folderScope, 'all');
-  assert.deepEqual(plain(h.model.entry().allowedFolders), []); assert.equal(h.model.entry().bodyAccess, false);
-});
-
-test('failed widening preserves the selected runtime scope and can be discarded or retried explicitly', async () => {
-  let rejectSave = true; const saved = snapshot(); saved.config.mailAccounts[0].folderScope = 'selected';
-  const h = setup((path, method, body) => {
-    if (method === 'PUT') {
-      if (rejectSave) return Promise.reject({ code: 'revision_conflict' });
-      saved.config = plain(body.config); saved.config.revision++;
-    }
-    return Promise.resolve(plain(saved));
-  });
-  await h.model.load(); h.model.select('mail', 'mail-one'); h.model.change('folderScope', 'all'); await h.model.save();
-  assert.equal(h.model.entry().folderScope, 'all'); assert.equal(h.model.snapshot.config.mailAccounts[0].folderScope, 'selected');
-  assert.equal(h.model.error, 'integrations.error.conflict'); assert.equal(h.model.dirty(), true);
-  await h.model.load(); h.model.select('mail', 'mail-one'); assert.equal(h.model.entry().folderScope, 'selected');
-  assert.equal(h.model.dirty(), false); h.model.change('folderScope', 'all'); rejectSave = false; await h.model.save();
-  assert.equal(h.model.entry().folderScope, 'all'); assert.equal(h.model.metadataDirty(), false);
-  h.model.change('folderScope', 'selected'); await h.model.save();
-  assert.equal(h.model.snapshot.config.mailAccounts[0].folderScope, 'selected');
-  assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX']);
+test('mail scope is fixed all and cannot be edited through the settings model', async () => {
+  const h = setup(); await h.model.load(); h.model.select('mail', 'mail-one');
+  h.model.change('folderScope', 'selected'); h.model.change('allowedFolders', ['INBOX']);
+  assert.equal(h.model.entry().folderScope, 'all');
+  assert.deepEqual(plain(h.model.entry().allowedFolders), []);
+  assert.equal(h.model.metadataDirty(), false);
 });
 
 test('busy save locks folder edits and duplicate actions; late saves cannot restore a destroyed view', async () => {
   const pending = deferred(); const h = setup((path, method) => method === 'PUT' ? pending.promise : undefined);
-  await h.model.load(); h.model.select('mail', 'mail-one'); h.model.change('folderScope', 'all');
+  await h.model.load(); h.model.select('mail', 'mail-one'); h.model.change('displayName', 'Changed');
   const saving = h.model.save(); h.model.change('folderScope', 'selected'); h.model.change('allowedFolders', []);
   h.model.cancel(); await h.model.load(); await h.model.save(); await h.model.action('test');
   assert.equal(h.model.busy, 'save'); assert.equal(h.model.entry().folderScope, 'all');
-  assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX']);
+  assert.deepEqual(plain(h.model.entry().allowedFolders), []);
   assert.deepEqual(h.calls.map(call => call[1]), ['GET', 'PUT']);
   const saved = snapshot(); saved.config = plain(h.calls.at(-1)[2].config); h.model.destroy();
   pending.resolve(saved); await saving; assert.equal(h.model.draft, null); assert.equal(h.model.snapshot, null);
 });
 
-test('late refresh and cancelled diagnostic replies cannot undo a newer folder scope', async () => {
+test('late refresh and cancelled diagnostic replies cannot undo a newer draft', async () => {
   const pending = deferred(); let delayed = false;
   const h = setup(() => delayed ? pending.promise : undefined);
   await h.model.load(); h.model.select('mail', 'mail-one'); delayed = true;
-  const refresh = h.model.refresh(); h.model.change('folderScope', 'all'); pending.resolve(snapshot()); await refresh;
+  const refresh = h.model.refresh(); h.model.change('displayName', 'Draft'); pending.resolve(snapshot()); await refresh;
   assert.equal(h.model.entry().folderScope, 'all'); assert.equal(h.model.dirty(), true);
   const tested = deferred(); const other = setup(path => path === '/test' ? tested.promise : undefined);
   await other.model.load(); other.model.select('mail', 'mail-one'); const testing = other.model.action('test');
@@ -328,72 +290,15 @@ async function setupView(handler, locale) {
   return h;
 }
 
-test('folder picker replaces raw names, defaults new mail to all, and preserves selected names across toggles', async () => {
-  const h = await setupView(); h.button('Test').fire('click');
-  assert.equal(h.field('folderScope').value, 'selected'); assert.equal(h.field('allowedFolders'), null);
-  assert.equal(h.view.dirty(), false); assert.equal(h.button('config.saveChanges').disabled, true);
-  h.model.change('allowedFolders', ['INBOX', 'Work/Nested', '*']);
-  for (let i = 0; i < 3; i++) {
-    h.change('folderScope', 'all'); assert.equal(h.field('folder-scope-hint').textContent, 'integrations.folderScope.allHint');
-    h.change('folderScope', 'selected'); assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX', 'Work/Nested', '*']);
-  }
-  assert.equal(h.field('folderScope').attributes['aria-describedby'], 'integration-folder-scope-hint');
-  h.button('integrations.add.mail').fire('click'); assert.equal(h.field('folderScope').value, 'all');
-  assert.equal(h.field('bodyAccess').checked, false);
-  for (const name of ['disclosureVersion', 'enabled', 'persist', 'allowedFolders']) assert.equal(h.field(name), null);
-  h.view.destroy();
-});
-
-test('cancelled discard preserves all-folder draft; confirmed discard and reopening restore saved explicit scope', async () => {
-  const h = await setupView(); h.button('Test').fire('click'); h.change('folderScope', 'all');
-  h.button('config.discard').fire('click'); await tick();
-  assert.equal(h.confirmations, 1); assert.equal(h.field('folderScope').value, 'all'); assert.equal(h.view.dirty(), true);
-  h.approveDiscard = true; h.button('config.discard').fire('click'); await tick(); h.button('Test').fire('click');
-  assert.equal(h.field('folderScope').value, 'selected'); assert.equal(h.field('allowedFolders'), null);
-  assert.equal(h.view.dirty(), false); h.change('folderScope', 'all'); h.view.destroy();
-  assert.equal(h.root.children.length, 0); h.view = h.context.mountIntegrations(h.root); await tick(); h.button('Test').fire('click');
-  assert.equal(h.field('folderScope').value, 'selected'); assert.equal(h.view.dirty(), false); h.view.destroy();
-});
-
-test('folder controls are disabled during save and rejected widening remains a recoverable draft', async () => {
-  const pending = deferred(); const h = await setupView((path, method) => method === 'PUT' ? pending.promise : undefined);
-  h.button('Test').fire('click'); h.change('folderScope', 'all'); h.button('config.saveChanges').fire('click');
-  assert.equal(h.field('folderScope').disabled, true); assert.equal(h.field('allowedFolders'), null);
-  assert.equal(h.button('config.discard').disabled, true); assert.equal(h.button('config.saveChanges').disabled, true);
-  h.button('config.saveChanges').fire('click'); assert.equal(h.calls.filter(call => call[1] === 'PUT').length, 1);
-  pending.reject({ code: 'revision_conflict', message: '<script>secret</script>' }); await tick();
-  assert.equal(h.field('folderScope').disabled, false); assert.equal(h.field('allowedFolders'), null);
-  assert.equal(h.field('folderScope').value, 'all'); assert.equal(h.view.dirty(), true);
-  assert.equal(h.document.activeElement.textContent, 'integrations.error.conflict');
-  h.change('folderScope', 'selected'); assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX']); h.view.destroy();
-});
-
-test('both localized folder scopes retain model, body and retention disclosures and render hostile names only as text', async () => {
-  const hostile = '<img src=x onerror=alert(1)>';
-  for (const language of ['en', 'zh']) {
-    const locale = JSON.parse(fs.readFileSync(new URL(`locales/${language}.json`, base)));
-    const saved = snapshot(); saved.config.mailAccounts[0].displayName = hostile;
-    saved.config.mailAccounts[0].allowedFolders = ['INBOX', 'Work/<script>alert(1)</script>', '*'];
-    saved.modelTarget = 'https://model.example/<svg/onload=alert(1)>';
-    const h = await setupView(() => Promise.resolve(plain(saved)), locale); h.button(hostile).fire('click');
-    for (const name of saved.config.mailAccounts[0].allowedFolders) assert.ok(allText(h.root).includes(name));
-    h.change('folderScope', 'all');
-    assert.ok(allText(h.root).includes(locale['integrations.folderScope.allHint']));
-    for (const key of ['integrations.bodyAccess', 'integrations.mailRetention', 'integrations.mailDisclosure'])
-      assert.ok(allText(h.root).includes(locale[key]), `${language}: ${key}`);
-    assert.ok(allText(h.root).includes(saved.modelTarget));
-    assert.equal(h.root.querySelectorAll('img').length, 0); assert.equal(h.root.querySelectorAll('script').length, 0);
-    assert.equal(h.root.querySelectorAll('svg').length, 0); assert.equal(h.field('bodyAccess').checked, false);
-    for (const key of ['integrations.folderScope', 'integrations.folderScope.all', 'integrations.folderScope.selected',
-      'integrations.folderScope.allHint', 'integrations.folderScope.selectedHint']) assert.ok(locale[key], `${language}: ${key}`);
-    if (language === 'en') {
-      assert.match(locale['integrations.folderScope.allHint'], /current, future and nested/);
-      assert.match(locale['integrations.folderScope.allHint'], /does not start automatic syncing.*all historical mail/);
-    } else {
-      assert.match(locale['integrations.folderScope.allHint'], /当前、以后新增及嵌套/);
-      assert.match(locale['integrations.folderScope.allHint'], /不会自动同步.*全部历史邮件/);
-    }
-    h.view.destroy();
+test('localized all-folder settings preserve body, model and retention disclosures', async () => {
+  for (const lang of ['zh', 'en']) {
+    const locale = JSON.parse(fs.readFileSync(new URL(`locales/${lang}.json`, base)));
+    const h = await setupView(() => Promise.resolve(snapshot()), locale); h.button('Test').fire('click');
+    for (const key of ['integrations.mailAllFolders', 'integrations.bodyAccess', 'integrations.mailRetention', 'integrations.mailDisclosure'])
+      assert.ok(allText(h.root).includes(locale[key]));
+    assert.equal(h.field('bodyAccess').checked, false); assert.equal(h.field('folderScope'), null);
+    h.change('bodyAccess', true); assert.equal(h.model.entry().bodyAccess, true);
+    assert.equal(h.model.entry().folderScope, 'all'); h.view.destroy();
   }
 });
 
@@ -431,7 +336,7 @@ test('mail activation sends the confirmed revision and model target only to the 
   pending.resolve(after); await saving;
   assert.equal(h.model.notice, 'mailActivated'); assert.equal(h.model.entry().enabled, true); assert.equal(h.model.entry().storageMode, 'windows');
   assert.equal(h.model.diagnostic, null); assert.equal(h.model.busy, ''); assert.equal(h.calls[1][2].secret, undefined);
-  assert.deepEqual(h.calls.map(call => [call[0], call[1]]), [['', 'GET'], ['/mail/activate', 'POST'], ['/mail/folders', 'POST']]);
+  assert.deepEqual(h.calls.map(call => [call[0], call[1]]), [['', 'GET'], ['/mail/activate', 'POST']]);
 });
 
 test('cancelled or missing activation confirmation sends nothing and clears secret input', async () => {
@@ -472,7 +377,7 @@ test('unsupported persistent storage, unset model target and unsaved metadata ca
   for (const failure of ['storage', 'target', 'draft']) {
     const data = activationSnapshot({ supported: failure !== 'storage' }); if (failure === 'target') data.modelTarget = '';
     const h = setup(() => Promise.resolve(plain(data))); await h.model.load(); h.model.select('mail', 'mail-one');
-    h.model.setSecret('SYNTHETIC-AUTH-CODE'); if (failure === 'draft') h.model.change('folderScope', 'selected');
+    h.model.setSecret('SYNTHETIC-AUTH-CODE'); if (failure === 'draft') h.model.change('displayName', 'Draft');
     await h.model.activateMail(() => assert.fail('not ready to confirm')); await h.model.action('credential');
     assert.equal(h.calls.filter(call => !call[0].startsWith('/mail/folders')).length, 1); assert.equal(h.model.entry().enabled, false);
     if (failure !== 'draft') assert.equal(h.model.error, failure === 'storage' ? 'integrations.error.mailStorage' : 'integrations.error.modelTarget');
@@ -527,7 +432,7 @@ test('late activation results cannot restore a closed or newly reopened view', a
 });
 
 test('mail metadata edits preserve hidden loaded state until the server resets permissions; display-name edits stay enabled', async () => {
-  for (const [field, value] of Object.entries({ provider: '163', email: 'other@qq.com', folderScope: 'selected', allowedFolders: ['Other/Nested'], bodyAccess: true, displayName: 'Renamed' })) {
+  for (const [field, value] of Object.entries({ provider: '163', email: 'other@qq.com', bodyAccess: true, displayName: 'Renamed' })) {
     const before = activationSnapshot({ stored: true, enabled: true }); let submitted;
     const h = setup((path, method, body) => {
       if (method !== 'PUT') return Promise.resolve(plain(before));
@@ -581,7 +486,7 @@ test('stored-mail activation uses a distinct action label without exposing a per
 });
 
 test('localized activation confirmation fully discloses saved scope, body, target, retention and secure storage as plain text', async () => {
-  for (const lang of ['zh', 'en']) for (const scope of ['all', 'selected']) for (const bodyAccess of [false, true]) {
+  for (const lang of ['zh', 'en']) for (const scope of ['all']) for (const bodyAccess of [false, true]) {
     const locale = JSON.parse(fs.readFileSync(new URL(`locales/${lang}.json`, base)));
     const data = activationSnapshot(); Object.assign(data.config.mailAccounts[0], { folderScope: scope, bodyAccess, allowedFolders: ['INBOX', 'Work/<script>alert(1)</script>', '*'] });
     data.modelTarget = 'https://model.example/<svg/onload=alert(1)>';
@@ -962,181 +867,68 @@ test('legacy cannot be deleted and deleting a saved mailbox preserves MCP server
   assert.equal(h.model.draft.mailAccounts.length, 0); assert.equal(h.model.draft.mcpServers.length, 2);
 });
 
-function folderResult(names = ['INBOX', 'Work/客户', '<script>not-code</script>'], revision = 4) {
-  return { accountId: 'mail-one', revision, complete: true, folders: names.map(name => ({ name, separator: '/', selectable: true })) };
-}
-function folderSetup({ stored = true, names, handler } = {}) {
-  let data = activationSnapshot({ stored });
-  const h = setup((path, method, body, signal) => {
-    if (handler) { const value = handler(path, method, body, signal); if (value !== undefined) return value; }
-    if (path === '/mail/folders') return Promise.resolve(folderResult(names, data.config.revision));
-    if (path === '/mail/folders/cancel') return Promise.resolve({ cancelled: true });
-    if (method === 'PUT') { data.config = plain(body.config); data.config.revision++; }
-    return Promise.resolve(plain(data));
+test('opening and saving configured mail never automatically enumerates folders', async () => {
+  let saved = activationSnapshot({stored: true});
+  const h = setup((path, method, body) => {
+    assert.notEqual(path, '/mail/folders');
+    if (method === 'PUT') { saved.config = plain(body.config); saved.config.revision++; }
+    return Promise.resolve(plain(saved));
   });
-  return h;
-}
-
-test('opening configured mail automatically discovers complete folders once without model/body authorization', async () => {
-  const h = folderSetup(); await h.model.load(); await h.model.select('mail', 'mail-one');
-  assert.equal(h.calls.filter(c => c[0] === '/mail/folders').length, 1);
-  const call = h.calls.find(c => c[0] === '/mail/folders');
-  assert.deepEqual(Object.keys(call[2]).sort(), ['expectedRevision', 'id', 'requestId']);
-  assert.match(call[2].requestId, /^[\da-f-]{36}$/);
-  assert.equal(h.model.folders.items.length, 3); assert.equal(h.model.folders.stale, false);
-  assert.equal(h.model.entry().enabled, false); assert.equal(h.model.entry().bodyAccess, false);
-  assert.equal(h.model.dirty(), false); assert.equal(h.model.notice, '');
-});
-
-test('unsaved and missing-credential accounts do not auto-connect; explicit temporary discovery is not activation', async () => {
-  let submitted; const h = folderSetup({ stored: false, handler(path, method, body) {
-    if (path === '/mail/folders') { submitted = plain(body); return Promise.resolve(folderResult()); }
-  } });
-  await h.model.load(); await h.model.select('mail', 'mail-one'); assert.equal(h.calls.length, 1);
-  h.model.setSecret('TEMP-CODE'); assert.equal(h.calls.length, 1);
-  await h.model.loadFolders(); assert.equal(submitted.secret, 'TEMP-CODE');
-  assert.equal(h.calls.find(c => c[0] === '/mail/folders')[2].secret, undefined);
-  assert.equal(h.model.entry().enabled, false); assert.equal(h.model.entry().credentialRef, null);
-  assert.equal(h.calls.filter(c => c[0] === '/mail/activate' || c[0] === '/credential').length, 0);
-  h.model.add('mail'); await h.model.loadFolders(); assert.equal(h.calls.filter(c => c[0] === '/mail/folders').length, 1);
-  h.model.destroy(); assert.equal(h.model.secret, '');
-});
-
-test('saving successfully triggers discovery, and discovery failure cannot turn committed save into failure', async () => {
-  let rejectFolders = false;
-  const h = folderSetup({ handler(path) { if (path === '/mail/folders' && rejectFolders) return Promise.reject({ code: 'authentication_failed' }); } });
   await h.model.load(); await h.model.select('mail', 'mail-one');
-  h.model.change('displayName', 'Saved name'); rejectFolders = true; await h.model.save();
-  assert.equal(h.model.snapshot.config.revision, 5); assert.equal(h.model.metadataDirty(), false);
-  assert.equal(h.model.notice, 'saved'); assert.equal(h.model.error, '');
-  assert.equal(h.model.folders.error, 'integrations.error.authentication');
-  assert.equal(h.calls.filter(c => c[1] === 'PUT').length, 1);
-  rejectFolders = false; await h.model.loadFolders(); assert.equal(h.model.folders.items.length, 3);
-  assert.equal(h.calls.filter(c => c[1] === 'PUT').length, 1);
+  h.model.change('displayName', 'No folder picker'); await h.model.save();
+  assert.equal(h.model.entry().folderScope, 'all');
+  assert.deepEqual(h.calls.map(c => c[1]), ['GET', 'PUT']);
 });
 
-test('range save retains unchecked folders as stale display data when automatic rediscovery fails', async () => {
-  let fail = false;
-  const h = folderSetup({handler(path) {
-    if (path === '/mail/folders' && fail) return Promise.reject({code: 'timeout'});
-  }});
-  await h.model.load(); await h.model.select('mail', 'mail-one');
-  h.model.toggleFolder('Work/客户', false);
-  const selected = plain(h.model.entry().allowedFolders);
-  fail = true; await h.model.save();
-  assert.equal(h.model.notice, 'saved'); assert.equal(h.model.error, '');
-  assert.deepEqual(plain(h.model.folders.items), folderResult().folders);
-  assert.equal(h.model.folders.stale, true); assert.equal(h.model.folders.error, 'integrations.error.timeout');
-  assert.deepEqual(plain(h.model.entry().allowedFolders), selected);
-  h.model.selectCurrentFolders(false);
-  assert.deepEqual(plain(h.model.entry().allowedFolders), selected);
-  fail = false; await h.model.loadFolders();
-  assert.equal(h.model.folders.stale, false);
-  assert.deepEqual(plain(h.model.entry().allowedFolders), selected);
-  h.model.change('email', 'other@163.com');
-  assert.equal(h.model.folders.items, null); // A different identity must not inherit this snapshot.
-});
-
-test('dynamic all uncheck becomes exact selection; search and refresh preserve absent selected names', async () => {
-  let result = folderResult(); const h = folderSetup({ handler(path) { if (path === '/mail/folders') return Promise.resolve(plain(result)); } });
-  await h.model.load(); await h.model.select('mail', 'mail-one'); h.model.toggleFolder('Work/客户', false);
-  assert.equal(h.model.entry().folderScope, 'selected');
-  assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX', '<script>not-code</script>']);
-  h.model.filterFolders('no matches'); assert.equal(h.model.entry().allowedFolders.length, 2);
-  result = folderResult(['INBOX'], 5); await h.model.save();
-  assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX', '<script>not-code</script>']);
-  h.model.toggleFolder('<script>not-code</script>', false); assert.deepEqual(plain(h.model.entry().allowedFolders), ['INBOX']);
-  h.model.selectCurrentFolders(true); assert.equal(h.model.entry().folderScope, 'selected');
-  await h.model.save(); assert.equal(h.model.error, 'integrations.error.folderSelection');
-  assert.equal(h.model.snapshot.config.revision, 5);
-});
-
-test('current selection supports 256 exact names but never accepts 257 or a partial/malformed directory response', async () => {
-  const names = Array.from({ length: 256 }, (_, i) => `Folder/${i}`); const h = folderSetup({ names });
-  await h.model.load(); await h.model.select('mail', 'mail-one'); h.model.selectCurrentFolders(false);
-  assert.equal(h.model.entry().allowedFolders.length, 256); await h.model.save();
-  assert.equal(h.model.snapshot.config.mailAccounts[0].allowedFolders.length, 256);
-  h.model.change('allowedFolders', [...names, 'Extra']); await h.model.save(); assert.equal(h.model.error, 'integrations.error.folderSelection');
-  for (const mutate of [r => r.complete = false, r => r.accountId = 'other', r => r.revision++, r => r.folders.push(r.folders[0]),
-      r => r.folders[0].name = '\u0000bad', r => r.folders = [...folderResult(names).folders, {name: 'extra', separator: '/', selectable: true}]]) {
-    const value = folderResult(); mutate(value); const bad = folderSetup({handler(path) {if (path === '/mail/folders') return Promise.resolve(value);}});
-    await bad.model.load(); await bad.model.select('mail', 'mail-one'); assert.equal(bad.model.folders.items, null);
-    assert.equal(bad.model.folders.error, 'integrations.error.validation');
-    bad.model.toggleFolder('INBOX', false); assert.equal(bad.model.entry().folderScope, 'all');
-  }
-});
-
-test('discovery is deduplicated and cancellation aborts plus targets the exact backend request', async () => {
-  const pending = deferred(); const h = folderSetup({ handler(path) { if (path === '/mail/folders') return pending.promise; } });
-  await h.model.load(); const loading = h.model.select('mail', 'mail-one'); await h.model.loadFolders();
-  assert.equal(h.calls.filter(c => c[0] === '/mail/folders').length, 1);
-  const call = h.calls.find(c => c[0] === '/mail/folders'); h.model.cancel();
-  assert.equal(call[3].aborted, true);
-  assert.deepEqual(plain(h.calls.find(c => c[0] === '/mail/folders/cancel')[2]), { id: 'mail-one', requestId: call[2].requestId });
-  pending.resolve(folderResult()); await loading; assert.equal(h.model.folders.items, null); assert.equal(h.model.folders.loading, false);
-});
-
-test('late discovery cannot cross identity changes, deleted accounts or a closed view', async () => {
-  for (const action of ['identity', 'select', 'delete', 'destroy']) {
-    const pending = deferred(); const h = folderSetup({ handler(path, method, body) {
-      if (path === '/mail/folders') return pending.promise;
-      if (path === '/delete') { const data = activationSnapshot({stored: true}); data.config.mailAccounts = []; data.config.revision++; delete data.statuses['mail-one']; return Promise.resolve(data); }
-    } });
-    await h.model.load(); const loading = h.model.select('mail', 'mail-one');
-    if (action === 'identity') h.model.change('email', 'other@qq.com');
-    if (action === 'select') h.model.select('legacy', 'legacy-websearch');
-    if (action === 'delete') await h.model.remove(() => true);
-    if (action === 'destroy') h.model.destroy();
-    pending.resolve(folderResult()); await loading; assert.equal(h.model.folders.items, null);
-    assert.equal(h.calls.find(c => c[0] === '/mail/folders')[3].aborted, true);
-  }
-});
-
-test('failed refresh retains selected choices and previous list marked stale until explicit retry', async () => {
-  let fail = false; const h = folderSetup({handler(path) {if (path === '/mail/folders' && fail) return Promise.reject({code:'timeout'});}});
-  await h.model.load(); await h.model.select('mail', 'mail-one'); fail = true; await h.model.loadFolders();
-  assert.equal(h.model.folders.items.length, 3); assert.equal(h.model.folders.stale, true); assert.equal(h.model.folders.error, 'integrations.error.timeout');
-  h.model.toggleFolder('INBOX', false); assert.equal(h.model.entry().folderScope, 'all');
-  fail = false; await h.model.loadFolders(); assert.equal(h.model.folders.stale, false);
-});
-
-test('folder DOM renders names safely and preserves checkbox keyboard focus after updating the selection', async () => {
-  const h = await setupView(path => Promise.resolve(path === '/mail/folders' ? folderResult() : activationSnapshot({stored: true})));
-  h.button('Test').fire('click'); await tick();
-  assert.equal(h.field('allowedFolders'), null); assert.equal(h.root.querySelectorAll('script').length, 0);
-  const folder = () => h.root.querySelectorAll('input').find(el => el.getAttribute('data-folder-name') === 'Work/客户');
-  folder().focus(); folder().checked = false; folder().fire('change');
-  assert.equal(h.model.entry().folderScope, 'selected'); assert.equal(h.document.activeElement.getAttribute('data-folder-name'), 'Work/客户');
-  h.model.filterFolders('INBOX'); assert.equal(h.model.entry().allowedFolders.length, 2);
-  h.model.filterFolders(''); assert.ok(allText(h.root).includes('<script>not-code</script>'));
+test('mail settings remove every folder picker control while preserving body permission', async () => {
+  const h = await setupView(() => Promise.resolve(activationSnapshot({stored: true})));
+  h.model.select('mail', 'mail-one');
+  for (const id of ['integration-folder-load', 'integration-folder-search', 'integration-folder-scope-hint'])
+    assert.equal(h.root.querySelector('#' + id), null);
+  assert.doesNotMatch(source, /field\("folderScope"|integration-folder-choice-|integration-folder-picker/);
+  assert.match(source, /field\("bodyAccess"/);
+  assert.match(source, /integrations.mailAllFolders/);
   h.view.destroy();
 });
 
-test('disconnect cancels in-flight folder loading and ignores a late result', async () => {
-  const pending = deferred(); const h = folderSetup({handler(path) {
-    if (path === '/mail/folders') return pending.promise;
-    if (path === '/disconnect') { const data = activationSnapshot(); data.config.revision = 5; return Promise.resolve(data); }
-  }});
-  await h.model.load(); const loading = h.model.select('mail', 'mail-one');
-  await h.model.action('disconnect'); pending.resolve(folderResult()); await loading;
-  assert.equal(h.model.folders.items, null); assert.equal(h.model.entry().credentialRef, null);
-  assert.equal(h.model.entry().enabled, false); assert.equal(h.model.notice, 'disconnected');
-  assert.equal(h.calls.find(call => call[0] === '/mail/folders')[3].aborted, true);
-  assert.equal(h.calls.filter(call => call[0] === '/mail/folders/cancel').length, 1);
+
+test('disconnect and asynchronous action snapshots reject selected scope without replacing the all draft', async () => {
+  for (const action of ['disconnect', 'test']) {
+    const pending = deferred();
+    const h = setup(path => path === '/' + action ? pending.promise : undefined);
+    await h.model.load(); h.model.select('mail', 'mail-one');
+    const before = plain(h.model.snapshot), draft = plain(h.model.draft);
+    const operation = h.model.action(action);
+    const result = snapshot(); result.config.revision++;
+    result.config.mailAccounts[0].folderScope = 'selected'; result.config.mailAccounts[0].allowedFolders = ['INBOX'];
+    pending.resolve(result); await operation;
+    assert.deepEqual(plain(h.model.snapshot), before); assert.deepEqual(plain(h.model.draft), draft);
+    assert.equal(h.model.error, 'integrations.error.mailScopeUnsupported');
+    assert.equal(h.model.diagnostic, null); assert.notEqual(h.model.notice, 'disconnected');
+  }
 });
 
-test('activation stays committed when its automatic folder loading fails', async () => {
-  let fail = false;
-  const h = folderSetup({stored: false, handler(path) {
-    if (path === '/mail/activate') { const data = activationSnapshot({stored: true, enabled: true}); data.config.revision = 5; return Promise.resolve(data); }
-    if (path === '/mail/folders' && fail) return Promise.reject({code: 'timeout'});
-  }});
-  await h.model.load(); await h.model.select('mail', 'mail-one'); h.model.setSecret('TEMP-CODE');
-  await h.model.loadFolders(); fail = true;
-  await h.model.activateMail(() => true);
-  assert.equal(h.model.notice, 'mailActivated'); assert.equal(h.model.error, '');
-  assert.equal(h.model.entry().enabled, true); assert.equal(h.model.entry().storageMode, 'windows');
-  assert.equal(h.model.folders.error, 'integrations.error.timeout'); assert.equal(h.model.activationNeedsRefresh, false);
-  assert.deepEqual(plain(h.model.folders.items), folderResult().folders); assert.equal(h.model.folders.stale, true);
-  assert.equal(h.calls.filter(call => call[0] === '/mail/activate').length, 1);
+test('activation rejects unsupported scope before confirmation or secret transmission', async () => {
+  const h = setup(() => Promise.resolve(activationSnapshot({stored: true})));
+  await h.model.load(); h.model.select('mail', 'mail-one'); h.model.setSecret('SYNTHETIC-CODE');
+  // Defense in depth for an unsupported in-memory snapshot, even when no metadata is dirty.
+  for (const config of [h.model.snapshot.config, h.model.draft]) {
+    config.mailAccounts[0].folderScope = 'selected'; config.mailAccounts[0].allowedFolders = ['INBOX'];
+  }
+  await h.model.activateMail(() => assert.fail('unsupported scope must not request confirmation'));
+  assert.equal(h.model.error, 'integrations.error.mailScopeUnsupported');
+  assert.deepEqual(h.calls.map(call => [call[0], call[1]]), [['', 'GET']]);
+});
+
+
+test('visible mail guidance describes fixed all-folder access without obsolete picker instructions', () => {
+  for (const lang of ['zh', 'en']) {
+    const locale = JSON.parse(fs.readFileSync(new URL('locales/' + lang + '.json', base), 'utf8'));
+    const help = locale['integrations.mailSaveFirst'];
+    assert.match(help, lang === 'zh' ? /全部文件夹.*以后新增目录/ : /all folders, including future folders/);
+    assert.match(help, lang === 'zh' ? /不会自动加载目录或同步邮件/ : /does not automatically load directories or sync mail/);
+    assert.match(help, lang === 'zh' ? /修改正文权限后须重新确认/ : /Body permission changes require activation confirmation/);
+    assert.doesNotMatch(help, /选择范围|并连接加载|folders load automatically|after choosing its scope/);
+    assert.doesNotMatch(locale['integrations.activation.bodyYes'], /所选|selected folder/);
+  }
 });

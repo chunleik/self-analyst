@@ -9,6 +9,7 @@ import io.modelcontextprotocol.json.jackson.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.spec.McpClientTransport;
 import io.modelcontextprotocol.spec.McpSchema;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 import java.io.ByteArrayOutputStream;
@@ -24,7 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
@@ -67,7 +67,7 @@ public final class PinnedSseMcpTransport implements McpClientTransport {
     private final int maxBytes;
     private final Supplier<String> bearer;
     private final AtomicBoolean started = new AtomicBoolean(), closed = new AtomicBoolean();
-    private final CompletableFuture<Void> ready = new CompletableFuture<>();
+    private final Sinks.Empty<Void> ready = Sinks.empty();
     private final PinnedHttpsClient.EventStream stream = new PinnedHttpsClient.EventStream();
     private final Set<Thread> active = ConcurrentHashMap.newKeySet();
     private final Map<Object, Pending> pending = new LinkedHashMap<>();
@@ -111,7 +111,7 @@ public final class PinnedSseMcpTransport implements McpClientTransport {
             Thread worker = Thread.ofVirtual().name("integration-mcp-sse").unstarted(this::runEvents);
             eventWorker = worker;
             worker.start();
-            return Mono.fromFuture(ready).timeout(initializationTimeout)
+            return ready.asMono().timeout(initializationTimeout)
                     .doOnError(ignored -> stop()).doOnCancel(this::stop);
         });
     }
@@ -145,7 +145,10 @@ public final class PinnedSseMcpTransport implements McpClientTransport {
         McpSchema.JSONRPCRequest request = message instanceof McpSchema.JSONRPCRequest rpc ? rpc : null;
         boolean business = request != null && "tools/call".equals(request.method());
         BusinessLease lease = business ? businessLease : null;
-        return Mono.<Void>fromRunnable(() -> {
+        // McpClientSession subscribes to connect() asynchronously. The first SDK initialize POST can
+        // arrive while the GET is still opening. Wait for the endpoint event without blocking an IO worker
+        // or letting cancellation of this single send cancel the shared readiness signal.
+        return ready.asMono().timeout(initializationTimeout).then(Mono.<Void>fromRunnable(() -> {
             Thread thread = Thread.currentThread();
             active.add(thread);
             byte[] body = null;
@@ -185,7 +188,7 @@ public final class PinnedSseMcpTransport implements McpClientTransport {
                 if (body != null) Arrays.fill(body, (byte) 0);
                 active.remove(thread);
             }
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic()));
     }
 
     private boolean allowed(PinnedHttpsClient.SsePostTarget target, boolean business, BusinessLease lease) {
@@ -233,7 +236,7 @@ public final class PinnedSseMcpTransport implements McpClientTransport {
     private void stop() {
         if (!closed.compareAndSet(false, true)) return;
         messageEndpoint = null;
-        ready.completeExceptionally(new IllegalStateException("mcp_sse_closed"));
+        ready.tryEmitError(new IllegalStateException("mcp_sse_closed"));
         synchronized (pending) { pending.clear(); }
         stream.close();
         Thread worker = eventWorker;
@@ -311,7 +314,7 @@ public final class PinnedSseMcpTransport implements McpClientTransport {
                     messageEndpoint = null;
                     throw new IOException("endpoint_cancelled");
                 }
-                ready.complete(null);
+                ready.tryEmitEmpty();
                 return;
             }
             if (messageEndpoint == null) throw new IOException("invalid_sse_endpoint");

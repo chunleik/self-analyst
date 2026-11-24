@@ -17,6 +17,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -168,6 +169,44 @@ class PinnedSseMcpTransportTest {
             assertFalse(gotResponse.get());
             assertFalse(transport.isOpen());
         } finally { transport.close(); }
+    }
+
+    @Test void queuesAnEarlySendUntilEndpointAndKeepsReadinessAfterCancellingAnotherSend() throws Exception {
+        var opened = new CountDownLatch(1);
+        var publishEndpoint = new CountDownLatch(1);
+        var writes = new AtomicInteger();
+        var transport = new PinnedSseMcpTransport((uri, header, connect, life, max, stream, consume) -> {
+            opened.countDown();
+            try {
+                publishEndpoint.await();
+                emit(consume, "event: endpoint\ndata: /messages?sessionId=delayed\n\n");
+                new CountDownLatch(1).await();
+            } catch (InterruptedException closed) { Thread.currentThread().interrupt(); }
+        }, (target, headers, body, timeout, maximum, authorize, startSend) -> {
+            assertTrue(authorize.getAsBoolean());
+            assertTrue(startSend.getAsBoolean());
+            writes.incrementAndGet();
+            return new PinnedHttpsClient.Response(202, Map.of(), new byte[0]);
+        }, URL, TIMEOUT, TIMEOUT, 4096, () -> null);
+
+        try {
+            var connect = transport.connect(message -> message).toFuture();
+            assertTrue(opened.await(2, TimeUnit.SECONDS));
+            var premature = new McpSchema.JSONRPCRequest("2.0", "initialize", 1, Map.of());
+            var first = transport.sendMessage(premature).toFuture();
+            var cancelled = transport.sendMessage(premature).toFuture();
+            assertTrue(cancelled.cancel(true));
+            assertThrows(TimeoutException.class, () -> first.get(100, TimeUnit.MILLISECONDS));
+            assertEquals(0, writes.get());
+            publishEndpoint.countDown();
+            connect.get(2, TimeUnit.SECONDS);
+            first.get(2, TimeUnit.SECONDS);
+            assertTrue(transport.isOpen());
+            assertEquals(1, writes.get());
+        } finally {
+            publishEndpoint.countDown();
+            transport.close();
+        }
     }
 
     private static void emit(PinnedHttpsClient.EventBytes consumer, String text) throws IOException {

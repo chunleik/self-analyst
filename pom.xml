@@ -48,6 +48,7 @@
     <modules>
         <module>self-analyst-events</module>
         <module>self-analyst-app</module>
+        <module>self-analyst-mail</module>
         <module>self-analyst-content</module>
         <module>self-analyst-wiki</module>
         <module>self-analyst-file</module>

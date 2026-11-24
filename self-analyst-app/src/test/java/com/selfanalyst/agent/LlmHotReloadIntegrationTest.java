@@ -73,8 +73,6 @@ class LlmHotReloadIntegrationTest {
                     max-tokens = 64
                     [agent.compaction]
                     enabled = false
-                    [websearch]
-                    enabled = false
                     """.formatted(dir.toString(), key, server.getAddress().getPort()));
             if (!initialOverrides.isEmpty()) {
                 Properties user = store.loadUser();

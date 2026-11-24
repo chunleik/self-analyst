@@ -35,6 +35,7 @@ Rust UIAutomation（临时树） ──┼─> TitleCapture ─> 内容事件 v2
 | `self-analyst-wiki` | 按小时、半天、日、周、双周和月聚合标题事实，维护摘要、生成账本与派生索引 |
 | `self-analyst-ontology` | 本地知识实体、关系、纠错与来源投影；可选、逐次确认的 Neo4j 快照同步 |
 | `self-analyst-app` | 生命周期、配置、Agent、桌面 REST/SSE 与静态 UI |
+| `self-analyst-mail` | 固定邮箱预设、有界 IMAP 读取、草稿和受批准的 SMTP |
 | `self-analyst-axsidecar` | OS 无障碍树查询协议；失败返回空，不负责持久化 |
 | `self-analyst-desktop` | Tauri 窗口、Java 后端启动与关闭、端口握手 |
 
@@ -344,18 +345,32 @@ DesktopServer 创建本体服务，注册 `/desktop/ontology` 的受认证 API �
 
 ## 11. MCP 与进程内邮箱
 
-`IntegrationStore` 在数据根准入之后管理独立版本化 JSON 与 revision CAS，`IntegrationCredentialStore` 提供默认 session 与显式 Windows 保险库实现，凭据绑定精确目标。原 `websearch.*` 保留唯一 TOML 权威，由 `McpManager` 的保留入口消费，不再由 Agent 自行注册未经审阅的客户端。
+本节新增的顶栏 MCP、回环共享和邮箱写入对应 `add-mcp-tool-management` 开发变更，不能从源码存在推断已经发版或通过实机验收。
+
+`IntegrationStore` 在数据根准入之后管理独立版本化 JSON 与 revision CAS，`IntegrationCredentialStore` 提供默认 session 与显式 Windows 系统凭据库实现，凭据绑定精确目标。`websearch.*` 和 `WEBSEARCH_*` 在配置解析、状态与管理接口中退役，合法 TOML 原文可保留；不会创建 `legacy-websearch` 连接、复制地址与凭据或沿用历史批准。Parallel Search 预设仅提供公共端点和协议，重新添加后采用现有外部 MCP 连接和批准流程。
 
 管理器异步发现启用连接，运行目录在每轮独占聊天门内生成快照，当前运行与后续模型版本使用同一策略。旧快照调用前仍检查配置、工具摘要与撤权。真实确认保存在 `ApprovalRegistry`，绑定 session/turn/参数，等待期间不持有配置锁；取消关闭收回记录与网络操作。
 
-`PinnedMcpTransport` 复用 MCP SDK 的协议语义，通过受限 `PinnedHttpsClient` 连接已校验 DNS 地址，校验原始 TLS 主机名，限制绝对截止时间、头部/消息体和并发，不重定向、不重试不确定调用。仅支持有限 JSON/SSE POST 交换，不提供后台订阅或 stdio。
+现有 `PinnedMcpTransport` 复用 MCP SDK 的协议语义，通过受限 `PinnedHttpsClient` 连接已校验 DNS 地址，校验原始 TLS 主机名，限制绝对截止时间、头部/消息体和并发，不重定向、不重试不确定调用。Streamable HTTP 的有限 JSON/SSE POST 不等于旧 SSE transport；旧版 SSE 有独立生命周期，保持公网 HTTPS、DNS 固定与 TLS 边界，不重放业务请求；stdio 以已审核的绝对可执行文件和参数启动，不经过通用 shell，不自动运行导入配置、应用启动或普通聊天轮次。
 
-`ReadOnlyMailService` 为进程内服务，经相同 Agent 工具入口发布四个邮箱能力，没有对外 MCP 监听端口。固定 QQ/163 预设、Angus IMAP、READ_ONLY/PEEK、UIDVALIDITY 引用、有界 MIME 与取消共同约束其读取边界。
+`ReadOnlyMailService` 维持独立读取路径，默认只由 SelfAnalyst Agent 使用。固定服务商预设、Angus IMAP、READ_ONLY/PEEK、UIDVALIDITY 引用、有界 MIME 与取消共同约束读取边界。向本机客户端开放时仍复用相同读服务与文件夹、正文和预算校验。除既有 QQ/163 外，新增普通 126 和符合条件的个人 Gmail 应用专用密码预设；Exchange Online、自定义与其它企业邮箱不在本次范围内。
 
-邮箱范围使用显式 `folderScope=all|selected`。新表单默认全部，但账户启用、正文和处理授权仍关闭；缺少字段的旧账户按指定模式兼容，不扩大既有白名单。全部模式在操作时处理服务商可见的完整目录名，支持新增及嵌套目录，并保留目录数量、协议与时间预算。范围和目录列表随配置 revision 参与即时复核，收窄后旧引用/游标失效；不改变单目录按需搜索或模型接收方授权。
+邮箱范围使用显式 `folderScope=all|selected`。新表单固定全部，但账户启用、正文和处理授权仍关闭；缺失或当前表单不支持的范围不会静默扩权。全部模式在操作时处理服务商可见的完整目录名，支持新增及嵌套目录，并保留目录数量、协议与时间预算。范围和目录列表随配置 revision 参与即时复核，收窄后旧引用/游标失效；不改变单目录按需搜索或模型接收方授权。
 
 邮箱启用使用独立受管桌面操作：前端用一次明确确认替代处理授权、启用、持久化三个勾选项，后端核对披露版本、预期 revision 和展示的模型目标。授权码先进入真实 Windows Credential Manager 并回读核验，再提交引用及启用状态，最后清理旧引用；失败不能降级为 session 或明文。旧会话凭据保留读取兼容，外部 MCP 存储规则不变。元数据入口不能赋予新的启用/披露状态；服务商、地址、目录范围及正文许可变化先停用，显示名编辑不影响启用。
 
 管理快照在与修改事务相同的 manager 监视器内完整采集，再序列化不可变结果，避免启用期间刷新返回旧配置与新状态的混合。激活传输或响应无法确认时，前端保留公共快照和恢复标记，不保存秘密、不自动重试；只有有效当前 GET 能解除恢复限制，关闭重开仍需核对。
 
-`MailSessionPolicy` 在 chat.db 保存来源和接收目标。Agent 模型包装、会话摘要、压缩及修复模型租约在实际发送时检查目标；源标记优先于自动记忆策略。原生工具采用本地只读 allowlist，拒绝 embedding 出口，确认后才能写设置或记忆。新管理接口要求 managedDesktop，不沿用无 token 本机兼容访问。用户说明与回滚边界见 `docs/integrations.md`、`docs/mail-integration.md` 和 `PRIVACY.md`。
+`MailSessionPolicy` 在 chat.db 保存来源和接收目标。Agent 模型包装、会话摘要、压缩及修复模型租约在实际发送时检查目标；源标记优先于自动记忆策略。原生工具采用本地只读 allowlist，拒绝 embedding 出口，确认后才能写设置或记忆。管理接口要求 `managedDesktop`，不沿用无 token 本机兼容访问。
+
+### 本机 MCP 接入
+
+`LocalMcpHttpEndpoint` 在已有 `127.0.0.1` 后端端口上处理 `/mcp/{serverId}`，包括聚合 `/mcp/all`；不新增可访问的网络监听地址。入口使用独立 Bearer 认证，校验回环 Host 和端口并拒绝带 Origin 的浏览器请求。只支持无会话 JSON Streamable HTTP 的初始化、ping、工具目录和调用；不代理外部 MCP、不提供订阅、resources 或 prompts。`/desktop/mcp-management` 是独立受认证管理面。
+
+`McpMailManagement` 在 `config/local-mcp.json` 原子保存 revision、按账户的显式开放/草稿/发信规则及非秘密凭据引用。专用 MCP 令牌和 SMTP 授权码各自写入 Windows 系统凭据库，分别绑定本机接入身份与该邮箱的固定 SMTP 目的地。不通过普通连接导出，不在状态中回显，无明文或会话降级。初始账户不开放，聚合目录仅包含开放账户并以账户 ID 区分工具；所有开放账户共用接入令牌。权限绑定账户身份、认证引用及读取范围，待批准操作还绑定配置 revision；重配、撤权和令牌轮换会阻断旧授权。
+
+### 隔离邮箱写入
+
+管理页分别决定允许申请草稿/发送，默认关闭；保存 SMTP 授权码不等于开启发送。应用内调用走聊天审批，本机客户端的待审草稿/发送在 MCP 页通过受管桌面审批。请求的发件账号、收件人、主题和完整正文规范化成不可变载荷，逐次批准不可复用，服务端写入前重新校验当前授权；仅持有客户端令牌不能写入。
+
+`MailWriteService` 和 `AngusMailWriteTransport` 与既有只读路径分开，使用有界纯文本和有限执行时间。草稿需要服务商返回唯一且在授权范围内的 `\Drafts`，只执行一次 IMAP APPEND；发信走服务商固定 SMTPS 端点，使用独立授权码且不自动追加 Sent。TLS 继续校验证书链与名称。失败、不确定后果或超时不自动重试；SMTP 接收仅能证明提交被服务端接收，不能证明送达。合成测试不能替代真实邮箱、Windows 凭据库、原生分发或具体的同机客户端互操作验收。用户说明见[连接指南](integrations.md)、[邮箱指南](mail-integration.md)和[隐私说明](../PRIVACY.md)。

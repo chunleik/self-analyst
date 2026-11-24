@@ -80,7 +80,7 @@ public final class AngusMailTransport implements MailTransport {
     private static IMAPStore connectTls(MailAccount account, char[] secret, MailCancellation cancellation,
                                          MailLimits limits, MailSocketFactory sockets) throws MessagingException {
         Session session = Session.getInstance(properties(limits, sockets));
-        IMAPStore store = createStore(session, "imaps", true, account.provider() == MailAccount.Provider.NETEASE_163);
+        IMAPStore store = createStore(session, "imaps", true, account.provider().requiresImapId());
         try {
             cancellation.check();
             store.connect(account.provider().host(), account.provider().port(), account.email(), new String(secret));
@@ -100,7 +100,7 @@ public final class AngusMailTransport implements MailTransport {
             @Override protected IMAPProtocol newIMAPProtocol(String host, int port) throws java.io.IOException, ProtocolException {
                 return new IMAPProtocol(protocolName, host, port, session.getProperties(), ssl, logger) {
                     @Override public MailboxInfo examine(String mailbox, ResyncData resync) throws ProtocolException {
-                        // ID belongs to the authenticated physical connection, not just the logical Store.
+                        // NetEase ID belongs to the authenticated physical connection, not just the logical Store.
                         if (identityRequired) {
                             if (!hasCapability("ID")) throw new MailException(MailException.Code.PROVIDER_RESTRICTED);
                             id(Map.of("name", "SelfAnalyst", "version", applicationVersion(), "vendor", "SelfAnalyst"));
@@ -123,16 +123,16 @@ public final class AngusMailTransport implements MailTransport {
         };
     }
     @Override public Connection connect(MailAccount account, char[] authorizationCode, MailCancellation cancellation, MailLimits limits) {
-        if (authorizationCode == null || authorizationCode.length == 0 || authorizationCode.length > 256) {
+        if (!account.provider().acceptsAuthorizationCode(authorizationCode))
             throw new MailException(MailException.Code.AUTHENTICATION_REQUIRED);
-        }
         cancellation.check();
         MailSocketFactory sockets = new MailSocketFactory(cancellation, limits.maxWireBytes());
+        char[] protocolCode = account.provider().protocolAuthorizationCode(authorizationCode);
         IMAPStore store = null;
         try {
-            store = connector.connect(account, authorizationCode, cancellation, limits, sockets);
+            store = connector.connect(account, protocolCode, cancellation, limits, sockets);
             cancellation.check();
-            if (account.provider() == MailAccount.Provider.NETEASE_163) {
+            if (account.provider().requiresImapId()) {
                 if (!store.hasCapability("ID")) throw new MailException(MailException.Code.PROVIDER_RESTRICTED);
                 store.id(Map.of("name", "SelfAnalyst", "version", applicationVersion(), "vendor", "SelfAnalyst"));
             }
@@ -142,6 +142,8 @@ public final class AngusMailTransport implements MailTransport {
             if (store != null) try { store.close(); } catch (MessagingException ignored) { }
             cancellation.check();
             throw classify(e);
+        } finally {
+            if (protocolCode != authorizationCode) Arrays.fill(protocolCode, '\0');
         }
     }
     private static String applicationVersion() {

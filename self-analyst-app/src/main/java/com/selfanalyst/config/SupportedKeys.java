@@ -13,9 +13,8 @@ import java.util.LinkedHashMap;
  * aligned with {@link Config#load()} and the desktop-only settings persisted by
  * {@code UserConfigStore}.
  *
- * <p>Network/LLM-sending features remain opt-in by default: wiki, embedding,
- * file watch, and web search are all listed with {@code false} where they cause
- * external processing or broader data capture.
+ * <p>Wiki, embedding and file watch remain opt-in where they cause external
+ * processing or broader data capture. Search is managed by external MCP connections.
  */
 public final class SupportedKeys {
 
@@ -145,10 +144,6 @@ public final class SupportedKeys {
         put("file.watch.excludeGlobs", "", KeyType.LIST);
         put("file.watch.respectGitIgnore", "true", KeyType.BOOLEAN);
 
-        put("websearch.enabled", "false", KeyType.BOOLEAN);
-        put("websearch.mcp-url", "https://search.parallel.ai/mcp", KeyType.STRING);
-        put("websearch.api-key", "", KeyType.STRING);
-
         put("app.language", "auto", KeyType.STRING);
 
         describe("log.dir", "应用日志的保存目录。", "Directory where application logs are stored.");
@@ -229,10 +224,6 @@ public final class SupportedKeys {
         describe("file.watch.excludeDirs", "任意层级要整棵跳过的目录名列表（不区分大小写）。", "Case-insensitive directory names whose subtrees are skipped at any depth.");
         describe("file.watch.excludeGlobs", "相对监控根目录匹配的排除 glob 列表。", "Exclusion globs matched against paths relative to each watch root.");
         describe("file.watch.respectGitIgnore", "是否读取监控目录内的 .gitignore 规则。", "Whether to apply .gitignore rules inside watched folders.");
-
-        describe("websearch.enabled", "是否允许 Agent 使用网络搜索。", "Whether to allow the agent to use web search.");
-        describe("websearch.mcp-url", "网络搜索 MCP 服务地址。", "URL of the web-search MCP service.");
-        describe("websearch.api-key", "网络搜索服务的 API 密钥。", "API key for the web-search service.");
 
         describe("app.language", "界面与提示词语言：auto、zh 或 en；修改后需重启。", "UI and prompt language: auto, zh, or en; restart required after changing it.");
 

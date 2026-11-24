@@ -124,6 +124,17 @@ public class EventServer {
                 ctx.skipRemainingHandlers();
                 return;
             }
+            boolean localMcp = ctx.path().startsWith("/mcp/");
+            if (localMcp && origin != null) {
+                ctx.status(403);
+                ctx.skipRemainingHandlers();
+                return;
+            }
+            if (localMcp && ctx.method() == HandlerType.OPTIONS) {
+                ctx.status(405);
+                ctx.skipRemainingHandlers();
+                return;
+            }
             if (origin != null) {
                 ctx.header("Access-Control-Allow-Origin", origin);
                 ctx.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");

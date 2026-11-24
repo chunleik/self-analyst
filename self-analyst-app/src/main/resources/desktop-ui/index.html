@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="ontology.css">
 <link rel="stylesheet" href="llm-settings.css">
 <link rel="stylesheet" href="integrations.css">
+<link rel="stylesheet" href="mcp.css">
 <link rel="stylesheet" href="observability.css">
 <link rel="stylesheet" href="config-layout.css">
 <link rel="stylesheet" href="privacy-settings.css">
@@ -35,6 +36,7 @@
       <button class="tab active" data-tab="agent" data-i18n="tab.agent">看板</button>
       <button class="tab" data-tab="knowledge" data-i18n="ontology.title">知识</button>
       <button class="tab" data-tab="chat" data-i18n="tab.chat">会话</button>
+      <button id="mcp-nav-tab" class="tab" type="button" data-tab="mcp" aria-controls="tab-mcp" data-i18n="mcp.title">MCP</button>
       <button class="tab hidden" data-tab="files" data-i18n="tab.files">文件</button>
     </nav>
   </div>
@@ -103,6 +105,7 @@
     </div>
   </section>
   <section id="tab-knowledge" class="tab-content"><div id="knowledge-root" class="knowledge-page"></div></section>
+  <section id="tab-mcp" class="tab-content" aria-labelledby="mcp-nav-tab"></section>
   <!-- ===== FILES TAB ===== -->
   <section id="tab-files" class="tab-content">
     <div class="file-page">
@@ -306,6 +309,7 @@
 <script src="llm-settings.js"></script>
 <script src="integration-tools-dialog.js"></script>
 <script src="integrations.js"></script>
+<script src="mcp.js"></script>
 <script src="observability.js"></script>
 <script src="integration-approvals.js"></script>
 <script src="files.js"></script>

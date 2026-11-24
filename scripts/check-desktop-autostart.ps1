@@ -37,8 +37,6 @@ enabled = false
 enabled = false
 [embedding]
 enabled = false
-[websearch]
-enabled = false
 [llm]
 api-key = ''
 "@
@@ -64,7 +62,7 @@ function Start-TestDesktop([string[]]$Arguments) {
         $info.Environment.Remove($legacy) | Out-Null
     }
     foreach ($setting in @('EVENTS_COLLECTION_WINDOW', 'EVENTS_COLLECTION_AFK', 'EVENTS_COLLECTION_TITLE_ENABLED',
-            'FILE_WATCH_ENABLED', 'WIKI_ENABLED', 'EMBEDDING_ENABLED', 'WEBSEARCH_ENABLED')) {
+            'FILE_WATCH_ENABLED', 'WIKI_ENABLED', 'EMBEDDING_ENABLED')) {
         $info.Environment[$setting] = 'false'
     }
     $info.Environment['EVENTS_MODE'] = 'embedded'

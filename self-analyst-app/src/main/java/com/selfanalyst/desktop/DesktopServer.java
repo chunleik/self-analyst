@@ -67,6 +67,7 @@ public class DesktopServer {
     private final DesktopDocumentController documentCtrl;
     private final com.selfanalyst.mcp.McpManager integrations;
     private final DesktopIntegrationController integrationCtrl;
+    private final com.selfanalyst.mcp.McpMailManagement mcpMailManagement;
     private final com.selfanalyst.observability.ObservabilityService observability;
     private final DesktopObservabilityController observabilityCtrl;
     private com.selfanalyst.ontology.OntologyService ontology;
@@ -230,6 +231,10 @@ public class DesktopServer {
             integrations = new com.selfanalyst.mcp.McpManager(integrationStore,
                     new com.selfanalyst.integrations.IntegrationCredentialStore(), mailPolicy, config,
                     new com.selfanalyst.integrations.PinnedHttpsClient(), new com.selfanalyst.mcp.ApprovalRegistry());
+            mcpMailManagement = new com.selfanalyst.mcp.McpMailManagement(
+                    Config.resolveConfigDir().toAbsolutePath().normalize().getParent(), integrations::config,
+                    new com.selfanalyst.integrations.IntegrationCredentialStore(), com.sun.jna.Platform::isWindows);
+            integrations.setMailManagement(mcpMailManagement);
             integrationCtrl = new DesktopIntegrationController(integrations,
                     () -> agent == null ? "" : agent.currentModelTarget());
             if (agent != null) {
@@ -328,6 +333,12 @@ public class DesktopServer {
      */
     public void start() {
         integrationCtrl.register(app);
+        new com.selfanalyst.desktop.controller.DesktopMcpManagementController(mcpMailManagement).register(app);
+        var localMcp = new com.selfanalyst.mcp.LocalMcpHttpEndpoint(mcpMailManagement);
+        String mcpPath = com.selfanalyst.mcp.LocalMcpHttpEndpoint.PATH;
+        app.post(mcpPath, localMcp::handle);
+        app.get(mcpPath, localMcp::handle);
+        app.delete(mcpPath, localMcp::handle);
         observabilityCtrl.register(app);
         new DesktopOntologyController(ontology).register(app);
         new DesktopNeo4jController(neo4jSync).register(app);
@@ -461,6 +472,7 @@ public class DesktopServer {
 
     public void shutdown() {
         observability.close();
+        mcpMailManagement.close();
         integrations.close();
         closeOntology();
         stopSummaryEnhancement();

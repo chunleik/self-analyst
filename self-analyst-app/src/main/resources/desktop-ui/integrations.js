@@ -1,5 +1,39 @@
 "use strict";
 
+var INTEGRATION_MCP_TRANSPORTS = ["streamable-http", "sse", "stdio"];
+var INTEGRATION_NETEASE_HELP = "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b";
+var INTEGRATION_MAIL_PROVIDERS = [
+  ["qq", "QQ", "https://help.mail.qq.com/detail/106/985"],
+  ["163", "163", INTEGRATION_NETEASE_HELP],
+  ["126", "126", INTEGRATION_NETEASE_HELP],
+  ["gmail", "Gmail", "https://support.google.com/accounts/answer/185833"]
+];
+
+function integrationMailProvider(id) {
+  return INTEGRATION_MAIL_PROVIDERS.find(function (entry) { return entry[0] === id; });
+}
+
+
+function integrationStdioArgv(value) {
+  try {
+    if (typeof value !== "string" || value.length > 8192) return null;
+    var argv = JSON.parse(value);
+    if (!Array.isArray(argv) || !argv.length || argv.length > 32
+        || !argv.every(function (arg) {
+          return typeof arg === "string" && arg.length <= 2048
+            && !/[\x00-\x1f\x7f-\x9f]/.test(arg);
+        })) return null;
+    if (argv[0].startsWith("//") || !(argv[0].startsWith("/") || /^[a-z]:[\\/].+/i.test(argv[0]))) return null;
+    return argv;
+  } catch (ignored) { return null; }
+}
+
+function integrationStdioReview(argv) {
+  return JSON.stringify(argv, null, 2).replace(/[\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, function (char) {
+    return "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0");
+  });
+}
+
 // Public metadata and write-only secrets deliberately have separate request paths.
 function integrationErrorText(error, mailActivation) {
   var storageCategory = mailActivation ? "mailStorage" : "storage";
@@ -9,10 +43,11 @@ function integrationErrorText(error, mailActivation) {
     credential_verification_failed: storageCategory, credential_read_failed: storageCategory, mail_credential_required: "mailCredential",
     mail_activation_confirmation_required: "reviewRequired", mail_activation_required: "reviewRequired", model_target_changed: "reviewRequired",
     model_target_unavailable: "modelTarget", mail_activation_outcome_uncertain: "mailOutcomeUncertain",
-    unsafe_login: "unsafeLogin", permission_changed: "permission", integration_authorization_required: "permission", managed_desktop_required: "permission", stale_reference: "stale",
+    invalid_stdio_command: "stdioCommand", mcp_stdio_invalid_command: "stdioCommand",
+    save_disabled_transport_before_enabling: "stdioSaveFirst", unsafe_login: "unsafeLogin", permission_changed: "permission", integration_authorization_required: "permission", managed_desktop_required: "permission", stale_reference: "stale",
     invalid_config: "validation", unsupported_transport: "validation", tls_error: "tls", tls_failure: "tls", provider_restricted: "unsafeLogin", limit_exceeded: "folderLimit", mail_discovery_busy: "folderBusy" };
   code = aliases[code] || (/^(invalid_|unsupported_|disclosure_required)/.test(code) ? "validation" : code);
-  var allowed = ["conflict", "authentication", "storage", "unsafeLogin", "permission", "stale", "validation", "tls", "timeout", "unavailable", "cancelled", "mailStorage", "mailCredential", "reviewRequired", "modelTarget", "mailOutcomeUncertain", "folderLimit", "folderBusy", "folderSelection", "mailScopeUnsupported"];
+  var allowed = ["conflict", "authentication", "storage", "unsafeLogin", "permission", "stale", "validation", "tls", "timeout", "unavailable", "cancelled", "mailStorage", "mailCredential", "reviewRequired", "modelTarget", "stdioCommand", "stdioSaveFirst", "mailOutcomeUncertain", "folderLimit", "folderBusy", "folderSelection", "mailScopeUnsupported"];
   return t("integrations.error." + (allowed.indexOf(code) >= 0 ? code : "unavailable"));
 }
 
@@ -37,13 +72,14 @@ function integrationValidSnapshot(snapshot) {
     ids.push(entry.id); return true;
   }
   return config.mailAccounts.every(function (entry) {
-    return identity(entry) && ["qq", "163"].indexOf(entry.provider) >= 0 && text(entry.email) && text(entry.displayName)
+    return identity(entry) && !!integrationMailProvider(entry.provider) && text(entry.email) && text(entry.displayName)
       && entry.folderScope === "all"
       && strings(entry.allowedFolders) && typeof entry.bodyAccess === "boolean" && credential(entry)
       && [0, 1].indexOf(entry.disclosureVersion) >= 0 && (!entry.enabled || entry.disclosureVersion === 1);
   }) && config.mcpServers.every(function (entry) {
-    return identity(entry) && text(entry.name) && text(entry.endpoint) && entry.transport === "streamable-http"
-      && ["anonymous", "bearer"].indexOf(entry.authType) >= 0 && credential(entry) && object(entry.budget);
+    return identity(entry) && text(entry.name) && text(entry.endpoint) && INTEGRATION_MCP_TRANSPORTS.indexOf(entry.transport) >= 0
+      && ["anonymous", "bearer"].indexOf(entry.authType) >= 0 && credential(entry) && object(entry.budget)
+      && (entry.transport !== "stdio" || entry.authType === "anonymous" && entry.credentialRef === null);
   }) && config.toolApprovals.every(function (entry) {
     return object(entry) && text(entry.sourceId) && text(entry.toolName) && text(entry.definitionDigest)
       && Number.isSafeInteger(entry.approvedRevision) && entry.approvedRevision >= 0;
@@ -125,13 +161,18 @@ function createIntegrationsModel(request, changed) {
     if (model.busy || model.loading) return;
     invalidate(); clearSecret(); model.selected = { kind: kind, id: id }; model.error = ""; model.notice = ""; emit();
   };
-  model.add = function (kind) {
+  model.add = function (kind, preset) {
     if (!model.draft || model.loading || model.outcomeUnknown || model.busy || kind === "mail" && model.activationNeedsRefresh) return;
     var id = (kind === "mail" ? "mail-" : "mcp-") + crypto.randomUUID();
     var entry = kind === "mail" ? { id: id, provider: "qq", email: "", displayName: "", enabled: false,
       folderScope: "all", allowedFolders: [], bodyAccess: false, credentialRef: null, storageMode: "session", disclosureVersion: 0 }
       : { id: id, name: "", enabled: false, transport: "streamable-http", endpoint: "", authType: "anonymous", credentialRef: null, storageMode: "session",
         budget: { connectTimeoutSeconds: 10, requestTimeoutSeconds: 30, maxTools: 64, maxSchemaBytes: 32768, maxResultBytes: 262144 } };
+    if (kind === "mcp" && preset === "parallel") {
+      entry.name = "Parallel Search";
+      entry.endpoint = "https://search.parallel.ai/mcp";
+      entry.authType = "bearer";
+    }
     model.draft[kind === "mail" ? "mailAccounts" : "mcpServers"].push(entry); model.select(kind, id);
   };
   model.change = function (field, value) {
@@ -139,16 +180,24 @@ function createIntegrationsModel(request, changed) {
       || model.selected.kind === "mail" && model.activationNeedsRefresh) return;
     var allowed = model.selected.kind === "mail"
       ? ["provider", "email", "displayName", "bodyAccess"]
-      : ["name", "endpoint", "authType", "enabled"];
-    if (allowed.indexOf(field) < 0) return;
+      : ["name", "endpoint", "transport", "authType", "enabled"];
+    if (allowed.indexOf(field) < 0 || entry[field] === value) return;
+    if (field === "provider" && !integrationMailProvider(value)
+        || field === "transport" && INTEGRATION_MCP_TRANSPORTS.indexOf(value) < 0
+        || field === "authType" && entry.transport === "stdio" && value !== "anonymous"
+        || field === "enabled" && value && (entry.transport === "stdio" || entry.transport === "sse")
+          && !model.transportSaved()) return;
     invalidate();
-    if (["provider", "email", "endpoint", "authType"].indexOf(field) >= 0) {
+    if (["provider", "email", "endpoint", "authType", "transport"].indexOf(field) >= 0) {
       clearSecret();
       // Mail permission and credential resets belong to the metadata transaction on the server.
       if (model.selected.kind === "mcp") { entry.enabled = false; entry.credentialRef = null; entry.storageMode = "session"; }
     }
+    if (field === "transport" && (entry.transport === "stdio" || value === "stdio")) {
+      entry.endpoint = ""; entry.authType = "anonymous";
+    }
     entry[field] = value; model.error = ""; model.notice = "";
-    if (field === "endpoint") {
+    if (field === "endpoint" && entry.transport !== "stdio") {
       try {
         var target = new URL(value).href;
         var duplicate = model.draft.mcpServers.some(function (item) { return item.id !== entry.id && item.endpoint && new URL(item.endpoint).href === target; });
@@ -159,22 +208,49 @@ function createIntegrationsModel(request, changed) {
     emit();
   };
   model.setSecret = function (value) {
-    if (!model.busy && !model.outcomeUnknown && model.entry() && !(model.selected.kind === "mail" && model.activationNeedsRefresh)) {
+    if (!model.busy && !model.outcomeUnknown && model.entry() && model.entry().transport !== "stdio"
+        && !(model.selected.kind === "mail" && model.activationNeedsRefresh)) {
       invalidate(); model.secret = value; model.error = ""; emit();
     }
   };
   model.setPersist = function (value) {
-    if (!model.busy && !model.outcomeUnknown && model.snapshot && model.selected && model.selected.kind === "mcp") {
+    if (!model.busy && !model.outcomeUnknown && model.snapshot && model.selected && model.selected.kind === "mcp"
+        && model.entry() && model.entry().transport !== "stdio") {
       model.persist = !!value && !!model.snapshot.persistentCredentialsSupported; emit();
     }
   };
-  model.save = function () {
+  model.save = function (confirmStdio) {
     if (!model.snapshot || model.busy || model.outcomeUnknown || !metadataDirty()) return Promise.resolve();
     if (model.draft.mailAccounts.some(function (entry) {
       return entry.folderScope !== "all";
     })) { model.error = t("integrations.error.mailScopeUnsupported"); emit(); return Promise.resolve(); }
     invalidate(); var current = generation; model.busy = "save"; model.error = ""; emit();
-    var configuration = copy(model.draft);
+    var configuration = copy(model.draft), local = configuration.mcpServers.filter(function (entry) { return entry.transport === "stdio"; });
+    if (local.some(function (entry) { return !integrationStdioArgv(entry.endpoint); })) {
+      model.error = t("integrations.error.stdioCommand"); model.busy = ""; emit(); return Promise.resolve();
+    }
+    var starting = local.filter(function (entry) {
+      return entry.enabled && !model.snapshot.config.mcpServers.some(function (saved) {
+        return saved.id === entry.id && saved.transport === "stdio" && saved.endpoint === entry.endpoint && saved.enabled;
+      });
+    });
+    if (starting.some(function (entry) {
+      return !model.snapshot.config.mcpServers.some(function (saved) {
+        return saved.id === entry.id && saved.transport === "stdio" && saved.endpoint === entry.endpoint;
+      });
+    })) {
+      model.error = t("integrations.error.stdioSaveFirst"); model.busy = ""; emit(); return Promise.resolve();
+    }
+    var accepted = true;
+    try {
+      accepted = !starting.length || typeof confirmStdio === "function" && starting.every(function (entry) {
+        return confirmStdio(t("integrations.confirmStdio", { name: entry.name,
+          command: integrationStdioReview(integrationStdioArgv(entry.endpoint)) })) === true;
+      });
+    } catch (ignored) { accepted = false; }
+    if (!alive || current !== generation) return Promise.resolve();
+    if (!accepted) { model.error = t("integrations.error.stdioReview"); model.busy = ""; emit(); return Promise.resolve(); }
+
     configuration.mailAccounts.forEach(function (account) {
       if (!account.displayName.trim()) account.displayName = account.email;
     });
@@ -231,16 +307,34 @@ function createIntegrationsModel(request, changed) {
       }
     }).finally(function () { recovery.pending = false; body.secret = undefined; if (alive && current === generation) { model.busy = ""; emit(); } });
   };
-  model.action = function (action, tool) {
+  model.action = function (action, tool, confirmStdio) {
     if (model.busy || model.outcomeUnknown || metadataDirty() || !model.entry()) return Promise.resolve();
     if (model.selected.kind === "mail" && model.activationNeedsRefresh) return Promise.resolve();
     if (model.selected.kind === "legacy" && ["discover", "tools/approve"].indexOf(action) < 0) return Promise.resolve();
+    var entry = model.entry(), localCommand = entry.transport === "stdio";
+    if (localCommand && action === "credential") return Promise.resolve();
+    if (localCommand && (action === "test" || action === "discover")) {
+      if (!entry.enabled || !model.transportSaved()) return Promise.resolve();
+      var confirmed = false, reviewing = generation;
+      model.busy = "stdio/review";
+      try {
+        confirmed = typeof confirmStdio === "function" && confirmStdio(t("integrations.confirmStdioLaunch", {
+          name: entry.name, command: integrationStdioReview(integrationStdioArgv(entry.endpoint))
+        })) === true;
+      } catch (ignored) { /* Never start if the exact-command review could not be shown. */ }
+      if (!alive || reviewing !== generation) return Promise.resolve();
+      model.busy = "";
+      if (!confirmed) return Promise.resolve();
+    }
     if (action === "credential" && (model.selected.kind === "mail" || !model.secret)) return Promise.resolve();
     invalidate(); var current = generation, selected = copy(model.selected);
     var body = { kind: selected.kind, id: selected.id };
     if (action === "credential") Object.assign(body, { secret: model.secret, persist: model.persist, expectedRevision: model.snapshot.config.revision });
     body.expectedRevision = model.snapshot.config.revision;
-    if (action === "discover") body = { serverId: selected.id };
+    if (action === "discover") {
+      body = { serverId: selected.id };
+      if (localCommand) body.expectedRevision = model.snapshot.config.revision;
+    }
     if (action === "tools/approve") body = { serverId: selected.id, toolName: tool.name, digest: tool.digest, expectedRevision: model.snapshot.config.revision };
     clearSecret(); model.busy = action; model.error = ""; model.notice = ""; controller = new AbortController(); emit();
     return request("/" + action, "POST", body, controller.signal).then(function (result) {
@@ -263,6 +357,11 @@ function createIntegrationsModel(request, changed) {
     if (!model.selected || !model.snapshot || model.selected.kind === "legacy") return null;
     return model.snapshot.config[model.selected.kind === "mail" ? "mailAccounts" : "mcpServers"]
       .find(function (item) { return item.id === model.selected.id; }) || null;
+  };
+  model.transportSaved = function () {
+    var entry = model.entry(), saved = model.savedEntry();
+    return !!(entry && saved && saved.transport === entry.transport && saved.endpoint === entry.endpoint
+      && saved.authType === entry.authType && (entry.transport !== "stdio" || integrationStdioArgv(saved.endpoint)));
   };
   model.remove = function (confirmDelete) {
     if (model.busy || model.loading || model.outcomeUnknown || model.selected && model.selected.kind === "mail" && model.activationNeedsRefresh || !model.entry() || model.selected.kind === "legacy") return Promise.resolve();
@@ -360,8 +459,9 @@ function integrationButton(text, action) {
 
 function mountIntegrations(root) {
   var model = createIntegrationsModel(api.integrations, render), mounted = true, builtFor = null, controls = {}, status, error, notice, list, editor, tools, footer, connectionState;
+  function confirmStdio(review) { return window.__SELF_ANALYST_DESKTOP__ === true && window.confirm(review); }
   var catalogOpen = false, catalog = createIntegrationToolsDialog({
-    onDiscover: function () { return model.action("discover"); },
+    onDiscover: function () { return model.action("discover", undefined, confirmStdio); },
     onClose: function () { catalogOpen = false; if (model.busy === "discover") model.cancel(); }
   });
   function catalogView() {
@@ -373,8 +473,10 @@ function mountIntegrations(root) {
       endpoint: kind === "legacy" ? legacy.endpoint || "" : entry.endpoint || "", state: live.state || "not_connected",
       tools: model.metadataDirty() ? [] : model.tools.length ? model.tools : live.tools || [],
       known: !model.metadataDirty() && (live.catalogAvailable === true || live.state === "ready" || model.notice === "discovered"),
-      busy: model.busy === "discover", error: model.error, canDiscover: !model.busy && !model.loading && !model.outcomeUnknown && !model.metadataDirty(),
-      hint: model.metadataDirty() ? t("integrations.catalog.saveFirst") : "" };
+      busy: model.busy === "discover", error: model.error, canDiscover: !model.busy && !model.loading && !model.outcomeUnknown && !model.metadataDirty()
+        && (entry.transport !== "stdio" || entry.enabled && window.__SELF_ANALYST_DESKTOP__ === true),
+      hint: model.metadataDirty() ? t("integrations.catalog.saveFirst")
+        : entry.transport === "stdio" && !entry.enabled ? t("integrations.stdioDisabled") : "" };
   }
   function openCatalog(trigger) { catalogOpen = true; catalog.open(catalogView(), trigger); }
   function confirmRemoval(value) {
@@ -396,21 +498,27 @@ function mountIntegrations(root) {
       if (model.secret && !window.confirm(t("config.confirmDiscardClose"))) return; model.add(kind);
     });
     add.id = "integration-add-" + kind; actions.appendChild(add);
-  }); scroller.appendChild(actions);
+  });
+  var parallel = integrationButton(t("integrations.add.parallel"), function () {
+    if (model.secret && !window.confirm(t("config.confirmDiscardClose"))) return; model.add("mcp", "parallel");
+  });
+  actions.appendChild(parallel);
+  scroller.appendChild(actions);
   list = integrationElement("div", null, "integrations-list"); scroller.appendChild(list);
   editor = integrationElement("div", null, "integrations-editor"); scroller.appendChild(editor);
   tools = integrationElement("div", null, "integrations-tools"); scroller.appendChild(tools);
-  var legacy = integrationElement("p", t("integrations.legacy"), "integrations-hint"); scroller.appendChild(legacy);
-  scroller.appendChild(integrationButton(t("integrations.openLegacy"), function () { switchConfigView("raw", "websearch.enabled"); }));
   error = integrationElement("p", null, "integrations-error"); error.setAttribute("role", "alert"); error.tabIndex = -1;
   notice = integrationElement("p"); notice.setAttribute("role", "status"); notice.tabIndex = -1;
   scroller.appendChild(error); scroller.appendChild(notice);
   footer = integrationElement("div", null, "config-action-bar integrations-actions");
   var discard = integrationButton(t("config.discard"), function () { if (!(model.dirty() || model.outcomeUnknown) || window.confirm(t("config.confirmDiscardClose"))) model.load(); });
-  var save = integrationButton(t("config.saveChanges"), function () { model.save().then(function () { if (mounted) (model.error ? error : notice).focus(); }); });
+  var save = integrationButton(t("config.saveChanges"), function () {
+    model.save(confirmStdio)
+      .then(function () { if (mounted) (model.error ? error : notice).focus(); });
+  });
   footer.appendChild(discard); footer.appendChild(save); section.appendChild(footer); root.appendChild(section);
   function field(name, label, type, choices) {
-    var wrap = integrationElement("label", t(label), "integrations-field"), input = integrationElement(choices ? "select" : name === "allowedFolders" ? "textarea" : "input");
+    var wrap = integrationElement("label", t(label), "integrations-field"), input = integrationElement(choices ? "select" : ["allowedFolders", "stdioCommand"].indexOf(name) >= 0 ? "textarea" : "input");
     if (choices) choices.forEach(function (item) { var option = integrationElement("option", item[1]); option.value = item[0]; input.appendChild(option); });
     else if (input.tagName === "INPUT") input.type = type || "text";
     if (name === "secret") { input.autocomplete = "new-password"; input.spellcheck = false; input.maxLength = 2048; }
@@ -420,7 +528,8 @@ function mountIntegrations(root) {
       var value = input.type === "checkbox" ? input.checked : input.value;
       if (name === "secret") model.setSecret(value);
       else if (name === "persist") model.setPersist(value);
-      else model.change(name, name === "allowedFolders" ? value.split(/\r?\n/).map(function (v) { return v.trim(); }).filter(Boolean) : value);
+      else model.change(name === "stdioCommand" ? "endpoint" : name,
+        name === "allowedFolders" ? value.split(/\r?\n/).map(function (v) { return v.trim(); }).filter(Boolean) : value);
     });
     wrap.appendChild(input); editor.appendChild(wrap); controls[name] = input; return input;
   }
@@ -436,7 +545,9 @@ function mountIntegrations(root) {
       controls.catalog = legacyCatalog; editor.appendChild(legacyCatalog); return;
     }
     if (kind === "mail") {
-      field("provider", "integrations.provider", "text", [["qq", "QQ"], ["163", "163"]]);
+      field("provider", "integrations.provider", "text", INTEGRATION_MAIL_PROVIDERS);
+      var providerHint = integrationElement("p", null, "integrations-hint");
+      providerHint.id = "integration-provider-hint"; editor.appendChild(providerHint);
       var providerHelp = integrationElement("a", t("integrations.providerHelp"));
       providerHelp.id = "integration-provider-help"; providerHelp.target = "_blank"; providerHelp.rel = "noopener noreferrer";
       providerHelp.referrerPolicy = "no-referrer"; editor.appendChild(providerHelp);
@@ -447,15 +558,29 @@ function mountIntegrations(root) {
       var recipient = integrationElement("p", null, "integrations-disclosure"); recipient.id = "integration-model-target"; editor.appendChild(recipient);
       editor.appendChild(integrationElement("p", t("integrations.mailRetention"), "integrations-hint"));
     } else {
-      field("name", "integrations.name"); field("endpoint", "integrations.endpoint", "url");
+      field("name", "integrations.name");
+      field("transport", "integrations.transportLabel", "text", INTEGRATION_MCP_TRANSPORTS.map(function (value) {
+        return [value, t("integrations.transport." + value)];
+      }));
+      field("endpoint", "integrations.endpoint", "url");
+      var command = field("stdioCommand", "integrations.stdioCommand");
+      command.spellcheck = false; command.rows = 3; command.maxLength = 8192;
+      command.setAttribute("aria-describedby", "integration-stdio-disclosure");
       field("authType", "integrations.authType", "text", [["anonymous", t("integrations.anonymous")], ["bearer", "Bearer"]]);
-      editor.appendChild(integrationElement("p", t("integrations.remoteDisclosure"), "integrations-disclosure"));
+      var remote = integrationElement("p", t("integrations.remoteDisclosure"), "integrations-disclosure");
+      remote.id = "integration-remote-disclosure"; editor.appendChild(remote);
+      var stdio = integrationElement("p", t("integrations.stdioDisclosure"), "integrations-disclosure");
+      stdio.id = "integration-stdio-disclosure"; editor.appendChild(stdio);
+      var localStatus = integrationElement("p", null, "integrations-hint");
+      localStatus.id = "integration-stdio-help"; editor.appendChild(localStatus);
     }
     if (kind === "mcp") field("enabled", "integrations.enabled", "checkbox");
-    field("secret", kind === "mail" ? "integrations.authorizationCode" : "integrations.bearer", "password");
+    var credentialInput = field("secret", kind === "mail" ? "integrations.authorizationCode" : "integrations.bearer", "password");
+    if (kind === "mail") credentialInput.setAttribute("aria-describedby", "integration-provider-hint");
     if (kind === "mcp") {
       field("persist", "integrations.persist", "checkbox");
-      editor.appendChild(integrationElement("p", t("integrations.sessionOnly"), "integrations-hint"));
+      var sessionOnly = integrationElement("p", t("integrations.sessionOnly"), "integrations-hint");
+      sessionOnly.id = "integration-session-credentials"; editor.appendChild(sessionOnly);
     } else {
       editor.appendChild(integrationElement("p", t("integrations.mailPersistence"), "integrations-hint"));
       var storage = integrationElement("p", null, "integrations-hint"); storage.id = "integration-mail-storage"; editor.appendChild(storage);
@@ -465,7 +590,7 @@ function mountIntegrations(root) {
       var button = integrationButton(t("integrations.action." + action), function () {
         if (action === "disconnect" && !window.confirm(t("integrations.confirmDisconnect"))) return;
         var operation = action === "activateMail" ? model.activateMail(function (review) { return window.confirm(review); })
-          : action === "refreshMail" ? model.refresh() : model.action(action);
+          : action === "refreshMail" ? model.refresh() : model.action(action, undefined, confirmStdio);
         operation.then(function () { if (mounted && builtFor) (model.error ? error : notice).focus(); });
       }); controls[action] = button; row.appendChild(button);
     });
@@ -500,9 +625,12 @@ function mountIntegrations(root) {
         button.setAttribute("aria-pressed", String(!!data.selected && item.id === data.selected.id)); list.appendChild(button);
       });
     });
-    var legacyButton = integrationButton(t("integrations.kind.legacy"), function () {
-      if (data.secret && !window.confirm(t("config.confirmDiscardClose"))) return; model.select("legacy", "legacy-websearch");
-    }); legacyButton.disabled = !!data.busy; list.appendChild(legacyButton);
+    if (data.snapshot.legacyWebsearch) {
+      var legacyButton = integrationButton(t("integrations.kind.legacy"), function () {
+        if (data.secret && !window.confirm(t("config.confirmDiscardClose"))) return; model.select("legacy", "legacy-websearch");
+      });
+      legacyButton.disabled = !!data.busy; list.appendChild(legacyButton);
+    }
     var entry = data.entry(), key = entry && data.selected.kind + ":" + entry.id;
     if (key !== builtFor) { builtFor = key; if (entry) build(entry, data.selected.kind); else { editor.replaceChildren(); controls = {}; } }
     if (entry) {
@@ -513,12 +641,18 @@ function mountIntegrations(root) {
       connectionState.textContent = data.selected.kind === "mail" && data.activationNeedsRefresh ? t("integrations.mailStateUncertain")
         : (data.selected.kind === "mail" ? t(entry.enabled ? "integrations.mailEnabled" : "integrations.mailDisabled") + " · " : "")
         + t(data.selected.kind === "mail" && liveState === "not_connected" ? "integrations.mailNotTested" : "integrations.state." + liveState) + " · "
-        + t(live.credentialConfigured ? "integrations.credentialConfigured" : "integrations.credentialMissing");
+        + t(entry.transport === "stdio" ? "integrations.stdioNoCredentials"
+          : live.credentialConfigured ? "integrations.credentialConfigured" : "integrations.credentialMissing");
     }
     if (entry && data.selected.kind === "mail") {
       var providerHelp = editor.querySelector("#integration-provider-help");
-      providerHelp.href = entry.provider === "qq" ? "https://help.mail.qq.com/detail/106/985"
-        : "https://help.mail.126.com/faqDetail.do?code=d7a5dc8471cd0c0e8b4b8f4f8e49998b374173cfe9171305fa1ce630d7f67ac2a5feb28b66796d3b";
+      var provider = integrationMailProvider(entry.provider);
+      if (provider) providerHelp.href = provider[2];
+      providerHelp.textContent = t(entry.provider === "gmail" ? "integrations.gmailHelp" : "integrations.providerHelp");
+      var hint = editor.querySelector("#integration-provider-hint");
+      hint.textContent = entry.provider === "gmail" ? t("integrations.gmailHint")
+        : entry.provider === "126" ? t("integrations.netease126Hint") : "";
+      hint.hidden = !hint.textContent;
       editor.querySelector("#integration-model-target").textContent = t("integrations.modelTarget") + ": " + (data.snapshot.modelTarget || t("integrations.unknownTarget"));
       var storageText = !data.snapshot.persistentCredentialsSupported ? t("integrations.error.mailStorage") : "";
       if (!data.snapshot.modelTarget) storageText += (storageText ? " " : "") + t("integrations.error.modelTarget");
@@ -528,6 +662,24 @@ function mountIntegrations(root) {
       controls.activateMail.textContent = t(!data.secret && data.hasStoredMailCredential() ? "integrations.action.activateStoredMail" : "integrations.action.activateMail");
 
     }
+    var local = !!entry && entry.transport === "stdio";
+    if (entry && data.selected.kind === "mcp") {
+      controls.stdioCommand.parentElement.hidden = !local;
+      ["endpoint", "authType", "secret", "persist"].forEach(function (key) {
+        controls[key].parentElement.hidden = local;
+      });
+      editor.querySelector("#integration-remote-disclosure").hidden = local;
+      editor.querySelector("#integration-session-credentials").hidden = local;
+      editor.querySelector("#integration-stdio-disclosure").hidden = !local;
+      var localHint = editor.querySelector("#integration-stdio-help");
+      var sseUnsaved = entry.transport === "sse" && !data.transportSaved();
+      localHint.hidden = !sseUnsaved && !local;
+      localHint.textContent = sseUnsaved ? t("integrations.sseSaveFirst") : !local ? ""
+        : t(window.__SELF_ANALYST_DESKTOP__ !== true ? "integrations.stdioManagedOnly"
+          : !data.transportSaved() ? "integrations.stdioSaveFirst"
+          : entry.enabled ? "integrations.stdioStartExplicitly" : "integrations.stdioDisabled");
+      controls.credential.hidden = local;
+    }
     if (entry) Object.keys(controls).forEach(function (name) {
       var input = controls[name];
       if (input.tagName === "BUTTON") {
@@ -535,13 +687,17 @@ function mountIntegrations(root) {
         if (name === "delete") { input.disabled = !!data.busy || data.loading || data.outcomeUnknown || data.selected.kind === "mail" && data.activationNeedsRefresh; return; }
         input.disabled = name === "cancel" ? (!!data.busy && data.busy !== "test" && data.busy !== "discover") || (!data.busy && !data.secret)
           : !!data.busy || data.outcomeUnknown || data.metadataDirty() || name === "credential" && !data.secret
+          || local && ((!entry.enabled || window.__SELF_ANALYST_DESKTOP__ !== true) && (name === "test" || name === "discover") || name === "credential")
           || data.selected.kind === "mail" && data.activationNeedsRefresh && name !== "refreshMail"
           || name === "activateMail" && (data.activationNeedsRefresh || !data.snapshot.persistentCredentialsSupported || !data.snapshot.modelTarget || !data.secret && !data.hasStoredMailCredential());
         return;
       }
       input.disabled = !!data.busy || data.outcomeUnknown || data.selected.kind === "mail" && data.activationNeedsRefresh || name === "persist" && !data.snapshot.persistentCredentialsSupported
-                || (name === "secret" || name === "persist") && data.selected.kind === "mcp" && entry.authType === "anonymous";
-      var value = name === "secret" ? data.secret : name === "persist" ? data.persist : entry[name];
+                || (name === "secret" || name === "persist") && data.selected.kind === "mcp" && entry.authType === "anonymous"
+                || name === "enabled" && !entry.enabled && (entry.transport === "sse" && !data.transportSaved()
+                  || local && (window.__SELF_ANALYST_DESKTOP__ !== true || !data.transportSaved()));
+      var value = name === "secret" ? data.secret : name === "persist" ? data.persist
+        : name === "stdioCommand" ? (local ? entry.endpoint : "") : local && name === "endpoint" ? "" : entry[name];
 
       if (input.type === "checkbox") input.checked = !!value;
       else { value = Array.isArray(value) ? value.join("\n") : value == null ? "" : String(value); if (input.value !== value) input.value = value; }

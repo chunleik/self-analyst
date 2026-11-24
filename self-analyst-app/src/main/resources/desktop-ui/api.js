@@ -145,6 +145,16 @@ var api = {
       });
     });
   },
+  mcpManagement: function (path, method, body, signal) {
+    return fetch(API_BASE + "/desktop/mcp-management" + (path || ""), {
+      method: method || "GET", signal: signal, cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(function (response) {
+      if (!response.ok) throw { status: response.status };
+      return response.json();
+    });
+  },
   summaryRepair: function (path, method, body) {
     return fetch(API_BASE + "/desktop/summary-repairs" + (path || ""), {
       method: method || "GET",

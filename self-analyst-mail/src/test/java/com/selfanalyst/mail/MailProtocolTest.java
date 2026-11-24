@@ -44,6 +44,19 @@ class MailProtocolTest {
             assertReadOnly(commands);
         }
     }
+    @Test void fixed126ProfileAlsoDeclaresClientIdentityBeforeReadOnlyOpen() throws Exception {
+        try (Fixture server = new Fixture()) {
+            var account = new MailAccount("synthetic", MailAccount.Provider.NETEASE_126, "synthetic@126.com", "Synthetic", false, Set.of("INBOX"), false, 1);
+            server.requireId = true;
+            try (var service = service(server, account)) {
+                assertTrue(service.testConnection(account, "synthetic-secret".toCharArray(), new MailCancellation()).connected());
+            }
+            List<String> commands = server.commands();
+            assertTrue(commands.stream().anyMatch(c -> c.contains(" ID ") && c.contains("SelfAnalyst")), commands.toString());
+            assertTrue(index(commands, " ID ") < index(commands, " EXAMINE "), commands.toString());
+            assertReadOnly(commands);
+        }
+    }
     @Test void desktopDiscoveryListsFullHierarchyBeforeEnablementWithoutOpeningOrFetching() throws Exception {
         var account = new MailAccount("mail-1", MailAccount.Provider.NETEASE_163, "synthetic@163.com", "Synthetic", false,
                 "selected", Set.of("INBOX"), false, 1);
@@ -228,7 +241,7 @@ class MailProtocolTest {
             p.setProperty("mail.imap.timeout", "1500"); p.setProperty("mail.imap.connectiontimeout", "1500");
             p.setProperty("mail.imap.partialfetch", "true"); p.setProperty("mail.imap.fetchsize", "8192");
             // Production always uses TLS at the fixed provider. The package-private test seam alone permits this fixture.
-            IMAPStore store = AngusMailTransport.createStore(Session.getInstance(p), "imap", false, a.provider() == MailAccount.Provider.NETEASE_163);
+            IMAPStore store = AngusMailTransport.createStore(Session.getInstance(p), "imap", false, a.provider().requiresImapId());
             store.connect("127.0.0.1", server.port(), a.email(), new String(secret));
             return store;
         });

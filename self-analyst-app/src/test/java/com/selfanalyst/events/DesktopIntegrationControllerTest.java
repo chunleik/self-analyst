@@ -130,6 +130,52 @@ class DesktopIntegrationControllerTest {
         }
     }
 
+    @Test void retiredSearchConfigurationAndApprovalCannotCreateAnIntegration() throws Exception {
+        var configDir = java.nio.file.Files.createDirectories(root.resolve("config"));
+        var configFile = configDir.resolve("config.toml");
+        var legacy = """
+                [websearch]
+                enabled = true
+                mcp-url = "https://legacy.invalid/mcp"
+                api-key = "legacy-synthetic-secret"
+                """;
+        java.nio.file.Files.writeString(configFile, legacy);
+        var startup = Config.load(configDir);
+        var server = new EventServer(root.resolve("events"), 0, "integration-test-token");
+        try (AutoCloseable cleanup = server::stop; var sessions = new ChatSessionStore(root.resolve("memory"));
+             var store = new IntegrationStore(root.resolve("integrations"))) {
+            var historical = new IntegrationConfig.ToolApproval(IntegrationConfig.LEGACY_WEBSEARCH_ID,
+                    "search", "a".repeat(64), 0);
+            var before = store.save(0, new IntegrationConfig(1, 0, List.of(), List.of(), List.of(historical)));
+            try (var manager = new McpManager(store, new SessionCredentialStore(), new MailSessionPolicy(sessions),
+                    startup, new PinnedHttpsClient(), new ApprovalRegistry())) {
+                new DesktopIntegrationController(manager, () -> "https://model.example.com/v1").register(server.app());
+                server.start(0);
+                var snapshot = request(server, "GET", "", null, "integration-test-token");
+                assertEquals(200, snapshot.statusCode());
+                var body = new ObjectMapper().readTree(snapshot.body());
+                assertFalse(body.has("legacyWebsearch"));
+                assertFalse(body.path("statuses").has(IntegrationConfig.LEGACY_WEBSEARCH_ID));
+                assertTrue(body.path("config").path("mcpServers").isEmpty());
+                assertFalse(snapshot.body().contains("legacy.invalid"));
+                assertFalse(snapshot.body().contains("synthetic-secret"));
+
+                assertEquals(400, request(server, "POST", "/discover",
+                        "{\"serverId\":\"legacy-websearch\"}", "integration-test-token").statusCode());
+                assertEquals(400, request(server, "POST", "/test",
+                        "{\"kind\":\"mcp\",\"id\":\"legacy-websearch\"}", "integration-test-token").statusCode());
+                assertEquals(400, request(server, "POST", "/tools/approve",
+                        "{\"serverId\":\"legacy-websearch\",\"toolName\":\"search\",\"digest\":\"" + "a".repeat(64)
+                                + "\",\"expectedRevision\":1}", "integration-test-token").statusCode());
+                assertEquals(before, store.snapshot());
+                assertEquals(legacy, java.nio.file.Files.readString(configFile));
+                var exported = request(server, "GET", "/export", null, "integration-test-token");
+                assertEquals(200, exported.statusCode());
+                assertFalse(exported.body().contains("legacy-websearch"));
+            }
+        }
+    }
+
     private static HttpResponse<String> request(EventServer server,String method,String suffix,String body,String token) throws Exception {
         var builder=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+server.port()+"/desktop/integrations"+suffix));
         if (token!=null) builder.header("X-SelfAnalyst-Token",token);

@@ -1,0 +1,13 @@
+.mcp-management { max-width: 1120px; margin: 0 auto; padding: 20px 24px; display: grid; gap: 16px; }
+.mcp-management > section { min-width: 0; padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.mcp-management h2, .mcp-management h3, .mcp-management h4 { margin: 0 0 8px; }
+.mcp-management p { margin: 6px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.mcp-management code { overflow-wrap: anywhere; }
+.mcp-management .config-action-bar { box-shadow: none; justify-content: flex-end; }
+.mcp-account, .mcp-review { margin: 12px 0; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); min-width: 0; }
+.mcp-account legend { padding: 0 6px; overflow-wrap: anywhere; }
+.mcp-account .integrations-field { margin: 8px 0; }
+.mcp-review pre { max-height: 20rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+.mcp-management :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mcp-management [role="alert"]:empty { display: none; }
+@media (max-width: 620px) { .mcp-management { padding: 12px; } .mcp-management > section { padding: 12px; } }

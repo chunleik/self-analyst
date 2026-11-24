@@ -51,12 +51,6 @@ class MailNativeToolGuardTest {
             assertEquals(1, count.get());
         }
     }
-    @Test void legacySearchConfigurationAlsoNeedsApprovalWithoutMail() {
-        var count = new AtomicInteger();
-        var tool = new MailNativeToolGuard(tool("setConfigValue", count), () -> null, () -> null);
-        assertThrows(IllegalStateException.class, () -> tool.callAsync(param("a".repeat(32), true, Map.of("key", "websearch.mcp-url"))).block());
-        assertEquals(0, count.get());
-    }
     @Test void trustedLegacyNativeToolsWorkWithLiveMailPolicy() {
         try (var store = new ChatSessionStore(root)) {
             var policy = new MailSessionPolicy(store);
@@ -69,25 +63,6 @@ class MailNativeToolGuardTest {
             new MailNativeToolGuard(tool("setConfigValue", calls), () -> policy, () -> null)
                     .callAsync(param("legacy_default", null, false, Map.of("key", "app.language", "value", "en"))).block();
             assertEquals(3, calls.get());
-        }
-    }
-    @Test void legacyContextStillCannotApproveWebsearchMutationsWithLiveMailPolicy() {
-        try (var store = new ChatSessionStore(root)) {
-            var policy = new MailSessionPolicy(store);
-            var calls = new AtomicInteger();
-            var approvals = new AtomicInteger();
-            AgentIntegrationGateway gateway = new AgentIntegrationGateway() {
-                public List<AgentTool> snapshot(TurnContext turn) { return List.of(); }
-                public void approveNative(TurnContext turn, String name, Map<String, Object> arguments) {
-                    approvals.incrementAndGet();
-                }
-            };
-            var guarded = new MailNativeToolGuard(tool("setConfigValue", calls), () -> policy, () -> gateway);
-            var denied = assertThrows(IllegalStateException.class, () -> guarded.callAsync(
-                    param("legacy_default", null, false, Map.of("key", "websearch.enabled", "value", true))).block());
-            assertEquals("NATIVE_TOOL_APPROVAL_REQUIRED", denied.getMessage());
-            assertEquals(0, calls.get());
-            assertEquals(0, approvals.get());
         }
     }
     @Test void legacyExceptionRejectsManagedMissingMismatchedAndOtherInvalidContexts() {

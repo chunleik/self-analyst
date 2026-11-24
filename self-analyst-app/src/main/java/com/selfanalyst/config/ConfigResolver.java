@@ -76,7 +76,7 @@ public final class ConfigResolver {
 
     public record Value(String value, String source, String inheritedFrom) {
         public Map<String, Object> publicValue(String key) {
-            return Map.of("value", sensitive(key) ? (value.isBlank() ? "" : "****") : Neo4jConfigResolver.publicValue(key, value),
+            return Map.of("value", sensitive(key) ? (value.isBlank() ? "" : "****") : value,
                     "source", source, "inheritedFrom", inheritedFrom, "isSet", !value.isBlank());
         }
     }

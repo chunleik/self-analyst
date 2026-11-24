@@ -162,7 +162,7 @@ function openConfigModal(focusKey) {
 
 function switchConfigView(view, focusKey) {
   if (state.configSaving || state.configRestarting || (state.integrationsView && state.integrationsView.saving()) || (state.observabilityView && state.observabilityView.saving())) return Promise.resolve();
-  if (["llm", "raw", "storage", "neo4j", "privacy", "integrations", "developer"].indexOf(view) < 0) return Promise.resolve();
+  if (["llm", "raw", "storage", "privacy", "integrations", "developer"].indexOf(view) < 0) return Promise.resolve();
   if (view === "integrations") {
     closeConfigModal();
     if (!state.configOpen) {
@@ -180,7 +180,6 @@ function switchConfigView(view, focusKey) {
   if (state.observabilityView) { state.observabilityView.destroy(); state.observabilityView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
-  if (typeof stopNeo4jSync === "function") stopNeo4jSync();
   if (typeof stopPrivacySettings === "function") stopPrivacySettings();
   state.configLoadGeneration = (state.configLoadGeneration || 0) + 1;
   state.configDirty = false; state.configRawText = ""; state.configRawBaseline = "";
@@ -204,11 +203,6 @@ function switchConfigView(view, focusKey) {
     return Promise.resolve();
   }
   if (view === "privacy") return mountPrivacySettings(state.dom.configGrid);
-  if (view === "neo4j") {
-    state.dom.configGrid.innerHTML = "";
-    mountNeo4jSync(state.dom.configGrid);
-    return refreshNeo4jStatus();
-  }
   if (view === "storage") {
     state.dom.configGrid.innerHTML = "";
     return loadRuntimeStorage();
@@ -231,7 +225,6 @@ function closeConfigModal() {
   if (state.observabilityView) { state.observabilityView.destroy(); state.observabilityView = null; }
   if (typeof stopConfigRuntimeRefresh === "function") stopConfigRuntimeRefresh();
   if (typeof stopRuntimeStorage === "function") stopRuntimeStorage();
-  if (typeof stopNeo4jSync === "function") stopNeo4jSync();
   if (typeof stopPrivacySettings === "function") stopPrivacySettings();
   state.configDirty = false;
   state.configRawText = ""; state.configRawBaseline = "";

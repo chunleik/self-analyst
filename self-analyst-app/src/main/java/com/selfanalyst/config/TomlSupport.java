@@ -46,7 +46,7 @@ public final class TomlSupport {
      * The retired websearch table is retained here only when regenerating existing raw keys.
      */
     static final List<String> SECTION_ORDER = List.of(
-            "llm.", "events.", "wiki.", "neo4j.", "embedding.", "agent.", "desktop.", "websearch.", "file.");
+            "llm.", "events.", "wiki.", "embedding.", "agent.", "desktop.", "websearch.", "file.");
 
     // ── Parse + flatten + normalize (SPEC-TOML-FMT-002/003) ──────────────
 

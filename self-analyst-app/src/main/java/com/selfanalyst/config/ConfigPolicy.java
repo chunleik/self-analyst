@@ -10,16 +10,12 @@ public final class ConfigPolicy {
             "llm.provider", "llm.chatgpt-account", "llm.chatgpt-model");
     public static final Set<String> PRIVACY = Set.of(
             "events.collection.excludeApps", "wiki.privacy.excludeApps", "wiki.privacy.excludeSites");
-    public static final Set<String> NEO4J = Set.of(
-            "neo4j.enabled", "neo4j.uri", "neo4j.database", "neo4j.username",
-            "neo4j.password-env", "neo4j.namespace", "neo4j.timeout-seconds");
     private static final Set<String> DYNAMIC = Set.of(
             "agent.allowAgentTasks", "agent.cacheSummaries", "desktop.hideToTray", "desktop.autoOpenWindow");
     public static boolean requiresRestart(String key) {
-        return SupportedKeys.contains(key) && !LLM.contains(key) && !NEO4J.contains(key) && !PRIVACY.contains(key) && !DYNAMIC.contains(key);
+        return SupportedKeys.contains(key) && !LLM.contains(key) && !PRIVACY.contains(key) && !DYNAMIC.contains(key);
     }
     public static String component(String key) {
-        if (NEO4J.contains(key)) return "neo4j";
         if (LLM.contains(key)) return "llm";
         if (key.startsWith("embedding.")) return "embedding";
         if (key.startsWith("file.")) return "file";

@@ -36,7 +36,6 @@ For an ended hourly, half-day, or daily summary that failed or exhausted its per
 
 - **Activity review**: Explore current, daily, and historical activities on the dashboard timeline. Available overviews are shown in full without expanding an entry, with topic titles underneath; expand to read each saved topic’s full title and narrative in order, or ask follow-up questions with context. Empty evidence sections are hidden. Local fallback summaries and saved overviews share the same text styling. Expanded entries stay open across automatic refreshes until you collapse them; reading state resets when the activity date or timezone changes. A day runs from 04:00 to 04:00 the next day in local time; see the [activity statistics guide (Chinese)](docs/activity-statistics.md).
 - **Personal knowledge**: Connect activity across days and apps to stable projects, topics, and goals in **Knowledge**. Confirm, remove, or correct associations; your decisions survive rebuilding and restarting. Knowledge works locally without extra model calls. See the [personal knowledge guide (Chinese)](docs/personal-ontology.md).
-- **Optional Neo4j sync**: Manually publish the current, corrected knowledge graph to a Neo4j database you configure. It is off by default and requires destination, namespace, and data-scope confirmation for every sync. Local storage remains authoritative. See the [setup and read-only query guide (Chinese)](docs/neo4j-sync.md).
 - **Message composer**: The enhanced and fallback chat views share an input area that stays at the bottom of the conversation. It starts with room for multiple lines, grows with your text, and scrolls internally at its height limit. Press Enter to send or Shift+Enter for a new line; confirming an input-method candidate does not send the message.
 - **Images in chat**: Use **+**, paste, or drop local PNG/JPEG images into the composer. Pasted images appear directly above the text input, with no separate requirements panel. Preview and remove images before sending; image-only messages are supported. Limits remain 4 images per turn, 5 MiB and 20 megapixels per image, and 20 MiB in total. Folders and remote image links are not accepted. This does not enable background screenshots.
 - **Sending and stopping**: During image preparation, upload, or message saving, the composer shows **Preparing** and prevents duplicate sends. Once model generation begins, the main action becomes **Stop generating**. A failure before the message is saved retains the text and images; a failure after saving offers a retry of the same turn without duplicating the user message.
@@ -52,8 +51,7 @@ For an ended hourly, half-day, or daily summary that failed or exhausted its per
 ## Privacy and data boundaries
 
 Activity data is stored locally. Model requests send only the required inputs to the service you
-configure. Optional, explicitly confirmed Neo4j sync sends a bounded knowledge-graph snapshot to your
-chosen database; it can include private titles, descriptions, and evidence. See the [privacy statement (Chinese)](PRIVACY.md).
+configure. See the [privacy statement (Chinese)](PRIVACY.md).
 
 - Content events store only allowlisted title fields. Body text, UIA text, control trees, screenshots, OCR, and audio are never stored.
 - Failed UIA queries fall back to system window titles. Sensitive applications are excluded from UIA queries.
@@ -63,18 +61,15 @@ chosen database; it can include private titles, descriptions, and evidence. See 
 - Privacy rules apply immediately after saving in the app, including the raw TOML editor. They do not delete existing records or rewrite saved summaries, old tool results, or content already seen in a chat. An in-flight model operation keeps the policy snapshot it started with; the next operation uses the saved policy. Numeric AQL aggregates can still include hidden time. Projection exports report the actual exported `recordCount` and `privacyFilteredCount`; `complete: true` means the filtered projection completed.
 - Agent AQL queries cannot use `tag` to overwrite `app`, `title`, `context_title`, `url_host`, or `private_browsing`, which would bypass privacy filtering. Other custom tags and direct local AQL queries remain available.
 - The event database stores merged activity intervals and is authoritative; back it up regularly. Collection stops when disk space falls below the blocking threshold; history is never deleted automatically.
-- Neo4j configuration saves and status checks never connect to Neo4j. Disabling sync does not erase the remote copy; source removals reach it only on the next successful manual sync. Changing namespaces leaves the old namespace in place.
 - ChatGPT OAuth credentials are stored separately from TOML with owner-only filesystem permissions, not application-level encryption or an OS credential vault. Processes running as the same OS user can still access them. Disconnecting clears local tokens and attempts remote revocation; an unconfirmed revocation is reported. Independent API keys and chat history are kept.
 
 ## Configuration
 
-Settings has seven tabs: **Model settings** (one active API Key or ChatGPT connection, with model
-discovery and a generation test), **Privacy** (application modes and hidden sites),
-**Advanced configuration** (the raw TOML editor), **Runtime data** (directories, storage usage,
-and migration backup cleanup), **Neo4j sync** (optional, manually confirmed graph sharing),
-**Connections and tools** (MCP servers and read-only mail),
-and **Developer features** (optional Langfuse observability).
-The top-level **MCP** page hosts connection and mailbox management; Settings includes a shortcut to it.
+Settings has six entries: **Model settings** (one active API Key or ChatGPT connection, with model
+discovery and a generation test), **Connections and tools** (a shortcut to the top-level **MCP** page
+for connection and mailbox management), **Developer features** (optional Langfuse observability),
+**Privacy** (application modes and hidden sites), **Advanced configuration** (the raw TOML editor),
+and **Runtime data** (directories, storage usage, and migration backup cleanup).
 
 In **Privacy**, search recent applications or enter an executable name manually, choose a mode,
 and save. Candidates come from the last 30 days of local window activity, with up to 100 entries
@@ -96,8 +91,7 @@ Changes to `llm.api-key`, `llm.base-url`, `llm.model`, `llm.temperature`, `llm.p
 ChatGPT uses its own account and model selection, not the API Key connection’s URL or temperature.
 Embedding remains a separate API Key connection, may retain its existing `llm.api-key` fallback,
 and never receives OAuth tokens or becomes enabled merely by switching providers.
-Saved `neo4j.*` settings apply to the next manual sync without
-restarting or sending data. Other restart-required keys are identified in Settings. External edits to the TOML
+Other restart-required keys are identified in Settings. External edits to the TOML
 file are not applied until you save through the app or restart the backend.
 
 | Configuration key | Environment variable | Default |
@@ -113,22 +107,6 @@ file are not applied until you save through the app or restart the backend.
 | `events.collection.excludeApps` | None (`config.toml` only) | Empty |
 | `wiki.privacy.excludeApps` | None (`config.toml` only) | Empty |
 | `wiki.privacy.excludeSites` | None (`config.toml` only) | Empty |
-| `neo4j.enabled` | None (`config.toml` only) | `false` |
-| `neo4j.uri` | None (`config.toml` only) | Empty |
-| `neo4j.database` | None (`config.toml` only) | `neo4j` |
-| `neo4j.username` | None (`config.toml` only) | `neo4j` |
-| `neo4j.password-env` | Names the password environment variable; never the password | `SELF_ANALYST_NEO4J_PASSWORD` |
-| `neo4j.namespace` | None (`config.toml` only) | Empty; required, exclusive to one local dataset |
-| `neo4j.timeout-seconds` | None (`config.toml` only) | `15` (range: `1`–`120`) |
-
-For Neo4j, set the password in the environment inherited by the app before starting it; never put
-the password in TOML or the URI. Changing that process environment requires restarting the app.
-Unencrypted connections allow only `bolt://` on `localhost`, `127.0.0.1`, or `[::1]`; remote targets
-require `bolt+s://` or `neo4j+s://` with a valid CA-trusted certificate. Plain `neo4j://`, `+ssc`,
-embedded credentials, paths (including a trailing slash), queries, and fragments are rejected.
-Use a namespace unique to this local dataset. In **Settings → Neo4j sync**, review the scope
-and destination, then choose **Confirm and sync…**. The configured account needs graph-write,
-constraint-creation, and `SHOW CONSTRAINTS` permissions; setup details and safe Cypher examples are in the [Neo4j guide (Chinese)](docs/neo4j-sync.md).
 
 See the [model settings guide (Chinese)](docs/llm-settings.md) and the
 [user configuration specification (Chinese)](openspec/specs/user-configuration/spec.md) for all
@@ -170,7 +148,6 @@ The following documents are maintained in Simplified Chinese:
 
 - [Documentation and specification index](docs/README.md)
 - [Architecture](docs/architecture.md)
-- [Optional Neo4j sync and read-only queries](docs/neo4j-sync.md)
 - [MCP connections and built-in mail](docs/integrations.md)
 - [Developer Langfuse observability](docs/developer-observability.md)
 - [Testing and integration verification](docs/testing.md)

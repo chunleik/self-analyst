@@ -121,7 +121,7 @@
 
 #### Scenario: 查阅知识相关说明
 - **WHEN** 用户选择“个人知识指南”或“Personal knowledge guide”
-- **THEN** 系统默认浏览器或 Web 新标签页打开现有个人知识文档，可继续访问其中的 Neo4j 同步说明；应用当前页面与草稿不受影响
+- **THEN** 系统默认浏览器或 Web 新标签页打开现有个人知识文档，应用当前页面与草稿不受影响
 
 #### Scenario: 查阅文档索引
 - **WHEN** 用户选择“帮助文档”或“Documentation”

@@ -33,7 +33,7 @@ class DesktopOntologyHttpTest {
             }
             EventServer server = new EventServer(dir.resolve("events"), 0, "ontology-test-token");
             var userConfig = new com.selfanalyst.desktop.store.UserConfigStore(dir.resolve("config"));
-            // Optional malformed Neo4j settings must not block normal desktop/ontology startup.
+            // Legacy Neo4j keys in config.toml must be treated as ordinary unknown keys and not block startup.
             if (!corrupt) userConfig.saveRaw("[neo4j]\nenabled=true\nuri='invalid'\ntimeout-seconds='broken'\n");
             var desktop = new com.selfanalyst.desktop.DesktopServer(server.app(), config, null, server.eventStore(),
                     null, null, null, true, null, null, null, null,
@@ -41,9 +41,7 @@ class DesktopOntologyHttpTest {
             try {
                 desktop.start(); server.start(); base = "http://localhost:" + server.port() + "/desktop/ontology";
                 assertEquals(corrupt ? 503 : 200, request("GET", "/status", null, true).statusCode());
-                var neo4j = request("GET", "/neo4j/status", null, true);
-                assertEquals(200, neo4j.statusCode());
-                assertEquals(corrupt ? "disabled" : "invalidConfig", json.readTree(neo4j.body()).path("state").asText());
+                assertEquals(404, request("GET", "/neo4j/status", null, true).statusCode());
                 var status = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + server.port() + "/desktop/status"))
                         .header("X-SelfAnalyst-Token", "ontology-test-token").GET().build(), HttpResponse.BodyHandlers.ofString());
                 assertEquals(200, status.statusCode());

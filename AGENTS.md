@@ -32,6 +32,8 @@ Java 使用四个空格缩进，JavaScript/CSS 使用两个空格缩进。类型
 
 ## 测试规范
 
+桌面 UI 的本地手动验证只在浏览器中进行。桌面安装包统一由 GitHub Actions 的 Windows 发布工作流构建。
+
 Java 测试文件命名为 `*Test.java`，Node 测试文件命名为 `*.test.mjs`。使用 JUnit 5，并通过 `@TempDir` 处理文件系统测试。修复缺陷时应补充回归测试；先运行针对性测试，涉及跨模块变更时再运行 `mvn test`。
 
 ## 提交与拉取请求规范

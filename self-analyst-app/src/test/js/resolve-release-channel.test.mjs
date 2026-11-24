@@ -15,6 +15,7 @@ const modules = [
   'self-analyst-file',
   'self-analyst-wiki',
   'self-analyst-ontology',
+  'self-analyst-mail',
 ];
 
 function writeRepo(t, version, overrides = {}) {

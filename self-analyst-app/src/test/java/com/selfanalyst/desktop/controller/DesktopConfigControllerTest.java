@@ -275,7 +275,6 @@ class DesktopConfigControllerTest {
 
         assertEquals("false", defaults.get("wiki.enabled"));
         assertEquals("false", defaults.get("embedding.enabled"));
-        assertEquals("false", defaults.get("websearch.enabled"));
         assertFalse(defaults.keySet().stream().anyMatch(DeprecatedKeys::contains));
         assertTrue(defaults.containsKey("memory.dir"));
         assertTrue(defaults.containsKey("events.base-url"));
@@ -344,6 +343,44 @@ class DesktopConfigControllerTest {
         assertEquals("true", saved.getProperty("headroom.enabled"));
         assertEquals("http://127.0.0.1:8787/v1", saved.getProperty("headroom.proxy-url"));
         assertEquals("false", saved.getProperty("desktop.hideToTray"));
+    }
+
+    @Test
+    void retiredSearchConfigurationRoundTripsOnlyAsInactiveRawText(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        var ctrl = controller(dir, store);
+        String legacy = """
+                # Legacy file can still be edited as raw text.
+                [websearch]
+                enabled = "old non-boolean value"
+                mcp-url = "https://legacy.invalid/mcp"
+                api-key = "legacy-synthetic-secret"
+                """;
+        var raw = ctrl.applyRawSave(legacy);
+        assertEquals(legacy, store.readRaw());
+        assertTrue(raw.unknownKeys().isEmpty());
+        assertTrue(raw.restartRequired().stream().noneMatch(k -> k.startsWith("websearch.")));
+        assertTrue(ctrl.buildRawResponse().supportedKeys().stream().noneMatch(k -> k.key().startsWith("websearch.")));
+        var structured = ctrl.configPayload();
+        assertFalse(structured.containsKey("websearch"));
+        assertFalse(structured.toString().contains("legacy-synthetic-secret"));
+        var effective = store.application().effectivePayload().toString();
+        assertFalse(effective.contains("websearch"));
+        assertFalse(effective.contains("legacy.invalid"));
+        assertFalse(effective.contains("legacy-synthetic-secret"));
+        assertFalse(store.load().containsKey("websearch.api-key"));
+
+        var result = ctrl.applyStructuredSave(Map.of(
+                "websearch", Map.of("webSearchEnabled", true, "webSearchMcpUrl", "https://unexpected.invalid/mcp",
+                        "webSearchApiKey", "new-synthetic-secret"),
+                "desktop", Map.of("hideToTray", false)));
+        assertTrue(result.restartRequired().stream().noneMatch(k -> k.startsWith("websearch.")));
+        Properties saved = store.loadUser();
+        assertEquals("old non-boolean value", saved.getProperty("websearch.enabled"));
+        assertEquals("https://legacy.invalid/mcp", saved.getProperty("websearch.mcp-url"));
+        assertEquals("legacy-synthetic-secret", saved.getProperty("websearch.api-key"));
+        assertEquals("false", saved.getProperty("desktop.hideToTray"));
+        assertFalse(store.readRaw().contains("new-synthetic-secret"));
     }
 
     @Test
@@ -613,11 +650,10 @@ class DesktopConfigControllerTest {
 
         Map<String, Map<String, Object>> llm = invokeSection(ctrl, "buildLlmSection", effective);
         Map<String, Map<String, Object>> embedding = invokeSection(ctrl, "buildEmbeddingSection", effective);
-        Map<String, Map<String, Object>> websearch = invokeSection(ctrl, "buildWebSearchSection", effective);
 
         assertFieldDoesNotExpose(llm.get("apiKey"), "sk-live-secret");
         assertFieldDoesNotExpose(embedding.get("embeddingApiKey"), "emb-live-secret");
-        assertFieldDoesNotExpose(websearch.get("webSearchApiKey"), "web-live-secret");
+        assertFalse(ctrl.configPayload().toString().contains("web-live-secret"));
     }
 
     @SuppressWarnings("unchecked")

@@ -89,7 +89,7 @@ class ChatImageModelTest {
                 case "llmApiKey" -> "test-key";
                 case "llmBaseUrl" -> url;
                 case "llmModel" -> "vision-test";
-                case "agentCompactionEnabled", "webSearchEnabled" -> false;
+                case "agentCompactionEnabled" -> false;
                 default -> component.getAccessor().invoke(base);
             };
         }

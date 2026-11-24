@@ -425,7 +425,18 @@ class ObservabilityCoreTest {
                                     var input =
                                             new BufferedReader(
                                                     new InputStreamReader(socket.getInputStream()));
-                                    while (!input.readLine().isEmpty()) {}
+                                    socket.setSoTimeout(3000);
+                                    // The request body is the ASCII string "{}" below. Closing a socket
+                                    // with unread request bytes can reset the peer before it reads the reply.
+                                    int contentLength = -1;
+                                    for (String line; (line = input.readLine()) != null && !line.isEmpty(); ) {
+                                        if (line.regionMatches(true, 0, "Content-Length:", 0, 15)) {
+                                            contentLength = Integer.parseInt(line.substring(15).trim());
+                                        }
+                                    }
+                                    if (contentLength != 2 || input.read() != '{' || input.read() != '}') {
+                                        throw new IOException("unexpected synthetic request");
+                                    }
                                     byte[] body =
                                             payload.getBytes(
                                                     java.nio.charset.StandardCharsets.UTF_8);

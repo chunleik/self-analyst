@@ -35,6 +35,19 @@ test('local load is side-effect free; new mail and MCP metadata starts disabled 
   assert.equal(h.calls.filter(call => !call[0].startsWith('/mail/folders')).length, 1);
 });
 
+test('Parallel Search preset prefills only disabled connection metadata and performs no network action', async () => {
+  const h = setup(); await h.model.load();
+  assert.equal(h.model.snapshot.legacyWebsearch, undefined);
+  h.model.add('mcp', 'parallel');
+  const draft = h.model.entry();
+  assert.equal(draft.name, 'Parallel Search');
+  assert.equal(draft.endpoint, 'https://search.parallel.ai/mcp');
+  assert.equal(draft.authType, 'bearer');
+  assert.equal(draft.enabled, false);
+  assert.equal(draft.credentialRef, null);
+  assert.deepEqual(h.calls.map(call => [call[0], call[1]]), [['', 'GET']]);
+});
+
 test('saving sends revision and metadata only; duplicate save and edits are locked', async () => {
   const pending = deferred(); const h = setup((path, method) => method === 'PUT' ? pending.promise : undefined);
   await h.model.load(); h.model.select('mail', 'mail-one'); h.model.change('displayName', 'Changed'); h.model.setSecret('SYNTHETIC-CODE');
@@ -111,20 +124,28 @@ test('metadata edits invalidate old status replies and require save before netwo
   assert.equal(h.calls.filter(call => !call[0].startsWith('/mail/folders')).length, 2); pending.resolve(snapshot()); await refresh; assert.equal(h.model.entry().displayName, 'Draft');
 });
 
-test('connections is lazy, preserves default model entry, and protects draft across cancel/switch/close/reopen', async () => {
+test('connections opens the guarded MCP tab, lazy mounts once and blocks loss of dirty or busy edits', async () => {
   let approved = false, destroyed = 0, mounts = 0, llmMounts = 0, busy = false;
-  const state = { configOpen: false, configSaving: false, configDirty: false,
-    dom: { configModal: { dataset: {}, classList: { add() {}, remove() {} } }, configGrid: { classList: { toggle() {} } } } };
-  const context = vm.createContext({ state, document: { getElementById: () => null }, window: { confirm: () => approved }, t: key => key,
+  const classList = { add() {}, remove() {}, toggle() {} };
+  const tab = { classList };
+  const state = { tab: 'agent', configOpen: false, configSaving: false, configDirty: false,
+    dom: { tabs: [], tabAgent: tab, tabChat: tab, tabFiles: tab,
+      configModal: { dataset: {}, classList }, configGrid: { classList } } };
+  const context = vm.createContext({ state, document: { getElementById: id => id === 'tab-mcp' ? tab : null },
+    window: { confirm: () => approved }, t: key => key,
     mountLlmSettings: () => { llmMounts++; return { dirty: () => false, destroy() {} }; },
-    mountIntegrations: () => { mounts++; return { dirty: () => true, saving: () => busy, destroy: () => destroyed++ }; } });
+    mountMcpManagement: () => { mounts++; return { dirty: () => true, saving: () => busy, destroy: () => destroyed++ }; } });
   vm.runInContext(ui, context); await context.openConfigModal(); assert.equal(llmMounts, 1); assert.equal(mounts, 0);
-  await context.switchConfigView('integrations'); assert.equal(mounts, 1);
-  await context.switchConfigView('llm'); context.closeConfigModal(); assert.equal(destroyed, 0); assert.equal(state.configOpen, true);
-  approved = true; busy = true; await context.switchConfigView('llm'); context.closeConfigModal(); assert.equal(destroyed, 0);
-  busy = false; await context.switchConfigView('llm'); assert.equal(destroyed, 1);
-  await context.switchConfigView('integrations'); context.closeConfigModal(); assert.equal(destroyed, 2);
-  await context.openConfigModal(); assert.equal(state.configView, 'llm'); assert.equal(llmMounts, 3);
+  state.configDirty = true;
+  await context.switchConfigView('integrations'); assert.equal(mounts, 0); assert.equal(state.configOpen, true);
+  approved = true;
+  await context.switchConfigView('integrations'); assert.equal(mounts, 1); assert.equal(state.configOpen, false);
+  context.switchTab('mcp'); assert.equal(mounts, 1);
+  approved = false; context.switchTab('agent'); assert.equal(destroyed, 0); assert.equal(state.tab, 'mcp');
+  approved = true; busy = true; context.switchTab('agent'); assert.equal(destroyed, 0);
+  busy = false; context.switchTab('agent'); assert.equal(destroyed, 1); assert.equal(state.tab, 'agent');
+  await context.openConfigModal(); assert.equal(state.configView, 'llm'); assert.equal(llmMounts, 2);
+  await context.switchConfigView('integrations'); assert.equal(mounts, 2); assert.equal(state.configOpen, false);
 });
 
 test('new views never use HTML injection or browser persistence; catalogs cover literal keys and mobile layout', () => {
@@ -251,7 +272,7 @@ function dom() {
       this.classList = {add: () => {}};
       this.type = this.tagName === 'INPUT' ? 'text' : ''; this.value = ''; this.disabled = false; this.checked = false; this.textContent = '';
     }
-    appendChild(child) { this.children.push(child); return child; }
+    appendChild(child) { this.children.push(child); child.parentElement = this; return child; }
     replaceChildren(...children) { this.children = children; }
     setAttribute(key, value) { this.attributes[key] = value; }
     getAttribute(key) { return this.attributes[key] ?? null; }
@@ -290,6 +311,39 @@ async function setupView(handler, locale) {
   return h;
 }
 
+test('only fixed mailbox providers are selectable and Gmail/126 use official credential instructions', async () => {
+  for (const language of ['en', 'zh']) {
+    const locale = JSON.parse(fs.readFileSync(new URL(`locales/${language}.json`, base)));
+    const icon = await setupView(() => Promise.resolve(snapshot()), locale);
+    icon.button('Test').fire('click');
+    assert.deepEqual(icon.field('provider').children.map(option => option.value), ['qq', '163', '126', 'gmail']);
+    icon.change('secret', 'synthetic-only');
+    icon.change('provider', 'gmail');
+    assert.equal(icon.field('secret').value, '');
+    assert.equal(icon.root.querySelector('#integration-provider-help').href, 'https://support.google.com/accounts/answer/185833');
+    assert.equal(icon.root.querySelector('#integration-provider-hint').textContent, locale['integrations.gmailHint']);
+    assert.equal(icon.field('secret').getAttribute('aria-describedby'), 'integration-provider-hint');
+    icon.change('provider', '126');
+    assert.match(icon.root.querySelector('#integration-provider-help').href, /^https:\/\/help\.mail\.126\.com\//);
+    assert.equal(icon.root.querySelector('#integration-provider-hint').textContent, locale['integrations.netease126Hint']);
+    icon.change('provider', 'workspace');
+    assert.equal(icon.model.entry().provider, '126');
+    assert.deepEqual(icon.calls.map(call => [call[0], call[1]]), [['', 'GET']]);
+  }
+});
+
+test('Gmail and 126 snapshots are accepted without changing connection state or triggering provider calls', async () => {
+  for (const provider of ['126', 'gmail']) {
+    const result = snapshot();
+    Object.assign(result.config.mailAccounts[0], { provider, email: `synthetic@${provider}.com` });
+    const h = setup(() => Promise.resolve(result));
+    await h.model.load();
+    assert.equal(h.model.snapshot.config.mailAccounts[0].provider, provider);
+    assert.equal(h.model.snapshot.config.mailAccounts[0].enabled, false);
+    assert.deepEqual(h.calls.map(call => [call[0], call[1]]), [['', 'GET']]);
+  }
+});
+
 test('localized all-folder settings preserve body, model and retention disclosures', async () => {
   for (const lang of ['zh', 'en']) {
     const locale = JSON.parse(fs.readFileSync(new URL(`locales/${lang}.json`, base)));
@@ -316,6 +370,103 @@ function mcpSnapshot(supported = false) {
   data.statuses['mcp-one'] = { state: 'disabled', credentialConfigured: false };
   return data;
 }
+
+test('SSE shares network settings; transport and local argv changes reset active credentials', async () => {
+  const before = mcpSnapshot(); before.config.mcpServers[0].enabled = true;
+  before.config.mcpServers[0].credentialRef = 'session:00000000-0000-0000-0000-000000000000';
+  const h = setup(() => Promise.resolve(before)); await h.model.load(); h.model.select('mcp', 'mcp-one');
+  h.model.setSecret('UNSAVED_CODE'); h.model.change('transport', 'sse');
+  assert.equal(h.model.entry().endpoint, 'https://mcp.example/api');
+  assert.equal(h.model.entry().enabled, false); assert.equal(h.model.entry().credentialRef, null); assert.equal(h.model.secret, '');
+  h.model.change('transport', 'arbitrary'); assert.equal(h.model.entry().transport, 'sse');
+  h.model.change('transport', 'stdio');
+  assert.equal(h.model.entry().endpoint, ''); assert.equal(h.model.entry().authType, 'anonymous');
+  h.model.change('authType', 'bearer'); h.model.setSecret('MUST_NOT_STORE'); h.model.setPersist(true);
+  assert.equal(h.model.entry().authType, 'anonymous'); assert.equal(h.model.secret, ''); assert.equal(h.model.persist, false);
+  h.model.change('transport', 'streamable-http');
+  assert.equal(h.model.entry().endpoint, ''); assert.equal(h.model.entry().enabled, false);
+});
+
+test('stdio must be saved disabled before enable, and exact managed review gates every new launch grant', async () => {
+  let before = mcpSnapshot(), revision = before.config.revision;
+  const command = JSON.stringify(['/synthetic/mcp', '--name', 'literal value', 'safe\u202edirection']);
+  const h = setup((path, method, body) => {
+    if (method === 'PUT') {
+      before = structuredClone(before); before.config = plain(body.config); before.config.revision = ++revision;
+    }
+    return Promise.resolve(before);
+  });
+  h.context.t = (key, params) => params ? key + '\n' + params.command : key;
+  await h.model.load(); h.model.select('mcp', 'mcp-one');
+  h.model.change('transport', 'stdio'); h.model.change('endpoint', '["relative-command"]'); await h.model.save();
+  assert.equal(h.model.error, 'integrations.error.stdioCommand'); assert.equal(h.calls.length, 1);
+  h.model.change('endpoint', command); h.model.change('enabled', true); assert.equal(h.model.entry().enabled, false);
+  await h.model.save(); assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1][2].config.mcpServers[0].endpoint, command);
+  assert.equal(h.calls[1][2].config.mcpServers[0].enabled, false);
+  await h.model.action('test'); await h.model.action('discover'); assert.equal(h.calls.length, 2);
+  h.model.change('enabled', true); await h.model.save(); assert.equal(h.calls.length, 2);
+  let review;
+  await h.model.save(value => { review = value; return false; }); assert.equal(h.calls.length, 2);
+  assert.deepEqual(JSON.parse(review.slice(review.indexOf('['))), JSON.parse(command));
+  assert.ok(review.includes('\\u202e'));
+  await h.model.save(() => true); assert.equal(h.calls.length, 3);
+  assert.equal(h.calls[2][2].config.mcpServers[0].enabled, true);
+  h.model.change('endpoint', JSON.stringify(['/another/synthetic', 'safe']));
+  assert.equal(h.model.entry().enabled, false); h.model.change('enabled', true);
+  assert.equal(h.model.entry().enabled, false);
+  await h.model.save(); assert.equal(h.calls.length, 4);
+  assert.equal(h.calls[3][2].config.mcpServers[0].enabled, false);
+});
+
+test('enabled stdio never launches from loading or selection: testing and discovery require exact-command confirmation', async () => {
+  const data = mcpSnapshot();
+  const argv = ['/synthetic/mcp', '--project', 'literal argument'];
+  Object.assign(data.config.mcpServers[0], { transport: 'stdio', endpoint: JSON.stringify(argv), authType: 'anonymous', enabled: true });
+  const h = setup(path => Promise.resolve(path === '/test' ? { ok: true } : path === '/discover' ? { tools: [] } : data));
+  h.context.t = (key, params) => params ? key + '\n' + params.command : key;
+  await h.model.load(); h.model.select('mcp', 'mcp-one');
+  await h.model.action('test'); await h.model.action('discover', undefined, () => false);
+  assert.deepEqual(h.calls.map(call => [call[0], call[1]]), [['', 'GET']]);
+  let review;
+  await h.model.action('test', undefined, content => { review = content; return true; });
+  assert.match(review, /^integrations.confirmStdioLaunch/);
+  assert.deepEqual(JSON.parse(review.slice(review.indexOf('['))), argv);
+  assert.equal(h.calls.at(-1)[0], '/test');
+  await h.model.action('discover', undefined, () => true);
+  assert.equal(h.calls.at(-1)[0], '/discover');
+});
+
+test('local executable editor hides network credential fields and gates enable in unmanaged browser', async () => {
+  const data = mcpSnapshot();
+  Object.assign(data.config.mcpServers[0], { transport: 'stdio', endpoint: JSON.stringify(['/synthetic/mcp']), authType: 'anonymous' });
+  const h = await setupView(() => Promise.resolve(data)); h.button('MCP').fire('click');
+  assert.equal(h.field('transport').value, 'stdio');
+  assert.equal(h.field('stdioCommand').parentElement.hidden, false);
+  assert.equal(h.field('endpoint').parentElement.hidden, true);
+  assert.equal(h.field('secret').parentElement.hidden, true);
+  assert.equal(h.field('enabled').disabled, true);
+  assert.equal(h.button('integrations.action.test').disabled, true);
+  assert.equal(h.button('integrations.action.discover').disabled, true);
+  h.change('transport', 'sse');
+  assert.equal(h.field('stdioCommand').parentElement.hidden, true);
+  assert.equal(h.field('endpoint').parentElement.hidden, false);
+  assert.equal(h.field('enabled').disabled, true);
+  assert.match(allText(h.root), /integrations.sseSaveFirst/);
+});
+
+test('managed desktop test button shows runtime warning and does not launch after dismissal', async () => {
+  const before = mcpSnapshot();
+  Object.assign(before.config.mcpServers[0], { transport: 'stdio', endpoint: JSON.stringify(['/synthetic/mcp']), authType: 'anonymous', enabled: true });
+  const h = await setupView(path => Promise.resolve(path === '/test' ? {ok: true} : before));
+  h.context.window.__SELF_ANALYST_DESKTOP__ = true;
+  h.button('MCP').fire('click');
+  assert.match(allText(h.root), /integrations.stdioStartExplicitly/);
+  h.button('integrations.action.test').fire('click');
+  assert.equal(h.confirmations, 1); assert.equal(h.calls.filter(call => call[0] === '/test').length, 0);
+  h.approveDiscard = true; h.button('integrations.action.test').fire('click'); await tick();
+  assert.equal(h.confirmations, 2); assert.equal(h.calls.filter(call => call[0] === '/test').length, 1);
+});
 
 test('mail activation sends the confirmed revision and model target only to the dedicated endpoint and clears its code', async () => {
   const before = activationSnapshot(); const pending = deferred(); let submitted;

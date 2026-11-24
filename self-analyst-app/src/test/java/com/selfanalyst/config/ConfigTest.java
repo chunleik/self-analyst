@@ -95,7 +95,7 @@ class ConfigTest {
 
         assertEquals("false", props.getProperty("wiki.enabled"));
         assertEquals("false", props.getProperty("embedding.enabled"));
-        assertEquals("false", props.getProperty("websearch.enabled"));
+        assertTrue(props.stringPropertyNames().stream().noneMatch(k -> k.startsWith("websearch.")));
         assertEquals("0", props.getProperty("file.watch.maxFileSizeKb"));
         assertEquals(FileFilterConfig.DEFAULT_EXTENSIONS_CSV,
                 props.getProperty("file.watch.extensions"));
@@ -119,6 +119,38 @@ class ConfigTest {
     void testDefaultsDisableCompaction(@TempDir Path dir) {
         Config c = Config.testDefaults(dir);
         assertFalse(c.agentCompactionEnabled(), "unit tests opt in to compaction explicitly");
+    }
+
+    @Test
+    void retiredWebSearchKeysNeverBecomeEffectiveFromTomlOrEnvironment(@TempDir Path dir) throws Exception {
+        var environment = java.util.Map.of("WEBSEARCH_ENABLED", "true", "WEBSEARCH_MCP_URL",
+                "https://env.invalid/mcp", "WEBSEARCH_API_KEY", "legacy-environment-secret");
+        var legacy = """
+                [websearch]
+                enabled = true
+                mcp-url = "https://toml.invalid/mcp"
+                api-key = "legacy-toml-secret"
+                [llm]
+                model = "unchanged-model"
+                """;
+        var file = dir.resolve("config.toml");
+        Files.writeString(file, legacy);
+        assertEquals("unchanged-model", Config.load(dir, environment).llmModel());
+        assertEquals(legacy, Files.readString(file));
+
+        var user = new Properties();
+        TomlSupport.parseAndFlatten(legacy).forEach(user::setProperty);
+        for (var input : java.util.List.of(user, new Properties())) {
+            var snapshot = ConfigResolver.resolve(input, environment);
+            for (String key : java.util.List.of("websearch.enabled", "websearch.mcp-url", "websearch.api-key")) {
+                assertTrue(DeprecatedKeys.contains(key));
+                assertFalse(SupportedKeys.contains(key));
+                assertFalse(ConfigPolicy.requiresRestart(key));
+                assertFalse(snapshot.values().containsKey(key));
+                assertFalse(snapshot.properties().containsKey(key));
+                assertFalse(snapshot.publicValues().containsKey(key));
+            }
+        }
     }
 
     @Test

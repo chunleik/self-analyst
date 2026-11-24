@@ -33,7 +33,10 @@ public final class IntegrationCredentialService {
         IntegrationConfig before = current(expectedRevision);
         var account = before.mailAccounts().stream().filter(a -> a.id().equals(id)).findFirst()
                 .orElseThrow(() -> new IOException("unknown_connection"));
-        if (secret != null) CredentialStore.validateSecret(secret);
+        if (secret != null) {
+            CredentialStore.validateSecret(secret);
+            if (!account.profile().acceptsAuthorizationCode(secret)) throw new IOException("invalid_credential");
+        }
         retryCleanup();
         String reference = account.credentialRef();
         boolean created = false;

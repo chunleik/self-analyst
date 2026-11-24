@@ -53,9 +53,6 @@ public record Config(
         int embeddingDimensions,
         boolean embeddingSendEncodingFormat,
         int titlePollIntervalMs,
-        boolean webSearchEnabled,
-        String webSearchMcpUrl,
-        String webSearchApiKey,
         double llmTemperature,
         boolean collectWindow,
         boolean collectAfk,
@@ -325,12 +322,6 @@ public record Config(
                 values.get("llm.budget.warnRatio", "0.8"), 0.8);
         if (budgetWarnRatio <= 0 || budgetWarnRatio > 1) budgetWarnRatio = 0.8;
 
-        boolean webSearchEnabled = Boolean.parseBoolean(
-                values.get("websearch.enabled", "false"));
-        String webSearchMcpUrl = values.get("websearch.mcp-url",
-                "https://search.parallel.ai/mcp");
-        String webSearchApiKey = values.get("websearch.api-key", "");
-
         // ── 应用语言 (SPEC-I18N-CFG-001) ──
         String appLanguage = values.get("app.language", "auto");
         String wikiExcludeApps = values.get("wiki.privacy.excludeApps", "");
@@ -348,7 +339,6 @@ public record Config(
                 embeddingEnabled, embeddingBaseUrl, embeddingApiKey,
                 embeddingModel, embeddingDimensions,
                 embeddingSendEncodingFormat, titlePollIntervalMs,
-                webSearchEnabled, webSearchMcpUrl, webSearchApiKey,
                 llmTemperature, collectWindow, collectAfk, collectTitle,
                 fileWatchEnabled, fileWatchPaths, fileWatchMaxFileSizeKb,
                 fileWatchWorkerIntervalSeconds, fileWatchDebounceSeconds,
@@ -385,7 +375,6 @@ public record Config(
                 false, false, 60, 24000, 6, 32000, 12, 256000L, 4096, 10,
                 false, baseDir.resolve("wiki-semantic-index"), 8,
                 false, "", "", "", 1024, true, 500,
-                false, "https://search.parallel.ai/mcp", "",
                 0.7, false, false, false,
                 false, "", 0, 60, 5, 5, FileFilterConfig.DEFAULT_EXTENSIONS_CSV,
                 "", "", true, null,

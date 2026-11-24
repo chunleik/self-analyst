@@ -59,8 +59,6 @@ final class MailNativeToolGuard implements AgentTool {
             var currentPolicy = policy.get();
             var turn = param.getRuntimeContext() == null ? null
                     : param.getRuntimeContext().get(AgentIntegrationGateway.TurnContext.class);
-            boolean legacySearchChange = getName().equals("setConfigValue")
-                    && String.valueOf(arguments.get("key")).startsWith("websearch.");
             boolean mail = false;
             if (currentPolicy != null) {
                 if (turn == null) return Mono.error(new IllegalStateException("MAIL_TOOL_CONTEXT_REQUIRED"));
@@ -76,7 +74,7 @@ final class MailNativeToolGuard implements AgentTool {
                 return Mono.error(new IllegalStateException("MAIL_EMBEDDING_DENIED: use queryWiki"));
             if (mail && !LOCAL_READS.contains(getName()) && !CONFIRMED_WRITES.contains(getName()))
                 return Mono.error(new IllegalStateException("MAIL_NATIVE_TOOL_DENIED"));
-            if (legacySearchChange || mail && CONFIRMED_WRITES.contains(getName())) {
+            if (mail && CONFIRMED_WRITES.contains(getName())) {
                 var approvals = gateway.get();
                 if (approvals == null || turn == null || !turn.managedDesktop())
                     return Mono.error(new IllegalStateException("NATIVE_TOOL_APPROVAL_REQUIRED"));

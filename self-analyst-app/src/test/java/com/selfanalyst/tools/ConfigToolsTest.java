@@ -55,6 +55,24 @@ class ConfigToolsTest {
     }
 
     @Test
+    void oldSearchConfigurationIsInvisibleAndCannotBeChangedByAgent(@TempDir Path dir) throws Exception {
+        UserConfigStore store = new UserConfigStore(dir);
+        String legacy = "[websearch]\nenabled = true\nmcp-url = 'https://legacy.invalid/mcp'\napi-key = 'old-synthetic-secret'\n";
+        store.saveRaw(legacy);
+        ConfigTools tools = new ConfigTools(store);
+        String effective = tools.getConfig();
+        assertFalse(effective.contains("websearch."));
+        assertFalse(effective.contains("https://legacy.invalid/mcp"));
+        assertFalse(effective.contains("old-synthetic-secret"));
+        for (String key : java.util.List.of("websearch.enabled", "websearch.mcp-url", "websearch.api-key")) {
+            String result = tools.setConfigValue(key, "new-synthetic-secret");
+            assertTrue(result.contains("不支持修改配置键"), result);
+            assertFalse(result.contains("new-synthetic-secret"));
+            org.junit.jupiter.api.Assertions.assertEquals(legacy, store.readRaw());
+        }
+    }
+
+    @Test
     void setConfigValueRejectsRemovedHeadroomKeys(@TempDir Path dir) throws Exception {
         UserConfigStore store = new UserConfigStore(dir);
 

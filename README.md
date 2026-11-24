@@ -40,8 +40,9 @@ For an ended hourly, half-day, or daily summary that failed or exhausted its per
 - **Images in chat**: Use **+**, paste, or drop local PNG/JPEG images into the composer. Pasted images appear directly above the text input, with no separate requirements panel. Preview and remove images before sending; image-only messages are supported. Limits remain 4 images per turn, 5 MiB and 20 megapixels per image, and 20 MiB in total. Folders and remote image links are not accepted. This does not enable background screenshots.
 - **Sending and stopping**: During image preparation, upload, or message saving, the composer shows **Preparing** and prevents duplicate sends. Once model generation begins, the main action becomes **Stop generating**. A failure before the message is saved retains the text and images; a failure after saving offers a retry of the same turn without duplicating the user message.
 - **Generated files**: Ask for spreadsheets, documents, presentations, or HTML/SVG, then save or download them from file cards in chat. See the [document generation guide (Chinese)](docs/document-generation.md).
-- **Connections and tools**: Add HTTPS Streamable HTTP MCP servers with tool review and per-call confirmation, or use built-in read-only QQ/163 mail. New mail accounts default to all IMAP folders, including future and nested folders. Settings use all folders without a folder picker or automatic directory loading; body access remains separate. Accounts stay disabled until confirmation. A confirmed mail activation saves the authorization code in Windows Credential Manager, with no plaintext or session-only fallback when secure persistence is unavailable. Separate mail consent, enable, and persistence checkboxes are replaced by this explicit action; scope and body permissions remain separate. Mail data still requires model-destination consent and may remain in chat history. Mail-origin chats do not automatically create long-term memories. See the [integration](docs/integrations.md) and [mail](docs/mail-integration.md) guides (Chinese).
+- **Connections and tools**: Add MCP servers with tool review and per-call confirmation, or use built-in mail. New accounts cover all IMAP folders, including future and nested folders. Body access is separate, and mail stays disabled until you explicitly approve activation and save its authorization code in Windows Credential Manager. Mail data requires model-destination consent, may remain in chat history, and is excluded from automatic long-term memory. See the [integration](docs/integrations.md) and [mail](docs/mail-integration.md) guides (Chinese).
   Saved and draft connections have an explicit **Delete connection** action. Deletion affects only the selected local connection and its approvals/credential, not chats or remote data. **View MCP interfaces** opens an accessible dialog of discovered **tools** (names, descriptions, input schemas and approval status); viewing does not discover, approve or run tools automatically.
+- **MCP management**: The top-level **MCP** page adds opt-in mailbox sharing with same-computer Streamable HTTP clients. A dedicated token is kept in Windows Credential Manager. Draft and send requests are off by default and require a fresh desktop approval of the exact message; sending also needs a separately stored SMTP authorization code. The built-in presets cover QQ, 163, 126 and eligible personal Gmail app-password accounts; Exchange Online, custom servers and other enterprise mail are out of scope. Legacy `websearch.*` settings are not migrated or used; add the Parallel Search preset or an external search server explicitly. External connections support Streamable HTTP, bounded legacy HTTPS SSE and explicitly launched local stdio. The transport and mail checks use synthetic endpoints, not personal mail accounts. The local endpoint does not serve cloud clients or forward third-party MCP tools.
 - **Developer observability**: Optionally send traces to your own local, LAN or remote Langfuse server. It is disabled by default and starts in metadata mode. Private text requires separate category/source consent for the current app run; images and attachments are not uploaded. Secret Key persistence requires the Windows credential vault. See the [developer observability guide (Chinese)](docs/developer-observability.md).
 - **Long-term memory**: Useful information is retained automatically; credentials, sensitive inferences, and one-off activity are filtered out. Ask the assistant in chat to correct or forget a memory.
 - **Help and updates**: The **Help** menu provides the user guide, **Documentation**, **Personal knowledge guide**, issue reporting, **Check for updates**, and **Project website** (the GitHub repository, opened in your default browser on desktop). Checks run only when requested; the app never downloads or installs updates automatically. **About SelfAnalyst** shows the installed desktop version and its exact release publication time in your local timezone (including beta releases). It uses cached public metadata when available; if the timestamp cannot be retrieved and no matching cache exists, it shows an unavailable notice. Debug builds show a development label.
@@ -64,11 +65,11 @@ configure. See the [privacy statement (Chinese)](PRIVACY.md).
 
 ## Configuration
 
-Settings has six tabs: **Model settings** (one active API Key or ChatGPT connection, with model
-discovery and a generation test), **Connections and tools** (MCP servers and read-only mail),
-**Developer features** (optional Langfuse observability), **Privacy** (application modes and hidden sites),
-**Advanced configuration** (the raw TOML editor), and **Runtime data** (directories, storage usage,
-and migration backup cleanup).
+Settings has six entries: **Model settings** (one active API Key or ChatGPT connection, with model
+discovery and a generation test), **Connections and tools** (a shortcut to the top-level **MCP** page
+for connection and mailbox management), **Developer features** (optional Langfuse observability),
+**Privacy** (application modes and hidden sites), **Advanced configuration** (the raw TOML editor),
+and **Runtime data** (directories, storage usage, and migration backup cleanup).
 
 In **Privacy**, search recent applications or enter an executable name manually, choose a mode,
 and save. Candidates come from the last 30 days of local window activity, with up to 100 entries
@@ -147,7 +148,7 @@ The following documents are maintained in Simplified Chinese:
 
 - [Documentation and specification index](docs/README.md)
 - [Architecture](docs/architecture.md)
-- [MCP connections and read-only QQ/163 mail](docs/integrations.md)
+- [MCP connections and built-in mail](docs/integrations.md)
 - [Developer Langfuse observability](docs/developer-observability.md)
 - [Testing and integration verification](docs/testing.md)
 - [Summary quality evaluation](docs/summary-quality-evaluation.md)

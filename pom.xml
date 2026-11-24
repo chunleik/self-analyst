@@ -6,7 +6,7 @@
 
     <groupId>com.selfanalyst</groupId>
     <artifactId>self-analyst</artifactId>
-    <version>0.6.1-beta.19</version>
+    <version>0.6.1-beta.20</version>
     <packaging>pom</packaging>
 
     <name>SelfAnalyst</name>
@@ -48,6 +48,7 @@
     <modules>
         <module>self-analyst-events</module>
         <module>self-analyst-app</module>
+        <module>self-analyst-mail</module>
         <module>self-analyst-content</module>
         <module>self-analyst-wiki</module>
         <module>self-analyst-file</module>

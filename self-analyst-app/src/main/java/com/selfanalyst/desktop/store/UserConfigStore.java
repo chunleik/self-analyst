@@ -1,5 +1,6 @@
 package com.selfanalyst.desktop.store;
 
+import com.selfanalyst.config.DeprecatedKeys;
 import com.selfanalyst.config.SupportedKeys;
 import com.selfanalyst.config.TomlSupport;
 
@@ -59,6 +60,7 @@ public class UserConfigStore {
         merged.putAll(defaults);
         Properties user = loadUser();
         merged.putAll(user);
+        merged.keySet().removeIf(key -> key instanceof String text && DeprecatedKeys.legacyWebSearch(text));
         return merged;
     }
 

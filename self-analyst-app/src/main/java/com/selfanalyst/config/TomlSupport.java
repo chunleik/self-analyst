@@ -43,6 +43,7 @@ public final class TomlSupport {
      * Section grouping order for generation/template — mirrors the section order
      * historically used by {@code UserConfigStore.save()}. Keys not matching any
      * prefix are emitted as top-level dotted assignments before the first table.
+     * The retired websearch table is retained here only when regenerating existing raw keys.
      */
     static final List<String> SECTION_ORDER = List.of(
             "llm.", "events.", "wiki.", "embedding.", "agent.", "desktop.", "websearch.", "file.");

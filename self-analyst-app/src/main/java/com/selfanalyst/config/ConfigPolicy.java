@@ -21,7 +21,6 @@ public final class ConfigPolicy {
         if (key.startsWith("file.")) return "file";
         if (key.startsWith("events.")) return "events";
         if (key.startsWith("llm.budget.")) return "budget";
-        if (key.startsWith("websearch.")) return "websearch";
         return "application";
     }
 }

@@ -50,7 +50,7 @@ class DocumentAgentIntegrationTest {
             var properties = new Properties(); properties.setProperty("memory.dir", temp.resolve("memory").toString());
             properties.setProperty("llm.api-key", "test-key"); properties.setProperty("llm.model", "test-model");
             properties.setProperty("llm.base-url", "http://127.0.0.1:" + model.getAddress().getPort() + "/v1");
-            properties.setProperty("wiki.enabled", "false"); properties.setProperty("websearch.enabled", "false");
+            properties.setProperty("wiki.enabled", "false");
             var config = ConfigResolver.resolve(properties, Map.of()).config();
             try (var chats = new ChatSessionStore(config.memoryDir()); var agent = new SelfAnalystAgent(config)) {
                 var documents = new DocumentService(config.memoryDir(), chats); agent.registerDocumentTools(documents);

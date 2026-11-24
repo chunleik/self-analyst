@@ -24,7 +24,6 @@ public class ConfigTools {
             "desktop.hideToTray", "desktop.autoOpenWindow", "desktop.autoStartBackend",
             "embedding.enabled", "embedding.base-url", "embedding.api-key",
             "embedding.model", "embedding.dimensions", "embedding.send-encoding-format",
-            "websearch.enabled", "websearch.mcp-url", "websearch.api-key",
             "llm.agent.maxIters", "desktop.summary.maxTimelineLlm",
             "llm.budget.mode", "llm.budget.dailyTokens", "llm.budget.warnRatio"
     );
@@ -39,7 +38,6 @@ public class ConfigTools {
     @Tool(description = "获取 SelfAnalyst 当前所有配置项的有效值（含默认值）。" +
             "可修改的配置键包括：app.language（zh/en/auto，需重启后端生效）；" +
             "llm.api-key、llm.base-url、llm.model、llm.temperature；" +
-            "websearch.enabled、websearch.mcp-url、websearch.api-key；" +
             "agent.summaryRefreshMinutes、agent.allowAgentTasks、agent.cacheSummaries；" +
             "desktop.hideToTray、desktop.autoOpenWindow、desktop.autoStartBackend；" +
             "events.collection.window、events.collection.afk、events.collection.title.enabled；" +
@@ -58,11 +56,6 @@ public class ConfigTools {
                 {"llm.base-url",    eff.getProperty("llm.base-url",    "https://api.openai.com/v1"), null},
                 {"llm.model",       eff.getProperty("llm.model",       "gpt-4o"),                    null},
                 {"llm.temperature", eff.getProperty("llm.temperature", "0.7"),                       null},
-        });
-        appendSection(sb, "联网搜索", new String[][]{
-                {"websearch.enabled", eff.getProperty("websearch.enabled", "false"),                                 null},
-                {"websearch.mcp-url", eff.getProperty("websearch.mcp-url", "https://search.parallel.ai/mcp"),       null},
-                {"websearch.api-key", eff.getProperty("websearch.api-key", ""),                                      "masked"},
         });
         appendSection(sb, "Agent", new String[][]{
                 {"agent.summaryRefreshMinutes", eff.getProperty("agent.summaryRefreshMinutes", "5"),     null},
@@ -98,12 +91,12 @@ public class ConfigTools {
     }
 
     @Tool(description = "更新 SelfAnalyst 的一个配置项并持久化到文件。" +
-            "key 为点分配置键（如 llm.model、websearch.enabled）；" +
+            "key 为点分配置键（如 llm.model、app.language）；" +
             "value 为新值，布尔值用 true/false，数字直接写数字，字符串直接写值。" +
-            "LLM 配置在新一轮生效，部分其它配置（如 websearch.enabled）需重启，返回信息中会注明。" +
+            "LLM 配置在新一轮生效，部分其它配置（如 app.language）需重启，返回信息中会注明。" +
             "value 为空字符串时删除用户覆盖，回退到环境变量或默认值。")
     public String setConfigValue(
-            @ToolParam(name = "key", description = "配置键，如 llm.model、websearch.enabled、agent.summaryRefreshMinutes")
+            @ToolParam(name = "key", description = "配置键，如 llm.model、app.language、agent.summaryRefreshMinutes")
             String key,
             @ToolParam(name = "value", description = "新配置值，留空则删除用户覆盖并使用默认值")
             String value

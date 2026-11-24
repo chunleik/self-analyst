@@ -108,6 +108,10 @@ function switchTab(tab) {
     }
     return;
   }
+  if (state.mcpView && tab !== "mcp") {
+    if (state.mcpView.saving() || state.mcpView.dirty() && !window.confirm(t("config.confirmDiscardClose"))) return;
+    state.mcpView.destroy(); state.mcpView = null;
+  }
   state.tab = tab;
   state.dom.tabs.forEach(function (t) {
     t.classList.toggle("active", t.dataset.tab === tab);
@@ -115,6 +119,16 @@ function switchTab(tab) {
   state.dom.tabAgent.classList.toggle("active", tab === "agent");
   state.dom.tabChat.classList.toggle("active", tab === "chat");
   state.dom.tabFiles.classList.toggle("active", tab === "files");
+  var mcpTab = document.getElementById("tab-mcp");
+  if (mcpTab) {
+    mcpTab.classList.toggle("active", tab === "mcp");
+    if (tab === "mcp" && !state.mcpView && typeof mountMcpManagement === "function") state.mcpView = mountMcpManagement(mcpTab);
+  }
+  var mcpNav = document.getElementById("mcp-nav-tab");
+  if (mcpNav) {
+    if (tab === "mcp") mcpNav.setAttribute("aria-current", "page");
+    else mcpNav.removeAttribute("aria-current");
+  }
   var knowledgeTab = document.getElementById("tab-knowledge");
   if (knowledgeTab) knowledgeTab.classList.toggle("active", tab === "knowledge");
   if (tab === "knowledge" && typeof openKnowledge === "function") openKnowledge();
@@ -149,6 +163,15 @@ function openConfigModal(focusKey) {
 function switchConfigView(view, focusKey) {
   if (state.configSaving || state.configRestarting || (state.integrationsView && state.integrationsView.saving()) || (state.observabilityView && state.observabilityView.saving())) return Promise.resolve();
   if (["llm", "raw", "storage", "privacy", "integrations", "developer"].indexOf(view) < 0) return Promise.resolve();
+  if (view === "integrations") {
+    closeConfigModal();
+    if (!state.configOpen) {
+      switchTab("mcp");
+      var mcpNav = document.getElementById("mcp-nav-tab");
+      if (mcpNav) mcpNav.focus();
+    }
+    return Promise.resolve();
+  }
   if (state.configView === view && !focusKey && state.dom.configModal.dataset.view === view) return Promise.resolve();
   if ((state.configDirty || (state.llmSettingsView && state.llmSettingsView.dirty()) || (state.integrationsView && state.integrationsView.dirty()) || (state.observabilityView && state.observabilityView.dirty()))
       && !window.confirm(t("config.confirmDiscardClose"))) return Promise.resolve();
@@ -173,10 +196,6 @@ function switchConfigView(view, focusKey) {
   });
   if (view === "llm" && typeof mountLlmSettings === "function") {
     state.llmSettingsView = mountLlmSettings(state.dom.configGrid);
-    return Promise.resolve();
-  }
-  if (view === "integrations") {
-    state.integrationsView = mountIntegrations(state.dom.configGrid);
     return Promise.resolve();
   }
   if (view === "developer") {

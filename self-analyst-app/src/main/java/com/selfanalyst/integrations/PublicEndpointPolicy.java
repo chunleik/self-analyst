@@ -115,7 +115,7 @@ public final class PublicEndpointPolicy {
             if (millis < 1 || millis > 30000) throw new IllegalArgumentException("invalid_timeout");
             String host = uri.getHost().replace("[", "").replace("]", "");
             int port = uri.getPort() == -1 ? 443 : uri.getPort();
-            Socket raw = new Socket();
+            Socket raw = new Socket(java.net.Proxy.NO_PROXY);
             try {
                 raw.connect(new InetSocketAddress(addresses.getFirst(), port), (int) millis);
                 raw.setSoTimeout((int) millis);

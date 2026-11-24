@@ -38,7 +38,7 @@ try {
     # 壳日志使用测试目录；Tauri 的数据根仍由 Windows Known Folder 决定。
     $Info.Environment['LOCALAPPDATA'] = $Scratch
     foreach ($key in @('EVENTS_COLLECTION_WINDOW', 'EVENTS_COLLECTION_AFK', 'EVENTS_COLLECTION_TITLE_ENABLED',
-        'FILE_WATCH_ENABLED', 'WIKI_ENABLED', 'EMBEDDING_ENABLED', 'WEBSEARCH_ENABLED')) { $Info.Environment[$key] = 'false' }
+        'FILE_WATCH_ENABLED', 'WIKI_ENABLED', 'EMBEDDING_ENABLED')) { $Info.Environment[$key] = 'false' }
     $Info.Environment['EVENTS_MODE'] = 'embedded'
     $Info.Environment['EVENTS_DATA_DIR'] = Join-Path $Data 'aw-data'
     $Info.Environment['EVENTS_RAW_DIR'] = Join-Path $Data 'aw-data/raw'

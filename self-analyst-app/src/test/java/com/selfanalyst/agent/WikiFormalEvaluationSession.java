@@ -36,7 +36,6 @@ public final class WikiFormalEvaluationSession implements WikiSummaryPipeline.Se
         properties.setProperty("memory.dir", isolatedRoot.resolve("memory").toAbsolutePath().toString());
         properties.setProperty("events.mode", "external");
         properties.setProperty("wiki.enabled", "false");
-        properties.setProperty("websearch.enabled", "false");
         properties.setProperty("agent.compaction.enabled", "false");
         properties.setProperty("llm.budget.mode", "block");
         properties.setProperty("llm.budget.dailyTokens", Long.toString(dailyTokens));

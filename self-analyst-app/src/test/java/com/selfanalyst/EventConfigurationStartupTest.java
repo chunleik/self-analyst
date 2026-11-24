@@ -93,7 +93,7 @@ class EventConfigurationStartupTest {
         env.put("OPENAI_API_KEY", "");
         for (String key : List.of("EVENTS_COLLECTION_WINDOW", "EVENTS_COLLECTION_AFK",
                 "EVENTS_COLLECTION_TITLE_ENABLED", "FILE_WATCH_ENABLED", "WIKI_ENABLED",
-                "EMBEDDING_ENABLED", "WEBSEARCH_ENABLED")) env.put(key, "false");
+                "EMBEDDING_ENABLED")) env.put(key, "false");
         env.put("SELF_ANALYST_DESKTOP_TOKEN", "rename-config-test");
         env.put("SELF_ANALYST_DESKTOP_PORT_FILE", dir.resolve("port.txt").toString());
         return builder;

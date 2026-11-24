@@ -62,6 +62,8 @@ class IntegrationStoreTest {
         assertThrows(IllegalArgumentException.class, () -> new IntegrationConfig(1, 0, List.of(server(null), server(null)), List.of(), List.of()));
         assertThrows(IllegalArgumentException.class, () -> new IntegrationConfig.McpServer("legacy-websearch", "Legacy", false,
                 "streamable-http", "https://search.example.com", "anonymous", null, "session", IntegrationConfig.Budget.defaults()));
+        assertThrows(IllegalArgumentException.class,
+                () -> new CredentialTarget(IntegrationConfig.LEGACY_WEBSEARCH_ID, "https://search.example.com"));
     }
     @Test void optimisticWritersCannotOverwriteNewerRevision() throws Exception {
         var first = new IntegrationStore(root); var second = new IntegrationStore(root);

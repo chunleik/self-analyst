@@ -67,9 +67,6 @@ public final class ConfigResolver {
             Map.entry("llm.budget.mode", "LLM_BUDGET_MODE"),
             Map.entry("llm.budget.dailyTokens", "LLM_BUDGET_DAILY_TOKENS"),
             Map.entry("llm.budget.warnRatio", "LLM_BUDGET_WARN_RATIO"),
-            Map.entry("websearch.enabled", "WEBSEARCH_ENABLED"),
-            Map.entry("websearch.mcp-url", "WEBSEARCH_MCP_URL"),
-            Map.entry("websearch.api-key", "WEBSEARCH_API_KEY"),
             Map.entry("app.language", "APP_LANGUAGE"),
             Map.entry("memory.dir", "MEMORY_DIR"));
     private final Properties user;
@@ -103,9 +100,11 @@ public final class ConfigResolver {
         RemovedEventConfig.validate(user, environment);
         this.user = new Properties();
         this.user.putAll(user);
+        // Preserve the original TOML in the store, but keep retired search keys out of runtime data.
+        this.user.keySet().removeIf(key -> key instanceof String text && DeprecatedKeys.legacyWebSearch(text));
         this.environment = Map.copyOf(environment);
         Set<String> keys = new TreeSet<>(defaults.stringPropertyNames());
-        keys.addAll(user.stringPropertyNames());
+        keys.addAll(this.user.stringPropertyNames());
         keys.remove("llm.max-tokens"); // Retired: preserve raw text, never expose an effective value.
         for (String key : keys) read(key, defaults.getProperty(key, ""), true, false);
     }
@@ -167,9 +166,6 @@ public final class ConfigResolver {
         effective("embedding.dimensions", String.valueOf(config.embeddingDimensions()));
         effective("embedding.send-encoding-format", String.valueOf(config.embeddingSendEncodingFormat()));
         effective("events.collection.title.pollMs", String.valueOf(config.titlePollIntervalMs()));
-        effective("websearch.enabled", String.valueOf(config.webSearchEnabled()));
-        effective("websearch.mcp-url", String.valueOf(config.webSearchMcpUrl()));
-        effective("websearch.api-key", String.valueOf(config.webSearchApiKey()));
         effective("llm.temperature", String.valueOf(config.llmTemperature()));
         effective("events.collection.excludeApps", config.collectionExcludeApps());
         effective("wiki.privacy.excludeApps", config.wikiExcludeApps());

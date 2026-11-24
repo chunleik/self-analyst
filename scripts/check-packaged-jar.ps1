@@ -122,7 +122,6 @@ try {
     $info.Environment["FILE_WATCH_ENABLED"] = "false"
     $info.Environment["WIKI_ENABLED"] = "false"
     $info.Environment["EMBEDDING_ENABLED"] = "false"
-    $info.Environment["WEBSEARCH_ENABLED"] = "false"
 
     $process = [System.Diagnostics.Process]::new()
     $process.StartInfo = $info

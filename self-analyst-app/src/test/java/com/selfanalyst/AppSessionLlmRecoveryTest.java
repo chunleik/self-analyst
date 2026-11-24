@@ -25,8 +25,6 @@ class AppSessionLlmRecoveryTest {
                 enabled = false
                 [embedding]
                 enabled = false
-                [websearch]
-                enabled = false
                 [file.watch]
                 enabled = false
                 """.formatted(dir));

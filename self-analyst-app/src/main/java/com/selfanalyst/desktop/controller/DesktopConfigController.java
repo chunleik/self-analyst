@@ -81,7 +81,6 @@ public class DesktopConfigController {
         response.put("agent", buildAgentSection(defaults));
         response.put("desktop", buildDesktopSection(defaults));
         response.put("embedding", buildEmbeddingSection(defaults));
-        response.put("websearch", buildWebSearchSection(defaults));
         Properties user = userStore.loadUser();
         response.forEach((section, fields) -> enrichFields(section, "", fields, snapshot, user));
         return response;
@@ -200,7 +199,6 @@ public class DesktopConfigController {
         sectionToPrefix.put("agent", "agent.");
         sectionToPrefix.put("desktop", "desktop.");
         sectionToPrefix.put("embedding", "embedding.");
-        sectionToPrefix.put("websearch", "websearch.");
         return sectionToPrefix;
     }
 
@@ -260,10 +258,6 @@ public class DesktopConfigController {
                     "embeddingModel", "model",
                     "embeddingDimensions", "dimensions",
                     "embeddingSendEncodingFormat", "send-encoding-format");
-            case "websearch" -> mapKey(rawKey, prefix,
-                    "webSearchEnabled", "enabled",
-                    "webSearchMcpUrl", "mcp-url",
-                    "webSearchApiKey", "api-key");
             default -> prefix + rawKey;
         };
     }
@@ -721,14 +715,6 @@ public class DesktopConfigController {
         return m;
     }
 
-    private Map<String, Map<String, Object>> buildWebSearchSection(Properties eff) {
-        var m = new LinkedHashMap<String, Map<String, Object>>();
-        m.put("webSearchEnabled", field("webSearchEnabled", eff.getProperty("websearch.enabled", "false")));
-        m.put("webSearchMcpUrl", field("webSearchMcpUrl", eff.getProperty("websearch.mcp-url", "https://search.parallel.ai/mcp")));
-        m.put("webSearchApiKey", field("webSearchApiKey", eff.getProperty("websearch.api-key", ""), true));
-        return m;
-    }
-
     /**
      * Build a config field object with metadata:
      * effectiveValue, savedValue, source, overridden, restartRequiredOnChange.
@@ -760,7 +746,7 @@ public class DesktopConfigController {
      * Try to find user-saved value by searching common key prefixes.
      */
     private String findUserValue(Properties user, String name) {
-        String[] prefixes = {"llm.", "events.", "events.collection.", "agent.", "desktop.", "embedding.", "websearch."};
+        String[] prefixes = {"llm.", "events.", "events.collection.", "agent.", "desktop.", "embedding."};
         for (String prefix : prefixes) {
             String val = user.getProperty(prefix + name);
             if (val != null) return val;

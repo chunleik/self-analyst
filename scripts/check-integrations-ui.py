@@ -19,7 +19,7 @@ BOOTSTRAP = (UI / 'init.js').read_text().split('var initializationPending')[0] +
   cacheDom(); state.lang = new URLSearchParams(location.search).get('lang') || 'en';
   await loadI18n(state.lang); applyI18n(document); document.documentElement.lang = state.lang;
   setupEvents(); hideError(); state.configOpen = true; state.dom.configModal.classList.remove('hidden');
-  await switchConfigView('integrations'); window.integrationsFixtureReady = true;
+  await switchConfigView('integrations'); window.integrationsFixtureReady = state.tab === 'mcp' && !state.configOpen;
 })();
 """
 
@@ -56,6 +56,8 @@ class FixtureHandler(SimpleHTTPRequestHandler):
             self.wfile.write(BOOTSTRAP.encode())
         elif urlsplit(self.path).path == '/desktop/integrations':
             self.respond_json(type(self).snapshot or fixture())
+        elif urlsplit(self.path).path == '/desktop/mcp-management':
+            self.respond_json(management_fixture(self.server.server_port))
         elif urlsplit(self.path).path == '/desktop/integrations/approvals':
             self.respond_json({'approvals': []})
         elif urlsplit(self.path).path.startswith('/desktop/'):
@@ -82,7 +84,18 @@ def fixture():
             'statuses': {'alpha': {'state': 'ready', 'catalogAvailable': True, 'credentialConfigured': True, 'tools': [tool]},
                          'beta': {'state': 'not_connected', 'catalogAvailable': False, 'credentialConfigured': True, 'tools': []}},
             'persistentCredentialsSupported': False, 'credentialCleanupPending': False,
-            'modelTarget': 'https://model.example.com/v1', 'legacyWebsearch': {}}
+            'modelTarget': 'https://model.example.com/v1'}
+
+
+def management_fixture(port, examples=False):
+    return {'revision': 4, 'baseUrl': f'http://127.0.0.1:{port}',
+            'tokenConfigured': examples, 'persistentSupported': True,
+            'accounts': [{'id': 'mail-fixture', 'label': 'Synthetic mailbox',
+                          'enabled': True, 'expose': True, 'allowDraft': True,
+                          'allowSend': False, 'smtpConfigured': True}] if examples else [],
+            'pending': [{'id': 'draft-fixture', 'operation': 'create_draft',
+                         'account': 'demo@example.test', 'to': ['review@example.test'],
+                         'subject': 'Synthetic project note', 'body': 'This is a synthetic example. No mail will be sent.'}] if examples else []}
 
 
 def check_browser(server, output, executable):
@@ -108,6 +121,12 @@ def check_browser(server, output, executable):
                 return
             if not path.startswith('/desktop/'):
                 route.continue_(); return
+            if path == '/desktop/mcp-management':
+                if request.method != 'GET':
+                    raise AssertionError('unexpected mutation in MCP visual fixture')
+                route.fulfill(status=200, content_type='application/json',
+                              body=json.dumps(management_fixture(server.server_port, examples=bool(mode.get('examples')))))
+                return
             if not path.startswith('/desktop/integrations'):
                 route.fulfill(status=200, content_type='application/json', body='{}'); return
             suffix = path.removeprefix('/desktop/integrations')
@@ -155,28 +174,42 @@ def check_browser(server, output, executable):
             for lang in ['en', 'zh']:
                 labels = json.loads((UI / f'locales/{lang}.json').read_text())
                 def text(key): return labels[key]
-                def button(key): return page.get_by_role('button', name=text(key), exact=True)
+                def button(key): return page.locator('.integrations-settings').get_by_role('button', name=text(key), exact=True)
                 def select(name): page.locator('.integrations-list').get_by_role('button', name=name, exact=True).click()
-                def reset():
-                    database.clear(); database.update(copy.deepcopy(fixture())); calls.clear(); mode.update(discover='empty', delete='success')
+                def reset(examples=False):
+                    database.clear(); database.update(copy.deepcopy(fixture())); calls.clear()
+                    mode.update(discover='empty', delete='success', examples=examples)
                     page.set_viewport_size({'width': 1280, 'height': 1000})
                     page.goto(f'{origin}/?lang={lang}'); page.wait_for_function('window.integrationsFixtureReady === true')
-                    expect(page.locator('.integrations-list button')).to_have_count(3)
+                    expect(page.locator('.integrations-list button')).to_have_count(2)
                 def accepted_delete():
                     page.once('dialog', lambda dialog: dialog.accept()); button('integrations.action.delete').click()
+                reset(examples=True)
+                expect(page.locator('#mcp-nav-tab')).to_have_attribute('aria-current', 'page')
+                expect(page.locator('#tab-mcp')).to_be_visible()
+                expect(page.locator('#config-modal')).not_to_be_visible()
+                expect(page.locator('#tab-mcp .mcp-account')).to_contain_text('Synthetic mailbox')
+                expect(page.locator('#tab-mcp .mcp-review')).to_contain_text('review@example.test')
+                expect(page.get_by_role('checkbox', name=text('mcp.allowSend'), exact=True)).not_to_be_checked()
+                for width, height in [(1280, 1000), (390, 800)]:
+                    page.set_viewport_size({'width': width, 'height': height})
+                    expect(page.locator('#tab-mcp .mcp-management')).to_be_visible()
+                    assert page.locator('#tab-mcp').evaluate('e => e.scrollWidth <= e.clientWidth + 2')
+                    page.screenshot(path=str(output / f'mcp-management-{lang}-{width}x{height}.png'))
+                checks.append(f'{lang}: MCP top-level and guarded settings shortcut, account scope, explicit pending review, desktop/narrow screenshots')
                 reset()
                 # Empty drafts are independently removable without any persistence or network action.
                 button('integrations.add.mcp').click(); button('integrations.add.mcp').click()
-                expect(page.locator('.integrations-list button')).to_have_count(5)
+                expect(page.locator('.integrations-list button')).to_have_count(4)
                 page.once('dialog', lambda dialog: dialog.dismiss()); button('integrations.action.delete').click()
-                expect(page.locator('.integrations-list button')).to_have_count(5)
-                accepted_delete(); expect(page.locator('.integrations-list button')).to_have_count(4)
+                expect(page.locator('.integrations-list button')).to_have_count(4)
+                accepted_delete(); expect(page.locator('.integrations-list button')).to_have_count(3)
                 expect(page.locator('.config-scroll-area > [role="status"][tabindex="-1"]')).to_be_focused()
                 assert not [c for c in calls if c['method'] != 'GET']
                 # Deleting saved Alpha must not save Beta's name edit or the remaining incomplete draft.
                 select('Beta synthetic'); page.locator('#integration-name').fill('Beta unsaved')
                 select('Alpha synthetic'); accepted_delete()
-                expect(page.locator('.integrations-list button')).to_have_count(3)
+                expect(page.locator('.integrations-list button')).to_have_count(2)
                 expect(page.locator('.config-scroll-area > [role="status"][tabindex="-1"]')).to_be_focused()
                 assert database['config']['mcpServers'][0]['name'] == 'Beta synthetic'
                 select('Beta unsaved'); expect(page.locator('#integration-name')).to_have_value('Beta unsaved')
@@ -261,7 +294,7 @@ def check_browser(server, output, executable):
                 expect(button('integrations.add.mcp')).to_be_enabled()
                 select('Alpha synthetic'); mode['delete'] = 'cleanup'; accepted_delete()
                 expect(page.locator('.integrations-settings')).to_contain_text(text('integrations.notice.cleanupPending'))
-                expect(page.locator('.integrations-list button')).to_have_count(2)
+                expect(page.locator('.integrations-list button')).to_have_count(1)
                 checks.append(f'{lang}: revision conflict, unknown outcome write lock/reload, credential cleanup warning')
                 # Folder discovery is a local setup operation, not a mail tool or an activation.
                 reset()
@@ -299,7 +332,7 @@ def check_browser(server, output, executable):
             page.screenshot(path=str(output / 'failure.png')); raise
         finally:
             context.close(); browser.close()
-    print('PASS: synthetic connection deletion, tools dialog and fixed all-folder mailbox settings, EN/ZH, keyboard, late responses, light/dark media and narrow screenshots. No real services or packaging.')
+    print('PASS: synthetic MCP management page, connection deletion, tools dialog and fixed all-folder mailbox settings, EN/ZH, keyboard, late responses, light/dark media and narrow screenshots. No real services or packaging.')
 
 
 def main():

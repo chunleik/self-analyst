@@ -72,10 +72,16 @@ public final class DesktopIntegrationController {
             }
         }));
         app.post(base + "/test", ctx -> run(ctx, () -> {
-            JsonNode body = body(ctx, "kind", "id"); manager.test(string(body,"kind"), string(body,"id")); snapshot(ctx);
+            JsonNode body = body(ctx, "kind", "id", "expectedRevision");
+            String id = string(body, "id");
+            manager.test(string(body, "kind"), id, diagnosticRevision(ctx, body, id));
+            snapshot(ctx);
         }));
         app.post(base + "/discover", ctx -> run(ctx, () -> {
-            JsonNode body = body(ctx, "serverId"); manager.discover(string(body,"serverId")); snapshot(ctx);
+            JsonNode body = body(ctx, "serverId", "expectedRevision");
+            String id = string(body, "serverId");
+            manager.discover(id, diagnosticRevision(ctx, body, id));
+            snapshot(ctx);
         }));
         app.post(base + "/tools/approve", ctx -> run(ctx, () -> {
             JsonNode body = body(ctx, "serverId", "toolName", "digest", "expectedRevision");
@@ -105,7 +111,7 @@ public final class DesktopIntegrationController {
             snapshot = Map.of("config", manager.config(), "statuses", manager.statuses(),
                     "persistentCredentialsSupported", com.sun.jna.Platform.isWindows(),
                     "credentialCleanupPending", manager.credentialCleanupPending(),
-                    "modelTarget", Objects.toString(modelTarget.get(), ""), "legacyWebsearch", manager.legacyStatus());
+                    "modelTarget", Objects.toString(modelTarget.get(), ""));
         }
         ctx.json(snapshot);
     }
@@ -123,7 +129,7 @@ public final class DesktopIntegrationController {
                     "model_target_changed", "mail_credential_required", "persistent_credentials_unavailable",
                     "mail_activation_outcome_uncertain", "mail_discovery_busy",
                     "credential_write_failed", "credential_read_failed", "credential_verification_failed",
-                    "invalid_credential", "credential_limit");
+                    "invalid_credential", "credential_limit", "stdio_review_required");
             ctx.status(Set.of("revision_conflict", "model_target_changed", "mail_discovery_busy").contains(code) ? 409 : 400)
                     .json(Map.of("error", safe.contains(code) ? code : "integration_operation_failed",
                             "credentialCleanupPending", manager.credentialCleanupPending()));
@@ -133,6 +139,20 @@ public final class DesktopIntegrationController {
         catch (RuntimeException failure) { ctx.status(400).json(Map.of("error", "integration_operation_failed",
                 "credentialCleanupPending", manager.credentialCleanupPending())); }
     }
+    private Long diagnosticRevision(Context ctx, JsonNode body, String id) throws IOException {
+        var snapshot = manager.config();
+        Long expected = body.has("expectedRevision") ? revision(body) : null;
+        if (expected != null && snapshot.revision() != expected) throw new IOException("revision_conflict");
+        if (snapshot.mcpServers().stream().anyMatch(row -> row.id().equals(id) && row.transport().equals("stdio"))) {
+            String origin = ctx.header("Origin");
+            String fetchSite = ctx.header("Sec-Fetch-Site");
+            if (expected == null || origin != null && !origin.equalsIgnoreCase("http://" + ctx.header("Host"))
+                    || fetchSite != null && !Set.of("same-origin", "none").contains(fetchSite))
+                throw new IOException("stdio_review_required");
+        }
+        return expected;
+    }
+
     private static JsonNode body(Context ctx, String... allowed) throws IOException {
         JsonNode node = REQUEST_JSON.readValue(DesktopChatJson.readBoundedBody(ctx));
         if (node == null || !node.isObject()) throw new IllegalArgumentException();

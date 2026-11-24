@@ -70,7 +70,6 @@ public class DesktopServer {
     private final com.selfanalyst.observability.ObservabilityService observability;
     private final DesktopObservabilityController observabilityCtrl;
     private com.selfanalyst.ontology.OntologyService ontology;
-    private final com.selfanalyst.ontology.Neo4jSyncService neo4jSync;
 
     /**
      * Create and register all desktop API routes.
@@ -296,9 +295,6 @@ public class DesktopServer {
         this.configCtrl.setChatGptSessions(chatGptSessions);
         var configuration = userConfigStore.application(config);
         this.privacyCtrl = new DesktopPrivacyController(configuration, eventStore);
-        this.neo4jSync = new com.selfanalyst.ontology.Neo4jSyncService(ontology,
-                () -> com.selfanalyst.config.Neo4jConfigResolver.from(configuration.saved().properties()),
-                System::getenv);
         this.llmSettings = new DesktopLlmSettingsController(userConfigStore.application(config));
         this.language = config.effectiveLanguage();
         this.taskCtrl = new DesktopTaskController(taskStore);
@@ -330,7 +326,6 @@ public class DesktopServer {
         integrationCtrl.register(app);
         observabilityCtrl.register(app);
         new DesktopOntologyController(ontology).register(app);
-        new DesktopNeo4jController(neo4jSync).register(app);
         var imageCtrl = new com.selfanalyst.desktop.controller.DesktopChatImageController(chatSessionStore.images());
         chatSessionStore.images().startMaintenance();
         app.post("/desktop/chat/sessions/{id}/images", imageCtrl::upload);

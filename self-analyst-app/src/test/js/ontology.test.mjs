@@ -124,13 +124,10 @@ test('knowledge labels and dynamic vocabulary are present in both languages', ()
   }
 });
 
-test('knowledge no longer mounts or reads the optional Neo4j integration', async () => {
-  const h = setup(); let mounts = 0, reads = 0;
-  h.ctx.mountNeo4jSync = () => { mounts++; };
-  h.ctx.refreshNeo4jStatus = () => { reads++; };
-  await h.ctx.openKnowledge(); await h.ctx.openKnowledge();
-  assert.equal(mounts, 0); assert.equal(reads, 0);
-  assert.doesNotMatch(h.root.textContent, /neo4j/);
+test('knowledge view renders cleanly without any external graph sync UI', async () => {
+  const h = setup();
+  await h.ctx.openKnowledge();
+  assert.doesNotMatch(h.root.textContent, /neo4j/i);
   assert.match(h.root.textContent, /ontology.newProject/);
 });
 

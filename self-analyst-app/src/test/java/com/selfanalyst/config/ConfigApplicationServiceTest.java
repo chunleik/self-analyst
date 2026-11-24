@@ -302,4 +302,16 @@ class ConfigApplicationServiceTest {
             assertFalse(Files.exists(store.filePath()));
         }
     }
+
+    @Test void legacyNeo4jKeysAreTreatedAsOrdinaryUnknownKeys() throws Exception {
+        var store = new UserConfigStore(dir);
+        var service = service(store);
+        String raw = "[neo4j]\nenabled = true\nuri = 'bolt://localhost:7687'\n";
+        var saved = service.saveRaw(raw);
+        assertEquals(raw, store.readRaw());
+        assertTrue(saved.unknownKeys().containsAll(List.of("neo4j.enabled", "neo4j.uri")));
+        assertTrue(saved.restartRequired().isEmpty());
+        assertFalse(saved.application().containsKey("neo4j"));
+        assertFalse(service.effectivePayload().get("configured").toString().contains("neo4j."));
+    }
 }
